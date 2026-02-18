@@ -12,7 +12,7 @@ Works with Claude Code, OpenCode, Codex CLI, Gemini CLI, Antigravity, Cursor, Wi
 
 You're using Claude Code, OpenCode, Codex CLI, Cursor, or another agentic coding tool. It writes code fast. Sometimes very good code. You ship more than before.
 
-Then something starts breaking down — not the code. The *process*.
+Then something starts breaking down — not the code. The process.
 
 - You ask the agent to implement something. It does. But it also changes three things you didn't ask for.
 - You start a new session. The agent has no idea what was decided last week. You re-explain. Again.
@@ -23,52 +23,45 @@ Then something starts breaking down — not the code. The *process*.
 
 None of these are bugs in the AI. They are symptoms of using a powerful execution engine without a governance layer.
 
-**An LLM is a V12 engine. Without the right steering system, speed becomes the problem.**
+An LLM is a V12 engine. Without the right steering system, speed becomes the problem.
 
 ---
 
 ## What GAAI Adds
 
-GAAI is the operating layer between you and your AI tools. It answers four questions that AI tools don't answer by themselves:
+Four questions AI tools don't answer by themselves:
 
-**1. What is the agent allowed to do right now?**
-The backlog is the only authorization mechanism. If a task isn't in the backlog with `status: refined`, the agent doesn't touch it. No implicit scope expansion.
+**What is the agent allowed to do right now?**
+The backlog. If it's not there with `status: refined`, the agent doesn't touch it.
 
-**2. What does the agent know about this project?**
-Memory is explicit — never auto-loaded, never polluted with stale context. Agents load exactly what they need: project facts, past decisions, learned conventions.
+**What does the agent know about this project?**
+Explicit memory — never auto-loaded. Agents load exactly what they need.
 
-**3. What counts as "done"?**
-Every backlog item has acceptance criteria. QA is a hard gate — PASS or FAIL, no "close enough". The agent iterates until criteria pass, or escalates.
+**What counts as "done"?**
+Acceptance criteria. QA is a hard gate: PASS or FAIL, no "close enough."
 
-**4. Who decides what?**
-You decide what to build (Discovery). The agent decides how to build it (Delivery). Those are separate tracks, with a clear handoff. The agent never improvises product decisions.
+**Who decides what?**
+You decide what to build. The agent decides how. Separate tracks, clear handoff.
 
 ---
 
-## What Changes in Practice
-
-Without GAAI, a typical AI coding session looks like:
+## The Model — Dual-Track Delivery
 
 ```
-You: implement user authentication
-Agent: [writes auth, also refactors your session handling, adds a new middleware,
-        changes your error format, asks three questions mid-way]
-You: ...ok, but why did you change the error format?
+You ←→ Discovery Agent     Understand. Define. Write Stories. Acceptance criteria.
+              ↓
+        active.backlog.yaml     Authorization gate. Only refined Stories proceed.
+              ↓
+       Delivery Agent →     Plan. Implement. QA. Done.
+              ↓
+          Working code
 ```
 
-With GAAI:
+**Discovery** — conversation with the Discovery Agent. Clarify what to build. Output: a Story with acceptance criteria in the backlog.
 
-```
-You: [Story already in backlog: "User can log in with email+password"
-      Acceptance criteria: session created, invalid credentials return 401,
-      brute-force protection after 5 attempts]
+**Delivery** — autonomous execution. The agent runs until criteria pass. No improvisation. No scope drift.
 
-Agent: [implements exactly that, no more, no less]
-       [QA: all 3 criteria — PASS]
-       [marks Story done, moves to next]
-```
-
-The agent still writes the code. You still review it. But the scope is locked before execution begins, the criteria define what "done" means, and the loop runs autonomously until it passes.
+**The backlog is the contract.** Nothing gets built that isn't in it.
 
 ---
 
@@ -80,7 +73,7 @@ A single `.gaai/` folder you drop into any project:
 your-project/
 └── .gaai/
     ├── agents/      ← Discovery + Delivery + Bootstrap agent specs
-    ├── skills/      ← 28 pure execution units (one thing, explicit output)
+    ├── skills/      ← 31 pure execution units (one thing, explicit output)
     ├── contexts/    ← rules, memory, backlog, artefacts
     ├── workflows/   ← delivery loop, bootstrap, handoffs
     ├── scripts/     ← bash utilities (backlog scheduler, health check)
@@ -102,38 +95,6 @@ cd gaai-framework && ./install.sh
 The installer asks which AI tool you use, copies `.gaai/` into your project, and deploys the right adapter.
 
 Or manually: copy `.gaai/` into your project root. Done.
-
----
-
-## The Model — Dual-Track Delivery
-
-```
-You ←→ Discovery Agent     Understand. Define. Write Stories. Acceptance criteria.
-              ↓
-        active.backlog.yaml     Authorization gate. Only refined Stories proceed.
-              ↓
-       Delivery Agent →     Plan. Implement. QA. Done.
-              ↓
-          Working code
-```
-
-**Discovery** is a conversation. You talk to the Discovery Agent to clarify what to build — needs, scope, edge cases. Output: a Story with acceptance criteria in the backlog.
-
-**Delivery** is autonomous execution. The Delivery Agent reads the Story and runs until the acceptance criteria pass — no improvisation, no scope drift.
-
-**The backlog is the contract.** Nothing gets built that isn't in it.
-
----
-
-### Why Two Tracks?
-
-This mirrors **Dual-Track Agile** — a well-established practice used by product engineering teams (Spotify, Intercom, and others) to separate *figuring out what to build* from *building it*. The separation prevents scope drift, reduces rework, and keeps decision-making where it belongs.
-
-For AI agents specifically, the separation matters even more. Research on LLM agents consistently shows that mixing reasoning (what to do?) with execution (how to do it?) in a single context degrades output quality. Discovery and Delivery run in separate context windows by design — each does one thing well.
-
-**If you're new to this:** Discovery is "make sure we know exactly what we're building before we start." Delivery is "build it, exactly that, nothing more." You already know this distinction intuitively — GAAI just enforces it structurally.
-
-**If you're a senior engineer:** GAAI applies Dual-Track separation at the agent level. Stories carry acceptance criteria. The delivery loop is a governed QA gate — PASS or escalate, no "close enough". Memory is explicit and selective, not ambient context. Rules are files you own and version.
 
 ---
 
@@ -160,9 +121,9 @@ For AI agents specifically, the separation matters even more. Research on LLM ag
 | Windsurf | `AGENTS.md` |
 | Any other | Read `.gaai/GAAI.md` directly |
 
-One canonical source (`.gaai/`). Thin adapters per tool. No content duplication.
+One canonical source (`.gaai/`). Thin adapters per tool. No duplication.
 
-Claude Code has the deepest integration (slash commands, auto-loaded CLAUDE.md, SKILL.md auto-discovery). All other tools work via `AGENTS.md` or direct file access — full framework capability, manual activation.
+Claude Code has the deepest integration: slash commands, auto-loaded CLAUDE.md, SKILL.md auto-discovery. All other tools work via `AGENTS.md` or direct file access.
 
 ---
 
