@@ -2,7 +2,7 @@
 
 A `.gaai/` folder you drop into any project. Markdown + YAML + bash. No SDK. No package.
 
-**GAAI turns agentic coding tools into reliable delivery systems.**
+**GAAI turns AI coding tools into reliable agentic software delivery systems.**
 
 Works with Claude Code, OpenCode, Codex CLI, Gemini CLI, Antigravity, Cursor, Windsurf — or any AI coding tool that can read files.
 
