@@ -37,13 +37,17 @@ The Bootstrap Agent will scan your codebase, extract architecture decisions, and
 
 ### New project (no codebase yet)
 
-Skip Bootstrap. Fill in one file:
+Skip Bootstrap. Go straight to Discovery:
 
+**Claude Code:**
 ```
-.gaai/contexts/memory/project/context.md
+/gaai-discover
 ```
 
-Add your project name, what it does, and who it's for. That's enough to start.
+**Other tools:**
+> "Read `.gaai/agents/discovery.agent.md`. I'm starting a new project: [describe your idea]. Help me define the first Epics and Stories."
+
+The Discovery Agent will ask questions about your project — what it does, who it's for, what constraints apply — and use your answers to seed the project memory automatically. No manual file editing required.
 
 ---
 
@@ -207,10 +211,10 @@ Total interaction: ~15 minutes.
 
 You have an idea: a CLI tool that generates commit messages from git diff.
 
-1. **No bootstrap** (no codebase). You fill in `.gaai/contexts/memory/project/context.md`: "CLI tool, TypeScript, Node, target users: developers."
+1. **No bootstrap** (no codebase yet). Go straight to Discovery.
 2. **Discover** — you say: "I want a CLI that takes a git diff and suggests a commit message using an LLM."
-   - Agent asks: which LLM? fallback if no API key? output format?
-   - You answer. Agent produces: PRD, 3 Epics, 7 Stories across two sprints.
+   - Agent asks: which LLM? fallback if no API key? output format? target users?
+   - You answer. The Discovery Agent seeds project memory from your answers, then produces: PRD, 3 Epics, 7 Stories across two sprints.
 3. **Deliver** — you run the delivery loop. Agent works through Stories one by one. You review output between sessions.
 
 Total hands-on time: 30 minutes setup. Then autonomous.

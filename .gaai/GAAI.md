@@ -64,9 +64,9 @@ Welcome. This is the `.gaai/` folder — the GAAI framework living inside your p
 4. Once Bootstrap passes, switch to Discovery or Delivery.
 
 **New project (starting from scratch):**
-1. Fill in `contexts/memory/project/context.md` with your project's context.
-2. Run `scripts/context-bootstrap.sh` to verify your setup.
-3. Activate the Discovery Agent and start with the `discovery-high-level-plan` skill.
+1. Activate the Discovery Agent. Read `agents/discovery.agent.md`.
+2. Describe your project idea. The Discovery Agent will ask questions to understand your project and seed the memory automatically.
+3. Once memory is seeded, start creating Epics and Stories.
 
 ---
 
@@ -94,6 +94,6 @@ The complete documentation lives outside this folder, in `docs/`:
 
 ## Framework Version
 
-See `VERSION` file. This folder was installed from [gaai-framework](https://github.com/your-org/gaai-framework) v1.0.0.
+See `VERSION` file. This folder was installed from [gaai-framework](https://github.com/Fr-e-d/GAAI-framework) v1.0.0.
 
 To check framework integrity: `bash .gaai/scripts/health-check.sh`

@@ -32,6 +32,40 @@ Browse each folder to see what skills exist and read their `SKILL.md` for detail
 
 ---
 
+## Skill Authoring Guidance
+
+### When to add a skill vs. when to add a rule
+
+These two are easy to confuse because both live in `.gaai/` and both govern agent behavior.
+
+| You want to... | Use... |
+|---|---|
+| Add a new **execution capability** (something an agent will *do*) | `create-skill` |
+| Add a new **constraint** (something an agent must *not* do, or a standard it must follow) | `rules-normalize` |
+
+**Skills** are procedural: they perform a defined operation and produce outputs. They live in `.gaai/skills/`.
+
+**Rules** are declarative: they state constraints, policies, and governance boundaries. They live in `.gaai/contexts/rules/`.
+
+### Decision test
+
+Ask: "Does this describe *how to do something*, or *whether something is allowed*?"
+
+- "How to generate a Story from an Epic" → skill (`generate-stories`)
+- "Stories must have acceptance criteria before entering the backlog" → rule (`orchestration.rules.md`)
+- "How to compact memory when it exceeds a size threshold" → skill (`memory-compact`)
+- "Memory must never be auto-loaded by a skill" → rule (`orchestration.rules.md`)
+
+If your answer is "how to do something" → skill.
+If your answer is "a constraint the system must enforce" → rule.
+
+### How to create each
+
+- New skill: invoke `create-skill` (`.gaai/skills/cross/create-skill/SKILL.md`)
+- New rule: invoke `rules-normalize` (`.gaai/skills/cross/rules-normalize/SKILL.md`)
+
+---
+
 ## Final Rule
 
 > If a skill appears to "think", it is wrongly designed.

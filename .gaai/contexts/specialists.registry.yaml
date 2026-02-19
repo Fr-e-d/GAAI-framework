@@ -4,9 +4,18 @@
 # The Implementation Sub-Agent reads this file, scans the execution plan
 # for trigger keywords, and spawns matching specialists.
 #
+# Trigger Matching:
+#   The Implementation Sub-Agent performs a SEMANTIC scan of the execution plan —
+#   not an exact grep. Each trigger string is treated as a concept: a trigger fires
+#   if the plan's intent or content meaningfully matches it, even if the exact word
+#   does not appear. Prefer short, unambiguous domain terms over long phrases.
+#   Broad triggers (e.g. "database") activate more often; narrow ones (e.g. "RBAC")
+#   activate only when that specific domain is clearly in scope.
+#   Multiple specialists may activate for the same Story.
+#
 # Format:
 #   id:             unique identifier
-#   triggers:       keywords in the execution plan that activate this specialist
+#   triggers:       domain keywords; semantic match against the execution plan
 #   skills:         skills available to this specialist
 #   context_bundle: memory/rules files loaded at spawn (in addition to base bundle)
 #

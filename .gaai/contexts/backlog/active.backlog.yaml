@@ -11,7 +11,7 @@
 #   epic: E01
 #   title: "Example story title"
 #   priority: high
-#   status: ready
+#   status: refined
 #   artefact: contexts/artefacts/stories/E01S01.story.md
 #   dependencies: []
 

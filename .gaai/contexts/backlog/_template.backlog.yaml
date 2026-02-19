@@ -6,7 +6,7 @@
   epic: E00                                   # Parent Epic ID
   title: "Story title"                        # One sentence, action-oriented
   priority: high | medium | low
-  status: draft | validated | ready | in_progress | done | failed | blocked
+  status: draft | refined | in_progress | done | failed | blocked
   artefact: contexts/artefacts/stories/E00S00.story.md   # Path to Story artefact
   dependencies: []                            # IDs of stories this depends on
   created_at: YYYY-MM-DD

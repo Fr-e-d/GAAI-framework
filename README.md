@@ -34,14 +34,16 @@ You ←→ Discovery Agent     Understand. Define. Write Stories. Acceptance cri
               ↓
         active.backlog.yaml     Authorization gate. Only refined Stories proceed.
               ↓
-       Delivery Agent →     Plan. Implement. QA. Done.
+       Delivery Agent →     Orchestrates. Coordinates. Escalates.
+              ↓
+       Sub-agents →         Plan. Implement. QA. (spawned per Story complexity tier)
               ↓
           Working code
 ```
 
 **Discovery** — conversation with the Discovery Agent. Clarify what to build. Output: a Story with acceptance criteria in the backlog. Discovery reasons. It does not execute.
 
-**Delivery** — autonomous execution. The agent runs until criteria pass. No improvisation. No scope drift. Delivery executes. It never decides scope or intent.
+**Delivery** — autonomous execution. The Delivery Agent orchestrates a team of specialized sub-agents (Planning, Implementation, QA) that it spawns per Story. Simple Stories use a single MicroDelivery sub-agent. Complex Stories use the full team, plus domain specialists for security, database, API, and UI work. No improvisation. No scope drift. Delivery executes. It never decides scope or intent.
 
 **The backlog is the contract.** Nothing gets built that isn't in it.
 
@@ -92,13 +94,39 @@ Markdown + YAML + bash. Readable by humans and any AI tool.
 ## 30-Second Install
 
 ```bash
-git clone https://github.com/your-org/gaai-framework.git
-cd gaai-framework && ./install.sh
+git clone https://github.com/Fr-e-d/GAAI-framework.git
+cd GAAI-framework && ./install.sh
 ```
 
 The installer asks which AI tool you use, copies `.gaai/` into your project, and deploys the right adapter.
 
 Or manually: copy `.gaai/` into your project root. Done.
+
+---
+
+## What a Session Looks Like
+
+```
+You:        /gaai-discover
+Discovery:  "What do you want to build?"
+You:        "Add rate limiting — 100 req/min per user, 429 on exceeded."
+Discovery:  "Got it. Checking memory for existing middleware patterns..."
+            → Generates Epic E03 + Story E03S01 with acceptance criteria
+            → Runs validation: artefact complete, criteria testable, no scope drift
+            → Adds to backlog: status: refined
+Discovery:  "Done. E03S01 is ready. Run /gaai-deliver when you're ready."
+
+You:        /gaai-deliver
+Delivery:   → Reads E03S01 from backlog
+            → Loads middleware conventions from memory
+            → Planning Sub-Agent: produces execution plan
+            → Implementation Sub-Agent: adds rate-limiting middleware
+            → QA Sub-Agent: all acceptance criteria PASS
+            → Story marked done, archived
+Delivery:   "E03S01 complete. No further Stories in backlog."
+```
+
+→ [Full walkthrough in Quick Start](docs/guides/quick-start.md)
 
 ---
 
@@ -114,9 +142,16 @@ Or manually: copy `.gaai/` into your project root. Done.
 
 ## Tool Compatibility
 
+**Deep integration** — slash commands, auto-loaded context, SKILL.md auto-discovery:
+
 | Tool | Adapter |
 |------|---------|
-| Claude Code | `CLAUDE.md` + `.claude/commands/` (slash commands) |
+| Claude Code | `CLAUDE.md` + `.claude/commands/` |
+
+**AGENTS.md compatible** — full GAAI capability via manual activation prompts:
+
+| Tool | Adapter |
+|------|---------|
 | OpenCode | `AGENTS.md` |
 | Codex CLI | `AGENTS.md` |
 | Gemini CLI | `AGENTS.md` |
@@ -127,7 +162,7 @@ Or manually: copy `.gaai/` into your project root. Done.
 
 One canonical source (`.gaai/`). Thin adapters per tool. No duplication.
 
-Claude Code has the deepest integration: slash commands, auto-loaded CLAUDE.md, SKILL.md auto-discovery. All other tools work via `AGENTS.md` or direct file access.
+The framework functions identically across all tools — the difference is activation convenience, not capability. → [Full compatibility details](docs/reference/tool-compatibility.md)
 
 ---
 
@@ -153,3 +188,11 @@ Fork or clone. Run `install.sh`. Adapt the rules, memory, and skills to your pro
 ---
 
 MIT — see [LICENSE](LICENSE)
+
+---
+
+## ❤️ Support This Project
+
+If you find this framework valuable, please consider showing your support. It is greatly appreciated!
+
+- **[Sponsor on GitHub](https://github.com/sponsors/Fr-e-d)**

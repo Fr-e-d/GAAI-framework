@@ -46,7 +46,6 @@ Builds: structured memory, explicit governance rules, extracted architecture dec
 ### Phase 3 — Persist Structured Memory
 
 5. Invoke `memory-ingest` with architecture insights and extracted decisions → populates `contexts/memory/project/` and index
-6. Fill in `contexts/memory/memory/project/context.md` with project-specific context
 
 ### Phase 4 — Normalize Governance
 

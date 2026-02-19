@@ -146,6 +146,18 @@ Never let context grow uncontrolled.
 
 ---
 
+## Memory Specimens (Filled Examples)
+
+Not sure what good memory looks like after a real project? Read these:
+
+- [project/context.example.md](project/context.example.md) — filled project memory after ~4 weeks of development
+- [decisions/_log.example.md](decisions/_log.example.md) — three real decision entries with context and impact
+- [patterns/conventions.example.md](patterns/conventions.example.md) — conventions file after several confirmed patterns
+
+These are read-only illustrations. Your actual memory lives in the non-`.example` files.
+
+---
+
 → [project/context.md](project/context.md) — fill this in first (project name, purpose, constraints)
 → [decisions/_log.md](decisions/_log.md) — append-only decision log
 → [Back to README.contexts.md](../README.contexts.md)

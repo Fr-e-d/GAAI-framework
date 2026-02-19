@@ -86,15 +86,20 @@ Delivery **must NOT**:
 Backlog items MUST follow this lifecycle:
 
 ```
-draft → validated → ready → in_progress → done | failed
+draft → refined → in_progress → done | failed
 ```
+
+- `draft` — Story created but not yet validated or acceptance-criteria complete
+- `refined` — Story is validated, acceptance criteria are present and unambiguous, ready for Delivery to consume
+- `in_progress` — Delivery is actively executing the Story
+- `done` — Story passed QA; moved to `done/` archive
+- `failed` — Story failed and cannot be retried without human intervention
 
 ### Rules
 
-- Only Discovery may move items to `validated`
-- Only validated items may become `ready`
-- Delivery may only consume items in `ready`
-- Delivery must update status to `in_progress` then `done`
+- Only Discovery may move items from `draft` to `refined`
+- Delivery may only consume items in `refined`
+- Delivery must update status to `in_progress` when execution begins, then `done` on PASS
 - Failed executions must be marked `failed` with artefact notes
 
 ## ⏰ Cron / Automation Responsibilities
@@ -102,7 +107,7 @@ draft → validated → ready → in_progress → done | failed
 Cron jobs are **allowed and encouraged**, but limited to governance tasks.
 
 Cron MAY trigger:
-- backlog polling (check for `ready` items)
+- backlog polling (check for `refined` items)
 - `memory-refresh.skill`
 - `memory-compact.skill`
 
@@ -142,7 +147,7 @@ Cron MUST NOT:
 Human
 → Discovery
 → memory-retrieve (selective)
-→ story creation → validation → backlog.ready
+→ story creation → validation → backlog.refined
 → Delivery → implement → test → PASS → done
 ```
 

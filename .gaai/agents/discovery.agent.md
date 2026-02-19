@@ -163,11 +163,25 @@ Use Discovery Agent for:
 - new products or features
 - product changes and iteration
 - ambiguous ideas
+- **new projects with no existing codebase** — Discovery seeds project memory by asking questions about the project (purpose, constraints, tech stack, target users) and ingesting answers via `memory-ingest`
 
 Do NOT use for:
 - bug fixes
 - refactors
 - pure technical maintenance
+
+## New Project — Memory Seeding
+
+When activated on a project with no existing codebase and no memory files, the Discovery Agent must:
+
+1. Ask the human a focused set of questions to understand the project:
+   - What does the project do? Who is it for?
+   - What are the key technical constraints or stack choices already decided?
+   - What does success look like?
+2. Invoke `memory-ingest` with the answers to populate `contexts/memory/project/context.md`
+3. Confirm memory is seeded before proceeding to artefact generation
+
+**The human never fills in memory files manually. Discovery does it through conversation.**
 
 ---
 
