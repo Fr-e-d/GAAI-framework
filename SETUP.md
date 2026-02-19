@@ -7,7 +7,10 @@ after the initial `wrangler login`. Run these commands from the repo root.
 
 ## Naming Convention
 
-**Rule:** every resource name encodes its environment — `{resource-name}-{env}`.
+**Rule:** every resource name encodes its project and its environment — `{project}-{resource}-{env}`.
+
+This ensures resources from different Cloudflare projects are immediately distinguishable
+in a shared workspace (dashboard, CLI output, billing).
 
 **Dev exception:** `wrangler dev` (local) binds directly to staging remote resources.
 No separate `-dev` resources are created or deployed anywhere.
@@ -28,12 +31,12 @@ No separate `-dev` resources are created or deployed anywhere.
 
 | Queue name | DLQ name | Used by |
 |---|---|---|
-| `email-notifications-staging` | `email-notifications-staging-dlq` | staging + local dev |
-| `lead-billing-staging` | `lead-billing-staging-dlq` | staging + local dev |
-| `matching-jobs-staging` | `matching-jobs-staging-dlq` | staging + local dev |
-| `email-notifications-production` | `email-notifications-production-dlq` | production |
-| `lead-billing-production` | `lead-billing-production-dlq` | production |
-| `matching-jobs-production` | `matching-jobs-production-dlq` | production |
+| `callibrate-core-email-notifications-staging` | `callibrate-core-email-notifications-staging-dlq` | staging + local dev |
+| `callibrate-core-lead-billing-staging` | `callibrate-core-lead-billing-staging-dlq` | staging + local dev |
+| `callibrate-core-matching-jobs-staging` | `callibrate-core-matching-jobs-staging-dlq` | staging + local dev |
+| `callibrate-core-email-notifications-production` | `callibrate-core-email-notifications-production-dlq` | production |
+| `callibrate-core-lead-billing-production` | `callibrate-core-lead-billing-production-dlq` | production |
+| `callibrate-core-matching-jobs-production` | `callibrate-core-matching-jobs-production-dlq` | production |
 
 ---
 
@@ -67,13 +70,14 @@ Production will be provisioned from the staging schema at launch.
 
 ### Future resources (R2, D1, Durable Objects…)
 
-Apply the same rule — no separate dev resource, local dev always binds to staging:
+Apply the same rule — always prefix with the project name, no separate dev resource:
 
 | Resource type | Staging name | Production name |
 |---|---|---|
-| R2 Bucket | `{name}-staging` | `{name}-production` |
-| D1 Database | `{name}-staging` | `{name}-production` |
-| Durable Object | `{name}-staging` | `{name}-production` |
+| R2 Bucket | `callibrate-core-{name}-staging` | `callibrate-core-{name}-production` |
+| D1 Database | `callibrate-core-{name}-staging` | `callibrate-core-{name}-production` |
+| Durable Object | `callibrate-core-{name}-staging` | `callibrate-core-{name}-production` |
+| Queue | `callibrate-core-{name}-staging` | `callibrate-core-{name}-production` |
 
 ---
 
