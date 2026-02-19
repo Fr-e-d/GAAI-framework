@@ -95,35 +95,19 @@ Markdown + YAML + bash. Readable by humans and any AI tool.
 
 ### Ask your AI assistant (Claude Code, OpenCode, Codex, Gemini, Cursor, Windsurf…)
 
-Pick your tool and paste the matching prompt into your AI tool's chat:
+Paste this into your AI tool's chat — it will handle the rest:
 
-**Claude Code / OpenCode / Codex / Gemini:**
 ```
 Install the GAAI framework into my current project.
-Run these commands:
-  rm -rf /tmp/gaai
-  git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai
-  bash /tmp/gaai/install.sh --target . --tool claude-code --yes
-  rm -rf /tmp/gaai
-```
 
-**Cursor:**
-```
-Install the GAAI framework into my current project.
-Run these commands:
-  rm -rf /tmp/gaai
-  git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai
-  bash /tmp/gaai/install.sh --target . --tool cursor --yes
-  rm -rf /tmp/gaai
-```
+Determine {user-tool} by identifying which AI coding tool is running this
+prompt. Valid values: claude-code | cursor | windsurf | other.
+If you cannot determine it, ask the user before proceeding.
 
-**Windsurf / Other:**
-```
-Install the GAAI framework into my current project.
-Run these commands:
+Then run:
   rm -rf /tmp/gaai
   git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai
-  bash /tmp/gaai/install.sh --target . --tool windsurf --yes
+  bash /tmp/gaai/install.sh --target . --tool {user-tool} --yes
   rm -rf /tmp/gaai
 ```
 
