@@ -1,0 +1,127 @@
+---
+type: rules
+category: artefacts
+id: RULES-ARTEFACTS-001
+tags:
+  - artefacts
+  - governance
+  - traceability
+  - execution
+  - non_authoritative
+created_at: 2026-02-09
+updated_at: 2026-02-09
+---
+
+# 📦 GAAI Artefacts Rules
+
+This document defines the **mandatory rules governing artefacts**
+inside the GAAI (Governed Agentic AI Infrastructure) system.
+
+These rules are **non-negotiable**.
+Any artefact violating these rules is **invalid by design**.
+
+## 🎯 Purpose of Artefacts
+
+Artefacts exist to provide:
+- execution evidence
+- rationale and explanation
+- traceability
+- auditability
+- support for agent reasoning
+
+Artefacts do **not** exist to:
+- drive orchestration
+- decide actions
+- control workflow
+- replace backlog or memory
+
+## 🧠 Core Principles
+
+**Backlog is canonical.**
+**Artefacts are informational.**
+**Agents decide.**
+
+Artefacts never hold authority.
+
+## 🗂️ Artefact Authority Model
+
+### R1 — Artefacts Never Decide
+
+An artefact MUST NOT:
+- decide priorities or scope
+- approve or reject execution
+- override agent decisions
+
+All authority belongs to **agents**.
+
+### R2 — Artefacts Never Orchestrate
+
+An artefact MUST NOT:
+- trigger execution
+- change backlog state
+- be used by cron or automation as a signal
+- act as a workflow controller
+
+Only the **backlog** may be used for orchestration.
+
+## 📑 Structure Rules
+
+### R3 — Mandatory Frontmatter
+
+Every artefact MUST contain YAML frontmatter declaring at minimum:
+- `gaai.type: artefact`
+- `artefact_type`
+- `track`
+- `id`
+- `related_backlog_id`
+- timestamps
+
+Frontmatter is **machine-readable**. Markdown body is **explanatory only**.
+
+### R4 — Descriptive Status Only
+
+Artefacts MAY include local status fields (e.g. `draft`, `final`).
+Such statuses are:
+- informational only
+- non-canonical
+- never consumed by automation
+- never used for orchestration
+
+## 🔁 Artefacts vs Backlog
+
+### R5 — Backlog Is the Single Source of Truth
+
+- Execution state lives in the backlog
+- Artefacts may reference backlog IDs
+- Artefacts MUST NOT duplicate or override backlog state
+
+## 🧠 Artefacts & Memory
+
+### R6 — Artefacts Are Not Memory
+
+Artefacts MUST NOT:
+- be treated as long-term memory
+- be auto-ingested into memory
+- bypass memory governance rules
+
+Only agents may decide if an artefact should be summarized into memory.
+
+## 🚫 Forbidden Artefact Behaviors (Hard Fail)
+
+The following behaviors are **explicitly forbidden**:
+- triggering execution
+- updating backlog state
+- ingesting memory directly
+- auto-loading themselves into context
+- containing hidden orchestration logic
+- communicating with humans as authority
+
+Any artefact exhibiting these behaviors is **invalid**.
+
+## 🧠 Final Rule
+
+**If an artefact influences execution without an agent decision,**
+**it violates GAAI design principles.**
+
+Artefacts exist to **support clarity and traceability** —
+never to control behavior.
