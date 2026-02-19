@@ -48,7 +48,11 @@ updated_at: 2026-02-19
 
 ## Code Patterns
 
-<!-- Recurring implementation patterns confirmed to work well -->
+- **Workers entrypoint:** `src/index.ts` exports `default { fetch(request, env) }` using `satisfies ExportedHandler<Env>`
+- **Env interface:** `src/types/env.ts` — single `Env` interface, all bindings typed: secrets = `string`, KV = `KVNamespace`, Queue producers = `Queue`
+- **Queue consumers:** declared in `wrangler.toml` `[[queues.consumers]]` but handler (`queue` export) added in the story that implements the consumer logic — not in bootstrap
+- **Health endpoint:** `GET /api/health` → `{ status: "ok", supabase: "connected"|"error", queues: [...] }` — returns 503 when Supabase unreachable (not 200-always)
+- **Supabase ping in Workers:** `fetch(${SUPABASE_URL}/rest/v1/, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: Bearer ... } })` — uses anon key, not service key
 
 ---
 
