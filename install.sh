@@ -311,21 +311,17 @@ echo ""
 case "$TOOL" in
   claude-code)
     echo "  Next steps:"
-    echo "    1. Restart your Claude Code session (slash commands load at startup)"
-    echo "    2. Existing project? → /gaai-bootstrap"
-    echo "       New project?      → fill in .gaai/contexts/memory/memory/project/context.md"
-    echo "                           then /gaai-discover"
+    echo "    1. Restart your Claude Code session — slash commands load at startup"
+    echo "    2. Then run /gaai-bootstrap — scans your codebase and builds memory files"
     ;;
   cursor)
     echo "  Next steps:"
-    echo "    Existing project? → tell Cursor: \"Read .gaai/agents/bootstrap.agent.md,"
-    echo "                        then follow .gaai/workflows/context-bootstrap.workflow.md\""
-    echo "    New project?      → fill in .gaai/contexts/memory/memory/project/context.md"
-    echo "                        then tell Cursor: \"Read .gaai/agents/discovery.agent.md...\""
+    echo "    Tell Cursor: \"Read .gaai/agents/bootstrap.agent.md,"
+    echo "    then follow .gaai/workflows/context-bootstrap.workflow.md\""
     ;;
   *)
     echo "  Next steps:"
-    echo "    Read .gaai/GAAI.md to get started."
+    echo "    Run the Bootstrap Agent — read .gaai/agents/bootstrap.agent.md"
     ;;
 esac
 

@@ -24,3 +24,7 @@ Runs the Bootstrap Agent workflow to:
 Read `.gaai/agents/bootstrap.agent.md` and `.gaai/workflows/context-bootstrap.workflow.md`.
 
 Follow the Bootstrap workflow step by step. After each phase, report what was found and what was stored. At the end, provide a clear PASS or FAIL with any remaining gaps identified.
+
+Once bootstrap is complete, tell the user:
+
+> Memory is ready. Run `/gaai-discover` when you're ready to define what to build.
