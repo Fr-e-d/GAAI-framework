@@ -8,30 +8,30 @@ compatibility_flags = ["nodejs_compat"]
 # Secrets are loaded from .dev.vars (gitignored).
 
 [[queues.consumers]]
-queue = "email-notifications-staging"
+queue = "callibrate-core-email-notifications-staging"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[queues.consumers]]
-queue = "lead-billing-staging"
+queue = "callibrate-core-lead-billing-staging"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[queues.consumers]]
-queue = "matching-jobs-staging"
+queue = "callibrate-core-matching-jobs-staging"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[queues.producers]]
-queue = "email-notifications-staging"
+queue = "callibrate-core-email-notifications-staging"
 binding = "EMAIL_NOTIFICATIONS"
 
 [[queues.producers]]
-queue = "lead-billing-staging"
+queue = "callibrate-core-lead-billing-staging"
 binding = "LEAD_BILLING"
 
 [[queues.producers]]
-queue = "matching-jobs-staging"
+queue = "callibrate-core-matching-jobs-staging"
 binding = "MATCHING_JOBS"
 
 [[kv_namespaces]]
@@ -55,30 +55,30 @@ preview_id = "PLACEHOLDER_FEATURE_FLAGS_KV_STAGING_ID"
 name = "callibrate-core-staging"
 
 [[env.staging.queues.consumers]]
-queue = "email-notifications-staging"
+queue = "callibrate-core-email-notifications-staging"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.staging.queues.consumers]]
-queue = "lead-billing-staging"
+queue = "callibrate-core-lead-billing-staging"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.staging.queues.consumers]]
-queue = "matching-jobs-staging"
+queue = "callibrate-core-matching-jobs-staging"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.staging.queues.producers]]
-queue = "email-notifications-staging"
+queue = "callibrate-core-email-notifications-staging"
 binding = "EMAIL_NOTIFICATIONS"
 
 [[env.staging.queues.producers]]
-queue = "lead-billing-staging"
+queue = "callibrate-core-lead-billing-staging"
 binding = "LEAD_BILLING"
 
 [[env.staging.queues.producers]]
-queue = "matching-jobs-staging"
+queue = "callibrate-core-matching-jobs-staging"
 binding = "MATCHING_JOBS"
 
 [[env.staging.kv_namespaces]]
@@ -99,30 +99,30 @@ id = "PLACEHOLDER_FEATURE_FLAGS_KV_STAGING_ID"
 name = "callibrate-core-production"
 
 [[env.production.queues.consumers]]
-queue = "email-notifications-production"
+queue = "callibrate-core-email-notifications-production"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.production.queues.consumers]]
-queue = "lead-billing-production"
+queue = "callibrate-core-lead-billing-production"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.production.queues.consumers]]
-queue = "matching-jobs-production"
+queue = "callibrate-core-matching-jobs-production"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.production.queues.producers]]
-queue = "email-notifications-production"
+queue = "callibrate-core-email-notifications-production"
 binding = "EMAIL_NOTIFICATIONS"
 
 [[env.production.queues.producers]]
-queue = "lead-billing-production"
+queue = "callibrate-core-lead-billing-production"
 binding = "LEAD_BILLING"
 
 [[env.production.queues.producers]]
-queue = "matching-jobs-production"
+queue = "callibrate-core-matching-jobs-production"
 binding = "MATCHING_JOBS"
 
 [[env.production.kv_namespaces]]
