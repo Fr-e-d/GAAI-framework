@@ -111,8 +111,7 @@ Then run:
   rm -rf /tmp/gaai
 
 After install, show the user the next steps exactly as printed by the
-installer. Do not infer whether this is a new or existing project —
-present both options and let the user decide.
+installer.
 ```
 
 ---
