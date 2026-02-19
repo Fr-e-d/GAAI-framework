@@ -9,16 +9,19 @@ compatibility_flags = ["nodejs_compat"]
 
 [[queues.consumers]]
 queue = "callibrate-core-email-notifications-staging"
+dead_letter_queue = "callibrate-core-email-notifications-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[queues.consumers]]
 queue = "callibrate-core-lead-billing-staging"
+dead_letter_queue = "callibrate-core-lead-billing-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[queues.consumers]]
 queue = "callibrate-core-matching-jobs-staging"
+dead_letter_queue = "callibrate-core-matching-jobs-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
@@ -56,16 +59,19 @@ name = "callibrate-core-staging"
 
 [[env.staging.queues.consumers]]
 queue = "callibrate-core-email-notifications-staging"
+dead_letter_queue = "callibrate-core-email-notifications-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.staging.queues.consumers]]
 queue = "callibrate-core-lead-billing-staging"
+dead_letter_queue = "callibrate-core-lead-billing-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.staging.queues.consumers]]
 queue = "callibrate-core-matching-jobs-staging"
+dead_letter_queue = "callibrate-core-matching-jobs-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
@@ -100,16 +106,19 @@ name = "callibrate-core-production"
 
 [[env.production.queues.consumers]]
 queue = "callibrate-core-email-notifications-production"
+dead_letter_queue = "callibrate-core-email-notifications-production-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.production.queues.consumers]]
 queue = "callibrate-core-lead-billing-production"
+dead_letter_queue = "callibrate-core-lead-billing-production-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.production.queues.consumers]]
 queue = "callibrate-core-matching-jobs-production"
+dead_letter_queue = "callibrate-core-matching-jobs-production-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 

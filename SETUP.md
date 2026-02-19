@@ -131,9 +131,8 @@ npx wrangler queues create matching-jobs-production
 npx wrangler queues create matching-jobs-production-dlq
 ```
 
-> Note: DLQ routing is not yet wired in `wrangler.toml`. After creating the DLQ queues,
-> add `dead_letter_queue` properties to each `[[queues.consumers]]` block pointing to
-> the corresponding `-dlq` queue name.
+> DLQ routing is wired in `wrangler.toml` via `dead_letter_queue` on each consumer.
+> The DLQ queues must still be created on Cloudflare (commands above).
 
 ---
 
