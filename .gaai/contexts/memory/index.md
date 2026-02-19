@@ -30,7 +30,7 @@ updated_at: 2026-02-19
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-19 (updated: Callibrate, stack, architecture) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-19 |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-19 (31 décisions) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | — |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
 
@@ -60,7 +60,8 @@ updated_at: 2026-02-19
 | `artefacts/stories/E06S07.story.md` | Story | Refined — blocked by E06S02 + E06S05 |
 | `artefacts/stories/E06S08.story.md` | Story | Refined — blocked by E06S01 + E06S02 (parallel with E06S07) |
 | `artefacts/stories/E06S09.story.md` | Story | Refined — blocked by E06S02 + E06S06 |
-| `artefacts/strategy/GTM-001.md` | Strategy | GTM plan — 4 phases, binary PASS/FAIL gates, J0–J90 |
+| `artefacts/strategy/GTM-001.md` | Strategy | GTM plan — 4 phases, binary PASS/FAIL gates, J0–J90 — Phase 0 restructurée (DEC-31) |
+| `artefacts/manifesto/MANIFESTO-001.md` | Manifesto | Manifeste public Callibrate — draft FR — pay-for-value + game theory + invitation |
 | `artefacts/marketing/E01S01-reddit-posts.md` | Marketing | Reddit discussion posts + observation log |
 | `artefacts/marketing/E01S01-community-posts.md` | Marketing | Slack/Discord engagement messages + observation log |
 

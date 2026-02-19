@@ -74,6 +74,7 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 - **Prospects** (product delivered): Entreprises avec un besoin réel — gratuit, accès via satellite sites niches
 
 **Founder profile:** Solo founder, AI-assisted development, minimal manual support target.
+**Contrainte founder :** Employé à un poste clé — LinkedIn bloqué jusqu'au lancement produit (risque de panique équipe/hiérarchie). GTM reséquencé en conséquence (DEC-31). LinkedIn activé comme levier de lancement simultané avec substance (manifeste + infra + signal Reddit accumulé).
 
 ---
 
