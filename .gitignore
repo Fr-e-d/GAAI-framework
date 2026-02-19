@@ -21,3 +21,7 @@ Thumbs.db
 
 # Test artifacts (if any)
 /tmp/
+
+# Distribution content (not part of the framework)
+docs/reddit-posts.md
+docs/hackernews-post.md
