@@ -112,23 +112,23 @@ needs a corresponding Dead Letter Queue (DLQ).
 ### Staging queues *(also used by local dev)*
 
 ```bash
-npx wrangler queues create email-notifications-staging
-npx wrangler queues create email-notifications-staging-dlq
-npx wrangler queues create lead-billing-staging
-npx wrangler queues create lead-billing-staging-dlq
-npx wrangler queues create matching-jobs-staging
-npx wrangler queues create matching-jobs-staging-dlq
+npx wrangler queues create callibrate-core-email-notifications-staging
+npx wrangler queues create callibrate-core-email-notifications-staging-dlq
+npx wrangler queues create callibrate-core-lead-billing-staging
+npx wrangler queues create callibrate-core-lead-billing-staging-dlq
+npx wrangler queues create callibrate-core-matching-jobs-staging
+npx wrangler queues create callibrate-core-matching-jobs-staging-dlq
 ```
 
 ### Production queues
 
 ```bash
-npx wrangler queues create email-notifications-production
-npx wrangler queues create email-notifications-production-dlq
-npx wrangler queues create lead-billing-production
-npx wrangler queues create lead-billing-production-dlq
-npx wrangler queues create matching-jobs-production
-npx wrangler queues create matching-jobs-production-dlq
+npx wrangler queues create callibrate-core-email-notifications-production
+npx wrangler queues create callibrate-core-email-notifications-production-dlq
+npx wrangler queues create callibrate-core-lead-billing-production
+npx wrangler queues create callibrate-core-lead-billing-production-dlq
+npx wrangler queues create callibrate-core-matching-jobs-production
+npx wrangler queues create callibrate-core-matching-jobs-production-dlq
 ```
 
 > DLQ routing is wired in `wrangler.toml` via `dead_letter_queue` on each consumer.
