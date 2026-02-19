@@ -151,6 +151,26 @@ Two tracks. Each track can host as many platforms as needed. All platforms in La
 
 ---
 
+## Competitive Moat
+
+**Moat primaire — Data flywheel**
+Chaque transaction (quiz, match score, booking, feedback) améliore les weights du matching engine. Plus de volume → meilleure calibration → meilleurs matchs → plus de volume. Impossible à répliquer pour un acteur solo ou un système mono-expert.
+
+**Différenciateur clé — Valeur au prospect "rejeté"**
+Un système mono-expert (Typeform ROI, filtre Upwork) : le prospect qui ne matche pas disparaît sans valeur.
+Callibrate : le prospect qui ne matche pas Expert A est matché avec Expert B ou C. Les "rejets" d'un expert deviennent des revenus pour un autre. **Aucune plateforme existante ne fait ça.**
+
+**Barrière technique — Matching bi-directionnel**
+Upwork / Malt / LinkedIn = unidirectionnel ou textuel. Callibrate évalue simultanément `expert.preferences` vs `prospect.requirements` dans les deux sens. Le composite score (data de vrais calls) est un actif défensif qui se renforce dans le temps.
+
+**La vraie promesse :** "Ne rate pas le bon match parce que tu as atterri sur le mauvais expert en premier."
+- Expert : reçoit des prospects pré-filtrés sans construire son propre système de qualification
+- Prospect : n'est jamais perdu après un refus — le système trouve qui correspond vraiment
+
+*Signal terrain : r/n8n_ai_agents — expert sophistiqué qui a construit son propre Typeform ROI + n8n filter. Preuve que le besoin existe et que la solution solo ne scale pas. (DEC-23)*
+
+---
+
 ## Strategic Options (Post-M3 — not decided, not scoped)
 
 > Ces options ne sont pas dans le backlog. Elles ne seront considérées qu'après Gate 3 PASS.

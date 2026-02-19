@@ -16,7 +16,7 @@ updated_at: 2026-02-19
 | Category | Path | Purpose | Load frequency |
 |---|---|---|---|
 | `project/` | `project/context.md` | Product vision, scope, stack, constraints, SMART objectives | Every session |
-| `decisions/` | `decisions/_log.md` | Validated choices — 22 decisions logged (append-only) | Selective |
+| `decisions/` | `decisions/_log.md` | Validated choices — 23 decisions logged (append-only) | Selective |
 | `patterns/` | `patterns/conventions.md` | Coding conventions, procedural knowledge | Every Delivery session |
 | `contacts/` | `contacts/leads.md` | Experts identifiés pendant Discovery — à contacter au lancement | Delivery phase |
 | `summaries/` | *(empty — add as project grows)* | Compacted episodic knowledge | Selective |

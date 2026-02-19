@@ -17,6 +17,16 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-19-23 — Competitive Moat : Data Flywheel + Bi-Directional Value
+
+**Context:** Observation terrain (r/n8n_ai_agents) — un expert sophistiqué a construit sa propre qualification system (Typeform + n8n ROI calculator). Il résout son propre problème, mais les prospects qui ne le matchent pas disparaissent sans valeur. Ça a cristallisé le moat réel de Callibrate.
+**Decision:** Le moat de Callibrate repose sur 3 couches : (1) Data flywheel — chaque transaction améliore les weights du matching engine, compounding impossible à répliquer pour un acteur solo. (2) Valeur au prospect rejeté — un prospect qui ne matche pas Expert A est matché avec Expert B ou C ; les "rejets" d'un expert deviennent des revenus pour un autre. Aucun système mono-expert ne peut faire ça. (3) Bi-directionnel comme barrière technique — Upwork/Malt/LinkedIn sont unidirectionnels ou textuels ; Callibrate évalue simultanément expert.preferences vs prospect.requirements dans les deux sens.
+**Rationale :** La vraie promesse n'est pas "trouve un expert" — c'est "ne rate pas le bon match parce que tu as atterri sur le mauvais expert en premier." Pour l'expert : reçoit des prospects pré-filtrés sans construire son propre système. Pour le prospect : ne disparaît jamais après un refus — le système trouve qui correspond vraiment.
+**Impact :** Reformule la promesse marketing (E01S02/E01S03). Renforce le positionnement "Matching OS" vs annuaire. Le composite score (data accumulée de vrais calls) devient un actif défensif qu'aucun concurrent solo ne peut répliquer. Capturé depuis signal terrain — non hypothétique.
+**Date:** 2026-02-19
+
+---
+
 ### DEC-2026-02-19-22 — 3-Layer Architecture Précisée (Refinement de DEC-18)
 
 **Context:** DEC-18 définit une architecture domain-agnostic en 3 couches mais sans préciser la structure interne de la couche Interface ni la règle de consommation.
