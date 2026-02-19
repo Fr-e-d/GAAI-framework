@@ -92,9 +92,10 @@ fi
 
 # 5. No existing .gaai/ conflict
 if [[ -d "$TARGET/.gaai" ]]; then
-  check ".gaai/ in target" "already exists — installer will prompt before overwriting"
+  echo "  ⚠️  .gaai/ in target — already exists (installer will prompt before overwriting)"
+  PASS=$((PASS + 1))
 else
-  check ".gaai/ in target" "ok (not present, clean install)"
+  check ".gaai/ in target — ok (not present, clean install)" "ok"
 fi
 
 # Summary

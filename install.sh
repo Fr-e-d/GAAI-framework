@@ -171,14 +171,14 @@ case "$TOOL" in
   claude-code)
     echo "  Next steps:"
     echo "    Existing project? → /gaai-bootstrap"
-    echo "    New project?      → fill in .gaai/contexts/memory/project.memory.md"
+    echo "    New project?      → fill in .gaai/contexts/memory/memory/project/context.md"
     echo "                        then /gaai-discover"
     ;;
   cursor)
     echo "  Next steps:"
     echo "    Existing project? → tell Cursor: \"Read .gaai/agents/bootstrap.agent.md,"
     echo "                        then follow .gaai/workflows/context-bootstrap.workflow.md\""
-    echo "    New project?      → fill in .gaai/contexts/memory/project.memory.md"
+    echo "    New project?      → fill in .gaai/contexts/memory/memory/project/context.md"
     echo "                        then tell Cursor: \"Read .gaai/agents/discovery.agent.md...\""
     ;;
   *)
