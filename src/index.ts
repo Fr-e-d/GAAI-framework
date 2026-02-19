@@ -1,6 +1,6 @@
 import { Env } from './types/env';
 
-const QUEUES = ['email-notifications', 'lead-billing', 'matching-jobs'] as const;
+const QUEUES = ['email-notifications', 'lead-billing'] as const;
 
 async function checkSupabase(env: Env): Promise<'connected' | 'error'> {
   try {
