@@ -241,21 +241,32 @@ COMPAT_DIR="$TARGET/.gaai/compat"
 echo ""
 info "Deploying adapter for: $TOOL"
 
-backup_if_exists() {
-  local file="$1"
-  if [[ -f "$file" ]]; then
-    local bak="${file}.gaai-bak"
-    cp "$file" "$bak"
-    warn "$(basename "$file") already exists — backed up to $(basename "$bak")"
+GAAI_MARKER="<!-- gaai-managed-section -->"
+
+deploy_or_append() {
+  local src="$1"
+  local dest="$2"
+  local label="$3"
+  if [[ -f "$dest" ]]; then
+    if grep -q "$GAAI_MARKER" "$dest"; then
+      # Already injected — skip silently
+      info "$label already contains GAAI section — skipping"
+    else
+      # Append to existing file
+      printf '\n\n%s\n' "$GAAI_MARKER" >> "$dest"
+      cat "$src" >> "$dest"
+      success "$label — GAAI section appended (existing content preserved)"
+    fi
+  else
+    cp "$src" "$dest"
+    success "$label deployed to $(dirname "$dest")/"
   fi
 }
 
 case "$TOOL" in
   claude-code)
-    # CLAUDE.md → project root
-    backup_if_exists "$TARGET/CLAUDE.md"
-    cp "$COMPAT_DIR/claude-code.md" "$TARGET/CLAUDE.md"
-    success "CLAUDE.md deployed to $TARGET/"
+    # CLAUDE.md → project root (append if exists)
+    deploy_or_append "$COMPAT_DIR/claude-code.md" "$TARGET/CLAUDE.md" "CLAUDE.md"
 
     # Slash commands → .claude/commands/
     mkdir -p "$TARGET/.claude/commands"
@@ -266,17 +277,15 @@ case "$TOOL" in
     ;;
 
   cursor)
-    # gaai.mdc → .cursor/rules/
+    # gaai.mdc → .cursor/rules/ (safe — scoped filename, no conflict)
     mkdir -p "$TARGET/.cursor/rules"
     cp "$COMPAT_DIR/cursor.mdc" "$TARGET/.cursor/rules/gaai.mdc"
     success ".cursor/rules/gaai.mdc deployed"
     ;;
 
   windsurf|other)
-    # AGENTS.md → project root
-    backup_if_exists "$TARGET/AGENTS.md"
-    cp "$COMPAT_DIR/windsurf.md" "$TARGET/AGENTS.md"
-    success "AGENTS.md deployed to $TARGET/"
+    # AGENTS.md → project root (append if exists)
+    deploy_or_append "$COMPAT_DIR/windsurf.md" "$TARGET/AGENTS.md" "AGENTS.md"
     ;;
 esac
 
