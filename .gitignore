@@ -12,6 +12,7 @@ temp/
 .env
 .env.*
 !.env.example
+.dev.vars
 
 # Node
 node_modules/
