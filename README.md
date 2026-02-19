@@ -93,7 +93,7 @@ Markdown + YAML + bash. Readable by humans and any AI tool.
 
 ## Install
 
-### Ask your AI assistant (Claude Code, Cursor, Windsurf…)
+### Ask your AI assistant (Claude Code, OpenCode, Codex, Gemini, Cursor, Windsurf…)
 
 Paste this into your AI tool's chat — it will handle the rest:
 
