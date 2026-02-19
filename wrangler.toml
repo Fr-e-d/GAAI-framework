@@ -4,38 +4,28 @@ compatibility_date = "2024-10-22"
 compatibility_flags = ["nodejs_compat"]
 
 # ── Default (dev) environment — local only, never deployed ───────────────────
-# Points to staging remote resources (queues, KV, Supabase).
-# Secrets are loaded from .dev.vars (gitignored).
+# Binds to staging remote resources (queues, KV, Supabase).
+# Secrets loaded from .dev.vars (gitignored).
 
 [[queues.consumers]]
-queue = "callibrate-core-email-notifications-staging"
-dead_letter_queue = "callibrate-core-email-notifications-staging-dlq"
+queue = "callibrate-core-queue-email-notifications-staging"
+dead_letter_queue = "callibrate-core-queue-email-notifications-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[queues.consumers]]
-queue = "callibrate-core-lead-billing-staging"
-dead_letter_queue = "callibrate-core-lead-billing-staging-dlq"
-max_batch_size = 10
-max_batch_timeout = 5
-
-[[queues.consumers]]
-queue = "callibrate-core-matching-jobs-staging"
-dead_letter_queue = "callibrate-core-matching-jobs-staging-dlq"
+queue = "callibrate-core-queue-lead-billing-staging"
+dead_letter_queue = "callibrate-core-queue-lead-billing-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[queues.producers]]
-queue = "callibrate-core-email-notifications-staging"
+queue = "callibrate-core-queue-email-notifications-staging"
 binding = "EMAIL_NOTIFICATIONS"
 
 [[queues.producers]]
-queue = "callibrate-core-lead-billing-staging"
+queue = "callibrate-core-queue-lead-billing-staging"
 binding = "LEAD_BILLING"
-
-[[queues.producers]]
-queue = "callibrate-core-matching-jobs-staging"
-binding = "MATCHING_JOBS"
 
 [[kv_namespaces]]
 binding = "SESSIONS"
@@ -58,34 +48,24 @@ preview_id = "PLACEHOLDER_FEATURE_FLAGS_KV_STAGING_ID"
 name = "callibrate-core-staging"
 
 [[env.staging.queues.consumers]]
-queue = "callibrate-core-email-notifications-staging"
-dead_letter_queue = "callibrate-core-email-notifications-staging-dlq"
+queue = "callibrate-core-queue-email-notifications-staging"
+dead_letter_queue = "callibrate-core-queue-email-notifications-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.staging.queues.consumers]]
-queue = "callibrate-core-lead-billing-staging"
-dead_letter_queue = "callibrate-core-lead-billing-staging-dlq"
-max_batch_size = 10
-max_batch_timeout = 5
-
-[[env.staging.queues.consumers]]
-queue = "callibrate-core-matching-jobs-staging"
-dead_letter_queue = "callibrate-core-matching-jobs-staging-dlq"
+queue = "callibrate-core-queue-lead-billing-staging"
+dead_letter_queue = "callibrate-core-queue-lead-billing-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.staging.queues.producers]]
-queue = "callibrate-core-email-notifications-staging"
+queue = "callibrate-core-queue-email-notifications-staging"
 binding = "EMAIL_NOTIFICATIONS"
 
 [[env.staging.queues.producers]]
-queue = "callibrate-core-lead-billing-staging"
+queue = "callibrate-core-queue-lead-billing-staging"
 binding = "LEAD_BILLING"
-
-[[env.staging.queues.producers]]
-queue = "callibrate-core-matching-jobs-staging"
-binding = "MATCHING_JOBS"
 
 [[env.staging.kv_namespaces]]
 binding = "SESSIONS"
@@ -102,46 +82,36 @@ id = "PLACEHOLDER_FEATURE_FLAGS_KV_STAGING_ID"
 # ── Production environment ────────────────────────────────────────────────────
 
 [env.production]
-name = "callibrate-core-production"
+name = "callibrate-core-prod"
 
 [[env.production.queues.consumers]]
-queue = "callibrate-core-email-notifications-production"
-dead_letter_queue = "callibrate-core-email-notifications-production-dlq"
+queue = "callibrate-core-queue-email-notifications-prod"
+dead_letter_queue = "callibrate-core-queue-email-notifications-prod-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.production.queues.consumers]]
-queue = "callibrate-core-lead-billing-production"
-dead_letter_queue = "callibrate-core-lead-billing-production-dlq"
-max_batch_size = 10
-max_batch_timeout = 5
-
-[[env.production.queues.consumers]]
-queue = "callibrate-core-matching-jobs-production"
-dead_letter_queue = "callibrate-core-matching-jobs-production-dlq"
+queue = "callibrate-core-queue-lead-billing-prod"
+dead_letter_queue = "callibrate-core-queue-lead-billing-prod-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.production.queues.producers]]
-queue = "callibrate-core-email-notifications-production"
+queue = "callibrate-core-queue-email-notifications-prod"
 binding = "EMAIL_NOTIFICATIONS"
 
 [[env.production.queues.producers]]
-queue = "callibrate-core-lead-billing-production"
+queue = "callibrate-core-queue-lead-billing-prod"
 binding = "LEAD_BILLING"
-
-[[env.production.queues.producers]]
-queue = "callibrate-core-matching-jobs-production"
-binding = "MATCHING_JOBS"
 
 [[env.production.kv_namespaces]]
 binding = "SESSIONS"
-id = "PLACEHOLDER_SESSIONS_KV_PRODUCTION_ID"
+id = "PLACEHOLDER_SESSIONS_KV_PROD_ID"
 
 [[env.production.kv_namespaces]]
 binding = "RATE_LIMITING"
-id = "PLACEHOLDER_RATE_LIMITING_KV_PRODUCTION_ID"
+id = "PLACEHOLDER_RATE_LIMITING_KV_PROD_ID"
 
 [[env.production.kv_namespaces]]
 binding = "FEATURE_FLAGS"
-id = "PLACEHOLDER_FEATURE_FLAGS_KV_PRODUCTION_ID"
+id = "PLACEHOLDER_FEATURE_FLAGS_KV_PROD_ID"

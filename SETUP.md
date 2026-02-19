@@ -7,23 +7,35 @@ after the initial `wrangler login`. Run these commands from the repo root.
 
 ## Naming Convention
 
-**Rule:** every resource name encodes its project and its environment — `{project}-{resource}-{env}`.
+```
+{scope}-{entity}-{resource}-{env}
+```
 
-This ensures resources from different Cloudflare projects are immediately distinguishable
-in a shared workspace (dashboard, CLI output, billing).
+| Segment | Values | Notes |
+|---|---|---|
+| `{scope}` | `callibrate-core` · `callibrate-io` · `callibrate-ai` | Which application owns this resource |
+| `{entity}` | `queue` · `kv` · `r2` · `d1` · `workflow` | Resource type — omitted for Workers (the worker IS the scope) |
+| `{resource}` | slug describing what the resource does | e.g. `email-notifications`, `sessions` |
+| `{env}` | `staging` · `prod` | No "dev" — local dev binds to staging resources directly |
 
-**Dev exception:** `wrangler dev` (local) binds directly to staging remote resources.
-No separate `-dev` resources are created or deployed anywhere.
+**Dev exception:** `wrangler dev` binds to staging remote resources. No separate local resources are created.
+
+**Scope ownership:** KV, Queues, R2, D1, and Workflows always belong to `callibrate-core`.
+`callibrate-io` and `callibrate-ai` are UI workers — they call the API, never touch storage directly.
 
 ---
 
 ### Workers
 
-| Cloudflare worker name | Environment | Deployed via |
-|---|---|---|
-| `callibrate-core-staging` | staging | push to `main` |
-| `callibrate-core-production` | production | push of a `v*` tag |
-| `callibrate-core-dev` | local dev | `wrangler dev` — never deployed |
+| Name | Scope | Environment | Deployed via |
+|---|---|---|---|
+| `callibrate-core-staging` | core API + queue consumers | staging | push to `main` |
+| `callibrate-core-prod` | core API + queue consumers | production | push of a `v*` tag |
+| `callibrate-io-staging` | expert UI (Next.js) | staging | *(separate repo)* |
+| `callibrate-io-prod` | expert UI (Next.js) | production | *(separate repo)* |
+| `callibrate-ai-staging` | prospect UI (Next.js) | staging | *(separate repo)* |
+| `callibrate-ai-prod` | prospect UI (Next.js) | production | *(separate repo)* |
+| `callibrate-core-dev` | local dev | never deployed | `wrangler dev` |
 
 ---
 
@@ -31,53 +43,48 @@ No separate `-dev` resources are created or deployed anywhere.
 
 | Queue name | DLQ name | Used by |
 |---|---|---|
-| `callibrate-core-email-notifications-staging` | `callibrate-core-email-notifications-staging-dlq` | staging + local dev |
-| `callibrate-core-lead-billing-staging` | `callibrate-core-lead-billing-staging-dlq` | staging + local dev |
-| `callibrate-core-matching-jobs-staging` | `callibrate-core-matching-jobs-staging-dlq` | staging + local dev |
-| `callibrate-core-email-notifications-production` | `callibrate-core-email-notifications-production-dlq` | production |
-| `callibrate-core-lead-billing-production` | `callibrate-core-lead-billing-production-dlq` | production |
-| `callibrate-core-matching-jobs-production` | `callibrate-core-matching-jobs-production-dlq` | production |
+| `callibrate-core-queue-email-notifications-staging` | `callibrate-core-queue-email-notifications-staging-dlq` | staging + local dev |
+| `callibrate-core-queue-lead-billing-staging` | `callibrate-core-queue-lead-billing-staging-dlq` | staging + local dev |
+| `callibrate-core-queue-email-notifications-prod` | `callibrate-core-queue-email-notifications-prod-dlq` | production |
+| `callibrate-core-queue-lead-billing-prod` | `callibrate-core-queue-lead-billing-prod-dlq` | production |
 
 ---
 
 ### KV Namespaces
 
-Wrangler auto-generates KV namespace names as `{worker-name}_{BINDING}`.
-The worker name already carries the env suffix, so KV names follow the convention automatically.
+Created manually with explicit names (see Step 3). Binding names in code are uppercase.
 
 | Cloudflare namespace name | Binding in code | Used by |
 |---|---|---|
-| `callibrate-core-staging_SESSIONS` | `SESSIONS` | staging + local dev |
-| `callibrate-core-staging_RATE_LIMITING` | `RATE_LIMITING` | staging + local dev |
-| `callibrate-core-staging_FEATURE_FLAGS` | `FEATURE_FLAGS` | staging + local dev |
-| `callibrate-core-production_SESSIONS` | `SESSIONS` | production |
-| `callibrate-core-production_RATE_LIMITING` | `RATE_LIMITING` | production |
-| `callibrate-core-production_FEATURE_FLAGS` | `FEATURE_FLAGS` | production |
+| `callibrate-core-kv-sessions-staging` | `SESSIONS` | staging + local dev |
+| `callibrate-core-kv-rate-limiting-staging` | `RATE_LIMITING` | staging + local dev |
+| `callibrate-core-kv-feature-flags-staging` | `FEATURE_FLAGS` | staging + local dev |
+| `callibrate-core-kv-sessions-prod` | `SESSIONS` | production |
+| `callibrate-core-kv-rate-limiting-prod` | `RATE_LIMITING` | production |
+| `callibrate-core-kv-feature-flags-prod` | `FEATURE_FLAGS` | production |
 
 ---
 
 ### Supabase
 
-Only one Supabase project is available at this stage.
-Production will be provisioned from the staging schema at launch.
+One Supabase project available at this stage. Production provisioned at launch.
 
 | Supabase project | Used by |
 |---|---|
 | `callibrate-staging` | staging + local dev |
-| `callibrate-production` | production — *(not yet created, deferred to launch)* |
+| `callibrate-prod` | production — *(not yet created, deferred to launch)* |
 
 ---
 
-### Future resources (R2, D1, Durable Objects…)
+### Future resources (R2, D1, Workflows…)
 
-Apply the same rule — always prefix with the project name, no separate dev resource:
+Same rule — `callibrate-core-{entity}-{resource}-{env}`, no dev variant:
 
-| Resource type | Staging name | Production name |
+| Example | Staging | Production |
 |---|---|---|
-| R2 Bucket | `callibrate-core-{name}-staging` | `callibrate-core-{name}-production` |
-| D1 Database | `callibrate-core-{name}-staging` | `callibrate-core-{name}-production` |
-| Durable Object | `callibrate-core-{name}-staging` | `callibrate-core-{name}-production` |
-| Queue | `callibrate-core-{name}-staging` | `callibrate-core-{name}-production` |
+| R2 bucket for avatars | `callibrate-core-r2-avatars-staging` | `callibrate-core-r2-avatars-prod` |
+| D1 main database | `callibrate-core-d1-main-staging` | `callibrate-core-d1-main-prod` |
+| Workflow for matching | `callibrate-core-workflow-matching-staging` | `callibrate-core-workflow-matching-prod` |
 
 ---
 
@@ -112,23 +119,19 @@ needs a corresponding Dead Letter Queue (DLQ).
 ### Staging queues *(also used by local dev)*
 
 ```bash
-npx wrangler queues create callibrate-core-email-notifications-staging
-npx wrangler queues create callibrate-core-email-notifications-staging-dlq
-npx wrangler queues create callibrate-core-lead-billing-staging
-npx wrangler queues create callibrate-core-lead-billing-staging-dlq
-npx wrangler queues create callibrate-core-matching-jobs-staging
-npx wrangler queues create callibrate-core-matching-jobs-staging-dlq
+npx wrangler queues create callibrate-core-queue-email-notifications-staging
+npx wrangler queues create callibrate-core-queue-email-notifications-staging-dlq
+npx wrangler queues create callibrate-core-queue-lead-billing-staging
+npx wrangler queues create callibrate-core-queue-lead-billing-staging-dlq
 ```
 
 ### Production queues
 
 ```bash
-npx wrangler queues create callibrate-core-email-notifications-production
-npx wrangler queues create callibrate-core-email-notifications-production-dlq
-npx wrangler queues create callibrate-core-lead-billing-production
-npx wrangler queues create callibrate-core-lead-billing-production-dlq
-npx wrangler queues create callibrate-core-matching-jobs-production
-npx wrangler queues create callibrate-core-matching-jobs-production-dlq
+npx wrangler queues create callibrate-core-queue-email-notifications-prod
+npx wrangler queues create callibrate-core-queue-email-notifications-prod-dlq
+npx wrangler queues create callibrate-core-queue-lead-billing-prod
+npx wrangler queues create callibrate-core-queue-lead-billing-prod-dlq
 ```
 
 > DLQ routing is wired in `wrangler.toml` via `dead_letter_queue` on each consumer.
@@ -146,33 +149,36 @@ corresponding `PLACEHOLDER_*` string.
 > After creating the staging namespaces below, copy their IDs into **both** the root
 > `[[kv_namespaces]]` block and the `[[env.staging.kv_namespaces]]` block in `wrangler.toml`.
 
+KV namespaces are created with explicit names (not via `--env` auto-naming) to match the convention.
+Copy the returned ID into `wrangler.toml` for both the root block and the env-specific block.
+
 ### Staging namespaces *(also used by local dev)*
 
 ```bash
-npx wrangler kv namespace create SESSIONS --env staging
-# -> Copy returned id into wrangler.toml: [[env.staging.kv_namespaces]] binding="SESSIONS" id=
+npx wrangler kv namespace create "callibrate-core-kv-sessions-staging"
+# -> id into: [[kv_namespaces]] id= AND [[env.staging.kv_namespaces]] binding="SESSIONS" id=
 
-npx wrangler kv namespace create RATE_LIMITING --env staging
-# -> Copy returned id into wrangler.toml: [[env.staging.kv_namespaces]] binding="RATE_LIMITING" id=
+npx wrangler kv namespace create "callibrate-core-kv-rate-limiting-staging"
+# -> id into: [[kv_namespaces]] id= AND [[env.staging.kv_namespaces]] binding="RATE_LIMITING" id=
 
-npx wrangler kv namespace create FEATURE_FLAGS --env staging
-# -> Copy returned id into wrangler.toml: [[env.staging.kv_namespaces]] binding="FEATURE_FLAGS" id=
+npx wrangler kv namespace create "callibrate-core-kv-feature-flags-staging"
+# -> id into: [[kv_namespaces]] id= AND [[env.staging.kv_namespaces]] binding="FEATURE_FLAGS" id=
 ```
 
 ### Production namespaces
 
 ```bash
-npx wrangler kv namespace create SESSIONS --env production
-# -> Copy returned id into wrangler.toml: [[env.production.kv_namespaces]] binding="SESSIONS" id=
+npx wrangler kv namespace create "callibrate-core-kv-sessions-prod"
+# -> id into: [[env.production.kv_namespaces]] binding="SESSIONS" id=
 
-npx wrangler kv namespace create RATE_LIMITING --env production
-# -> Copy returned id into wrangler.toml: [[env.production.kv_namespaces]] binding="RATE_LIMITING" id=
+npx wrangler kv namespace create "callibrate-core-kv-rate-limiting-prod"
+# -> id into: [[env.production.kv_namespaces]] binding="RATE_LIMITING" id=
 
-npx wrangler kv namespace create FEATURE_FLAGS --env production
-# -> Copy returned id into wrangler.toml: [[env.production.kv_namespaces]] binding="FEATURE_FLAGS" id=
+npx wrangler kv namespace create "callibrate-core-kv-feature-flags-prod"
+# -> id into: [[env.production.kv_namespaces]] binding="FEATURE_FLAGS" id=
 ```
 
-After updating all 9 IDs in `wrangler.toml`, no `PLACEHOLDER_*` strings should remain.
+After updating all 6 IDs in `wrangler.toml`, no `PLACEHOLDER_*` strings should remain.
 
 ---
 
@@ -246,7 +252,7 @@ Expected output:
 ```
 Your worker has access to the following bindings:
 - KV Namespaces: SESSIONS, RATE_LIMITING, FEATURE_FLAGS
-- Queues: EMAIL_NOTIFICATIONS, LEAD_BILLING, MATCHING_JOBS
+- Queues: EMAIL_NOTIFICATIONS, LEAD_BILLING
 ⎔ Starting local server...
 [wrangler:inf] Ready on http://localhost:8787
 ```
@@ -263,7 +269,7 @@ Expected response (HTTP 200):
 {
   "status": "ok",
   "supabase": "connected",
-  "queues": ["email-notifications", "lead-billing", "matching-jobs"]
+  "queues": ["email-notifications", "lead-billing"]
 }
 ```
 
