@@ -48,6 +48,24 @@ Before starting the loop:
 
 ## Workflow Steps
 
+### 0. Git Setup (before any execution)
+
+For every Story, before any implementation begins:
+
+```bash
+# Create isolated branch from production
+git checkout production
+git pull origin production
+git checkout -b story/{id}
+
+# Create worktree — agent works in isolated directory, never in the main repo
+git worktree add ../{id}-workspace story/{id}
+```
+
+All sub-agents operate exclusively inside `../{id}-workspace/`. The main working directory is never touched during delivery. If two Stories run in parallel, each has its own worktree — zero filesystem conflicts.
+
+> Solo founder shortcut: for Tier 1 (MicroDelivery, low-risk, no schema changes), worktree is optional — branch only is acceptable.
+
 ### 1. Select Next Story
 
 Read `contexts/backlog/active.backlog.yaml`. Select the highest-priority ready Story (status: `refined`, no unresolved dependencies). Use `scripts/backlog-scheduler.sh --next` for automated selection.
@@ -93,6 +111,17 @@ Collect `{id}.impl-report.md`.
 
 Invoke `coordinate-handoffs` → validate artefact → PROCEED or RE-SPAWN or ESCALATE.
 
+**After PROCEED — atomic commit:**
+```bash
+git -C ../{id}-workspace add .
+git -C ../{id}-workspace commit -m "feat({id}): {Story title summary}
+
+Implements: {AC list e.g. AC1–AC9}
+Story: contexts/artefacts/stories/{id}.story.md
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+```
+
 ### 7. Execute — Tier 2/3: QA Phase
 
 Spawn `qa.sub-agent.md` with QA context bundle.
@@ -104,7 +133,33 @@ Invoke `coordinate-handoffs`:
 - FAIL → re-spawn Implementation Sub-Agent with qa-report, then re-spawn QA Sub-Agent (max 3 cycles — see `qa.sub-agent.md`)
 - ESCALATE → stop, surface to human
 
-### 8. Complete Story
+### 8. Merge & Complete Story
+
+**After QA PASS — push, merge, cleanup:**
+
+```bash
+# Push branch
+git -C ../{id}-workspace push origin story/{id}
+
+# Squash merge to production (single clean commit per Story)
+git checkout production
+git merge --squash story/{id}
+git commit -m "feat({id}): {Story title}
+
+$(cat contexts/artefacts/reports/{id}.impl-report.md | head -20)
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+git push origin production
+
+# Cleanup
+git worktree remove ../{id}-workspace
+git branch -d story/{id}
+git push origin --delete story/{id}
+```
+
+> **PR instead of direct merge** — required for: Tier 3 Stories, database schema changes, auth/security changes. Optional for Tier 1/2 routine Stories (solo founder context). When required: `gh pr create --base production --head story/{id}` before merge.
+
+**Backlog & memory:**
 
 Update Story status to `done` in `contexts/backlog/active.backlog.yaml`.
 
@@ -114,7 +169,7 @@ Invoke `decision-extraction` if notable architectural or governance decisions em
 
 Invoke `memory-retrieve` + `memory-ingest` if new patterns worth persisting were identified.
 
-**If the Story required human intervention or reached 3 QA cycles:** invoke `post-mortem-learning`. Record the friction signal (domain, root cause hypothesis, AC gap if applicable) as a `[FRICTION]` entry in `contexts/memory/decisions.memory.md`. This informs future Discovery refinement — not as a new system, but as a structured note the Discovery Agent can retrieve before writing acceptance criteria in the same domain.
+**If the Story required human intervention or reached 3 QA cycles:** invoke `post-mortem-learning`. Record the friction signal (domain, root cause hypothesis, AC gap if applicable) as a `[FRICTION]` entry in `contexts/memory/decisions.memory.md`. This informs future Discovery refinement.
 
 Proceed to next Story.
 
@@ -126,6 +181,8 @@ Proceed to next Story.
 active.backlog.yaml
        ↓
 Pick next ready Story
+       ↓
+git checkout -b story/{id} + worktree add ../{id}-workspace
        ↓
 evaluate-story
        ↓
@@ -144,10 +201,10 @@ Tier 2/3? ──→ compose-team (+ risk-analysis if needed)
              ↓
              spawn Implementation Sub-Agent ──→ {id}.impl-report.md
              │    (+ Specialists if Tier 3)
-             ↓
+             ↓ atomic commit in worktree
              spawn QA Sub-Agent ──→ {id}.qa-report.md
              ↓
-             PASS → done
+             PASS → push story/{id} → squash merge → production → cleanup worktree → done
              FAIL → re-spawn Impl + re-spawn QA (max 3 cycles)
              ESCALATE → human intervention required
              ↓ (on ESCALATE or 3 QA cycles)

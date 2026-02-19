@@ -21,11 +21,28 @@ updated_at: 2026-02-19
 ## Git & Version Control
 
 - **Repo:** `github.com/Fr-e-d/callibrate-core` (private, monorepo)
-- **Main branch:** `production` — all commits land here at MVP stage
-- **Branch strategy (MVP):** direct commits to `production` acceptable for solo founder. Feature branches for anything requiring review.
-- **Commit format:** imperative subject line + body if needed + `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` when AI-assisted
-- **Never commit:** `.DS_Store`, `temp/`, `.env`, `node_modules/`, `.wrangler/` — covered by `.gitignore`
-- **Push:** always `git push origin production` — no force push
+- **Main branch:** `production` — stable, never committed to directly during Delivery
+- **Branch per Story:** `story/{id}` (e.g., `story/E06S01`) — created from `production` before any implementation
+- **Worktree per Story:** `git worktree add ../{id}-workspace story/{id}` — agent works in isolated directory
+  - Parallel Stories = parallel worktrees, zero filesystem conflict
+  - Tier 1 shortcut: worktree optional, branch still required
+- **Commit format:** conventional commits, AI-assisted work always includes Co-Author line
+  ```
+  feat(E06S01): bootstrap Supabase + CF Workers + Queues + KV [AC1–AC8]
+
+  Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+  ```
+- **Commit types:** `feat` (new Story), `fix` (QA remediation), `chore` (config/tooling), `refactor`, `test`, `docs`
+- **Commit timing:** once, atomically, after all ACs are implemented — before handoff artefact is written
+- **Merge strategy:** squash merge to `production` (one commit per Story — clean history)
+  ```bash
+  git merge --squash story/{id} && git commit -m "feat({id}): {title}"
+  ```
+- **PR required for:** Tier 3 Stories · schema migrations · auth/security changes (`gh pr create --base production --head story/{id}`)
+- **PR optional for:** Tier 1/2 routine Stories (squash merge directly — solo founder MVP context)
+- **Cleanup after merge:** `git worktree remove ../{id}-workspace && git branch -d story/{id} && git push origin --delete story/{id}`
+- **Never:** force push · commit to `production` directly · leave stale worktrees or branches
+- **Ignored files:** `.DS_Store`, `temp/`, `.env`, `node_modules/`, `.wrangler/` — `.gitignore` in root
 
 ---
 

@@ -104,10 +104,37 @@ Specialists are dispatched by the Implementation Sub-Agent, not by the Orchestra
 
 ---
 
+## Git Workflow (Non-Negotiable)
+
+The Delivery Orchestrator is responsible for the full git lifecycle of every Story.
+
+```
+BEFORE execution  → git checkout -b story/{id} production
+                    git worktree add ../{id}-workspace story/{id}
+
+AFTER impl PASS   → atomic commit inside ../{id}-workspace
+
+AFTER QA PASS     → push story/{id}
+                    squash merge → production
+                    git push origin production
+                    cleanup: worktree remove + branch delete
+
+NEVER             → commit directly to production
+                    implement without a branch
+                    leave stale worktrees or branches
+```
+
+**PR required for:** Tier 3 Stories · database schema migrations · auth/security changes.
+**PR optional for:** Tier 1/2 routine Stories (solo founder context — squash merge directly).
+
+---
+
 ## Orchestration Flow
 
 ```
 Read backlog → select next ready Story
+       ↓
+git checkout -b story/{id} + worktree add ../{id}-workspace
        ↓
 invoke evaluate-story
        ↓
@@ -132,6 +159,7 @@ Tier 2 or 3? → assemble context bundle
            PASS → collect {id}.memory-delta.md
                   → if verdict DRIFT_DETECTED or NEW_KNOWLEDGE_FOUND or DRIFT_AND_NEW_KNOWLEDGE:
                       flag Discovery with delta report before marking done
+                  → push story/{id} → squash merge → production → cleanup
                   → mark Story done → proceed
            FAIL → re-spawn Implementation Sub-Agent with qa-report (max 2 re-spawns)
                   → re-spawn QA Sub-Agent

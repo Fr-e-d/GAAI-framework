@@ -18,7 +18,11 @@ Spawned by the Delivery Orchestrator. Executes code implementation against a val
 
 ```
 SPAWN   ← Orchestrator provides context bundle (Story + execution plan + coding patterns)
-EXECUTE ← Implements per plan steps; spawns specialists if needed
+          Working directory: ../{id}-workspace (git worktree on branch story/{id})
+EXECUTE ← Implements per plan steps inside the worktree; spawns specialists if needed
+COMMIT  ← Atomic commit after all ACs are implemented and self-validated:
+          git add . && git commit -m "feat({id}): {title} [AC1–ACn]
+          Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 HANDOFF ← Writes contexts/artefacts/reports/{id}.impl-report.md
 DIE     ← Terminates; context window released
 ```
@@ -85,4 +89,7 @@ The artefact must include:
 - MUST implement exactly what the execution plan defines — no additions, no shortcuts
 - MUST NOT modify acceptance criteria or expand scope
 - MUST NOT invoke QA skills (QA is the QA Sub-Agent's responsibility)
+- MUST work exclusively inside `../{id}-workspace` — never in the main repo directory
+- MUST commit atomically before writing the handoff artefact — no uncommitted changes at HANDOFF
+- MUST NOT commit directly to `production` — always on `story/{id}` branch
 - MUST terminate after writing the handoff artefact
