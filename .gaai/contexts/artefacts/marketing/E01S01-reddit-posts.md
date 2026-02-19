@@ -375,10 +375,53 @@ Drop a short note about relevant experience and availability. No agencies — lo
 | r/aisolobusinesses | ✅ 19/02/2026 06:00 | 3 upvotes | 5 commentaires | "6-7h/week", "half my week finding decent leads", "difficult to get on a call", "thinking of changing my niche" | H2 ✅ H1 ✅ H6 ✅ |
 | r/gohighlevel | ✅ 19/02/2026 06:00 | | | | |
 | r/automation | ✅ 19/02/2026 06:00 | | | | |
-| r/AiForSmallBusiness | ✅ 19/02/2026 06:00 | — | 1 commentaire | "workflow architects who understand business logic", "10-15% of Upwork pool are real", "paid audit $100-200 before hiring", "vague AI automation claims are a red flag" | H7 ✅ H8 ✅ H9 ✅ H11 ✅ H12 ✅ |
+| r/AiForSmallBusiness | ✅ 19/02/2026 06:00 | — | 5+ commentaires | "workflow architects who understand business logic", "10-15% of Upwork pool are real", "paid audit $100-200", "3 months to find someone", "n8n vs Zapier/ChatGPT = quality proxy", "prototype not a demo before payment", "asks a ton of questions before mentioning a solution" | H1 ✅ H7 ✅ H8 ✅ H9 ✅ H10 ✅ H11 ✅ H12 ✅ — **2 expert hand-raiser potentiels identifiés** |
 | r/buhaydigital | ✅ 19/02/2026 06:00 | | | | |
 | r/ArtificialNtelligence | ✅ 19/02/2026 06:00 | | | | |
 | r/Upwork | ✅ 19/02/2026 06:00 | | | | |
 | r/ClaudeAI | ✅ 19/02/2026 06:00 | | | | |
 | r/freelancing | ✅ 19/02/2026 06:00 | | | | |
 | r/freelance_forhire | ✅ 19/02/2026 06:00 | — | 2 commentaires | "I can deliver in 10 hours... start immediately" (aucun portfolio, aucune question) | H1 ✅ confirmé — expert typique non qualifié qui répond sans scoper |
+
+---
+
+### r/AiForSmallBusiness — Détail commentaires (suite, 19/02/2026)
+
+**PathStoneAnalytics** (original, 13h après post)
+- Upwork > Fiverr pour le contexte projet dans les reviews
+- Paid audit ($100-200) comme filtre de compétence : "Anyone who refuses either can't do it or doesn't need your business"
+- Filtre qualité : outil spécifiques mentionnés (Zapier, Make, n8n, Python) vs vague "AI automation"
+- "Real workflow architects who understand business logic are maybe 10-15% of that pool"
+- **Hypothèses :** H8 ✅ H9 ✅ H11 ✅ H12 ✅
+
+**Academic-Highlight10** *(potential expert hand-raiser — builder côté plateforme)*
+- "We build for customers — platform-building side"
+- Process de confiance actuel : discovery call → prototype réel (pas une démo) avec intégrations complètes → sessions de test → PUIS demande de paiement
+- Curiosité : "wanting to see what more clients want to help validate trust"
+- **Signal :** expert qui investit massivement dans la confiance avant revenus — potentiel Callibrate (lead pré-qualifié = prototype remplacé par matching)
+- **Hypothèses :** H1 ✅ H3 ✅ H9 ✅
+- **Réponse envoyée :** question sur le taux de drop-off post-prototype (coût absorbé sans conversion)
+
+**Present-Access-2260** *(potential expert hand-raiser — dev shop)*
+- "Took about 3 months to find someone who actually got our specific business logic" — 2ème confirmation indépendante
+- Trust = paid audit + mapping workflow complet + identification d'inefficacités non vues
+- "Perfect finder would filter for people who talk about tools like n8n or custom scripts, not just Zapier and ChatGPT" → **vocabulaire clé pour profils experts Callibrate**
+- "Most small biz owners need someone who asks a ton of questions about their actual operations before even mentioning a solution"
+- Gère un dev shop qui fait ça pour des clients
+- **Hypothèses :** H7 ✅ H8 ✅ H10 ✅
+- **Réponse envoyée :** flip question côté expert — comment signalent-ils la distinction avant l'audit ?
+
+**Extension_Earth_8856 / Wide_Brief3025** — promo produit (gigup / ParseStream) — non engagés
+
+---
+
+### Insights promise language (r/AiForSmallBusiness)
+
+| Insight | Source | Usage |
+|---|---|---|
+| "3 mois pour trouver quelqu'un qui comprend vraiment le business" | Present-Access-2260 | Promise prospect : délai réduit |
+| "n8n / scripts custom = qualité, Zapier/ChatGPT = vague" | Present-Access-2260 | Critère de profil expert Callibrate, badge "outil vérifié" |
+| "Paid audit avant de s'engager" | PathStoneAnalytics + Academic | Valide l'appel de 20min comme gate naturel de confiance |
+| "Prototype réel (pas démo) avant paiement" | Academic-Highlight10 | Montre que les experts investissent sans garantie — Callibrate = lead pré-qualifié = investissement réduit |
+| "Pose des tonnes de questions avant de proposer une solution" | Present-Access-2260 | Valide l'approche freetext + qualification Callibrate côté prospect |
+| "10-15% de vrais experts sur Upwork" | PathStoneAnalytics | Angle promise : "accès aux 10-15% qui savent vraiment" |
