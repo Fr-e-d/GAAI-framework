@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V7
+.Trashes
+
+# Temp / scratch
+temp/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+.next/
+dist/
+.wrangler/
+
+# Editor
+.cursor/
+.vscode/settings.json
+*.swp
+*.swo
+
+# Logs
+*.log
+wrangler.log
