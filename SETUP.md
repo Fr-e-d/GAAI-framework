@@ -5,6 +5,39 @@ after the initial `wrangler login`. Run these commands from the repo root.
 
 ---
 
+## Naming Convention
+
+All Cloudflare resources follow `{resource-name}-{env}`:
+
+| Environment | Worker | Queues | KV Namespaces |
+|---|---|---|---|
+| dev (local) | `callibrate-core-dev` *(never deployed)* | `*-staging` *(shared)* | staging IDs *(shared)* |
+| staging | `callibrate-core-staging` | `*-staging` | auto: `callibrate-core-staging_*` |
+| production | `callibrate-core-production` | `*-production` | auto: `callibrate-core-production_*` |
+
+> **Dev uses staging resources.** Local development (`wrangler dev`) binds to the same
+> staging queues, KV namespaces, and Supabase project. No separate `-dev` resources are created.
+>
+> KV namespace names on Cloudflare are auto-generated as `{worker-name}_{BINDING}` by Wrangler.
+> Since worker names already carry the env suffix, KV names follow the convention automatically.
+
+---
+
+## Supabase — One Database Policy
+
+**Constraint:** only one Supabase project is available at this stage.
+
+| Environment | Supabase project |
+|---|---|
+| dev (local) | `callibrate-staging` (shared) |
+| staging | `callibrate-staging` |
+| production | *(not yet created — will be provisioned at launch)* |
+
+Both dev and staging point to the same Supabase project. Production secrets will remain
+unset until the production database is created from the staging schema at launch time.
+
+---
+
 ## Prerequisites
 
 | Tool | Version |
@@ -31,18 +64,9 @@ Confirm with: `npx wrangler whoami`
 Cloudflare Queues must be created via the Wrangler CLI (or dashboard). Each main queue
 needs a corresponding Dead Letter Queue (DLQ).
 
-### Production / dev queues (shared name)
+> Dev local uses the staging queues directly — no separate dev queues to create.
 
-```bash
-npx wrangler queues create email-notifications
-npx wrangler queues create email-notifications-dlq
-npx wrangler queues create lead-billing
-npx wrangler queues create lead-billing-dlq
-npx wrangler queues create matching-jobs
-npx wrangler queues create matching-jobs-dlq
-```
-
-### Staging queues
+### Staging queues *(also used by local dev)*
 
 ```bash
 npx wrangler queues create email-notifications-staging
@@ -51,6 +75,17 @@ npx wrangler queues create lead-billing-staging
 npx wrangler queues create lead-billing-staging-dlq
 npx wrangler queues create matching-jobs-staging
 npx wrangler queues create matching-jobs-staging-dlq
+```
+
+### Production queues
+
+```bash
+npx wrangler queues create email-notifications-production
+npx wrangler queues create email-notifications-production-dlq
+npx wrangler queues create lead-billing-production
+npx wrangler queues create lead-billing-production-dlq
+npx wrangler queues create matching-jobs-production
+npx wrangler queues create matching-jobs-production-dlq
 ```
 
 > Note: DLQ routing is not yet wired in `wrangler.toml`. After creating the DLQ queues,
@@ -65,27 +100,11 @@ Create one KV namespace per binding per environment. After running each command,
 Wrangler prints the namespace ID — copy it into `wrangler.toml` replacing the
 corresponding `PLACEHOLDER_*` string.
 
-### Dev namespaces (used by `wrangler dev` via `preview_id`)
+> Dev local reuses the staging KV namespace IDs — no separate dev namespaces to create.
+> After creating the staging namespaces below, copy their IDs into **both** the root
+> `[[kv_namespaces]]` block and the `[[env.staging.kv_namespaces]]` block in `wrangler.toml`.
 
-```bash
-npx wrangler kv namespace create SESSIONS
-# -> Copy returned id   into wrangler.toml: [[kv_namespaces]] binding="SESSIONS" id=
-# -> Copy returned id   into wrangler.toml: [[kv_namespaces]] binding="SESSIONS" preview_id=
-
-npx wrangler kv namespace create RATE_LIMITING
-# -> Copy returned id   into wrangler.toml: [[kv_namespaces]] binding="RATE_LIMITING" id=
-# -> Copy returned id   into wrangler.toml: [[kv_namespaces]] binding="RATE_LIMITING" preview_id=
-
-npx wrangler kv namespace create FEATURE_FLAGS
-# -> Copy returned id   into wrangler.toml: [[kv_namespaces]] binding="FEATURE_FLAGS" id=
-# -> Copy returned id   into wrangler.toml: [[kv_namespaces]] binding="FEATURE_FLAGS" preview_id=
-```
-
-> For `preview_id` you can create a separate preview namespace or reuse the same ID.
-> Wrangler recommends a separate one for local dev isolation:
-> `npx wrangler kv namespace create SESSIONS --preview`
-
-### Staging namespaces
+### Staging namespaces *(also used by local dev)*
 
 ```bash
 npx wrangler kv namespace create SESSIONS --env staging
@@ -138,15 +157,13 @@ npx wrangler secret put SUPABASE_SERVICE_KEY --env staging
 
 ### Production secrets
 
+> Production secrets will be configured at launch when the production Supabase
+> project is created from the staging schema. Skip this step for now.
+
 ```bash
-npx wrangler secret put SUPABASE_URL --env production
-# Paste: (production Supabase project URL — may differ from staging)
-
-npx wrangler secret put SUPABASE_ANON_KEY --env production
-# Paste: (anon/public key from production Supabase project)
-
-npx wrangler secret put SUPABASE_SERVICE_KEY --env production
-# Paste: (service_role key from production Supabase project — keep this private)
+# npx wrangler secret put SUPABASE_URL --env production        # (deferred to launch)
+# npx wrangler secret put SUPABASE_ANON_KEY --env production   # (deferred to launch)
+# npx wrangler secret put SUPABASE_SERVICE_KEY --env production # (deferred to launch)
 ```
 
 ---
@@ -209,14 +226,26 @@ Expected response (HTTP 200):
 ```
 
 If `supabase` shows `"error"`, verify that `SUPABASE_URL` and `SUPABASE_ANON_KEY` are
-available in your local environment. For local dev you can set them via a `.dev.vars`
-file (gitignored):
+available in your local environment. For local dev set them via a `.dev.vars` file (gitignored):
 
 ```
 # .dev.vars  (never commit this file)
+# Points to the staging Supabase project (shared with the staging environment)
 SUPABASE_URL=https://xiilmuuafyapkhflupqx.supabase.co
 SUPABASE_ANON_KEY=<your-anon-key>
 SUPABASE_SERVICE_KEY=<your-service-key>
 ```
 
 Wrangler automatically loads `.dev.vars` during `wrangler dev`.
+
+---
+
+## Future Resources (R2, Durable Objects, etc.)
+
+When adding new Cloudflare resources, apply the same naming convention:
+
+| Resource | Dev | Staging | Production |
+|---|---|---|---|
+| R2 Bucket | `{name}-dev` | `{name}-staging` | `{name}-production` |
+| Durable Object | `{name}-dev` | `{name}-staging` | `{name}-production` |
+| D1 Database | `{name}-dev` | `{name}-staging` | `{name}-production` |

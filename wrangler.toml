@@ -1,51 +1,53 @@
-name = "callibrate-core"
+name = "callibrate-core-dev"
 main = "src/index.ts"
 compatibility_date = "2024-10-22"
 compatibility_flags = ["nodejs_compat"]
 
-# ── Default (dev) environment ────────────────────────────────────────────────
+# ── Default (dev) environment — local only, never deployed ───────────────────
+# Points to staging remote resources (queues, KV, Supabase).
+# Secrets are loaded from .dev.vars (gitignored).
 
 [[queues.consumers]]
-queue = "email-notifications"
+queue = "email-notifications-staging"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[queues.consumers]]
-queue = "lead-billing"
+queue = "lead-billing-staging"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[queues.consumers]]
-queue = "matching-jobs"
+queue = "matching-jobs-staging"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[queues.producers]]
-queue = "email-notifications"
+queue = "email-notifications-staging"
 binding = "EMAIL_NOTIFICATIONS"
 
 [[queues.producers]]
-queue = "lead-billing"
+queue = "lead-billing-staging"
 binding = "LEAD_BILLING"
 
 [[queues.producers]]
-queue = "matching-jobs"
+queue = "matching-jobs-staging"
 binding = "MATCHING_JOBS"
 
 [[kv_namespaces]]
 binding = "SESSIONS"
-id = "PLACEHOLDER_SESSIONS_KV_ID"
-preview_id = "PLACEHOLDER_SESSIONS_KV_PREVIEW_ID"
+id = "PLACEHOLDER_SESSIONS_KV_STAGING_ID"
+preview_id = "PLACEHOLDER_SESSIONS_KV_STAGING_ID"
 
 [[kv_namespaces]]
 binding = "RATE_LIMITING"
-id = "PLACEHOLDER_RATE_LIMITING_KV_ID"
-preview_id = "PLACEHOLDER_RATE_LIMITING_KV_PREVIEW_ID"
+id = "PLACEHOLDER_RATE_LIMITING_KV_STAGING_ID"
+preview_id = "PLACEHOLDER_RATE_LIMITING_KV_STAGING_ID"
 
 [[kv_namespaces]]
 binding = "FEATURE_FLAGS"
-id = "PLACEHOLDER_FEATURE_FLAGS_KV_ID"
-preview_id = "PLACEHOLDER_FEATURE_FLAGS_KV_PREVIEW_ID"
+id = "PLACEHOLDER_FEATURE_FLAGS_KV_STAGING_ID"
+preview_id = "PLACEHOLDER_FEATURE_FLAGS_KV_STAGING_ID"
 
 # ── Staging environment ───────────────────────────────────────────────────────
 
@@ -94,43 +96,43 @@ id = "PLACEHOLDER_FEATURE_FLAGS_KV_STAGING_ID"
 # ── Production environment ────────────────────────────────────────────────────
 
 [env.production]
-name = "callibrate-core-prod"
+name = "callibrate-core-production"
 
 [[env.production.queues.consumers]]
-queue = "email-notifications"
+queue = "email-notifications-production"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.production.queues.consumers]]
-queue = "lead-billing"
+queue = "lead-billing-production"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.production.queues.consumers]]
-queue = "matching-jobs"
+queue = "matching-jobs-production"
 max_batch_size = 10
 max_batch_timeout = 5
 
 [[env.production.queues.producers]]
-queue = "email-notifications"
+queue = "email-notifications-production"
 binding = "EMAIL_NOTIFICATIONS"
 
 [[env.production.queues.producers]]
-queue = "lead-billing"
+queue = "lead-billing-production"
 binding = "LEAD_BILLING"
 
 [[env.production.queues.producers]]
-queue = "matching-jobs"
+queue = "matching-jobs-production"
 binding = "MATCHING_JOBS"
 
 [[env.production.kv_namespaces]]
 binding = "SESSIONS"
-id = "PLACEHOLDER_SESSIONS_KV_PROD_ID"
+id = "PLACEHOLDER_SESSIONS_KV_PRODUCTION_ID"
 
 [[env.production.kv_namespaces]]
 binding = "RATE_LIMITING"
-id = "PLACEHOLDER_RATE_LIMITING_KV_PROD_ID"
+id = "PLACEHOLDER_RATE_LIMITING_KV_PRODUCTION_ID"
 
 [[env.production.kv_namespaces]]
 binding = "FEATURE_FLAGS"
-id = "PLACEHOLDER_FEATURE_FLAGS_KV_PROD_ID"
+id = "PLACEHOLDER_FEATURE_FLAGS_KV_PRODUCTION_ID"
