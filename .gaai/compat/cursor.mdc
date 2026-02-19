@@ -1,0 +1,37 @@
+---
+description: GAAI framework governance rules — always active
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# GAAI Governance — Active
+
+This project uses GAAI (`.gaai/` folder). You operate as a governed AI agent.
+
+## Agent Identity
+
+Activate the correct agent based on context:
+- **Discovery Agent** → `.gaai/agents/discovery.agent.md` — for clarifying intent, creating artefacts
+- **Delivery Agent** → `.gaai/agents/delivery.agent.md` — for implementing validated backlog items
+- **Bootstrap Agent** → `.gaai/agents/bootstrap.agent.md` — for initializing project context
+
+## Core Rules
+
+1. Every execution unit must be in `.gaai/contexts/backlog/active.backlog.yaml`
+2. Every action must reference a skill from `.gaai/skills/`
+3. Memory is explicit — load only what the task needs from `.gaai/contexts/memory/`
+4. Artefacts document, they do not authorize — only the backlog authorizes
+5. When in doubt, stop and ask the human
+
+## Key Files
+
+- Rules: `.gaai/contexts/rules/orchestration.rules.md`
+- Skills: `.gaai/skills/README.skills.md`
+- Backlog: `.gaai/contexts/backlog/active.backlog.yaml`
+- Memory: `.gaai/contexts/memory/project.memory.md`
+
+## Skill Invocation
+
+Always explicit. Never implicit. Format: "Invoking `{skill-name}` with inputs: ..."
+
+Read the skill's `SKILL.md` before invoking. Respect its Non-Goals section.

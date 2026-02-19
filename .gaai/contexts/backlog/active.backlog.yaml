@@ -1,0 +1,131 @@
+# GAAI Active Backlog
+# Execution queue — contains only Stories that are validated and ready for Delivery.
+# Rules:
+#   - One item = one Story
+#   - Must have a corresponding artefact with acceptance criteria
+#   - Keep under ~20 items; archive completed items to done/
+#   - Only Discovery may add items; only Delivery may update status
+
+items:
+
+  # ── EPIC E01: Offer Validated Before Building ──────────────────────────────
+
+  - id: E01S01
+    epic: E01
+    title: "Community listening to sharpen promise language"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E01S01.story.md
+    dependencies: []
+    notes: "Founder-executed. Observe Reddit + Slack/Discord. Output: promise draft doc. 2–3 days."
+
+  - id: E01S02
+    epic: E01
+    title: "Expert-side Hand Raiser campaign (LinkedIn + X + Facebook)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E01S02.story.md
+    dependencies: [E01S01]
+    notes: "Gate: ≥10 qualified expert hand raisers. Rewrite + retry if gate fails."
+
+  - id: E01S03
+    epic: E01
+    title: "Prospect-side Hand Raiser campaign (LinkedIn + X + Facebook)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E01S03.story.md
+    dependencies: [E01S01]
+    notes: "Gate: ≥15 qualified prospect hand raisers. Can run in parallel with E01S02."
+
+  - id: E01S04
+    epic: E01
+    title: "Validate M0 gates and lock promise language"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E01S04.story.md
+    dependencies: [E01S02, E01S03]
+    notes: "M0 close. Both gates must be met. Updates memory + decisions log. Unblocks E02+E03."
+
+  # ── EPIC E06: Platform Foundation — Infrastructure & Technical Plumbing ────
+  # Runs in parallel with E01. Blocks E02, E03, E04, E05.
+
+  - id: E06S01
+    epic: E06
+    title: "Project bootstrap — Supabase + Cloudflare Workers + Queues + KV"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S01.story.md
+    dependencies: []
+    notes: "Foundation story. No dependencies. Can start immediately in parallel with E01."
+
+  - id: E06S02
+    epic: E06
+    title: "Database schema & migrations"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S02.story.md
+    dependencies: [E06S01]
+    notes: "9 tables (6 core + 3 feedback: call_experience_surveys, project_satisfaction_surveys, lead_evaluations). GIN indexes, RLS policies, TypeScript types. experts.composite_score field."
+
+  - id: E06S03
+    epic: E06
+    title: "Auth middleware & Expert registration + profile API"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S03.story.md
+    dependencies: [E06S02]
+    notes: "JWT validation middleware + POST /api/experts/register + GET/PATCH profile. Can run in parallel with E06S05."
+
+  - id: E06S04
+    epic: E06
+    title: "Cal.com managed users integration + webhook endpoint"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S04.story.md
+    dependencies: [E06S03]
+    notes: "Cal.com account provisioned as prerequisite. Google Calendar OAuth + 20-min event type + booking webhooks."
+
+  - id: E06S05
+    epic: E06
+    title: "Matching engine scoring function + match API"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S05.story.md
+    dependencies: [E06S02]
+    notes: "Pure function, JSONB-based, configurable weights. Can run in parallel with E06S03 and E06S04."
+
+  - id: E06S06
+    epic: E06
+    title: "Async queue workers — email, lead-billing, matching"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S06.story.md
+    dependencies: [E06S03, E06S04, E06S05]
+    notes: "3 queue consumers + retry + DLQ + n8n webhook trigger. Requires all upstream stories complete."
+
+  - id: E06S07
+    epic: E06
+    title: "Satellite funnel API"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S07.story.md
+    dependencies: [E06S02, E06S05]
+    notes: "Config endpoint + prospect submit + anonymized reveal + email capture + booking URL. CORS for satellite domains."
+
+  - id: E06S08
+    epic: E06
+    title: "AI freetext extraction service (project description → structured JSONB)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S08.story.md
+    dependencies: [E06S01, E06S02]
+    notes: "POST /api/extract. Claude haiku-4-5. Returns ProspectRequirements + confidence per field + confirmation questions for low-confidence fields. Stateless — no DB writes."
+
+  - id: E06S09
+    epic: E06
+    title: "Expert composite score computation worker"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S09.story.md
+    dependencies: [E06S02, E06S06]
+    notes: "score-computation queue consumer. Formula: call_experience×0.35 + trust×0.20 + satisfaction×0.20 + hire_rate×0.10 + recency×0.15. Triggered by all three feedback events. Re-ranks pending matches after score update."

@@ -1,0 +1,67 @@
+---
+name: memory-refresh
+description: Periodic memory maintenance — archive session files, convert recurring knowledge into summaries, update the memory index. Activate at end of a major phase (Discovery complete, sprint done) or when memory spans many sessions. For emergency context-window pressure mid-task, use memory-compact instead.
+license: MIT
+compatibility: Works with any filesystem-based AI coding agent
+metadata:
+  author: gaai-framework
+  version: "1.0"
+  category: cross
+  track: cross-cutting
+  id: SKILL-MEMORY-REFRESH-001
+  updated_at: 2026-01-27
+inputs:
+  - contexts/memory/index.md
+  - contexts/memory/sessions/**
+  - contexts/memory/decisions/**
+  - contexts/memory/patterns/**
+  - contexts/memory/project/**
+  - contexts/memory/summaries/**
+outputs:
+  - contexts/memory/summaries/*.summary.md
+  - contexts/memory/archive/**
+  - contexts/memory/index.md  (updated)
+---
+
+# Memory Refresh
+
+## Purpose / When to Activate
+
+Activate:
+- After major discovery or delivery phases
+- When memory exceeds comfortable context size
+- Periodically on active projects (weekly or per sprint)
+
+This skill governs and optimizes **existing memory only** — it does not create new knowledge.
+
+---
+
+## Process
+
+1. Read memory index
+2. Extract durable knowledge from session memory
+3. Convert recurring or validated information into summary memory
+4. Archive raw session files to `contexts/memory/archive/`
+5. Compact oversized memory files
+6. Update memory index
+
+---
+
+## Quality Checks
+
+- Active memory remains minimal and high-signal
+- Summaries become the primary long-term context source
+- Raw exploration is archived, not deleted
+- No uncontrolled memory growth
+- Index always reflects current active memory
+
+---
+
+## Non-Goals
+
+This skill must NOT:
+- Create new project memory
+- Record new decisions (use `memory-ingest` or `decision-extraction`)
+- Generate architecture context
+
+**Governs existing memory. Keeps it clean, cheap, and precise.**
