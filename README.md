@@ -99,9 +99,11 @@ Paste this into your AI tool's chat — it will handle the rest:
 
 ```
 Install the GAAI framework into my current project.
-Clone https://github.com/Fr-e-d/GAAI-framework.git to /tmp/gaai,
-run: bash /tmp/gaai/install.sh --target . --yes
-then delete /tmp/gaai.
+Run these commands:
+  rm -rf /tmp/gaai
+  git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai
+  bash /tmp/gaai/install.sh --target . --yes
+  rm -rf /tmp/gaai
 ```
 
 The installer auto-detects your AI tool from existing config directories (`.claude/`, `.cursor/`, `.windsurf/`).
