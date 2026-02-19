@@ -7,34 +7,73 @@ after the initial `wrangler login`. Run these commands from the repo root.
 
 ## Naming Convention
 
-All Cloudflare resources follow `{resource-name}-{env}`:
+**Rule:** every resource name encodes its environment — `{resource-name}-{env}`.
 
-| Environment | Worker | Queues | KV Namespaces |
-|---|---|---|---|
-| dev (local) | `callibrate-core-dev` *(never deployed)* | `*-staging` *(shared)* | staging IDs *(shared)* |
-| staging | `callibrate-core-staging` | `*-staging` | auto: `callibrate-core-staging_*` |
-| production | `callibrate-core-production` | `*-production` | auto: `callibrate-core-production_*` |
-
-> **Dev uses staging resources.** Local development (`wrangler dev`) binds to the same
-> staging queues, KV namespaces, and Supabase project. No separate `-dev` resources are created.
->
-> KV namespace names on Cloudflare are auto-generated as `{worker-name}_{BINDING}` by Wrangler.
-> Since worker names already carry the env suffix, KV names follow the convention automatically.
+**Dev exception:** `wrangler dev` (local) binds directly to staging remote resources.
+No separate `-dev` resources are created or deployed anywhere.
 
 ---
 
-## Supabase — One Database Policy
+### Workers
 
-**Constraint:** only one Supabase project is available at this stage.
+| Cloudflare worker name | Environment | Deployed via |
+|---|---|---|
+| `callibrate-core-staging` | staging | push to `main` |
+| `callibrate-core-production` | production | push of a `v*` tag |
+| `callibrate-core-dev` | local dev | `wrangler dev` — never deployed |
 
-| Environment | Supabase project |
+---
+
+### Queues
+
+| Queue name | DLQ name | Used by |
+|---|---|---|
+| `email-notifications-staging` | `email-notifications-staging-dlq` | staging + local dev |
+| `lead-billing-staging` | `lead-billing-staging-dlq` | staging + local dev |
+| `matching-jobs-staging` | `matching-jobs-staging-dlq` | staging + local dev |
+| `email-notifications-production` | `email-notifications-production-dlq` | production |
+| `lead-billing-production` | `lead-billing-production-dlq` | production |
+| `matching-jobs-production` | `matching-jobs-production-dlq` | production |
+
+---
+
+### KV Namespaces
+
+Wrangler auto-generates KV namespace names as `{worker-name}_{BINDING}`.
+The worker name already carries the env suffix, so KV names follow the convention automatically.
+
+| Cloudflare namespace name | Binding in code | Used by |
+|---|---|---|
+| `callibrate-core-staging_SESSIONS` | `SESSIONS` | staging + local dev |
+| `callibrate-core-staging_RATE_LIMITING` | `RATE_LIMITING` | staging + local dev |
+| `callibrate-core-staging_FEATURE_FLAGS` | `FEATURE_FLAGS` | staging + local dev |
+| `callibrate-core-production_SESSIONS` | `SESSIONS` | production |
+| `callibrate-core-production_RATE_LIMITING` | `RATE_LIMITING` | production |
+| `callibrate-core-production_FEATURE_FLAGS` | `FEATURE_FLAGS` | production |
+
+---
+
+### Supabase
+
+Only one Supabase project is available at this stage.
+Production will be provisioned from the staging schema at launch.
+
+| Supabase project | Used by |
 |---|---|
-| dev (local) | `callibrate-staging` (shared) |
-| staging | `callibrate-staging` |
-| production | *(not yet created — will be provisioned at launch)* |
+| `callibrate-staging` | staging + local dev |
+| `callibrate-production` | production — *(not yet created, deferred to launch)* |
 
-Both dev and staging point to the same Supabase project. Production secrets will remain
-unset until the production database is created from the staging schema at launch time.
+---
+
+### Future resources (R2, D1, Durable Objects…)
+
+Apply the same rule — no separate dev resource, local dev always binds to staging:
+
+| Resource type | Staging name | Production name |
+|---|---|---|
+| R2 Bucket | `{name}-staging` | `{name}-production` |
+| D1 Database | `{name}-staging` | `{name}-production` |
+| Durable Object | `{name}-staging` | `{name}-production` |
 
 ---
 
@@ -238,14 +277,3 @@ SUPABASE_SERVICE_KEY=<your-service-key>
 
 Wrangler automatically loads `.dev.vars` during `wrangler dev`.
 
----
-
-## Future Resources (R2, Durable Objects, etc.)
-
-When adding new Cloudflare resources, apply the same naming convention:
-
-| Resource | Dev | Staging | Production |
-|---|---|---|---|
-| R2 Bucket | `{name}-dev` | `{name}-staging` | `{name}-production` |
-| Durable Object | `{name}-dev` | `{name}-staging` | `{name}-production` |
-| D1 Database | `{name}-dev` | `{name}-staging` | `{name}-production` |
