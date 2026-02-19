@@ -118,7 +118,9 @@ contexts/artefacts/
 ├── stories/
 ├── plans/
 ├── reports/
-└── prd/
+├── prd/
+├── marketing/    ← posts, campaigns, observation logs, validated hypotheses
+└── strategy/     ← GTM plans, positioning, go-to-market artefacts
 ```
 
 Artefacts inform future reasoning but never trigger execution.

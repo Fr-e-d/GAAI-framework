@@ -45,7 +45,8 @@ contexts/artefacts/
 ├── stories/                ← Story artefacts (mirrors backlog items)
 ├── plans/                  ← Delivery execution plans
 ├── reports/                ← QA reports, post-mortems, findings
-└── marketing/              ← Content artefacts: posts, campaigns, copy, observation logs
+├── marketing/              ← Content artefacts: posts, campaigns, copy, observation logs, validated hypotheses
+└── strategy/               ← GTM plans, positioning, go-to-market artefacts
 ```
 
 ---
@@ -61,7 +62,7 @@ All artefacts follow the same structural convention:
 ```yaml
 ---
 type: artefact
-artefact_type: epic | story | plan | report | prd
+artefact_type: epic | story | plan | report | prd | marketing | strategy
 id: UNIQUE-ID
 track: discovery | delivery
 related_backlog_id: BACKLOG-ID   # null if no backlog item yet
@@ -107,6 +108,20 @@ updated_at: YYYY-MM-DD
 - high-level product requirements documents
 - produced by Discovery for major initiatives
 - optional; not required for every story
+
+### Marketing (`marketing/`)
+
+- community posts, observation logs, hand raiser campaigns
+- validated hypothesis logs (market signal evidence)
+- promise drafts and validated copy
+- produced by Discovery during market validation (E01-type epics)
+
+### Strategy (`strategy/`)
+
+- GTM plans, go-to-market artefacts
+- positioning documents, phased launch plans
+- produced by Discovery for strategic initiatives
+- referenced by Epics and PRDs but never authoritative over backlog
 
 ---
 

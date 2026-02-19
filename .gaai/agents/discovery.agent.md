@@ -47,8 +47,10 @@ The Discovery Agent produces:
 - **PRD** — optional high-level strategic framing
 - **Epics** — user outcomes (not features)
 - **Stories** — executable product contracts with acceptance criteria
+- **Marketing** — community posts, observation logs, hypothesis logs, hand raiser campaigns, promise drafts (validation-phase only)
+- **Strategy** — GTM plans, phased launch plans, positioning artefacts
 
-Only these artefacts are valid inputs for Delivery.
+Only Epics and Stories are valid inputs for Delivery. Marketing and Strategy artefacts are Discovery-only and inform backlog decisions but never authorize execution.
 
 ---
 

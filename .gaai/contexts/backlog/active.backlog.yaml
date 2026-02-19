@@ -14,28 +14,28 @@ items:
     epic: E01
     title: "Community listening to sharpen promise language"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E01S01.story.md
     dependencies: []
-    notes: "Founder-executed. Observe Reddit + Slack/Discord. Output: promise draft doc. 2–3 days."
+    notes: "Founder-executed. Observe + engage (non-revealing) on Reddit. Active: r/aisolobusinesses, r/AiForSmallBusiness, r/ArtificialNtelligence. AC4 (promise draft) not yet produced — blocker for E01S02."
 
   - id: E01S02
     epic: E01
     title: "Expert-side Hand Raiser campaign (LinkedIn + X + Facebook)"
     priority: high
-    status: refined
+    status: deferred
     artefact: contexts/artefacts/stories/E01S02.story.md
     dependencies: [E01S01]
-    notes: "Gate: ≥10 qualified expert hand raisers. Rewrite + retry if gate fails."
+    notes: "DEFERRED — LinkedIn bloqué (founder employé à poste clé, contrainte professionnelle). X/Twitter possible comme canal alternatif de validation partielle. LinkedIn activé comme levier de lancement simultané quand l'infra tient (voir DEC-31). Gate: ≥10 qualified expert hand raisers."
 
   - id: E01S03
     epic: E01
     title: "Prospect-side Hand Raiser campaign (LinkedIn + X + Facebook)"
     priority: high
-    status: refined
+    status: deferred
     artefact: contexts/artefacts/stories/E01S03.story.md
     dependencies: [E01S01]
-    notes: "Gate: ≥15 qualified prospect hand raisers. Can run in parallel with E01S02."
+    notes: "DEFERRED — même contrainte que E01S02. LinkedIn activé au lancement produit. Gate: ≥15 qualified prospect hand raisers."
 
   - id: E01S04
     epic: E01

@@ -13,6 +13,28 @@ updated_at: 2026-02-19
 
 ---
 
+## Academic-Highlight10
+
+- **Plateforme :** Reddit — r/AiForSmallBusiness
+- **Profil :** Builder côté plateforme / agence de développement AI automation (non identifié nominalement)
+- **Signaux :** Investit massivement dans la confiance avant paiement : discovery call → prototype réel (pas une démo) avec intégrations complètes → sessions de test → PUIS demande de paiement. "Wanting to see what more clients want to help validate trust."
+- **Fit plateforme :** ✅ Expert qui absorbe un coût de qualification élevé sans garantie de revenus — exactement le profil pour qui Callibrate réduit le risque (lead pré-qualifié = prototype non nécessaire avant confiance)
+- **Statut :** Réponse envoyée (question sur taux de drop-off post-prototype). Réponse en attente.
+- **Contexte :** Identifié via r/AiForSmallBusiness (19/02/2026)
+
+---
+
+## Present-Access-2260
+
+- **Plateforme :** Reddit — r/AiForSmallBusiness
+- **Profil :** Dev shop gérant des projets AI automation pour clients
+- **Signaux :** "Took about 3 months to find someone who actually got our specific business logic" (2ème confirmation indépendante). Trust = paid audit + mapping workflow complet. "Perfect finder would filter for people who talk about tools like n8n or custom scripts, not just Zapier and ChatGPT."
+- **Fit plateforme :** ✅ Expert OU prospect (gère un dev shop qui délivre pour des clients — peut être les deux). Vocabulaire clé pour les critères de profil Callibrate.
+- **Statut :** Réponse envoyée (flip question côté expert — comment signalent-ils la distinction avant l'audit ?). Réponse en attente.
+- **Contexte :** Identifié via r/AiForSmallBusiness (19/02/2026)
+
+---
+
 ## Caio Valadares
 
 - **Site :** caiov.dev | **Email :** caio@caiov.dev

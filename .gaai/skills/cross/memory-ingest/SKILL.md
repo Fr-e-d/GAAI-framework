@@ -15,6 +15,8 @@ inputs:
   - architecture_insights
   - validated_decisions
   - project_knowledge
+  - marketing_observation_logs  (validated hypotheses, promise drafts — from contexts/artefacts/marketing/**)
+  - strategy_artefacts  (validated GTM decisions — from contexts/artefacts/strategy/**)
 outputs:
   - contexts/memory/project/**
   - contexts/memory/decisions/**
@@ -37,7 +39,7 @@ Activate after:
 
 ## Process
 
-1. Read new validated knowledge (discovery results, decisions, architecture insights)
+1. Read new validated knowledge (discovery results, decisions, architecture insights, validated hypotheses, GTM decisions)
 2. Classify knowledge by memory category: project / decisions / summaries
 3. Create or update corresponding memory files using standard templates
 4. Register all new entries in memory index

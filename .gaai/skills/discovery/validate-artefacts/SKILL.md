@@ -14,6 +14,8 @@ inputs:
   - contexts/artefacts/epics/**
   - contexts/artefacts/stories/**
   - contexts/artefacts/prd/**  (optional)
+  - contexts/artefacts/marketing/**  (optional — observation logs, validated hypotheses)
+  - contexts/artefacts/strategy/**  (optional — GTM plans, positioning)
   - contexts/rules/**
   - contexts/memory/**  (selective)
 outputs:
@@ -53,6 +55,8 @@ This is the **mandatory gate** between Discovery and Delivery. No Story proceeds
 - No Story exists without a parent Epic
 - No scope contradictions with memory
 - No rule violations
+- Marketing artefacts (if present): hypothesis statuses align with Story acceptance criteria
+- Strategy artefacts (if present): GTM phases align with Epic dependencies and gates
 
 ---
 

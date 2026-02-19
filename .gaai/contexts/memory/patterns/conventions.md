@@ -74,3 +74,6 @@ updated_at: 2026-02-19
 - Hardcoded matching criteria or domain-specific fields in Layer 2 code (use JSONB + satellite_configs)
 - Email gate before match reveal (DEC-15 — kills conversion)
 - Subscription billing at MVP (DEC-14 — pay-per-call only)
+- Applying inferred preferences automatically to `expert.preferences` — system observes and suggests only, expert approves explicitly (DEC-29)
+- Any config change without explicit expert approval — Suggest + Approve model, never auto-apply (DEC-29)
+- Artificial top-N limit on match results — ranked list complet, top 3 highlighted visuellement (DEC-24)

@@ -377,8 +377,8 @@ Drop a short note about relevant experience and availability. No agencies — lo
 | r/automation | ✅ 19/02/2026 06:00 | | | | |
 | r/AiForSmallBusiness | ✅ 19/02/2026 06:00 | — | 5+ commentaires | "workflow architects who understand business logic", "10-15% of Upwork pool are real", "paid audit $100-200", "3 months to find someone", "n8n vs Zapier/ChatGPT = quality proxy", "prototype not a demo before payment", "asks a ton of questions before mentioning a solution" | H1 ✅ H7 ✅ H8 ✅ H9 ✅ H10 ✅ H11 ✅ H12 ✅ — **2 expert hand-raiser potentiels identifiés** |
 | r/buhaydigital | ✅ 19/02/2026 06:00 | | | | |
-| r/ArtificialNtelligence | ✅ 19/02/2026 06:00 | | | | |
-| r/Upwork | ✅ 19/02/2026 06:00 | | | | |
+| r/ArtificialNtelligence | ✅ 19/02/2026 06:00 | — | 3+ commentaires | HotNeon : "No one needs an AI consultant" — corporations internalize (BAs/ops), won't hire outsiders without domain knowledge → confond enterprise et SMB. Fred reply : "what about 10-50 employees?" | H12 ⚠️ signal négatif enterprise → ICP = SMB confirmé ✅ |
+| r/Upwork | ✅ 19/02/2026 06:00 | — | 1 commentaire | "Upwork brings volume but not qualified AI buyers. Most serious leads come from niche communities or partnerships, not open marketplaces." | H1 ✅ H5 ✅ — nouveau signal : distribution insight |
 | r/ClaudeAI | ✅ 19/02/2026 06:00 | | | | |
 | r/freelancing | ✅ 19/02/2026 06:00 | | | | |
 | r/freelance_forhire | ✅ 19/02/2026 06:00 | — | 2 commentaires | "I can deliver in 10 hours... start immediately" (aucun portfolio, aucune question) | H1 ✅ confirmé — expert typique non qualifié qui répond sans scoper |
@@ -400,7 +400,14 @@ Drop a short note about relevant experience and availability. No agencies — lo
 - Curiosité : "wanting to see what more clients want to help validate trust"
 - **Signal :** expert qui investit massivement dans la confiance avant revenus — potentiel Callibrate (lead pré-qualifié = prototype remplacé par matching)
 - **Hypothèses :** H1 ✅ H3 ✅ H9 ✅
-- **Réponse envoyée :** question sur le taux de drop-off post-prototype (coût absorbé sans conversion)
+- **Réponse envoyée (round 1) :** question sur le taux de drop-off post-prototype (coût absorbé sans conversion)
+- **Réponse Academic-Highlight10 (round 2) :**
+  - Drop-off faible grâce à la discovery call — filtre efficace
+  - **Raison #1 de non-conversion : client en early stage, pas de funding/budget** ← signal fort H1 ✅
+  - Absorbent encore du coût build quand ça ne close pas
+  - Ne prennent pas de projets hors fit
+  - Question retournée à Fred : "Are you looking to build for people in the near future?"
+- **Réponse envoyée (round 2) :** "Not building for clients — problem research side. Your point about early-stage clients with no funding is exactly what I was mapping. Does that come up at end of prototype or do you catch it earlier in discovery now?"
 
 **Present-Access-2260** *(potential expert hand-raiser — dev shop)*
 - "Took about 3 months to find someone who actually got our specific business logic" — 2ème confirmation indépendante
@@ -415,6 +422,39 @@ Drop a short note about relevant experience and availability. No agencies — lo
 
 ---
 
+### r/ArtificialNtelligence — Analyse HotNeon (19/02/2026)
+
+**Thread :** "Is there a marketplace for AI automation consultants? (Not Upwork)"
+
+**HotNeon** — sceptique, position entreprise-centrée
+- "No one needs an 'AI consultant'" — corporations learn internally via BAs and ops managers
+- "Companies won't hire individuals from outside with no domain knowledge"
+- "Speed to hire isn't in the top 5 considerations"
+- Suggère : corporate training (plus scalable, mieux payé)
+
+**Analyse :**
+- HotNeon confond **enterprise** (peut internaliser) et **SMB** (ne peut pas)
+- Son argument "domain knowledge" est réel — mais c'est exactement le problème de matching que Callibrate résout (filtrage par secteur, par spécialité)
+- "Speed to hire" peu prioritaire en enterprise → cohérent ; mais en SMB avec un projet bloquant, la vitesse à trouver le bon expert compte
+- Signal value : **confirmateur négatif de cible enterprise → ICP = PME/SMB 10-200 employés**
+
+**Signal clé :**
+- Les grandes entreprises intériorisent. ✅ (hors ICP Callibrate)
+- Les PME n'ont pas cette capacité. → ICP cible confirmé
+- "Domain knowledge" = critère de matching dans le profil expert (champ `industries_served`)
+
+**Réponse envoyée :**
+> "That tracks for companies large enough to have BAs or ops managers who can absorb this internally.
+> What about smaller businesses — say, 10–50 employees — where there's no one with that bandwidth? Does the same logic apply there, or does it break differently at that scale?"
+
+**Objectif :** faire distinguer enterprise vs SMB à la communauté. Aucun CTA, aucune révélation.
+
+**Hypothèses :**
+- H12 ⚠️ : la question "est-ce qu'une plateforme spécialisée manque" est répondue différemment selon le segment. Enterprise : non. SMB : potentiellement oui.
+- H13 : l'argument "domain knowledge" valide que les experts généralistes ont du mal — confirme l'intérêt d'un matching par spécialité
+
+---
+
 ### Insights promise language (r/AiForSmallBusiness)
 
 | Insight | Source | Usage |
@@ -425,3 +465,8 @@ Drop a short note about relevant experience and availability. No agencies — lo
 | "Prototype réel (pas démo) avant paiement" | Academic-Highlight10 | Montre que les experts investissent sans garantie — Callibrate = lead pré-qualifié = investissement réduit |
 | "Pose des tonnes de questions avant de proposer une solution" | Present-Access-2260 | Valide l'approche freetext + qualification Callibrate côté prospect |
 | "10-15% de vrais experts sur Upwork" | PathStoneAnalytics | Angle promise : "accès aux 10-15% qui savent vraiment" |
+| "Les grandes entreprises intériorisent — les PME ne peuvent pas" | HotNeon (contra) | Confirme ICP = PME 10-200 employés. Ne pas cibler enterprise en messaging MVP |
+| "Domain knowledge requis par les entreprises" | HotNeon (contra) | Valide `industries_served` comme champ clé du profil expert — critère de matching visible |
+| **"Budget / funding = raison #1 de drop-off, même après discovery rigoureuse"** | Academic-Highlight10 | ✅ Valide "budget confirmé" comme critère central de la promise expert. Ce n'est pas une hypothèse — donnée terrain directe. |
+| **"Upwork = volume mais pas de qualified AI buyers. Les vrais leads viennent de niche communities et partnerships"** | Rich-Emu-1561 (r/Upwork) | ✅ H1 H5 — les plateformes génériques sont insuffisantes pour ce niche. Distribution insight : les experts sérieux évitent Upwork. Callibrate = niche community + qualification intégrée. |
+| **"Bouche-à-oreille + recommandation d'un tiers de confiance = canal #1 des vrais leads (online et offline)"** | Synthèse terrain (Rich-Emu + signal général) | ✅ Insight structurel clé. Le vrai concurrent de Callibrate = le réseau humain de confiance, pas Upwork. Callibrate = l'intermédiaire de confiance scalable pour ceux qui ne sont pas dans le réseau. **Impact direct sur promise prospect.** |

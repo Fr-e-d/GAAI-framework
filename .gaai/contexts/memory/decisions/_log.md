@@ -17,6 +17,86 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-19-27 — Critères de Matching : Verticaux, Extensibles, Configurés par satellite_configs
+
+**Context:** Les critères de matching (langue, localisation, remote/présentiel, disponibilité, budget, stade de projet, secteur, stack) ne sont pas universels — ils varient selon le vertical et selon chaque expert. Les encoder en colonnes fixes crée des migrations coûteuses à chaque nouveau vertical.
+**Decision:** Tous les critères de matching sont verticalement configurés via `satellite_configs.quiz_schema` (côté prospect) et `expert.preferences` JSONB (côté expert). Les critères universels minimaux (langue, mode de travail, disponibilité, budget range, stade de projet accepté) sont toujours présents. Les critères verticaux spécifiques (stack, secteur, certifications, etc.) sont définis par le satellite_config du vertical. Ajouter un vertical = ajouter une config, pas modifier le schéma.
+**Rationale:** Domain-agnostic par design (DEC-18/22). Un vertical formation a des critères différents d'un vertical AI consulting (QUALIOPI, format présentiel/distanciel, durée, taille de groupe, etc.). Encoder ces différences dans le JSONB + config est la seule approche scalable.
+**Impact:** `satellite_configs.quiz_schema` définit les champs extraits par l'IA pour les prospects de ce vertical. `expert.preferences` JSONB contient les critères universels + les critères verticaux spécifiques. E06S05 matching engine lit les deux et score en conséquence.
+**Date:** 2026-02-19
+
+---
+
+### DEC-2026-02-19-31 — GTM Reséquencé : Build + Learn → Launch Simultané
+
+**Context:** Founder employé à un poste clé — ne peut pas publier sur LinkedIn sans risquer de créer de la panique dans son équipe et sa hiérarchie. LinkedIn était le canal primaire de Gate 0 (Hand Raiser). Cette contrainte bloque E01S02 et E01S03 tels que définis.
+**Decision:** Séquence GTM révisée : (1) Build (E06) + Learn (E01S01 Reddit) en parallèle — maintenant. (2) LinkedIn activé comme levier de lancement simultané quand l'infrastructure tient et que le produit peut absorber le signal et s'adapter. X/Twitter possible comme canal de validation partielle sans risque professionnel. Gate 0 (Hand Raiser) redéfini : validation partielle via Reddit + X/Twitter maintenant, validation complète via LinkedIn au lancement. E01S02 et E01S03 passent à `deferred`.
+**Rationale:** La contrainte professionnelle est réelle et non-négociable. L'architecture domain-agnostic et le modèle hypothesis-driven atténuent le risque de builder sans validation LinkedIn complète. LinkedIn au lancement avec un produit fonctionnel + manifeste + signal Reddit accumulé = position plus forte qu'un Hand Raiser à vide à J+3. "Organique" ne signifie pas "passif" — Reddit continue de générer du signal terrain utile.
+**Impact:** E01S02, E01S03 → `deferred`. E06 démarre immédiatement (indépendant de la validation LinkedIn). GTM Phase 0 restructuré. Manifeste rédigé maintenant pour usage au lancement (MANIFESTO-001).
+**Date:** 2026-02-19
+
+---
+
+### DEC-2026-02-19-30 — Billing Conditionnel + Anti-Gaming Auto-Régulé
+
+**Context:** Facturer l'expert à la confirmation de booking (Cal.com webhook) crée un risque de churn si le lead est de mauvaise qualité (no-show, hors-scope). Un système de dispute manuel est incompatible avec le modèle solo founder. Il faut une mécanique qui protège l'expert honnête et pénalise naturellement le fraudeur.
+**Decision:** L'expert n'est facturé que sur un lead confirmé qualifié. Flux : (1) Call confirmé → lead en statut `pending` → `billing_deadline_at = now() + 7 days`. (2) Expert peut flag "non qualifié" dans les 7 jours → pas de billing, flag enregistré. (3) Silence ou confirmation explicite au bout de 7 jours → Lemon Squeezy checkout déclenché automatiquement. Anti-gaming : `qualification_rate = leads_confirmed / total_leads` est un composant du composite_score. Expert qui flag systématiquement → `qualification_rate` chute → composite_score baisse → moins visible dans le matching → moins de leads. Pas de sanction explicite — le système se régule naturellement.
+**Rationale:** Aligne parfaitement les incentives : experts honnêtes paient leurs bons leads et montent dans le ranking. Fraudeurs descendent et reçoivent moins de leads. Zéro overhead de support ou de dispute. La conséquence est graduelle et proportionnelle. Silence = satisfait = facturé (un expert insatisfait prend la peine de flag — l'inaction est un signal positif).
+**Impact:** `leads.qualification_status` (pending / confirmed / flagged) + `leads.billing_deadline_at`. E06S06 : billing queue consumer vérifie billing_deadline_at — déclenche checkout si deadline atteinte sans flag. Composite score (DEC-19) : `qualification_rate` ajouté comme composant — remplace ou complète `hire_rate`. E05S01/S02 : flux revu — expert peut flag dans les 7j, sinon checkout auto. DEC-14 : billing trigger = confirmation expert ou silence 7j (pas Cal.com webhook direct).
+**Date:** 2026-02-19
+
+---
+
+### DEC-2026-02-19-29 — Préférences Expert : Toujours Visibles, Éditables et Réinitialisables
+
+**Context:** Un système qui apprend les préférences en silence crée des boîtes noires. Un expert dont les critères se sont progressivement restreints sans qu'il le sache peut se retrouver sans leads et sans comprendre pourquoi — scénario de churn silencieux.
+**Decision:** Le système observe le comportement de l'expert (leads acceptés/déclinés, scores J+48, taux de conversion) et génère des **suggestions de mise à jour de profil** — jamais des modifications automatiques. La config de l'expert ne change que sur son accord explicite ("Appliquer" dans le dashboard). Pas de flags `source: inferred/manual`, pas de différenciation UI complexe. Observer → Suggérer → Expert approuve. C'est tout. L'expert peut modifier ses critères à tout moment depuis le dashboard, indépendamment de toute suggestion.
+**Rationale:** Appliquer silencieusement des préférences déduites — même si visibles et éditables — introduit de la complexité d'implémentation (flags JSONB, UI différenciée) et un risque résiduel d'impact non voulu. Le modèle Suggest + Approve est plus simple, plus sûr, et plus respectueux de l'agentivité de l'expert. Les humains changent : leurs critères aussi. Rien ne doit figer sans leur accord.
+**Impact:** E02S04 (dashboard expert) : section "Ton profil de matching" — affiche les critères actifs en langage clair + bouton d'édition libre. Notification suggérée après N leads : "Basé sur ton activité récente, on suggère d'ajuster ton profil → [Voir la suggestion]". Expert approuve ou ignore. E06S09 : écrit les suggestions dans `expert.preference_suggestions` JSONB — ne touche jamais à `expert.preferences` directement.
+**Date:** 2026-02-19
+
+---
+
+### DEC-2026-02-19-28 — Critères Expert : 3 Couches (Hard Constraints / Soft Preferences / Learned)
+
+**Context:** Les experts n'ont pas tous les mêmes attentes. Capturer toute cette diversité à l'onboarding crée de la friction et de la complexité d'implémentation. Ne rien capturer produit un matching grossier. La solution est une architecture à 3 couches progressive.
+**Decision:** Les critères expert sont organisés en 3 couches : (1) **Hard constraints** — filtres binaires non-négociables capturés à l'onboarding (budget min, langues, mode remote/présentiel/hybrid, zone géographique) — 5 questions max, pas de match si non respectés. (2) **Soft preferences** — facteurs de scoring capturés à l'onboarding et éditables depuis le dashboard (secteurs préférés, stade de projet, type de relation client one-shot/récurrent, complexité technique) — influencent le score sans éliminer. (3) **Learned preferences** — émergent du comportement dans le temps (leads acceptés/déclinés, scores J+48, taux de conversion) — le matching engine affine les poids automatiquement par expert sans saisie. Les 3 couches sont stockées dans `expert.preferences` JSONB.
+**Rationale:** La diversité des experts (junior cherchant volume, senior high-ticket only, expert cherchant récurrence, expert testant un nouveau secteur) ne peut pas être entièrement capturée upfront sans friction excessive. Les contraintes dures filtrent les mismatches évidents. Les préférences souples donnent la subtilité dès J0. Le feedback loop apprend le reste. Complexité d'implémentation minimale — JSONB absorbe les 3 couches sans migration.
+**Impact:** E02S02 : onboarding = 5 questions hard constraints + profiling light soft preferences. Dashboard expert : édition des soft preferences post-onboarding. E06S09 : observe le comportement et génère des suggestions de config — ne modifie jamais `expert.preferences` directement (voir DEC-29).
+**Date:** 2026-02-19
+
+---
+
+### DEC-2026-02-19-26 — Expert Onboarding : Profiling de Positionnement Marché (pas formulaire de critères bruts)
+
+**Context:** Demander à un expert de remplir des critères de matching abstraits ("budget minimum", "stade de projet accepté") est une mauvaise UX et produit des données de mauvaise qualité. Les experts ne pensent pas en critères — ils pensent en positionnement marché.
+**Decision:** L'onboarding expert est un profiling de positionnement marché structuré, pas un formulaire de critères. Le profiling couvre : (1) stade de carrière / ambition (junior cherche expérience et volume → critères larges / medior sélectionne / senior high-ticket only → critères stricts) ; (2) mode de travail (remote only / présentiel possible / hybrid) ; (3) disponibilité (freelance full-time / side projects / X jours/semaine) ; (4) secteurs maîtrisés ; (5) budget confortable ; (6) stade de projet accepté (exploration / scope défini / exécution urgente) ; (7) langues de travail ; (8) zone géographique si présentiel. Le profiling génère automatiquement `expert.preferences` JSONB — l'expert décrit son positionnement, le système traduit en critères de matching.
+**Rationale:** UX plus naturelle = données plus précises = meilleur matching. La segmentation junior/medior/senior est un critère de matching à part entière : un prospect avec €500 et projet early-stage matche mieux avec un junior cherchant de l'expérience qu'avec un senior high-ticket. Les deux y gagnent — c'est de la précision, pas une dégradation.
+**Impact:** E02S02 révisé : UI de profiling de positionnement (pas formulaire de critères). Génère `expert.preferences` JSONB incluant `career_stage`, `work_mode`, `availability`, `budget_min`, `project_stage_accepted[]`, `languages[]`, `geo_zone`, `industries[]`. E06S05 matching engine utilise ces champs pour scorer.
+**Date:** 2026-02-19
+
+---
+
+### DEC-2026-02-19-25 — Qualification des Prospects : Critères par Expert, Pas de Standard Universel
+
+**Context:** La promise expert "budget confirmé, décisionnaire identifié, projet défini" suggérait un standard universel de qualification. Cela crée un problème structurel : si tous les experts filtrent au même seuil élevé, les prospects moins qualifiés n'ont aucun match et sont abandonnés.
+**Decision:** Il n'existe pas de prospect "non qualifié" globalement. La qualification est relative aux critères de chaque expert. Chaque expert configure ses propres seuils dans son profil (budget min, stade de projet accepté, décisionnaire requis, secteurs). Le matching engine score chaque prospect contre les critères de chaque expert individuellement. Un prospect "froid" obtient un faible score chez un expert senior, mais un score correct chez un expert qui accepte les projets early-stage. Aucun prospect n'est abandonné — il existe toujours un expert configuré pour l'accueillir, reflété dans son ranking.
+**Rationale:** Le bi-directionnel matching est l'actif fondamental. Le "rejet" d'un prospect par l'Expert A = match potentiel avec Expert B ou C (DEC-23). Un standard universel de qualification détruirait ce mécanisme. La seule exception : si la confidence AI est trop faible sur tous les champs critiques → E03S02 invite le prospect à préciser avant matching (pas un abandon, une invitation à clarifier).
+**Impact:** `expert.preferences` JSONB contient les critères individuels de chaque expert. E02S02 : UI de configuration de ces critères. E06S05 : matching engine score contre `expert.preferences` de chaque expert, pas contre un seuil global. Promise expert révisée : "Reçois des prospects qui matchent tes critères — budget, secteur, stade de projet — directement dans ton agenda, sans filtrage de ta part."
+**Date:** 2026-02-19
+
+---
+
+### DEC-2026-02-19-24 — Match Results : Ranked List Complet (pas de limite top 3)
+
+**Context:** DEC-15 mentionnait "top-3 anonymized" pour la logique de gate email. Cette formulation a été interprétée à tort comme une limite de résultats. L'UX correcte est un ranked list complet.
+**Decision:** Le reveal de matching affiche tous les experts matchés, rankés par composite_score + per-criterion breakdown visible. Les premiers sont les plus pertinents (score global le plus élevé). Le prospect scrolle librement. Pas de limite artificielle à 3 résultats.
+**Rationale:** Limiter à 3 crée une perte de valeur prospect (le bon expert peut être #4 ou #5), réduit l'exposition des experts moins bien scorés mais pertinents sur des critères spécifiques, et réduit le volume de bookings potentiels. Le modèle correct est Google : tous les résultats, les meilleurs en premier. La décision DEC-15 portait uniquement sur la gate email (montrer de la valeur avant de demander un email), pas sur le nombre de résultats affichés.
+**Impact:** E06S07 : endpoint retourne tous les matches rankés, pas top-3 uniquement. E03S03 : UI affiche ranked list complet avec score global + breakdown par critère. DEC-15 : "top-3" remplacé par "ranked list" dans l'interprétation. Meilleur pour le data flywheel — plus de bookings possibles sur toute la liste.
+**Date:** 2026-02-19
+
+---
+
 ### DEC-2026-02-19-23 — Competitive Moat : Data Flywheel + Bi-Directional Value
 
 **Context:** Observation terrain (r/n8n_ai_agents) — un expert sophistiqué a construit sa propre qualification system (Typeform + n8n ROI calculator). Il résout son propre problème, mais les prospects qui ne le matchent pas disparaissent sans valeur. Ça a cristallisé le moat réel de Callibrate.
@@ -60,7 +140,7 @@ updated_at: 2026-02-19
 ### DEC-2026-02-19-19 — Composite Score System (Trust + Engagement + Outcome)
 
 **Context:** Match ranking needs a quality signal beyond criteria overlap — to surface experts who deliver great experiences, not just matching profiles.
-**Decision:** `composite_score = call_experience_avg × 0.35 + trust_score × 0.20 + client_satisfaction_avg × 0.20 + hire_rate × 0.10 + recency_score × 0.15`. Used as tiebreaker in match ranking. Starts at 0 — no score inflation before real data.
+**Decision:** `composite_score = call_experience_avg × 0.30 + trust_score × 0.20 + client_satisfaction_avg × 0.20 + qualification_rate × 0.15 + recency_score × 0.15`. Used as tiebreaker in match ranking. Starts at 0 — no score inflation before real data. `qualification_rate` (DEC-30) remplace `hire_rate` comme signal d'honnêteté et d'alignement — expert qui confirme ses leads qualifiés vs expert qui flag systématiquement.
 **Rationale:** Composite weighting prioritizes the call experience (0.35) — the unit of value delivery — while incorporating trust verification (0.20), client satisfaction (0.20), conversion outcome (0.10), and freshness (0.15). All components measurable from day 1.
 **Impact:** `experts.composite_score` + `experts.score_updated_at` fields. E06S09 computes on each feedback event. E06S05 uses as tiebreaker. Displayed to prospects as anonymized quality tier.
 **Date:** 2026-02-19
@@ -102,7 +182,7 @@ updated_at: 2026-02-19
 **Context:** Gating anonymized match results behind an email form creates unnecessary friction and kills conversion before the prospect has experienced value.
 **Decision:** No email gate before revealing anonymized match results. Email is captured only at the Cal.com booking step (Cal.com captures email/name natively). No pre-reveal email form.
 **Rationale:** The match reveal is the key "aha moment" — if blocked behind an email gate, prospects may abandon before experiencing value. Cal.com booking captures email with higher intent. Reduces friction by one full step.
-**Impact:** E06S07: `GET /api/prospects/:id/matches` returns anonymized top-3 without email. Email captured at booking via Cal.com webhook → `prospects.email` updated on booking.
+**Impact:** E06S07: `GET /api/prospects/:id/matches` returns full anonymized ranked list without email — no top-3 limit (voir DEC-24). Email captured at booking via Cal.com webhook → `prospects.email` updated on booking.
 **Date:** 2026-02-19
 
 ---
@@ -112,7 +192,7 @@ updated_at: 2026-02-19
 **Context:** Monthly subscription plans (900€/5 leads, 1500€/10 leads) were initially considered. They create a committed monthly burden with uncertain ROI at MVP stage.
 **Decision:** Revenue model is pure pay-per-call. Expert pays 100–200€ per booked call, only when a prospect books. No monthly subscription, no upfront commitment.
 **Rationale:** Lower adoption barrier for early experts — no sunk cost before seeing lead quality. Aligns platform incentives with expert success. Easier to explain and justify. Subscriptions can be introduced post-M3 once lead quality is proven and experts demand volume.
-**Impact:** E05 rewritten for pay-per-call only. Subscription bundles removed. Lemon Squeezy configured for one-time checkout per call, not recurring subscription.
+**Impact:** E05 rewritten for pay-per-call only. Subscription bundles removed. Lemon Squeezy configured for one-time checkout per call, not recurring subscription. *(Billing trigger précisé par DEC-30 : checkout déclenché sur confirmation expert ou silence 7j post-call — pas sur Cal.com webhook direct.)*
 **Date:** 2026-02-19
 
 ---

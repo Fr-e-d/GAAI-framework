@@ -70,7 +70,7 @@ Only the **backlog** may be used for orchestration.
 
 Every artefact MUST contain YAML frontmatter declaring at minimum:
 - `gaai.type: artefact`
-- `artefact_type`
+- `artefact_type` — must be one of: `epic | story | plan | report | prd | marketing | strategy`
 - `track`
 - `id`
 - `related_backlog_id`
