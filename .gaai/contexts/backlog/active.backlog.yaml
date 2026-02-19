@@ -53,10 +53,10 @@ items:
     epic: E06
     title: "Project bootstrap — Supabase + Cloudflare Workers + Queues + KV"
     priority: high
-    status: in_progress
+    status: done
     artefact: contexts/artefacts/stories/E06S01.story.md
     dependencies: []
-    notes: "Foundation story. No dependencies. Can start immediately in parallel with E01. Delivery started 2026-02-19. Supabase project exists (xiilmuuafyapkhflupqx, callibrate staging). Wrangler token expired — requires wrangler login before AC2/3/4/5/8 can be verified."
+    notes: "DONE 2026-02-19. QA PASS. AC1/2/6/7 PASS. AC3/4/5/8 DEFERRED(human — wrangler login + provisioning commands in SETUP.md). Unblocks E06S02, E06S08."
 
   - id: E06S02
     epic: E06
