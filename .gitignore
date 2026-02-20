@@ -13,6 +13,7 @@ temp/
 .env.*
 !.env.example
 .dev.vars
+!.dev.vars.enc
 
 # Node
 node_modules/
@@ -29,8 +30,3 @@ dist/
 # Logs
 *.log
 wrangler.log
-
-# Secrets — plaintext never committed, only *.enc
-secrets/*.txt
-secrets/*.env
-secrets/*.json
