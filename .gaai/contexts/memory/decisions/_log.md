@@ -483,6 +483,16 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-20-48 — LLM provider pour /api/extract : GPT-4o-mini remplace Anthropic Haiku
+
+**Context:** E06S08 utilisait `claude-haiku-4-5` via Cloudflare AI Gateway (path Anthropic). Évaluation comparative conduite en session : Gemini 2.0 Flash ($0.10/$0.40/1M), GPT-4o-mini ($0.15/$0.60/1M), Haiku ($0.80/$4.00/1M), Cloudflare Workers AI Llama 3.x. La tâche d'extraction est de la classification structurée — pas de raisonnement complexe.
+**Decision:** Migration vers **GPT-4o-mini** comme provider unique. Pas de fallback au stade MVP. Direct API call (`https://api.openai.com/v1/chat/completions`), pas de CF AI Gateway dans un premier temps (ajout ultérieur si observabilité requise). `ANTHROPIC_API_KEY` et `CLOUDFLARE_AI_GATEWAY_URL` supprimés de la stack. `OPENAI_API_KEY` ajouté.
+**Rationale:** GPT-4o-mini = meilleur JSON Structured Outputs du marché (le plus documenté, le plus testé en production pour cette tâche). Coût ~5x inférieur à Haiku pour une qualité équivalente ou supérieure sur l'extraction. Le fallback Gemini→GPT-4o-mini via CF AI Gateway Dynamic Routing (Beta) est la bonne architecture long terme — mais ajoute de la complexité injustifiée à volume zéro. Décision réversible : CF Gateway peut être réintroduit en 1 story.
+**Impact:** E06S12 story créée (migration code + secrets). Supprimer `ANTHROPIC_API_KEY` et `CLOUDFLARE_AI_GATEWAY_URL` de wrangler secrets staging/prod après livraison de E06S12. Provisionner `OPENAI_API_KEY --env staging` avant delivery.
+**Date:** 2026-02-20
+
+---
+
 ### DEC-2026-02-20-47 — Staging-first deployment flow + convention de tag production
 
 **Context:** Le GAAI delivery loop squashait directement vers la branche `production` sans jamais déployer sur le worker Cloudflare staging. Les GitHub Actions existantes ciblaient `main` (branche inexistante) — aucun code n'avait jamais été déployé sur les workers CF. L'utilisateur souhaitait valider chaque story sur le staging réel (données Supabase staging) avant de promouvoir en production.
