@@ -13,7 +13,6 @@ temp/
 .env.*
 !.env.example
 .dev.vars
-!.dev.vars.enc
 
 # Node
 node_modules/
@@ -26,6 +25,10 @@ dist/
 .vscode/settings.json
 *.swp
 *.swo
+
+# Secrets backup — plaintext never committed, only *.enc
+secrets/staging.secrets.txt
+secrets/prod.secrets.txt
 
 # Logs
 *.log
