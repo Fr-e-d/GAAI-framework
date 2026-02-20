@@ -69,6 +69,8 @@ updated_at: 2026-02-20
 - **OAuth2 callback route placement rule (E06S10):** Unauthenticated external callbacks (OAuth, webhooks) MUST be registered BEFORE the authenticated `/api/experts/` block in `index.ts`. Google OAuth redirects without a Bearer token — placing callback inside the auth block causes silent 401 for all users.
 - **OAuth2 refresh token preservation pattern (E06S10):** When updating stored tokens, build the update object conditionally — only include `gcal_refresh_token` key when a new refresh token is present. Omit the key entirely (do NOT set to null). Prevents overwriting a valid refresh token when Google only returns a new access token (standard on re-auth without `prompt=consent`).
 - **OAuth connected status derivation (E06S10):** `connected: data.gcal_refresh_token != null` — derive from actual token column presence, not from a stored `gcal_connected` boolean. The boolean can drift; the token presence is ground truth.
+- **Google OAuth token response field (E06S10 post-delivery fix):** Google's `/oauth2/googleapis.com/token` returns `expires_in` (integer, seconds from now), NOT `expiry_date` (absolute ms timestamp used by google-auth-library). Calculate expiry as `new Date(Date.now() + expires_in * 1000).toISOString()`.
+- **Google OAuth email scope (E06S10 post-delivery fix):** Calendar scopes alone (`calendar.events`, `calendar.readonly`) do NOT grant access to user email. Include `openid email` in the scope string to allow the userinfo endpoint to return `email`. Full scope string: `openid email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly`.
 
 ---
 
