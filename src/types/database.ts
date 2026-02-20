@@ -415,7 +415,36 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      merge_expert_profile: {
+        Args: {
+          p_id: string
+          p_display_name?: string | null
+          p_headline?: string | null
+          p_bio?: string | null
+          p_rate_min?: number | null
+          p_rate_max?: number | null
+          p_availability?: string | null
+          p_profile?: Json | null
+          p_preferences?: Json | null
+        }
+        Returns: {
+          id: string
+          availability: string | null
+          avatar_url: string | null
+          bio: string | null
+          cal_username: string | null
+          composite_score: number | null
+          created_at: string | null
+          display_name: string | null
+          headline: string | null
+          preferences: Json | null
+          profile: Json | null
+          rate_max: number | null
+          rate_min: number | null
+          score_updated_at: string | null
+          verified_at: string | null
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
