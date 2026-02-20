@@ -44,10 +44,8 @@ preview_id = "24a3f09adaf34c26805ba2351d773829"
 
 [[kv_namespaces]]
 binding = "EXPERT_POOL"
-# PLACEHOLDER — run: npx wrangler kv namespace create "callibrate-core-kv-expert-pool-staging"
-# Copy the returned id into this field AND into [[env.staging.kv_namespaces]] binding="EXPERT_POOL"
-id = "PLACEHOLDER_EXPERT_POOL_STAGING"
-preview_id = "PLACEHOLDER_EXPERT_POOL_STAGING"
+id = "68927a33fd9a46ec8b537a22a9cf2d20"
+preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
 
 # ── Staging environment ───────────────────────────────────────────────────────
 
@@ -88,8 +86,7 @@ id = "24a3f09adaf34c26805ba2351d773829"
 
 [[env.staging.kv_namespaces]]
 binding = "EXPERT_POOL"
-# PLACEHOLDER — copy staging id from root [[kv_namespaces]] after provisioning
-id = "PLACEHOLDER_EXPERT_POOL_STAGING"
+id = "68927a33fd9a46ec8b537a22a9cf2d20"
 
 # ── Production environment ────────────────────────────────────────────────────
 
@@ -130,6 +127,4 @@ id = "4d5d37620fe14ddfb34aa374cbc37ffe"
 
 [[env.production.kv_namespaces]]
 binding = "EXPERT_POOL"
-# PLACEHOLDER — run: npx wrangler kv namespace create "callibrate-core-kv-expert-pool-prod"
-# Copy the returned id into this field
-id = "PLACEHOLDER_EXPERT_POOL_PROD"
+id = "af0c9c22c77b45ffbac4215009a295d4"
