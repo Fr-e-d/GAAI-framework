@@ -393,6 +393,16 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-20-39 — Architecture domaines finale : callibrate.io + app.callibrate.io + satellites + api.callibrate.io
+
+**Context:** callibrate.ai était prévu comme hub prospect central (DEC-07, DEC-08, DEC-22). Domaine coûteux. TLD `.ai` banalisé en 2026 — plus de signal différenciant. Les satellites couvrent déjà l'intégralité de l'acquisition prospect.
+**Decision:** callibrate.ai supprimé du stack. Architecture finale : (1) `callibrate.io` = landing page expert (marketing, inscription) ; (2) `app.callibrate.io` = dashboard expert authentifié ; (3) Satellites (généraliste ou par vertical/domaine) = seul canal prospect (directory, funnel quiz, matching engine, embedded booking widget, data centralized in Layer 2 via api.callibrate.io) ; (4) `api.callibrate.io` = API publique, sert toutes les UI.
+**Rationale:** Les satellites étaient déjà le canal prospect principal. callibrate.ai était un hub généraliste redondant avec les satellites. Supprimer callibrate.ai élimine un domaine coûteux sans perte fonctionnelle. `api.callibrate.io` remplace les endpoints `workers.dev` et clarifie la séparation UI/API. Convention `app.` = standard SaaS (Linear, Notion, Vercel).
+**Impact:** DEC-07 et DEC-08 supersedés sur la partie callibrate.ai. `context.md` mis à jour. Track 3.2 (prospect) = satellites uniquement. Track 3.1 (expert) = callibrate.io + app.callibrate.io. Layer 2 API exposée via `api.callibrate.io`. Aucun développement sur callibrate.ai. CORS E06S07 : `*.callibrate.ai` retiré des origines autorisées.
+**Date:** 2026-02-20
+
+---
+
 ### DEC-2026-02-20-38 — callibrate.io acquis — domaine principal confirmé
 
 **Context:** DEC-07 mentionnait "both domains available and secured" mais sans confirmation d'achat réel. callibrate.io est désormais officiellement acquis.

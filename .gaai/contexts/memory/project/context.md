@@ -55,7 +55,7 @@ L'utilisateur contrôle toujours son expérience. Le système apprend, propose, 
 
 ## Project Overview
 
-**Name:** Callibrate (callibrate.io + callibrate.ai)
+**Name:** Callibrate (callibrate.io + app.callibrate.io + satellites)
 
 **Purpose:** Matching OS — moteur de qualification et matching bi-directionnel configurable par domaine. MVP focalisé sur les experts AI. Architecture domain-agnostic : peut accueillir tout type de prestataire de service qualifié. Le call booké est l'unité monétisable. Pas de commission sur les deals.
 
@@ -113,7 +113,7 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 - **Email transactionnel:** Resend (via Cloudflare Queues)
 - **Calendar / Booking:** Cal.com — managed users API, Google Calendar + Google Meet + Teams
 - **Payment / MoR:** Lemon Squeezy (Merchant of Record — gestion taxes internationales)
-- **Frontend platform:** Next.js 15 (App Router) — callibrate.io + callibrate.ai
+- **Frontend platform:** Next.js 15 (App Router) — callibrate.io + app.callibrate.io (expert dashboard) + satellites
 - **Satellite sites:** Astro (SSG, SEO-first) ou WordPress headless
 - **Dev tooling:** Cloudflare MCP server (`docs.mcp.cloudflare.com/mcp`)
 - **Language:** TypeScript (Workers + Next.js)
@@ -165,11 +165,12 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 Two tracks. Each track can host as many platforms as needed. All platforms in Layer 3 consume Layer 2 exclusively.
 
 *Track 3.1 — Expert dedicated UIs*
-- **callibrate.io**: registration, profile, dashboard, lead pipeline, analytics, billing
+- **callibrate.io**: landing page expert (marketing, inscription)
+- **app.callibrate.io**: dashboard expert authentifié (profil, lead pipeline, analytics, billing)
 
 *Track 3.2 — Prospect dedicated UIs*
-- **callibrate.ai**: directory browsing + matching engine funnel (main prospect app)
-- **Satellite sites** (N domains, niche-specific): SEO/GEO inbound funnels per vertical — conversational quiz, embedded booking widget, content — data centralized in Layer 2
+- **Satellite sites** (N domains, généraliste ou par vertical/domaine): seul canal prospect — directory, funnel quiz, matching engine, embedded booking widget, content — data centralized in Layer 2 via api.callibrate.io
+- ~~callibrate.ai supprimé~~ (DEC-39)
 
 ## Architectural Boundaries
 
@@ -180,7 +181,7 @@ Two tracks. Each track can host as many platforms as needed. All platforms in La
 - **Lead billing trigger:** booking confirmed → Lemon Squeezy one-time checkout → lead billed (pay-per-call)
 - **Score computation:** Feedback events (call_experience + satisfaction + lead_eval) → composite_score (CF Queue consumer)
 - **Feedback loop:** n8n triggers J+7 and J+45 survey emails → submissions → score worker → match re-ranking
-- **Expert dashboard:** Profile, criteria, lead pipeline, analytics, composite_score tier
+- **Expert dashboard:** Profile, criteria, lead pipeline, analytics, composite_score tier — servi par `app.callibrate.io`
 - **Notification layer:** Cloudflare Queues → Resend (email) / n8n (complex workflows, time-based triggers)
 
 ---
