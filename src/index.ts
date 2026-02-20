@@ -7,6 +7,7 @@ import { handleGetProfile, handlePatchProfile } from './handlers/experts/profile
 import { handleSatelliteConfig } from './routes/satellites';
 import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify } from './routes/prospects';
 import { handleCors, addCorsHeaders, corsForbidden } from './lib/cors';
+import { handleGcalAuthUrl, handleGcalStatus, handleGcalDisconnect, handleGcalCallback } from './handlers/experts/gcal';
 
 const QUEUES = ['email-notifications', 'lead-billing'] as const;
 
@@ -57,6 +58,11 @@ export default {
     // POST /api/extract
     if (method === 'POST' && pathname === '/api/extract') {
       return handleExtract(request, env);
+    }
+
+    // ── GCal OAuth callback (unauthenticated — Google redirects here) ─────────
+    if (method === 'GET' && pathname === '/api/gcal/callback') {
+      return handleGcalCallback(request, env);
     }
 
     // ── Satellite routes (AC9: CORS enforced) ───────────────────────────────
@@ -131,6 +137,21 @@ export default {
         }
         if (method === 'PATCH') {
           return handlePatchProfile(request, env, user, profileMatch[1]!);
+        }
+      }
+
+      // GCal routes
+      const gcalIdMatch = pathname.match(/^\/api\/experts\/([^/]+)\/gcal\//);
+      if (gcalIdMatch && gcalIdMatch[1]) {
+        const gcalExpertId = gcalIdMatch[1];
+        if (method === 'GET' && pathname === `/api/experts/${gcalExpertId}/gcal/auth-url`) {
+          return handleGcalAuthUrl(request, env, user, gcalExpertId);
+        }
+        if (method === 'GET' && pathname === `/api/experts/${gcalExpertId}/gcal/status`) {
+          return handleGcalStatus(request, env, user, gcalExpertId);
+        }
+        if (method === 'DELETE' && pathname === `/api/experts/${gcalExpertId}/gcal/disconnect`) {
+          return handleGcalDisconnect(request, env, user, gcalExpertId);
         }
       }
 

@@ -134,10 +134,10 @@ items:
     epic: E06
     title: "Google Calendar OAuth layer (replaces E06S04)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S10.story.md
     dependencies: [E06S03]
-    notes: "DEC-41. OAuth2 direct Google Calendar — auth URL, callback, token storage chiffré (AES-256-GCM Workers Web Crypto), refresh utility, status endpoint, disconnect. Prereq E06S11. ⚠️ Google sensitive scope review à initier immédiatement (calendar.events — peut prendre plusieurs semaines)."
+    notes: "QA PASS 2026-02-20 (1 remediation — AC4 fix). PR#4 open — awaiting human merge + staging smoke tests. DEC-41. OAuth2 direct Google Calendar — auth URL, callback, token storage chiffré (AES-256-GCM Workers Web Crypto), refresh utility, status endpoint, disconnect. Prereq E06S11. ⚠️ Google sensitive scope review à initier immédiatement (calendar.events — peut prendre plusieurs semaines)."
 
   - id: E06S11
     epic: E06
