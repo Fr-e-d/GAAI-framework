@@ -147,3 +147,12 @@ items:
     artefact: contexts/artefacts/stories/E06S11.story.md
     dependencies: [E06S10, E06S06]
     notes: "DEC-41. Headless booking engine Google Calendar direct : freebusy availability, hold slot (10min TTL), confirm (events.insert + conferenceDataVersion=1 Meet link), cancel, reschedule. Anti double-booking : DB hold + freebusy re-check. Cron Trigger cleanup holds expirés. Consommé par E06S07 satellite funnel."
+
+  - id: E06S12
+    epic: E06
+    title: "Migrate /api/extract from Anthropic to GPT-4o-mini"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S12.story.md
+    dependencies: [E06S08]
+    notes: "DEC-48. Provider swap: claude-haiku-4-5 → gpt-4o-mini. Remove ANTHROPIC_API_KEY + CLOUDFLARE_AI_GATEWAY_URL. Add OPENAI_API_KEY. Same external contract. No CF AI Gateway at this stage (direct OpenAI call). Unblocks removal of Anthropic billing."
