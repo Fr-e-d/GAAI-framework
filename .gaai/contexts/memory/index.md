@@ -30,7 +30,7 @@ updated_at: 2026-02-19
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-19 (updated: Callibrate, stack, architecture) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-19 (31 décisions) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-20 (37 décisions) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | — |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
 

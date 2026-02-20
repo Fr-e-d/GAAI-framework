@@ -373,4 +373,24 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-20-36 — Parallel `/gaai-deliver` : interdit — une seule exécution à la fois
+
+**Context:** Question posée : peut-on lancer plusieurs `/gaai-deliver` en parallèle pour accélérer la livraison ? Aucune règle explicite ne l'interdit dans GAAI v1.0, mais aucun mécanisme de coordination n'existe non plus.
+**Decision:** Une seule instance `/gaai-deliver` à la fois. Pas d'exécutions parallèles du Delivery Agent.
+**Rationale:** Trois risques identifiés : (1) Race condition sur `active.backlog.yaml` — deux agents peuvent lire et réclamer la même Story `refined` simultanément, sans locking. (2) Conflits de merge sur `production` — deux Stories convergent toutes les deux vers `production` ; la séquence de merge doit être orchestrée manuellement. (3) Conflits de fichiers — si deux Stories touchent les mêmes fichiers, collision de branches quasi-certaine. La concurrence est déjà intégrée au sein d'un seul `/gaai-deliver` : Tier 2/3 spawne Planning, Implementation et QA Sub-Agents, c'est là que le parallélisme est conçu.
+**Impact:** Règle opérationnelle GAAI : jamais deux `/gaai-deliver` simultanés. Pour accélérer, utiliser la complexité Tier 2/3 qui parallélise en interne. Si le besoin de parallélisme inter-Stories émerge à l'avenir, il faudra ajouter un mécanisme de claim/lock sur le backlog avant d'autoriser cette pratique.
+**Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-20-37 — Supabase : Publishable Key vs Anon Key selon le contexte d'appel
+
+**Context:** La publishable key (`sb_publishable_*`) ne fonctionne pas pour les appels REST directs à PostgREST — celui-ci exige un JWT dans le header `Authorization: Bearer`. Les publishable keys sont conçues pour le SDK `supabase-js`, qui gère l'échange d'auth sous le capot différemment.
+**Decision:** Deux contextes, deux clés : (1) Appels REST directs (Workers health check, appels PostgREST bruts) → utiliser la **legacy anon key** (JWT). (2) Client `@supabase/supabase-js` (E06S02 et au-delà) → instancier avec la **publishable key** (`sb_publishable_*`). Aucun changement de code immédiat — la migration vers publishable key se fait au moment de l'intégration supabase-js en E06S02.
+**Rationale:** La publishable key est le standard recommandé pour les nouvelles applications, mais elle suppose l'usage du SDK. Les Workers qui appellent PostgREST directement via fetch doivent continuer à utiliser l'anon key JWT jusqu'à adoption complète du SDK.
+**Impact:** E06S01 (health check Worker) : conserve l'anon key. E06S02 : instancier `createClient()` avec la publishable key. Documenter dans les secrets staging/prod : `SUPABASE_ANON_KEY` (legacy, REST direct) + `SUPABASE_PUBLISHABLE_KEY` (SDK).
+**Date:** 2026-02-20
+
+---
+
 <!-- Add decisions above this line, newest first -->
