@@ -96,12 +96,12 @@ items:
 
   - id: E06S06
     epic: E06
-    title: "Async queue workers — email, lead-billing, matching"
+    title: "Async queue workers — email, lead-billing"
     priority: high
     status: refined
     artefact: contexts/artefacts/stories/E06S06.story.md
     dependencies: [E06S03, E06S04, E06S05]
-    notes: "3 queue consumers + retry + DLQ + n8n webhook trigger. Requires all upstream stories complete."
+    notes: "2 queue consumers (email + billing) + retry + DLQ + n8n webhook trigger. matching-jobs supprimée (DEC-33). Cal.com setup synchrone en E06S04 (DEC-34)."
 
   - id: E06S07
     epic: E06

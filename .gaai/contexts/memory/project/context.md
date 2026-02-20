@@ -107,7 +107,7 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 
 - **Database / Auth / Storage:** Supabase (PostgreSQL + Auth + Storage)
 - **Edge compute:** Cloudflare Workers (full-stack — NOT Pages, deprecated)
-- **Async / Background jobs:** Cloudflare Queues + Workflows (technical pipelines)
+- **Async / Background jobs:** Cloudflare Queues + Workflows (technical pipelines) — naming convention: `callibrate-core-queue-{resource}-{env}` (DEC-32)
 - **Business automation:** n8n (integrations tierces, notifications, onboarding sequences)
 - **Cache / Session:** Cloudflare KV
 - **Email transactionnel:** Resend (via Cloudflare Queues)
@@ -157,7 +157,7 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 
 **Layer 2 — Services / API**
 - Cloudflare Workers: all API endpoints, business logic, matching engine, AI extraction, score computation
-- Cloudflare Queues: async workers (email, billing, matching, score)
+- Cloudflare Queues: async workers (email, billing, score) — matching is synchronous (DEC-33)
 - n8n: time-based workflows (survey triggers, onboarding sequences)
 - This layer is domain-agnostic — no UI concerns, no platform-specific assumptions
 

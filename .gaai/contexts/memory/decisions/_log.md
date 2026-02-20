@@ -327,4 +327,50 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-20-35 — Supabase : une seule DB en staging, partagée entre dev et staging
+
+**Context:** Une seule DB Supabase est disponible à ce stade. La DB de production sera créée à partir du schéma staging au moment du lancement.
+**Decision:** `callibrate-staging` = DB unique pour dev local ET staging. Production différée. Dev local (`wrangler dev`) pointe sur staging Supabase via `.dev.vars`. Aucune DB séparée pour dev.
+**Rationale:** Contrainte budgétaire réelle. Pas de risque — dev et staging partagent la même base de données de test, aucun impact production.
+**Impact:** `.dev.vars` = mêmes credentials que staging. Secrets staging = `SUPABASE_URL` + `SUPABASE_ANON_KEY` + `SUPABASE_SERVICE_KEY` → pointent vers `callibrate-staging`. Secrets production configurés au lancement.
+**Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-20-34 — `cal.setup` : sort de matching-jobs, home à définir en E06S04
+
+**Context:** `matching-jobs` queue est supprimée (DEC-33). Elle portait deux types de messages : `compute.matches` (over-engineering) et `cal.setup` (création du managed user Cal.com lors de l'inscription expert). Le `cal.setup` est légitime mais n'a plus de queue pour le transporter.
+**Decision:** `cal.setup` est traité de manière synchrone lors de l'inscription expert (POST /api/experts/register → appel Cal.com API directement). Si la latence Cal.com est trop élevée, une queue dédiée `callibrate-core-queue-onboarding-staging/prod` sera créée en E06S04. Décision finale à prendre dans E06S04.
+**Rationale:** À l'inscription, l'expert attend déjà une confirmation — une latence de 1–2s pour le Cal.com setup est acceptable. Si Cal.com répond > 3s en médiane, on bascule en async. MVP first.
+**Impact:** E06S04 : implémenter cal.setup synchrone dans POST /api/experts/register. Si besoin async → créer `callibrate-core-queue-onboarding-staging` + `callibrate-core-queue-onboarding-prod` en suivant la convention de nommage (DEC-32).
+**Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-20-33 — Suppression de la queue `matching-jobs` (over-engineering MVP)
+
+**Context:** `matching-jobs` queue était destinée au batch re-matching : re-scorer des prospects existants quand un nouvel expert s'inscrit. La question s'est posée lors de la révision de l'architecture async vs sync.
+**Decision:** La queue `matching-jobs` est supprimée définitivement. Le matching est synchrone au moment de la recherche prospect. Aucun batch re-matching.
+**Rationale:** Le prospect est anonyme — il n'a pas de profil persistant à re-matcher. La recherche se fait à la demande et retourne un résultat immédiat. Conserver des "prospects en attente" à re-scorer n'a pas de sens dans ce modèle. Sur une base de quelques dizaines à centaines d'experts (MVP), le matching synchrone est sub-100ms.
+**Impact:** `wrangler.toml` : queue `matching-jobs` supprimée (root, staging, production). `src/index.ts` : QUEUES constant mise à jour. E06S06 : 2 queue consumers (email + billing), pas 3. E06S09 AC9 : dispatch vers matching-jobs supprimé — le re-ranking post score update est best-effort inline ou supprimé du scope MVP.
+**Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-20-32 — Convention de nommage Cloudflare : `{scope}-{entity}-{resource}-{env}`
+
+**Context:** Le workspace Cloudflare héberge plusieurs projets. Sans préfixe projet, les ressources (queues, KV, workers) sont indiscernables dans le dashboard, la CLI et la facturation.
+**Decision:** Convention universelle pour toutes les ressources Cloudflare : `{scope}-{entity}-{resource}-{env}`.
+- `{scope}` : `callibrate-core` | `callibrate-io` | `callibrate-ai`
+- `{entity}` : `queue` | `kv` | `r2` | `d1` | `workflow` — **omis pour les Workers** (le Worker IS le scope)
+- `{resource}` : slug décrivant la fonction (ex: `email-notifications`, `sessions`)
+- `{env}` : `staging` | `prod` — pas `production`, pas `dev`
+- **Exception dev** : dev local (`wrangler dev`) pointe sur les ressources staging directement. Aucune ressource `-dev` créée.
+- **Scope ownership** : KV, Queue, R2, D1, Workflow → toujours `callibrate-core`. `callibrate-io` et `callibrate-ai` = UI workers uniquement, ils consomment l'API, jamais le storage directement.
+**Rationale:** Multi-projet Cloudflare → les noms doivent être auto-explicatifs depuis n'importe quelle vue (dashboard, billing, logs). Le type de ressource dans le nom évite les confusions entre une KV `sessions` et une queue `sessions`.
+**Impact:** `wrangler.toml` mis à jour. `SETUP.md` mis à jour. Queues renommées avec préfixe `queue-`. KV namespaces créés avec noms explicites (pas via `--env` auto-naming). Aucune ressource ne doit être créée sans respecter cette convention.
+**Date:** 2026-02-20
+
+---
+
 <!-- Add decisions above this line, newest first -->

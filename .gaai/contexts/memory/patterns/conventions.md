@@ -72,6 +72,38 @@ updated_at: 2026-02-19
 
 ---
 
+## Cloudflare Resource Naming
+
+Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
+
+| Segment | Values |
+|---|---|
+| `{scope}` | `callibrate-core` · `callibrate-io` · `callibrate-ai` |
+| `{entity}` | `queue` · `kv` · `r2` · `d1` · `workflow` — **omitted for Workers** |
+| `{resource}` | functional slug (e.g. `email-notifications`, `sessions`) |
+| `{env}` | `staging` · `prod` — never `production`, never `dev` |
+
+- **Dev exception:** `wrangler dev` binds to staging resources. No `-dev` resources exist.
+- **Scope ownership:** KV · Queue · R2 · D1 · Workflow → always `callibrate-core`. UI workers (`callibrate-io`, `callibrate-ai`) never own storage.
+- **Workers:** named as `{scope}-{env}` (no entity segment) — e.g. `callibrate-core-staging`
+- **KV namespaces:** created with explicit names via `wrangler kv namespace create "callibrate-core-kv-sessions-staging"` — never rely on `--env` auto-naming
+- **DLQs:** `{queue-full-name}-dlq` — e.g. `callibrate-core-queue-email-notifications-staging-dlq`
+
+### Active Cloudflare resources (callibrate-core)
+
+| Resource | Staging | Production |
+|---|---|---|
+| Worker | `callibrate-core-staging` | `callibrate-core-prod` |
+| Queue — email | `callibrate-core-queue-email-notifications-staging` | `callibrate-core-queue-email-notifications-prod` |
+| Queue — billing | `callibrate-core-queue-lead-billing-staging` | `callibrate-core-queue-lead-billing-prod` |
+| KV — sessions | `callibrate-core-kv-sessions-staging` | `callibrate-core-kv-sessions-prod` |
+| KV — rate limiting | `callibrate-core-kv-rate-limiting-staging` | `callibrate-core-kv-rate-limiting-prod` |
+| KV — feature flags | `callibrate-core-kv-feature-flags-staging` | `callibrate-core-kv-feature-flags-prod` |
+
+Score computation queue (`callibrate-core-queue-score-computation-staging/prod`) added in E06S09.
+
+---
+
 ## Anti-Patterns (Avoid)
 
 - Synchronous external API calls inside CF Worker request handlers (use Queues)
@@ -81,3 +113,6 @@ updated_at: 2026-02-19
 - Applying inferred preferences automatically to `expert.preferences` — system observes and suggests only, expert approves explicitly (DEC-29)
 - Any config change without explicit expert approval — Suggest + Approve model, never auto-apply (DEC-29)
 - Artificial top-N limit on match results — ranked list complet, top 3 highlighted visuellement (DEC-24)
+- Async batch re-matching of anonymous prospects — matching is synchronous at search time, no persistent prospect profile to re-match (DEC-33)
+- Cloudflare resource names without `{scope}-{entity}-{resource}-{env}` pattern (DEC-32)
+- Using `production` or `dev` as env suffix — use `staging` and `prod` only (DEC-32)
