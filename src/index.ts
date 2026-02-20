@@ -4,6 +4,9 @@ import { handleExtract } from './routes/extract';
 import { authenticate } from './middleware/auth';
 import { handleRegister } from './handlers/experts/register';
 import { handleGetProfile, handlePatchProfile } from './handlers/experts/profile';
+import { handleSatelliteConfig } from './routes/satellites';
+import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify } from './routes/prospects';
+import { handleCors, addCorsHeaders, corsForbidden } from './lib/cors';
 
 const QUEUES = ['email-notifications', 'lead-billing'] as const;
 
@@ -54,6 +57,59 @@ export default {
     // POST /api/extract
     if (method === 'POST' && pathname === '/api/extract') {
       return handleExtract(request, env);
+    }
+
+    // ── Satellite routes (AC9: CORS enforced) ───────────────────────────────
+    if (pathname.startsWith('/api/satellites/')) {
+      const corsResult = await handleCors(request, env);
+      if (corsResult.preflight) return corsResult.preflight;
+      if (!corsResult.allowed) return corsForbidden(corsResult.origin);
+
+      // GET /api/satellites/:id/config
+      const satConfigMatch = pathname.match(/^\/api\/satellites\/([^/]+)\/config$/);
+      if (method === 'GET' && satConfigMatch && satConfigMatch[1]) {
+        const response = await handleSatelliteConfig(request, env, satConfigMatch[1]);
+        return addCorsHeaders(response, corsResult.origin);
+      }
+
+      return addCorsHeaders(
+        new Response(JSON.stringify({ error: 'Not Found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }),
+        corsResult.origin,
+      );
+    }
+
+    // ── Prospect routes (AC9: CORS enforced) ────────────────────────────────
+    if (pathname.startsWith('/api/prospects/')) {
+      const corsResult = await handleCors(request, env);
+      if (corsResult.preflight) return corsResult.preflight;
+      if (!corsResult.allowed) return corsForbidden(corsResult.origin);
+
+      // POST /api/prospects/submit
+      if (method === 'POST' && pathname === '/api/prospects/submit') {
+        const response = await handleProspectSubmit(request, env);
+        return addCorsHeaders(response, corsResult.origin);
+      }
+
+      const prospectId = pathname.match(/^\/api\/prospects\/([^/]+)\//)?.[1];
+
+      if (prospectId) {
+        // GET /api/prospects/:id/matches?token=xxx
+        if (method === 'GET' && pathname === `/api/prospects/${prospectId}/matches`) {
+          const response = await handleProspectMatches(request, env, prospectId);
+          return addCorsHeaders(response, corsResult.origin);
+        }
+
+        // POST /api/prospects/:id/identify
+        if (method === 'POST' && pathname === `/api/prospects/${prospectId}/identify`) {
+          const response = await handleProspectIdentify(request, env, prospectId);
+          return addCorsHeaders(response, corsResult.origin);
+        }
+      }
+
+      return addCorsHeaders(
+        new Response(JSON.stringify({ error: 'Not Found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }),
+        corsResult.origin,
+      );
     }
 
     // ── Expert routes (authenticated) ───────────────────────────────────────

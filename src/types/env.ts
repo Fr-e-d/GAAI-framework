@@ -12,6 +12,10 @@ export interface Env {
   SESSIONS: KVNamespace;
   RATE_LIMITING: KVNamespace;
   FEATURE_FLAGS: KVNamespace;
+  EXPERT_POOL: KVNamespace;
+
+  // Worker secrets (bound via wrangler secret put)
+  PROSPECT_TOKEN_SECRET: string;
 
   // Queue producers
   EMAIL_NOTIFICATIONS: Queue;

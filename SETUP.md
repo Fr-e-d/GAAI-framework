@@ -59,9 +59,11 @@ Created manually with explicit names (see Step 3). Binding names in code are upp
 | `callibrate-core-kv-sessions-staging` | `SESSIONS` | staging + local dev |
 | `callibrate-core-kv-rate-limiting-staging` | `RATE_LIMITING` | staging + local dev |
 | `callibrate-core-kv-feature-flags-staging` | `FEATURE_FLAGS` | staging + local dev |
+| `callibrate-core-kv-expert-pool-staging` | `EXPERT_POOL` | staging + local dev |
 | `callibrate-core-kv-sessions-prod` | `SESSIONS` | production |
 | `callibrate-core-kv-rate-limiting-prod` | `RATE_LIMITING` | production |
 | `callibrate-core-kv-feature-flags-prod` | `FEATURE_FLAGS` | production |
+| `callibrate-core-kv-expert-pool-prod` | `EXPERT_POOL` | production |
 
 ---
 
@@ -163,6 +165,10 @@ npx wrangler kv namespace create "callibrate-core-kv-rate-limiting-staging"
 
 npx wrangler kv namespace create "callibrate-core-kv-feature-flags-staging"
 # -> id into: [[kv_namespaces]] id= AND [[env.staging.kv_namespaces]] binding="FEATURE_FLAGS" id=
+
+npx wrangler kv namespace create "callibrate-core-kv-expert-pool-staging"
+# -> id into: [[kv_namespaces]] binding="EXPERT_POOL" id= AND preview_id=
+#             [[env.staging.kv_namespaces]] binding="EXPERT_POOL" id=
 ```
 
 ### Production namespaces
@@ -176,9 +182,12 @@ npx wrangler kv namespace create "callibrate-core-kv-rate-limiting-prod"
 
 npx wrangler kv namespace create "callibrate-core-kv-feature-flags-prod"
 # -> id into: [[env.production.kv_namespaces]] binding="FEATURE_FLAGS" id=
+
+npx wrangler kv namespace create "callibrate-core-kv-expert-pool-prod"
+# -> id into: [[env.production.kv_namespaces]] binding="EXPERT_POOL" id=
 ```
 
-After updating all 6 IDs in `wrangler.toml`, no `PLACEHOLDER_*` strings should remain.
+After updating all IDs in `wrangler.toml`, no `PLACEHOLDER_*` strings should remain.
 
 ---
 
@@ -201,6 +210,10 @@ npx wrangler secret put SUPABASE_ANON_KEY --env staging
 
 npx wrangler secret put SUPABASE_SERVICE_KEY --env staging
 # Paste: (service_role key from Supabase dashboard — keep this private)
+
+npx wrangler secret put PROSPECT_TOKEN_SECRET --env staging
+# Paste: (generate a secure random string, e.g. openssl rand -base64 32)
+# Used to sign prospect JWT tokens (24h TTL) in the satellite funnel
 ```
 
 ### Production secrets
@@ -209,9 +222,10 @@ npx wrangler secret put SUPABASE_SERVICE_KEY --env staging
 > project is created from the staging schema. Skip this step for now.
 
 ```bash
-# npx wrangler secret put SUPABASE_URL --env production        # (deferred to launch)
-# npx wrangler secret put SUPABASE_ANON_KEY --env production   # (deferred to launch)
-# npx wrangler secret put SUPABASE_SERVICE_KEY --env production # (deferred to launch)
+# npx wrangler secret put SUPABASE_URL --env production            # (deferred to launch)
+# npx wrangler secret put SUPABASE_ANON_KEY --env production       # (deferred to launch)
+# npx wrangler secret put SUPABASE_SERVICE_KEY --env production    # (deferred to launch)
+# npx wrangler secret put PROSPECT_TOKEN_SECRET --env production   # (deferred to launch)
 ```
 
 ---

@@ -107,10 +107,10 @@ items:
     epic: E06
     title: "Satellite funnel API"
     priority: high
-    status: refined
+    status: done
     artefact: contexts/artefacts/stories/E06S07.story.md
     dependencies: [E06S02, E06S05]
-    notes: "Config endpoint + prospect submit + anonymized reveal + email capture + booking URL. CORS for satellite domains. DEC-40 : AC3 révisé — matching synchrone (scoreMatch() + INSERT matches, plus de queue). AC6 garde défensive. EXPERT_POOL: KVNamespace à créer (env.ts + wrangler.toml)."
+    notes: "DONE 2026-02-20. QA PASS (1 remediation cycle — CORS 403 headers). All 10 ACs met. GET satellite config + POST prospect submit (sync scoreMatch + KV expert pool) + GET anonymized matches (JWT-gated) + POST identify (full profiles + booking_url). JWT via Web Crypto API. CORS *.callibrate.io + satellite DB domains. EXPERT_POOL KV placeholder IDs (SETUP.md) + DB fallback. PROSPECT_TOKEN_SECRET secret required."
 
   - id: E06S08
     epic: E06

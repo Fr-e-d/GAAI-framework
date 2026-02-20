@@ -61,6 +61,10 @@ updated_at: 2026-02-20
 - **Anthropic tool_use pattern (E06S08):** Use `tool_choice: { type: 'tool', name }` to force structured JSON output from Claude without prompt engineering. Tool schema enforces field types + required fields. Raw `fetch` only — no Anthropic SDK.
 - **CF AI Gateway routing (E06S08):** `const apiUrl = \`${env.CLOUDFLARE_AI_GATEWAY_URL}/v1/messages\`` where `CLOUDFLARE_AI_GATEWAY_URL = https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/anthropic`. Header: `x-api-key: env.ANTHROPIC_API_KEY` (NOT `Authorization: Bearer`). `anthropic-version: 2023-06-01`.
 - **Non-blocking optional enrichment pattern (E06S08):** Wrap optional DB reads in `try/catch`, use null-check after. Core logic proceeds regardless. Example: `satellite_configs.vertical` lookup for extraction context.
+- **JWT pattern — Web Crypto API (E06S07):** `signProspectToken()` / `verifyProspectToken()` in `src/lib/jwt.ts`. No external library — CF Workers provides `crypto.subtle` natively. HMAC-SHA256, base64url encoding, claims `{ prospect_id, exp }`.
+- **KV cache-aside pattern (E06S07):** `src/lib/expertPool.ts` — `get(key, { type: 'json' })` → DB fallback on null → `put(key, json, { expirationTtl: 300 })` write-back. Non-blocking write failure (try/catch). Expert pool TTL: 300s.
+- **CORS middleware pattern (E06S07):** `handleCors(request, env)` returns `{ allowed, origin, preflight }`. Caller checks `preflight` first (OPTIONS → 204), then `allowed`, then wraps response with `addCorsHeaders(response, origin)`. Blocked origins get 403 WITH `Access-Control-Allow-Origin` header (browser can read error body). No Origin header → allow (server-to-server). Satellite domain whitelist from `satellite_configs.domain` (bare hostname, not full URL).
+- **Quiz schema validation pattern (E06S07):** `extractRequiredKeys(quizSchema)` handles two formats — Format A (`{ questions: [{ key, required }] }`) and Format B (`{ fieldKey: { required: true } }`). Returns `[]` for unrecognized formats (liberal — no 422 on unknown schema).
 
 ---
 
@@ -125,6 +129,7 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 | KV — sessions | `callibrate-core-kv-sessions-staging` | `callibrate-core-kv-sessions-prod` |
 | KV — rate limiting | `callibrate-core-kv-rate-limiting-staging` | `callibrate-core-kv-rate-limiting-prod` |
 | KV — feature flags | `callibrate-core-kv-feature-flags-staging` | `callibrate-core-kv-feature-flags-prod` |
+| KV — expert pool | `callibrate-core-kv-expert-pool-staging` | `callibrate-core-kv-expert-pool-prod` |
 
 Score computation queue (`callibrate-core-queue-score-computation-staging/prod`) added in E06S09.
 
