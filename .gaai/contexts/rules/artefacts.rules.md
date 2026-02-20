@@ -9,7 +9,7 @@ tags:
   - execution
   - non_authoritative
 created_at: 2026-02-09
-updated_at: 2026-02-09
+updated_at: 2026-02-20
 ---
 
 # 📦 GAAI Artefacts Rules
@@ -70,7 +70,7 @@ Only the **backlog** may be used for orchestration.
 
 Every artefact MUST contain YAML frontmatter declaring at minimum:
 - `gaai.type: artefact`
-- `artefact_type` — must be one of: `epic | story | plan | report | prd | marketing | strategy`
+- `artefact_type` — must be one of: `epic | story | plan | report | prd | marketing | strategy | evaluation`
 - `track`
 - `id`
 - `related_backlog_id`

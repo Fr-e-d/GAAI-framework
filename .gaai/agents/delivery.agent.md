@@ -4,7 +4,7 @@ id: AGENT-DELIVERY-001
 role: delivery-orchestrator
 responsibility: coordinate-sub-agents-to-deliver-validated-stories
 track: delivery
-updated_at: 2026-02-18
+updated_at: 2026-02-20
 ---
 
 # Delivery Agent (GAAI)
@@ -186,12 +186,13 @@ All artefacts are written by sub-agents and read by the Orchestrator:
 
 | Artefact | Written by | Read by |
 |----------|-----------|---------|
+| `{id}.approach-evaluation.md` | Planning Sub-Agent (via `approach-evaluation` skill, when triggered) | Planning Sub-Agent, Implementation Sub-Agent |
 | `{id}.execution-plan.md` | Planning Sub-Agent | Implementation Sub-Agent, QA Sub-Agent |
 | `{id}.impl-report.md` | Implementation Sub-Agent | QA Sub-Agent, Orchestrator |
 | `{id}.qa-report.md` | QA Sub-Agent | Orchestrator |
 | `{id}.memory-delta.md` | QA Sub-Agent (PASS only) | Orchestrator → Discovery |
 | `{id}.micro-delivery-report.md` | MicroDelivery Sub-Agent | Orchestrator |
-| `{id}.plan-blocked.md` | Planning Sub-Agent (on failure) | Orchestrator (triggers escalation) |
+| `{id}.plan-blocked.md` | Planning Sub-Agent (on failure or architectural escalation from approach evaluation) | Orchestrator (triggers escalation) |
 
 Artefacts persist until the Story is archived. They are the audit trail.
 

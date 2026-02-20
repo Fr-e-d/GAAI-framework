@@ -5,7 +5,7 @@ role: implementation-specialist
 parent: AGENT-DELIVERY-001
 track: delivery
 lifecycle: ephemeral
-updated_at: 2026-02-18
+updated_at: 2026-02-20
 ---
 
 # Implementation Sub-Agent
@@ -33,6 +33,7 @@ DIE     ← Terminates; context window released
 
 - `contexts/artefacts/stories/{id}.story.md` — the validated Story
 - `contexts/artefacts/plans/{id}.execution-plan.md` — the Planning Sub-Agent's output
+- `contexts/artefacts/evaluations/{id}.approach-evaluation.md` — (when it exists) the approach comparison that informed the plan; provides the WHY behind the chosen implementation approach
 - `contexts/rules/orchestration.rules.md`
 - `contexts/memory/patterns/conventions.md`
 - `contexts/memory/project/context.md`

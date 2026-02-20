@@ -80,10 +80,10 @@ items:
     epic: E06
     title: "Cal.com managed users integration + webhook endpoint"
     priority: high
-    status: done
+    status: superseded
     artefact: contexts/artefacts/stories/E06S04.story.md
     dependencies: [E06S03]
-    notes: "DONE 2026-02-20. QA PASS. All 10 ACs met. Synchronous cal.setup (DEC-34), HMAC-SHA256 webhook validation, booking.created/cancelled handlers, idempotent processing. Schema migration applied (5 new cal_* columns). PR#3 open (schema migration — PR required). Unblocks E06S06."
+    notes: "SUPERSEDED 2026-02-20 by DEC-41. Cal.com Platform fermée aux nouveaux signups depuis 15/12/2025. Remplacée par E06S10 (Google Calendar OAuth layer) + E06S11 (Booking engine). Les colonnes cal_* en DB sont conservées sans nettoyage jusqu'au post-MVP."
 
   - id: E06S05
     epic: E06
@@ -100,8 +100,8 @@ items:
     priority: high
     status: refined
     artefact: contexts/artefacts/stories/E06S06.story.md
-    dependencies: [E06S03, E06S04, E06S05]
-    notes: "2 queue consumers (email + billing) + retry + DLQ + n8n webhook trigger. matching-jobs supprimée (DEC-33). Cal.com setup synchrone en E06S04 (DEC-34)."
+    dependencies: [E06S03, E06S10, E06S05]
+    notes: "2 queue consumers (email + billing) + retry + DLQ + n8n webhook trigger. matching-jobs supprimée (DEC-33). Dependency E06S04 remplacée par E06S10 (DEC-41) — booking.created messages désormais émis par E06S11, pas par webhook Cal.com."
 
   - id: E06S07
     epic: E06
@@ -129,3 +129,21 @@ items:
     artefact: contexts/artefacts/stories/E06S09.story.md
     dependencies: [E06S02, E06S06]
     notes: "score-computation queue consumer. Formula: call_experience×0.35 + trust×0.20 + satisfaction×0.20 + hire_rate×0.10 + recency×0.15. Triggered by all three feedback events. Re-ranks pending matches after score update."
+
+  - id: E06S10
+    epic: E06
+    title: "Google Calendar OAuth layer (replaces E06S04)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S10.story.md
+    dependencies: [E06S03]
+    notes: "DEC-41. OAuth2 direct Google Calendar — auth URL, callback, token storage chiffré (AES-256-GCM Workers Web Crypto), refresh utility, status endpoint, disconnect. Prereq E06S11. ⚠️ Google sensitive scope review à initier immédiatement (calendar.events — peut prendre plusieurs semaines)."
+
+  - id: E06S11
+    epic: E06
+    title: "Booking engine — availability, create, cancel, reschedule"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S11.story.md
+    dependencies: [E06S10, E06S06]
+    notes: "DEC-41. Headless booking engine Google Calendar direct : freebusy availability, hold slot (10min TTL), confirm (events.insert + conferenceDataVersion=1 Meet link), cancel, reschedule. Anti double-booking : DB hold + freebusy re-check. Cron Trigger cleanup holds expirés. Consommé par E06S07 satellite funnel."
