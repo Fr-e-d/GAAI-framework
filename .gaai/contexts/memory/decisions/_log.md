@@ -483,4 +483,14 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-20-46 — Staging-first deployment flow + convention de tag production
+
+**Context:** Le GAAI delivery loop squashait directement vers la branche `production` sans jamais déployer sur le worker Cloudflare staging. Les GitHub Actions existantes ciblaient `main` (branche inexistante) — aucun code n'avait jamais été déployé sur les workers CF. L'utilisateur souhaitait valider chaque story sur le staging réel (données Supabase staging) avant de promouvoir en production.
+**Decision:** Flow staging-first en 3 phases : (1) QA PASS → squash merge → push `production` branch → GitHub Actions auto-déploie `callibrate-core-staging`. (2) Delivery Agent exécute smoke tests contre staging URL. (3) Smoke PASS → Delivery Agent s'arrête et reporte à l'humain la commande de tag pour déclencher le deploy production. Gate production = **human gate** (l'humain crée le tag). Convention de tag : `v0.{EPIC_NUMBER}.{STORY_NUMBER}` (ex. `v0.6.7` pour E06S07) avec annotation `{id}: {Story title}`. GitHub Actions `deploy-production.yml` déclenche sur `v*` tags → `wrangler deploy --env production`.
+**Rationale:** Human gate = cohérent avec la philosophie GAAI (contrôle + gouvernance). Smoke tests = signal de confiance runtime (bindings KV, secrets, Supabase), pas exhaustif. Facile d'automatiser plus tard. Tag format `v0.EPIC.STORY` offre traçabilité directe story → tag sans sacrifier la compatibilité semver. Le trigger GitHub Actions staging était cassé (ciblait `main` inexistant) → corrigé vers `production`.
+**Impact:** `.github/workflows/deploy-staging.yml` : trigger `main` → `production`. `.gaai/workflows/delivery-loop.workflow.md` : Step 8 enrichi (8a–8e). `SETUP.md` : références `main` → `production` + ANTHROPIC_API_KEY + CLOUDFLARE_AI_GATEWAY_URL ajoutés aux secrets staging. Secrets staging manquants à provisionner avant la prochaine delivery : `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `ANTHROPIC_API_KEY`, `CLOUDFLARE_AI_GATEWAY_URL`. Premier tag production : `v0.6.7` (E06S07 déjà livré en staging après ce fix).
+**Date:** 2026-02-20
+
+---
+
 <!-- Add decisions above this line, newest first -->

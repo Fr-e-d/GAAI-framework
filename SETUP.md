@@ -29,7 +29,7 @@ after the initial `wrangler login`. Run these commands from the repo root.
 
 | Name | Scope | Environment | Deployed via |
 |---|---|---|---|
-| `callibrate-core-staging` | core API + queue consumers | staging | push to `main` |
+| `callibrate-core-staging` | core API + queue consumers | staging | push to `production` branch |
 | `callibrate-core-prod` | core API + queue consumers | production | push of a `v*` tag |
 | `callibrate-io-staging` | expert UI (Next.js) | staging | *(separate repo)* |
 | `callibrate-io-prod` | expert UI (Next.js) | production | *(separate repo)* |
@@ -211,21 +211,29 @@ npx wrangler secret put SUPABASE_ANON_KEY --env staging
 npx wrangler secret put SUPABASE_SERVICE_KEY --env staging
 # Paste: (service_role key from Supabase dashboard — keep this private)
 
+npx wrangler secret put ANTHROPIC_API_KEY --env staging
+# Paste: (API key from https://console.anthropic.com)
+
+npx wrangler secret put CLOUDFLARE_AI_GATEWAY_URL --env staging
+# Paste: (AI Gateway URL from Cloudflare dashboard → AI Gateway)
+
 npx wrangler secret put PROSPECT_TOKEN_SECRET --env staging
-# Paste: (generate a secure random string, e.g. openssl rand -base64 32)
-# Used to sign prospect JWT tokens (24h TTL) in the satellite funnel
+# Already set — skip if already done
+# openssl rand -base64 32 | npx wrangler secret put PROSPECT_TOKEN_SECRET --env staging
 ```
 
 ### Production secrets
 
 > Production secrets will be configured at launch when the production Supabase
 > project is created from the staging schema. Skip this step for now.
+> `PROSPECT_TOKEN_SECRET` for production is already set.
 
 ```bash
 # npx wrangler secret put SUPABASE_URL --env production            # (deferred to launch)
 # npx wrangler secret put SUPABASE_ANON_KEY --env production       # (deferred to launch)
 # npx wrangler secret put SUPABASE_SERVICE_KEY --env production    # (deferred to launch)
-# npx wrangler secret put PROSPECT_TOKEN_SECRET --env production   # (deferred to launch)
+# npx wrangler secret put ANTHROPIC_API_KEY --env production       # (deferred to launch)
+# npx wrangler secret put CLOUDFLARE_AI_GATEWAY_URL --env production # (deferred to launch)
 ```
 
 ---
@@ -244,7 +252,12 @@ The CI/CD workflows authenticate to Cloudflare via an API token stored as a GitH
    - Secret name: `CLOUDFLARE_API_TOKEN`
    - Value: (paste the token created above)
 
-Once set, pushing to `main` auto-deploys to staging, and pushing a `v*` tag deploys to production.
+Once set, pushing to the `production` branch auto-deploys to staging, and pushing a `v*` tag deploys to production.
+
+**Production tag convention:** `v0.{EPIC_NUMBER}.{STORY_NUMBER}` — e.g. `v0.6.7` for E06S07.
+```bash
+git tag v0.6.7 -m "E06S07: Satellite Funnel API" && git push origin v0.6.7
+```
 
 ---
 
