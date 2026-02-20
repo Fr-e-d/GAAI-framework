@@ -373,12 +373,12 @@ updated_at: 2026-02-19
 
 ---
 
-### DEC-2026-02-20-36 — Parallel `/gaai-deliver` : interdit — une seule exécution à la fois
+### DEC-2026-02-20-36 — Parallel `/gaai-deliver` : autorisé quand le backlog le permet (RÉVISÉ)
 
-**Context:** Question posée : peut-on lancer plusieurs `/gaai-deliver` en parallèle pour accélérer la livraison ? Aucune règle explicite ne l'interdit dans GAAI v1.0, mais aucun mécanisme de coordination n'existe non plus.
-**Decision:** Une seule instance `/gaai-deliver` à la fois. Pas d'exécutions parallèles du Delivery Agent.
-**Rationale:** Trois risques identifiés : (1) Race condition sur `active.backlog.yaml` — deux agents peuvent lire et réclamer la même Story `refined` simultanément, sans locking. (2) Conflits de merge sur `production` — deux Stories convergent toutes les deux vers `production` ; la séquence de merge doit être orchestrée manuellement. (3) Conflits de fichiers — si deux Stories touchent les mêmes fichiers, collision de branches quasi-certaine. La concurrence est déjà intégrée au sein d'un seul `/gaai-deliver` : Tier 2/3 spawne Planning, Implementation et QA Sub-Agents, c'est là que le parallélisme est conçu.
-**Impact:** Règle opérationnelle GAAI : jamais deux `/gaai-deliver` simultanés. Pour accélérer, utiliser la complexité Tier 2/3 qui parallélise en interne. Si le besoin de parallélisme inter-Stories émerge à l'avenir, il faudra ajouter un mécanisme de claim/lock sur le backlog avant d'autoriser cette pratique.
+**Context:** DEC-36 initial interdisait tout parallélisme. Révisé après constat que le backlog gère déjà les dépendances — deux stories `refined` avec des dépendances toutes `done` et des fichiers disjoints sont safe à livrer en parallèle.
+**Decision:** Deux `/gaai-deliver` peuvent tourner simultanément **si et seulement si** : (1) chaque session cible une **story différente** (argument story ID explicite obligatoire) ; (2) les deux stories ont des dépendances indépendantes (toutes `done`) dans le backlog ; (3) les fichiers touchés ne se chevauchent pas. Le human orchestre : c'est lui qui décide de lancer deux sessions et choisit les stories cibles. Le parallélisme non-supervisé (deux agents choisissant librement) reste interdit faute de locking.
+**Rationale:** Le backlog + système de dépendances est le mécanisme de coordination. Il n'est pas nécessaire de sérialiser toutes les livraisons quand les stories sont structurellement indépendantes. Gain de temps réel sur les Epics avec de nombreuses stories parallélisables (ex: E06S07 + E06S08).
+**Impact:** `/gaai-deliver` mis à jour : argument story ID supporté, logique de sélection strictement backlog-first. `delivery.agent.md` mis à jour : story selection non-negotiable = backlog only, jamais inférée depuis git/artefacts. Règle : chaque session doit passer l'ID story en argument si parallèle.
 **Date:** 2026-02-20
 
 ---

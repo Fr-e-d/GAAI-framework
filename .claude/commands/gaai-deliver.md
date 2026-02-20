@@ -24,7 +24,25 @@ Runs the Delivery Loop:
 
 Read `.gaai/agents/delivery.agent.md` and `.gaai/workflows/delivery-loop.workflow.md`.
 
-Check `.gaai/contexts/backlog/active.backlog.yaml` for the next Story with status `refined`.
+### Story Selection — Non-Negotiable
+
+**The backlog is the ONLY source of truth for story selection.**
+
+1. Open `.gaai/contexts/backlog/active.backlog.yaml`
+2. If an argument was passed (e.g. `/gaai-deliver E06S07`), select that story — verify its status is `refined` before proceeding.
+3. If no argument: select the **first** story in the backlog with `status: refined` (top-to-bottom order).
+4. **Ignore completely:** git branch name, git worktree state, artefact existence, impl-report or qa-report files. A story with `status: done` in the backlog is done — regardless of what branch or files exist.
+
+### Parallel Execution
+
+Multiple `/gaai-deliver` sessions may run simultaneously **if and only if**:
+- Each session targets a **different** story (use explicit story ID argument)
+- The two stories have **no shared dependencies** (both already `done`) per the backlog
+- The user explicitly launches each session
+
+When in doubt: pass the story ID as argument to avoid ambiguity.
+
+### Delivery Loop
 
 Follow the delivery loop exactly. Do not skip QA. If QA fails, invoke `remediate-failures`. If a fix requires changing product scope, STOP and escalate to the human.
 

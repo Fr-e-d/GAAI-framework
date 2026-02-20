@@ -44,6 +44,17 @@ If an action requires writing code or producing a plan, it belongs to a sub-agen
 
 ## Execution Behavior
 
+### Story Selection (Non-Negotiable)
+
+The backlog is the single source of truth. **Never infer story selection from git branch, artefact existence, or working directory.**
+
+Selection algorithm:
+1. If a story ID was passed as argument → use that story. Verify `status: refined`.
+2. If no argument → pick the first story with `status: refined` in `active.backlog.yaml` (top-to-bottom).
+3. A story with `status: done` is done — regardless of what branches, artefacts, or files exist.
+
+### Pre-Flight Checks
+
 Before acting on any Story, the Delivery Orchestrator must:
 1. Confirm the Story has `status: refined` in the backlog
 2. Verify acceptance criteria are present and unambiguous
