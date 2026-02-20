@@ -32,3 +32,13 @@ items:
     artefact: contexts/artefacts/stories/E06S03.story.md
     dependencies: [E06S02]
     notes: "QA PASS. All 10 ACs met. JWT middleware (supabase.auth.getUser), POST /api/experts/register (Zod, 201/409/422/429), GET/PATCH /api/experts/:id/profile (403 own-guard, JSONB merge via merge_expert_profile RPC). zod added. MATCHING_JOBS removed (DEC-33). merge_expert_profile migration applied. PR #2 (auth/security story — PR required)."
+
+  - id: E06S10
+    epic: E06
+    title: "Google Calendar OAuth layer (replaces E06S04)"
+    priority: high
+    status: done
+    completed_at: 2026-02-20
+    artefact: contexts/artefacts/stories/E06S10.story.md
+    dependencies: [E06S03]
+    notes: "QA PASS (1 remediation — AC4: connected derived from gcal_refresh_token IS NOT NULL, not stored boolean). All 10 ACs met. GET auth-url (scopes, offline, consent, state), GET callback (AES-256-GCM encrypted storage, AC3 preservation), GET status, DELETE disconnect (Google revocation + DB clear), refreshGcalToken utility (E06S11 prereq), schema migration (6 gcal_* columns), 8 vitest tests 28/28. PR #4. Smoke tests PASS. ⚠️ Google sensitive scope review (calendar.events) = pre-go-live blocker — must be initiated by founder."
