@@ -483,7 +483,7 @@ updated_at: 2026-02-19
 
 ---
 
-### DEC-2026-02-20-46 — Staging-first deployment flow + convention de tag production
+### DEC-2026-02-20-47 — Staging-first deployment flow + convention de tag production
 
 **Context:** Le GAAI delivery loop squashait directement vers la branche `production` sans jamais déployer sur le worker Cloudflare staging. Les GitHub Actions existantes ciblaient `main` (branche inexistante) — aucun code n'avait jamais été déployé sur les workers CF. L'utilisateur souhaitait valider chaque story sur le staging réel (données Supabase staging) avant de promouvoir en production.
 **Decision:** Flow staging-first en 3 phases : (1) QA PASS → squash merge → push `production` branch → GitHub Actions auto-déploie `callibrate-core-staging`. (2) Delivery Agent exécute smoke tests contre staging URL. (3) Smoke PASS → Delivery Agent s'arrête et reporte à l'humain la commande de tag pour déclencher le deploy production. Gate production = **human gate** (l'humain crée le tag). Convention de tag : `v0.{EPIC_NUMBER}.{STORY_NUMBER}` (ex. `v0.6.7` pour E06S07) avec annotation `{id}: {Story title}`. GitHub Actions `deploy-production.yml` déclenche sur `v*` tags → `wrangler deploy --env production`.
