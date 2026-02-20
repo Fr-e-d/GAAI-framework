@@ -11,7 +11,7 @@ import {
   type QualityTier,
   type ScoreBreakdown,
 } from '../types/matching';
-import { scoreMatch } from '../matching/score';
+import { scoreMatch, applyReliabilityModifier } from '../matching/score';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -101,7 +101,11 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
       rate_max: expert.rate_max,
     };
     const prefs = (expert.preferences ?? {}) as ExpertPreferences;
-    const matchScore = scoreMatch(profile, prefs, requirements, weights);
+    const raw = scoreMatch(profile, prefs, requirements, weights);
+    const matchScore = applyReliabilityModifier(raw, {
+      composite_score: expert.composite_score,
+      total_leads: 0, // TODO(E06S09): populate from leads table count
+    });
 
     return { expert, matchScore };
   });

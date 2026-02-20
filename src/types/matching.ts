@@ -62,6 +62,7 @@ export interface MatchingWeights {
   budget_compatibility: number; // max points for budget component (default 20)
   timeline_match: number;       // max points for timeline component (default 10)
   language_match: number;       // max points for language component (default 10)
+  budget_conversion_factor?: number; // hourly→monthly multiplier (default 20)
 }
 
 export const DEFAULT_WEIGHTS: MatchingWeights = {
@@ -70,6 +71,7 @@ export const DEFAULT_WEIGHTS: MatchingWeights = {
   budget_compatibility: 20,
   timeline_match: 10,
   language_match: 10,
+  budget_conversion_factor: 20,
 };
 
 export interface ScoreBreakdown {
@@ -79,6 +81,7 @@ export interface ScoreBreakdown {
   timeline_match: number;
   language_match: number;
   deal_breaker?: boolean;
+  reliability_modifier?: number;
 }
 
 export interface MatchScore {

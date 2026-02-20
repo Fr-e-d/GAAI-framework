@@ -14,6 +14,7 @@ export interface ExpertPoolEntry {
   rate_min: number | null;
   rate_max: number | null;
   composite_score: number | null;
+  total_leads: number; // TODO(E06S09): populate from leads table count
 }
 
 const KV_KEY = 'expert_pool';
@@ -53,6 +54,7 @@ export async function loadExpertPool(env: Env): Promise<ExpertPoolEntry[]> {
     rate_min: e.rate_min,
     rate_max: e.rate_max,
     composite_score: e.composite_score,
+    total_leads: 0, // TODO(E06S09): populate from leads table count
   }));
 
   // 3. Write back to KV (non-blocking on failure)

@@ -59,7 +59,13 @@ L'utilisateur contrôle toujours son expérience. Le système apprend, propose, 
 
 **Purpose:** Matching OS — moteur de qualification et matching bi-directionnel configurable par domaine. MVP focalisé sur les experts AI. Architecture domain-agnostic : peut accueillir tout type de prestataire de service qualifié. Le call booké est l'unité monétisable. Pas de commission sur les deals.
 
-**Positionnement :** "Browse like a directory. Match like magic."
+**Taglines validés (DEC-49) :**
+- Expert-facing (callibrate.io) : *"Pre-qualified leads, booked to your calendar."*
+- Prospect-facing (satellites) : *"The expert a trusted friend would recommend."*
+- Brand-level (social bios, meta, decks) : *"Qualified matches. Booked calls."*
+- Secondary (mode dual) : *"Browse like a directory. Match like magic."*
+
+**Positionnement dual :**
 - Mode directory : exploration, profils, trust scores, SEO-friendly
 - Mode engine : freetext + AI extraction → matching bi-directionnel → résultats rankés
 

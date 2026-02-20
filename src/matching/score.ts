@@ -6,6 +6,7 @@ import type {
   ProspectRequirements,
   ScoreBreakdown,
 } from '../types/matching';
+import { normalizeSkill, getIndustryProximity, parseTimelineDays } from './normalize';
 
 // ── scoreMatch — pure function, no side effects ───────────────────────────────
 // AC1: scoreMatch(expertProfile, expertPreferences, prospectRequirements, weights): MatchScore
@@ -18,10 +19,11 @@ export function scoreMatch(
   weights: MatchingWeights,
 ): MatchScore {
   // AC6: bi-directional deal-breaker check (short-circuit)
-  const excludedIndustries = expertPreferences.excluded_industries ?? [];
+  // Fix DEC-49: case-insensitive comparison
+  const excludedIndustries = (expertPreferences.excluded_industries ?? []).map((i) => i.toLowerCase());
   if (
     prospectRequirements.industry &&
-    excludedIndustries.includes(prospectRequirements.industry)
+    excludedIndustries.includes(prospectRequirements.industry.toLowerCase())
   ) {
     return {
       score: 0,
@@ -39,7 +41,7 @@ export function scoreMatch(
   const breakdown: ScoreBreakdown = {
     skills_overlap: scoreSkillsOverlap(expertProfile, prospectRequirements, weights.skills_overlap),
     industry_match: scoreIndustryMatch(expertProfile, prospectRequirements, weights.industry_match),
-    budget_compatibility: scoreBudgetCompatibility(expertProfile, prospectRequirements, weights.budget_compatibility),
+    budget_compatibility: scoreBudgetCompatibility(expertProfile, prospectRequirements, weights),
     timeline_match: scoreTimelineMatch(expertPreferences, prospectRequirements, weights.timeline_match),
     language_match: scoreLanguageMatch(expertProfile, expertPreferences, prospectRequirements, weights.language_match),
   };
@@ -54,8 +56,42 @@ export function scoreMatch(
   return { score, breakdown };
 }
 
+// ── Reliability modifier (DEC-50) ───────────────────────────────────────────
+
+export interface ReliabilityContext {
+  composite_score: number | null;
+  total_leads: number;
+}
+
+export function applyReliabilityModifier(
+  matchScore: MatchScore,
+  context: ReliabilityContext,
+): MatchScore {
+  // Cold start protection: < 5 leads or no composite data → no penalty
+  if (context.total_leads < 5 || context.composite_score == null || context.composite_score === 0) {
+    return matchScore;
+  }
+
+  // composite >= 50 → no penalty
+  if (context.composite_score >= 50) {
+    return {
+      score: matchScore.score,
+      breakdown: { ...matchScore.breakdown, reliability_modifier: 1.0 },
+    };
+  }
+
+  // composite < 50 → progressive penalty (0.5 to 1.0)
+  const multiplier = 0.5 + (context.composite_score / 50) * 0.5;
+  return {
+    score: matchScore.score * multiplier,
+    breakdown: { ...matchScore.breakdown, reliability_modifier: multiplier },
+  };
+}
+
+// ── Scorers ─────────────────────────────────────────────────────────────────
+
 // AC3: skills_overlap = (matching skills count / prospect.skills_needed.length) * weight
-// Returns 0 if prospect has no skills_needed
+// Uses normalizeSkill() for alias resolution (DEC-49)
 function scoreSkillsOverlap(
   profile: ExpertProfile,
   requirements: ProspectRequirements,
@@ -64,13 +100,14 @@ function scoreSkillsOverlap(
   const needed = requirements.skills_needed ?? [];
   if (needed.length === 0) return 0;
 
-  const expertSkills = (profile.skills ?? []).map((s) => s.toLowerCase());
-  const matchCount = needed.filter((s) => expertSkills.includes(s.toLowerCase())).length;
+  const expertSkills = (profile.skills ?? []).map(normalizeSkill);
+  const matchCount = needed.filter((s) => expertSkills.includes(normalizeSkill(s))).length;
 
   return (matchCount / needed.length) * weight;
 }
 
-// AC4: full points if expert.profile.industries includes prospect.requirements.industry; 0 otherwise
+// AC4: graduated industry match with proximity scoring (DEC-49)
+// Exact match → full weight; proximity match → proximity × weight; unknown pair → 0
 function scoreIndustryMatch(
   profile: ExpertProfile,
   requirements: ProspectRequirements,
@@ -78,28 +115,39 @@ function scoreIndustryMatch(
 ): number {
   if (!requirements.industry) return 0;
 
-  const expertIndustries = (profile.industries ?? []).map((i) => i.toLowerCase());
-  return expertIndustries.includes(requirements.industry.toLowerCase()) ? weight : 0;
+  const expertIndustries = profile.industries ?? [];
+  if (expertIndustries.length === 0) return 0;
+
+  let bestProximity = 0;
+  for (const expertInd of expertIndustries) {
+    const proximity = getIndustryProximity(expertInd, requirements.industry);
+    if (proximity > bestProximity) bestProximity = proximity;
+    if (bestProximity === 1) break; // exact match — can't improve
+  }
+
+  return bestProximity * weight;
 }
 
-// AC5: budget_compatibility
-// full: budget_range.min <= expert.rate_min * 20 <= budget_range.max
-// partial: [rate_min*20, rate_max*20] partially overlaps budget_range (expert affordable but at edge)
+// AC5: budget_compatibility with configurable conversion factor (DEC-49)
+// full: budget_range.min <= expert.rate_min * factor <= budget_range.max
+// partial: ranges overlap → 0.5 * weight
 // 0: no overlap or missing data
 function scoreBudgetCompatibility(
   profile: ExpertProfile,
   requirements: ProspectRequirements,
-  weight: number,
+  weights: MatchingWeights,
 ): number {
+  const weight = weights.budget_compatibility;
   const budgetRange = requirements.budget_range;
   if (!budgetRange || profile.rate_min == null) return 0;
 
-  const expertMonthly = profile.rate_min * 20;
-  const expertMonthlyMax = (profile.rate_max ?? profile.rate_min) * 20;
+  const factor = weights.budget_conversion_factor ?? 20;
+  const expertMonthly = profile.rate_min * factor;
+  const expertMonthlyMax = (profile.rate_max ?? profile.rate_min) * factor;
   const budgetMin = budgetRange.min ?? 0;
   const budgetMax = budgetRange.max;
 
-  // Full: rate_min * 20 falls within budget_range
+  // Full: rate_min * factor falls within budget_range
   if (expertMonthly >= budgetMin && expertMonthly <= budgetMax) {
     return weight;
   }
@@ -113,8 +161,8 @@ function scoreBudgetCompatibility(
   return 0;
 }
 
-// timeline_match: full if no prospect timeline requirement;
-// full if expert accepts the prospect's timeline; 0 if expert hasn't specified or doesn't accept
+// timeline_match with temporal proximity (DEC-49)
+// Exact string match first (backward compat), then parse to days for proximity scoring
 function scoreTimelineMatch(
   preferences: ExpertPreferences,
   requirements: ProspectRequirements,
@@ -125,9 +173,36 @@ function scoreTimelineMatch(
   const accepted = preferences.accepted_timelines;
   if (!accepted || accepted.length === 0) return 0; // expert hasn't specified → no confirmed match
 
-  return accepted.map((t) => t.toLowerCase()).includes(requirements.timeline.toLowerCase())
-    ? weight
-    : 0;
+  // Exact string match (backward compat)
+  if (accepted.map((t) => t.toLowerCase()).includes(requirements.timeline.toLowerCase())) {
+    return weight;
+  }
+
+  // Parse prospect timeline to days
+  const prospectDays = parseTimelineDays(requirements.timeline);
+  if (prospectDays === null) return 0; // non-parseable, no string match → 0
+
+  // Find best proximity among accepted timelines
+  let bestScore = 0;
+  for (const t of accepted) {
+    const expertDays = parseTimelineDays(t);
+    if (expertDays === null) continue;
+
+    // Both flexible → full match
+    if (prospectDays === Infinity && expertDays === Infinity) {
+      return weight;
+    }
+    // One flexible, one specific → half points
+    if (prospectDays === Infinity || expertDays === Infinity) {
+      bestScore = Math.max(bestScore, 0.5);
+      continue;
+    }
+    // Both finite → ratio-based proximity
+    const ratio = Math.min(prospectDays, expertDays) / Math.max(prospectDays, expertDays);
+    bestScore = Math.max(bestScore, ratio);
+  }
+
+  return bestScore * weight;
 }
 
 // language_match: proportional overlap between prospect required languages and expert languages

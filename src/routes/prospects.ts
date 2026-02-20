@@ -15,7 +15,7 @@ import {
   type ProspectRequirements,
   type ScoreBreakdown,
 } from '../types/matching';
-import { scoreMatch } from '../matching/score';
+import { scoreMatch, applyReliabilityModifier } from '../matching/score';
 import { signProspectToken, verifyProspectToken } from '../lib/jwt';
 import { loadExpertPool } from '../lib/expertPool';
 
@@ -183,7 +183,11 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
         rate_max: expert.rate_max,
       };
       const prefs = (expert.preferences ?? {}) as ExpertPreferences;
-      const { score, breakdown } = scoreMatch(profile, prefs, requirements, weights);
+      const raw = scoreMatch(profile, prefs, requirements, weights);
+      const { score, breakdown } = applyReliabilityModifier(raw, {
+        composite_score: expert.composite_score,
+        total_leads: expert.total_leads,
+      });
 
       return {
         prospect_id: prospect.id,
@@ -384,6 +388,7 @@ export async function handleProspectIdentify(
         rate_min: expert.rate_min,
         rate_max: expert.rate_max,
         score: matchScoreMap.get(expertId) ?? 0,
+        // TODO(DEC-41): cal_username → Google Calendar booking (E06S10/E06S11)
         booking_url: expert.cal_username
           ? `https://cal.com/${expert.cal_username}/intro-call`
           : null,

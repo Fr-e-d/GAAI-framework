@@ -503,4 +503,43 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-20-49 — Naming confirmé "Callibrate" + taglines dual validés
+
+**Context:** Question de savoir si "Callibrate" évoque suffisamment le concept de lead qualification. Analyse structurée des alternatives (4 axes : qualification/filtrage, matching/précision, confiance/réseau, hybride) vs conservation du nom existant avec travail de tagline.
+**Decision:** Nom "Callibrate" confirmé définitivement. Taglines dual adoptés : (1) Expert-facing : "Pre-qualified leads, booked to your calendar." (2) Prospect-facing : "The expert a trusted friend would recommend." (3) Brand-level : "Qualified matches. Booked calls." Les taglines compensent ce que le nom seul ne porte pas (qualification explicite) tout en respectant le positionnement profond (réseau de confiance scalable).
+**Rationale:** Aucune alternative ne bat Callibrate sur l'ensemble des critères : domain-agnostic (pas de "AI" ou "lead" dans le nom — cohérent DEC-18/19), domaine sécurisé (callibrate.io + app.callibrate.io déjà dans le code/CORS), double lecture sémantique (calibrate + call), mémorable et prononçable FR/EN. Le gap "qualification pas explicite dans le nom" est résolvable par le tagline — le gap des alternatives (vertical lock, connotation erronée, domaine indisponible) ne l'est pas. Alternatives évaluées et rejetées : QualifyAI (vertical lock), LeadSift (sonne outil interne), Vetted (saturé), PreQual (connotation immo), MatchOS (trop technique), TrueMatch (dating), FitScore (fitness), Vouchd (SEO fragile), Screenr (connotation RH).
+**Impact:** context.md mis à jour avec les taglines validés. Positionnement "Browse like a directory. Match like magic." conservé comme secondary tagline (mode dual directory/engine). Les taglines sont applicables immédiatement : callibrate.io (expert-facing), satellites (prospect-facing), meta descriptions et social bios (brand-level). Supersede partiel de DEC-07 : le "why" du nom est désormais documenté avec les taglines associés.
+**Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-20-52 — Flow Hybride Prospect : Expression libre → Extraction AI → Confirmation ciblée
+
+**Context:** Le quiz form pur crée de la friction et manque le contexte nuancé. Le prospect comprend son problème en langage naturel, pas en vocabulaire technique structuré.
+**Decision:** Flow prospect en 3 phases : (1) Expression libre (freetext description) → (2) Extraction AI via `/api/extract` existant (E06S08) → (3) Confirmation ciblée des champs low-confidence uniquement. Remplace le quiz form pur comme canal principal. Le quiz form reste disponible comme fallback.
+**Rationale:** Réduit la friction funnel, exploite l'infrastructure d'extraction AI déjà livrée (E06S08), et produit des données de meilleure qualité que le forced-choice. Cohérent avec DEC-17 (AI Freetext Extraction).
+**Impact:** Story séparée à créer pour l'implémentation UI. Aucun changement backend — `/api/extract` est déjà opérationnel. Décision loggée uniquement, pas d'implémentation dans ce scope.
+**Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-20-51 — Reliability Modifier Anti-Gaming : composite_score comme scoring modifier
+
+**Context:** Le composite_score était utilisé uniquement comme tiebreaker dans le ranking (sort secondaire). Un expert avec un composite_score faible (gaming, flags systématiques) pouvait toujours être #1 s'il avait des skills uniques matchant le prospect. Le tiebreaker ne pénalise que les ex-aequo.
+**Decision:** composite_score passe de tiebreaker à scoring modifier via `applyReliabilityModifier()`. Cold start protection : < 5 leads OU composite null/0 → pas de pénalité (aucun expert pénalisé avant données réelles). Composite >= 50 → modifier 1.0 (pas de pénalité). Composite < 50 → multiplier progressif (0.5 à 1.0). Le modifier est enregistré dans `breakdown.reliability_modifier` pour transparence. E06S09 dependency pour activation réelle (composite_score = 0 pour tous actuellement → cold start → aucune pénalité appliquée).
+**Rationale:** Aligne les incentives : experts honnêtes avec bon composite_score conservent leur ranking. Experts gaming voient leur score match réduit progressivement. La cold start protection garantit zéro impact avant données suffisantes. Réf: DEC-19, DEC-30.
+**Impact:** `applyReliabilityModifier()` exporté depuis `src/matching/score.ts`. Wired dans `src/routes/prospects.ts` et `src/routes/matches.ts`. `reliability_modifier` ajouté à `ScoreBreakdown`. Activation réelle dépend de E06S09 (composite score worker) + accumulation de 5+ leads par expert.
+**Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-20-50 — Scoring Engine Phase 1 : normalisation skills, proximité industries/timelines, budget configurable, fix case-sensitivity
+
+**Context:** L'analyse objective du scoring engine a révélé 7 faiblesses structurelles : (1) deal-breaker case-sensitive (seul check non-normalisé), (2) skills matching par string equality sans alias, (3) industry match binaire, (4) budget proxy ×20 hardcodé, (5) timeline matching par string equality, (6) anti-gaming composite en tiebreaker uniquement, (7) données collectées mais inutilisées.
+**Decision:** Phase 1 corrige les 6 premières faiblesses. Fix : deal-breaker case-insensitive. Skills : `normalizeSkill()` avec alias map (react.js→react, nodejs, etc.). Industries : `getIndustryProximity()` graduée (banking↔fintech 0.8, e-commerce↔retail 0.9, etc.). Timelines : `parseTimelineDays()` avec ratio-based proximity scoring. Budget : `budget_conversion_factor` configurable dans `MatchingWeights` (default 20, backward-compatible). Tous les utilitaires dans `src/matching/normalize.ts`. Réf: DEC-18, DEC-27.
+**Impact:** `src/matching/normalize.ts` créé (3 fonctions exportées). `src/matching/score.ts` mis à jour (4 scorers + deal-breaker fix). `src/types/matching.ts` étendu (`budget_conversion_factor`, `reliability_modifier`). 11 nouveaux tests, 5 existants inchangés (non-régression vérifiée). Phase 2 (embeddings pgvector) et Phase 3 (ML re-ranking) hors scope.
+**Date:** 2026-02-20
+
+---
+
 <!-- Add decisions above this line, newest first -->

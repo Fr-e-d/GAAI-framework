@@ -4,7 +4,7 @@ export interface Env {
   SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_KEY: string;
 
-  // Anthropic AI (bound via wrangler secret put)
+  // TODO(E06S12): migrate to OPENAI_API_KEY (DEC-48)
   ANTHROPIC_API_KEY: string;
   CLOUDFLARE_AI_GATEWAY_URL: string;
 
