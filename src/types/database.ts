@@ -103,6 +103,12 @@ export type Database = {
           composite_score: number | null
           created_at: string | null
           display_name: string | null
+          gcal_access_token: string | null
+          gcal_connected: boolean | null
+          gcal_connected_at: string | null
+          gcal_email: string | null
+          gcal_refresh_token: string | null
+          gcal_token_expiry_at: string | null
           headline: string | null
           id: string
           preferences: Json | null
@@ -120,6 +126,12 @@ export type Database = {
           composite_score?: number | null
           created_at?: string | null
           display_name?: string | null
+          gcal_access_token?: string | null
+          gcal_connected?: boolean | null
+          gcal_connected_at?: string | null
+          gcal_email?: string | null
+          gcal_refresh_token?: string | null
+          gcal_token_expiry_at?: string | null
           headline?: string | null
           id: string
           preferences?: Json | null
@@ -137,6 +149,12 @@ export type Database = {
           composite_score?: number | null
           created_at?: string | null
           display_name?: string | null
+          gcal_access_token?: string | null
+          gcal_connected?: boolean | null
+          gcal_connected_at?: string | null
+          gcal_email?: string | null
+          gcal_refresh_token?: string | null
+          gcal_token_expiry_at?: string | null
           headline?: string | null
           id?: string
           preferences?: Json | null
@@ -428,7 +446,6 @@ export type Database = {
           p_preferences?: Json | null
         }
         Returns: {
-          id: string
           availability: string | null
           avatar_url: string | null
           bio: string | null
@@ -436,7 +453,14 @@ export type Database = {
           composite_score: number | null
           created_at: string | null
           display_name: string | null
+          gcal_access_token: string | null
+          gcal_connected: boolean | null
+          gcal_connected_at: string | null
+          gcal_email: string | null
+          gcal_refresh_token: string | null
+          gcal_token_expiry_at: string | null
           headline: string | null
+          id: string
           preferences: Json | null
           profile: Json | null
           rate_max: number | null

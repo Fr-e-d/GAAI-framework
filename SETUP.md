@@ -261,6 +261,28 @@ git tag v0.6.7 -m "E06S07: Satellite Funnel API" && git push origin v0.6.7
 
 ---
 
+## Google Calendar OAuth Secrets (E06S10)
+
+wrangler secret put GOOGLE_CLIENT_ID
+# Paste: OAuth 2.0 Client ID from Google Cloud Console (Credentials page)
+
+wrangler secret put GOOGLE_CLIENT_SECRET
+# Paste: OAuth 2.0 Client Secret from Google Cloud Console
+
+wrangler secret put GCAL_TOKEN_ENCRYPTION_KEY
+# Paste: base64-encoded 32-byte AES-256 key
+# Generate: openssl rand -base64 32
+
+wrangler secret put WORKER_BASE_URL
+# Staging:    https://callibrate-core-staging.{account}.workers.dev
+# Production: https://api.callibrate.io
+
+**Required redirect URIs in Google Cloud Console (Authorized redirect URIs):**
+- Staging:    https://callibrate-core-staging.{account}.workers.dev/api/gcal/callback
+- Production: https://api.callibrate.io/api/gcal/callback
+
+---
+
 ## Step 6 — Verify Local Dev
 
 Install dependencies (one-time):
