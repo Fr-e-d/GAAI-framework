@@ -54,7 +54,7 @@ export async function handleGcalAuthUrl(
     client_id: env.GOOGLE_CLIENT_ID,
     redirect_uri: `${env.WORKER_BASE_URL}/api/gcal/callback`,
     response_type: 'code',
-    scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly',
+    scope: 'openid email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly',
     access_type: 'offline',
     prompt: 'consent',
     state: expertId,
@@ -111,10 +111,10 @@ export async function handleGcalCallback(
   const tokens = await tokenResponse.json() as {
     access_token: string;
     refresh_token?: string | null;
-    expiry_date?: number;
+    expires_in?: number;
   };
 
-  const { access_token, refresh_token, expiry_date } = tokens;
+  const { access_token, refresh_token, expires_in } = tokens;
 
   const encryptedAccessToken = await encryptToken(access_token, env.GCAL_TOKEN_ENCRYPTION_KEY);
 
@@ -142,7 +142,7 @@ export async function handleGcalCallback(
   // AC4: gcal_connected = true only when a refresh token is present (not just any token exchange)
   const updateData: Record<string, unknown> = {
     gcal_access_token: encryptedAccessToken,
-    gcal_token_expiry_at: expiry_date ? new Date(expiry_date).toISOString() : null,
+    gcal_token_expiry_at: expires_in ? new Date(Date.now() + expires_in * 1000).toISOString() : null,
     gcal_connected: encryptedRefreshToken !== undefined,
     gcal_connected_at: new Date().toISOString(),
   };
