@@ -80,10 +80,10 @@ items:
     epic: E06
     title: "Cal.com managed users integration + webhook endpoint"
     priority: high
-    status: refined
+    status: done
     artefact: contexts/artefacts/stories/E06S04.story.md
     dependencies: [E06S03]
-    notes: "Cal.com account provisioned as prerequisite. Google Calendar OAuth + 20-min event type + booking webhooks."
+    notes: "DONE 2026-02-20. QA PASS. All 10 ACs met. Synchronous cal.setup (DEC-34), HMAC-SHA256 webhook validation, booking.created/cancelled handlers, idempotent processing. Schema migration applied (5 new cal_* columns). PR#3 open (schema migration — PR required). Unblocks E06S06."
 
   - id: E06S05
     epic: E06
@@ -116,10 +116,10 @@ items:
     epic: E06
     title: "AI freetext extraction service (project description → structured JSONB)"
     priority: high
-    status: refined
+    status: done
     artefact: contexts/artefacts/stories/E06S08.story.md
     dependencies: [E06S01, E06S02]
-    notes: "POST /api/extract. Claude haiku-4-5. Returns ProspectRequirements + confidence per field + confirmation questions for low-confidence fields. Stateless — no DB writes."
+    notes: "DONE 2026-02-20. QA PASS. All 10 ACs met. POST /api/extract + claude-haiku-4-5-20251001 + CF AI Gateway + tool_use schema + satellite vertical context (AC9) + 8 vitest tests PASS. Extends ProspectRequirements with challenge?, company_size?. Unblocks satellite funnel (E06S07 integration) and future ML improvements."
 
   - id: E06S09
     epic: E06

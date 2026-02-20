@@ -4,23 +4,13 @@ import type { Env } from '../types/env';
 
 // ── Mock Env ──────────────────────────────────────────────────────────────────
 
-const mockEnv: Env = {
+const mockEnv = {
   SUPABASE_URL: 'https://test.supabase.co',
   SUPABASE_ANON_KEY: 'test-anon-key',
   SUPABASE_SERVICE_KEY: 'test-service-key',
   ANTHROPIC_API_KEY: 'test-anthropic-key',
   CLOUDFLARE_AI_GATEWAY_URL: 'https://gateway.ai.cloudflare.com/v1/account/gateway/anthropic',
-  // Stub unused bindings
-  CAL_API_KEY: '',
-  CAL_OAUTH_CLIENT_ID: '',
-  CAL_WEBHOOK_SECRET: '',
-  PROSPECT_TOKEN_SECRET: '',
-  SESSIONS: {} as KVNamespace,
-  RATE_LIMITING: {} as KVNamespace,
-  FEATURE_FLAGS: {} as KVNamespace,
-  EMAIL_NOTIFICATIONS: {} as Queue,
-  LEAD_BILLING: {} as Queue,
-};
+} as unknown as Env;
 
 // ── Realistic 150-word freetext (AC10) ────────────────────────────────────────
 
@@ -38,9 +28,9 @@ before our busy season in 3 months. We work primarily in French but the system s
 customers too.
 `.trim();
 
-// ── Mock Claude tool_use response (all 7 fields present, 5+ confidence > 0.5) ─
+// ── Mock Claude tool_use response (all 7 fields present, all confidence > 0.5) ─
 
-const MOCK_ANTHROPIC_RESPONSE = {
+const MOCK_HIGH_CONFIDENCE_RESPONSE = {
   id: 'msg_test',
   type: 'message',
   role: 'assistant',
@@ -173,7 +163,7 @@ describe('handleExtract — POST /api/extract', () => {
 
   it('AC10 — extracts all 7 fields with ≥5 having confidence > 0.5', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(JSON.stringify(MOCK_ANTHROPIC_RESPONSE), {
+      new Response(JSON.stringify(MOCK_HIGH_CONFIDENCE_RESPONSE), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -209,7 +199,6 @@ describe('handleExtract — POST /api/extract', () => {
     expect(highConfidenceFields.length).toBeGreaterThanOrEqual(5);
 
     // AC3: Response shape
-    expect(typeof body.needs_confirmation).toBe('object');
     expect(Array.isArray(body.needs_confirmation)).toBe(true);
     expect(typeof body.ready_to_match).toBe('boolean');
   });
@@ -218,7 +207,7 @@ describe('handleExtract — POST /api/extract', () => {
 
   it('AC6 — ready_to_match is true and no confirmation_questions when all confidence ≥ 0.7', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(JSON.stringify(MOCK_ANTHROPIC_RESPONSE), {
+      new Response(JSON.stringify(MOCK_HIGH_CONFIDENCE_RESPONSE), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -295,5 +284,25 @@ describe('handleExtract — POST /api/extract', () => {
 
     const res = await handleExtract(req, mockEnv);
     expect(res.status).toBe(502);
+  });
+
+  // ── AC2: tool_use not returned → 500 ────────────────────────────────────────
+
+  it('AC2 — returns 500 when Anthropic returns no tool_use block', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 'msg', type: 'message', content: [{ type: 'text', text: 'hello' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Build me an AI.' }),
+    });
+
+    const res = await handleExtract(req, mockEnv);
+    expect(res.status).toBe(500);
   });
 });

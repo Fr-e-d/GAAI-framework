@@ -4,8 +4,6 @@ import { handleExtract } from './routes/extract';
 import { authenticate } from './middleware/auth';
 import { handleRegister } from './handlers/experts/register';
 import { handleGetProfile, handlePatchProfile } from './handlers/experts/profile';
-import { handleCalAuthUrl, handleCalCallback, handleCalStatus } from './handlers/experts/cal';
-import { handleCalWebhook } from './handlers/webhooks/cal';
 
 const QUEUES = ['email-notifications', 'lead-billing'] as const;
 
@@ -58,11 +56,6 @@ export default {
       return handleExtract(request, env);
     }
 
-    // ── Cal.com webhooks (unauthenticated — signature validated inside handler)
-    if (method === 'POST' && pathname === '/webhooks/cal') {
-      return handleCalWebhook(request, env);
-    }
-
     // ── Expert routes (authenticated) ───────────────────────────────────────
     if (pathname.startsWith('/api/experts/')) {
       const authResult = await authenticate(request, env);
@@ -83,22 +76,6 @@ export default {
         if (method === 'PATCH') {
           return handlePatchProfile(request, env, user, profileMatch[1]!);
         }
-      }
-
-      // ── Cal.com expert sub-routes ─────────────────────────────────────────
-      const calAuthUrlMatch = pathname.match(/^\/api\/experts\/([^/]+)\/cal\/auth-url$/);
-      if (method === 'GET' && calAuthUrlMatch && calAuthUrlMatch[1]) {
-        return handleCalAuthUrl(request, env, user, calAuthUrlMatch[1]);
-      }
-
-      const calCallbackMatch = pathname.match(/^\/api\/experts\/([^/]+)\/cal\/callback$/);
-      if (method === 'GET' && calCallbackMatch && calCallbackMatch[1]) {
-        return handleCalCallback(request, env, user, calCallbackMatch[1]);
-      }
-
-      const calStatusMatch = pathname.match(/^\/api\/experts\/([^/]+)\/cal\/status$/);
-      if (method === 'GET' && calStatusMatch && calStatusMatch[1]) {
-        return handleCalStatus(request, env, user, calStatusMatch[1]);
       }
 
       return new Response(JSON.stringify({ error: 'Not Found' }), {

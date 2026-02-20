@@ -58,6 +58,9 @@ updated_at: 2026-02-20
 - **Zod validation pattern (E06S03):** Always use `safeParse()` (never `.parse()` — throws). On failure: 422 + `{ error: "Validation failed", details: parsed.error.flatten().fieldErrors }`. Use `z.record(z.string(), z.unknown())` for flexible JSONB object fields (Zod v3 — two-argument form required; single-arg is Zod v4+ only).
 - **Rate limiter pattern (E06S03):** `src/lib/rateLimit.ts` — KV key `rate_limit:{action}:{ip}` where ip = `CF-Connecting-IP` (fallback `'unknown'` in dev). Sliding window via `expirationTtl`. Enforced after auth, before DB operations.
 - **Ownership guard pattern (E06S03):** `user.id !== resourceId` check at handler entry — returns 403 before any DB query. `resourceId` extracted from URL in the router, passed as handler arg.
+- **Anthropic tool_use pattern (E06S08):** Use `tool_choice: { type: 'tool', name }` to force structured JSON output from Claude without prompt engineering. Tool schema enforces field types + required fields. Raw `fetch` only — no Anthropic SDK.
+- **CF AI Gateway routing (E06S08):** `const apiUrl = \`${env.CLOUDFLARE_AI_GATEWAY_URL}/v1/messages\`` where `CLOUDFLARE_AI_GATEWAY_URL = https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/anthropic`. Header: `x-api-key: env.ANTHROPIC_API_KEY` (NOT `Authorization: Bearer`). `anthropic-version: 2023-06-01`.
+- **Non-blocking optional enrichment pattern (E06S08):** Wrap optional DB reads in `try/catch`, use null-check after. Core logic proceeds regardless. Example: `satellite_configs.vertical` lookup for extraction context.
 
 ---
 
@@ -80,6 +83,7 @@ updated_at: 2026-02-20
 ## Test Patterns
 
 - **Test framework:** `vitest` — added in E06S05. Pure functions (no CF Worker bindings) test cleanly with vitest. Run: `npm run test`.
+- **Mocking global fetch in vitest (E06S08):** `vi.stubGlobal('fetch', vi.fn())` in `beforeEach`, `vi.unstubAllGlobals()` in `afterEach`. Then `vi.mocked(fetch).mockResolvedValueOnce(new Response(...))` to mock API calls.
 - **scoreMatch timeline behavior:** When a prospect specifies a timeline but the expert has no `accepted_timelines`, the engine returns 0 (no confirmed match). Full points only when: (a) prospect has no timeline requirement, OR (b) expert's `accepted_timelines` explicitly includes the prospect's timeline. Prevents false positives; incentivizes experts to declare preferences.
 
 ---
