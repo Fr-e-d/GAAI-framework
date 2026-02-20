@@ -1,0 +1,19 @@
+# Local dev secrets — copy to .dev.vars and fill in real values from 1Password
+# Never commit .dev.vars or .dev.vars.enc
+
+# Supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_KEY=your-service-key
+
+# Anthropic / AI Gateway
+ANTHROPIC_API_KEY=sk-ant-your-key
+CLOUDFLARE_AI_GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/your-account/your-gateway/anthropic
+
+# Prospect token
+PROSPECT_TOKEN_SECRET=any-random-string-32-chars-min
+
+# Google Calendar OAuth (E06S10)
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-your-secret
+GCAL_TOKEN_ENCRYPTION_KEY=base64-encoded-32-byte-key  # openssl rand -base64 32
