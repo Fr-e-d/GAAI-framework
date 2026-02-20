@@ -393,4 +393,14 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-20-38 — callibrate.io acquis — domaine principal confirmé
+
+**Context:** DEC-07 mentionnait "both domains available and secured" mais sans confirmation d'achat réel. callibrate.io est désormais officiellement acquis.
+**Decision:** callibrate.io est le domaine principal de la plateforme. callibrate.ai reste le domaine prospect-facing (statut d'acquisition à confirmer séparément).
+**Rationale:** Confirmation de possession réelle — plus une vérification de disponibilité.
+**Impact:** Tous les artefacts, DNS, déploiements Cloudflare Workers doivent pointer vers callibrate.io pour l'interface expert. Aucun changement architectural — cohérent avec DEC-07 et DEC-22.
+**Date:** 2026-02-20
+
+---
+
 <!-- Add decisions above this line, newest first -->
