@@ -98,4 +98,7 @@ export interface MatchResult {
   skills: string[];
   industries: string[];
   project_types: string[];
+  languages: string[];
+  rate_min: number | null;
+  rate_max: number | null;
 }

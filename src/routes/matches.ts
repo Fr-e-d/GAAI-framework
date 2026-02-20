@@ -138,6 +138,9 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
       skills: profile.skills ?? [],
       industries: profile.industries ?? [],
       project_types: profile.project_types ?? [],
+      languages: profile.languages ?? [],
+      rate_min: expert.rate_min ?? null,
+      rate_max: expert.rate_max ?? null,
     };
   });
 
@@ -177,7 +180,7 @@ export async function handleMatchGet(request: Request, env: Env, prospectId: str
   const expertIds = matches.map((m) => m.expert_id).filter(Boolean) as string[];
   const { data: experts, error: expertErr } = await supabase
     .from('experts')
-    .select('id, composite_score, profile')
+    .select('id, composite_score, profile, rate_min, rate_max')
     .in('id', expertIds);
 
   if (expertErr) return errorResponse('Database error', 500);
@@ -198,6 +201,9 @@ export async function handleMatchGet(request: Request, env: Env, prospectId: str
       skills: profile.skills ?? [],
       industries: profile.industries ?? [],
       project_types: profile.project_types ?? [],
+      languages: profile.languages ?? [],
+      rate_min: expert?.rate_min ?? null,
+      rate_max: expert?.rate_max ?? null,
     };
   });
 

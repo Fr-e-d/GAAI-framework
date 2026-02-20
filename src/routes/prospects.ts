@@ -37,14 +37,25 @@ function isValidEmail(email: string): boolean {
 }
 
 // Extract required field keys from quiz_schema JSONB.
-// Expected schema format: Record<string, { required?: boolean, ... }>
-// Also supports { questions: Array<{ key: string, required?: boolean }> }
+// Supports three formats:
+//   Format A (DB format): { fields: [{ id: string, required?: boolean, ... }] }
+//   Format B (legacy):    { questions: [{ key: string, required?: boolean, ... }] }
+//   Format C (dict):      { field_key: { required: boolean, ... }, ... }
 function extractRequiredKeys(quizSchema: Json): string[] {
   if (!quizSchema || typeof quizSchema !== 'object' || Array.isArray(quizSchema)) return [];
 
   const schema = quizSchema as Record<string, Json>;
 
-  // Format A: { questions: [{ key, required }, ...] }
+  // Format A: { fields: [{ id, required }, ...] } — actual DB format (verified from staging)
+  if (Array.isArray(schema['fields'])) {
+    return (schema['fields'] as Json[])
+      .filter((f): f is Record<string, Json> => typeof f === 'object' && f !== null && !Array.isArray(f))
+      .filter((f) => f['required'] === true)
+      .map((f) => String(f['id'] ?? ''))
+      .filter(Boolean);
+  }
+
+  // Format B: { questions: [{ key, required }, ...] } — legacy array format
   if (Array.isArray(schema['questions'])) {
     return (schema['questions'] as Json[])
       .filter((q): q is Record<string, Json> => typeof q === 'object' && q !== null && !Array.isArray(q))
@@ -53,7 +64,7 @@ function extractRequiredKeys(quizSchema: Json): string[] {
       .filter(Boolean);
   }
 
-  // Format B: { field_key: { required: boolean, ... }, ... }
+  // Format C: { field_key: { required: boolean, ... }, ... } — dict format
   return Object.entries(schema)
     .filter(([, v]) => typeof v === 'object' && v !== null && !Array.isArray(v) && (v as Record<string, Json>)['required'] === true)
     .map(([k]) => k);
