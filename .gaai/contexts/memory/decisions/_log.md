@@ -423,4 +423,44 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-20-44 — Booking reminders : Prospect obligatoire (J-1 + H-1), Expert optionnel (dashboard)
+
+**Context:** Un booking confirmé nécessite des rappels pour réduire les no-shows. Expert et prospect ont des besoins différents : le prospect a besoin d'un rappel systématique ; l'expert peut vouloir gérer ses notifications lui-même.
+**Decision:** Prospect : reminders J-1 (24h) + H-1 (1h) obligatoires, non désactivables, email via Resend. Expert : reminders J-1 + H-1 optionnels, activés par défaut à l'inscription, désactivables depuis le dashboard `app.callibrate.io` (`experts.reminder_settings` JSONB). Email J-1 expert inclut le contexte prospect (nom, besoin, budget) pour préparation active. Implémentation : Cloudflare Workers Cron Trigger (toutes les 15 min) → requête `bookings WHERE status='confirmed'` dans les fenêtres J-1 et H-1 → push `email-notifications` queue → Resend. Pas de n8n pour les reminders (stateless + prévisibles).
+**Rationale:** Les reminders prospects sont non-négociables (réduction no-shows = protection du revenu expert et de la qualité du matching). Le contrôle expert respecte l'agentivité (DEC-29 — l'utilisateur contrôle toujours son expérience). Le Cron Trigger est plus simple et moins coûteux que n8n pour un pattern prévisible à fenêtre fixe.
+**Impact:** E06S11 : Cron Trigger toutes les 15 min + 2 nouveaux message types dans `email-notifications` queue (`booking.reminder_prospect`, `booking.reminder_expert`). E06S06 : consumer gère ces 2 nouveaux types. Schema : `experts.reminder_settings jsonb DEFAULT '{"enabled": true}'`. Dashboard expert (E02) : toggle reminders on/off.
+**Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-20-43 — Google Calendar event description : résumé inline + lien fiche prep
+
+**Context:** L'expert et le prospect doivent être sur la même longueur d'onde au début du call. L'expert a déjà pris connaissance du contexte via le lead pipeline ; le prospect doit se rappeler ce qu'il a soumis et réfléchir à ce qu'il veut préciser.
+**Decision:** L'événement Google Calendar créé à la confirmation du booking contient : (1) un résumé structuré inline (besoin, budget, stade, secteur — extrait de `prospect.requirements` JSONB) ; (2) un lien vers une fiche de préparation complète (`/prep/[booking_token]`) accessible sans compte, token à durée limitée (expire après le call). La fiche prep affiche le contexte complet formaté + invite le prospect à réfléchir à ce qu'il veut clarifier ("Avant votre appel, pensez à...").
+**Rationale:** Le résumé inline est visible sans cliquer depuis n'importe quel client calendrier (offline-friendly). Le lien fiche permet un affichage complet et formaté sans surcharger la description. Les deux ensemble maximisent la préparation des deux parties avec un effort d'implémentation minimal.
+**Impact:** E06S11 AC4 : `events.insert` description field = résumé structuré + lien `/prep/[booking_token]`. Nouvel endpoint léger requis : `GET /api/bookings/:token/prep` (lecture `prospects.requirements` + `bookings` sans auth, token-gated, CORS satellite). Endpoint peut être ajouté en E06S11 ou story dédiée si scope trop large.
+**Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-20-42 — OAuth Google Calendar : expert uniquement — prospect reçoit invitation nativement
+
+**Context:** Question soulevée sur la nécessité d'un OAuth côté prospect pour recevoir la confirmation de booking dans son calendrier.
+**Decision:** OAuth uniquement côté expert (E06S10). Le prospect fournit uniquement son email lors de la confirmation du booking. Google Calendar API crée l'événement avec le prospect en tant qu'`attendee` (`attendees: [{ email: prospect@email.com }]`) → Google envoie nativement l'invitation calendrier par email au prospect, incluant le lien Google Meet et la possibilité d'accepter/refuser l'événement. Aucun OAuth, aucun compte Google requis côté prospect.
+**Rationale:** Le flow prospect doit rester frictionless — pas de compte, pas de login, pas d'OAuth. Google Calendar gère nativement l'envoi d'invitation aux attendees lors de la création d'un événement via `events.insert`. C'est le comportement standard utilisé par tous les outils de scheduling (Calendly, etc.). Zéro code additionnel requis pour ce mécanisme.
+**Impact:** E06S10 : inchangé (OAuth expert uniquement). E06S11 AC4 : `events.insert` avec `attendees: [{ email: expert_google_email }, { email: prospect_email }]` — Google envoie l'invite au prospect automatiquement. Prospect reçoit : email d'invitation Google Calendar + événement dans son agenda (s'il accepte) + lien Google Meet.
+**Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-20-41 — Booking Layer : Cal.com superseded → Google Calendar API directe
+
+**Context:** Cal.com Platform (Managed Users API) a fermé ses inscriptions aux nouveaux clients le 15/12/2025. E06S04 (livré) était construit sur cette API. Un deep research comparatif (20 solutions évaluées : Nylas, Cronofy, Cal.com self-hosted, Acuity, YouCanBookMe, OnceHub, SavvyCal, Harmonizely, Google Calendar API directe, Microsoft Graph) a été conduit avec la grille de contraintes Callibrate.
+**Decision:** E06S04 superseded. Architecture booking headless construite en interne sur **Google Calendar API directe** (OAuth2, token storage chiffré Supabase, freebusy + events.insert + conferenceDataVersion=1). Deux nouvelles stories : **E06S10** (Google Calendar OAuth layer) et **E06S11** (Booking engine — availability, create, cancel, reschedule). Les colonnes `cal_*` existantes en DB sont conservées sans nettoyage jusqu'au post-MVP.
+**Rationale:** Toutes les alternatives SaaS échouent sur au moins un critère rédhibitoire : Nylas ($1/compte/mois → coût des inactifs incompatible avec un ratio actifs/inscrits de 1–10% en early stage) ; Cronofy ($819/mois plancher → incompatible 0-revenue) ; Cal.com self-hosted (EE commercial requis pour Managed Users + infrastructure Node.js hors stack) ; tous les booking SaaS (pricing per-seat, pas de managed users marketplace). Google Calendar API est gratuite à l'usage, mature, directement appelable depuis un Cloudflare Worker via `fetch`, et ne génère aucun coût marginal par expert inactif.
+**Impact:** E06S04 → `superseded` dans le backlog. E06S06 dependency sur E06S04 → remplacée par E06S10 (OAuth layer requis avant billing). E06S10 est la nouvelle dépendance de E06S11. **Point critique pre-go-live :** Google OAuth scope `calendar.events` est un "sensitive scope" → vérification formelle de l'app Google requise pour accès production aux comptes externes (process peut prendre plusieurs semaines — à initier immédiatement). Anti double-booking nécessite : table `bookings` avec colonne `held_until` + re-check freebusy à la confirmation.
+**Date:** 2026-02-20
+
+---
+
 <!-- Add decisions above this line, newest first -->

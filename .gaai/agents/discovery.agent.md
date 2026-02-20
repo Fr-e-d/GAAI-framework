@@ -4,7 +4,7 @@ id: AGENT-DISCOVERY-001
 role: product-intelligence
 responsibility: decide-what-to-build-and-why
 track: discovery
-updated_at: 2026-01-31
+updated_at: 2026-02-20
 ---
 
 # Discovery Agent (GAAI)
@@ -67,6 +67,7 @@ Only Epics and Stories are valid inputs for Delivery. Marketing and Strategy art
 
 ### Cross Skills (Used Selectively)
 
+- `approach-evaluation` — research industry standards and compare viable approaches when a product or architectural decision requires objective comparison before committing to a Story definition (e.g., choosing between booking services, payment processors, matching paradigms). Produces a factual comparison matrix — Discovery reads and decides (or escalates to human for strategic choices).
 - `risk-analysis` — surface user, scope, value, and delivery risks before decisions lock in
 - `consistency-check` — detect incoherence between PRD, Epics, Stories, and rules
 - `context-building` — build minimal focused context bundles for skills

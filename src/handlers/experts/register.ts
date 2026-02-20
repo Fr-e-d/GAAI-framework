@@ -3,7 +3,6 @@ import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
 import { createServiceClient } from '../../lib/supabase';
 import { checkRateLimit } from '../../lib/rateLimit';
-import { createManagedUser } from '../../lib/cal';
 
 const RegisterSchema = z.object({
   display_name: z.string().min(1, 'display_name is required').max(100),
@@ -56,32 +55,7 @@ export async function handleRegister(
   const { display_name, headline, bio, rate_min, rate_max } = parsed.data;
   const supabase = createServiceClient(env);
 
-  // AC1 (DEC-34): Create Cal.com managed user synchronously.
-  // AC9: Failure is logged and must NOT block registration.
-  let calData: {
-    cal_user_id: string;
-    cal_username: string;
-    cal_access_token: string;
-    cal_refresh_token: string;
-  } | null = null;
-
-  try {
-    const managed = await createManagedUser(env.CAL_API_KEY, env.CAL_OAUTH_CLIENT_ID, {
-      email: user.email ?? `expert-${user.id}@callibrate.io`,
-      name: display_name,
-    });
-    calData = {
-      cal_user_id: managed.cal_user_id,
-      cal_username: managed.cal_username,
-      cal_access_token: managed.access_token,
-      cal_refresh_token: managed.refresh_token,
-    };
-  } catch (calErr) {
-    // AC9: Log failure — registration continues without Cal.com setup.
-    console.error('[E06S04] Cal.com managed user creation failed:', calErr);
-  }
-
-  // AC2: Insert expert row (with Cal.com data if available)
+  // Insert expert row (Google Calendar OAuth layer wired in E06S10 — DEC-41)
   const { data: expert, error } = await supabase
     .from('experts')
     .insert({
@@ -91,16 +65,8 @@ export async function handleRegister(
       bio: bio ?? null,
       rate_min: rate_min ?? null,
       rate_max: rate_max ?? null,
-      ...(calData
-        ? {
-            cal_username: calData.cal_username,
-            cal_user_id: calData.cal_user_id,
-            cal_access_token: calData.cal_access_token,
-            cal_refresh_token: calData.cal_refresh_token,
-          }
-        : {}),
     })
-    .select('id, display_name, cal_username')
+    .select('id, display_name')
     .single();
 
   if (error) {
@@ -130,12 +96,11 @@ export async function handleRegister(
     email: user.email ?? '',
   });
 
-  // AC2 + AC10: Return 201
+  // Return 201
   return new Response(
     JSON.stringify({
       expert_id: expert.id,
       display_name: expert.display_name,
-      cal_username: expert.cal_username,
     }),
     {
       status: 201,

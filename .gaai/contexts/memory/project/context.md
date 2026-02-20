@@ -111,7 +111,7 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 - **Business automation:** n8n (integrations tierces, notifications, onboarding sequences)
 - **Cache / Session:** Cloudflare KV
 - **Email transactionnel:** Resend (via Cloudflare Queues)
-- **Calendar / Booking:** Cal.com — managed users API, Google Calendar + Google Meet + Teams
+- **Calendar / Booking:** Google Calendar API directe (OAuth2 — DEC-41). Cal.com supprimé (Platform fermée aux nouveaux signups 15/12/2025). Token storage : chiffrement AES-256-GCM via Workers Web Crypto (`GCAL_TOKEN_ENCRYPTION_KEY`). Visio : Google Meet auto-généré par booking (`conferenceDataVersion=1`). Teams/Outlook : post-MVP.
 - **Payment / MoR:** Lemon Squeezy (Merchant of Record — gestion taxes internationales)
 - **Frontend platform:** Next.js 15 (App Router) — callibrate.io + app.callibrate.io (expert dashboard) + satellites
 - **Satellite sites:** Astro (SSG, SEO-first) ou WordPress headless
@@ -177,7 +177,7 @@ Two tracks. Each track can host as many platforms as needed. All platforms in La
 - **AI extraction:** Freetext description → Claude (haiku-4-5) → ProspectRequirements JSONB (CF Worker, stateless — `POST /api/extract`)
 - **Qualification engine:** Quiz funnel (satellite) → requirements JSONB → Supabase (CF Worker)
 - **Matching engine:** Expert profile JSONB vs prospect requirements JSONB → scored matches + composite_score tiebreaker (CF Worker)
-- **Booking layer:** Cal.com managed users — Google Calendar + Meet + Teams
+- **Booking layer:** Google Calendar API directe — OAuth2 par expert (E06S10) → freebusy availability + hold slot + events.insert (Meet link) + cancel/reschedule (E06S11). Headless, consommé par satellite funnel widget. Anti double-booking : held status + freebusy re-check à la confirmation.
 - **Lead billing trigger:** booking confirmed → Lemon Squeezy one-time checkout → lead billed (pay-per-call)
 - **Score computation:** Feedback events (call_experience + satisfaction + lead_eval) → composite_score (CF Queue consumer)
 - **Feedback loop:** n8n triggers J+7 and J+45 survey emails → submissions → score worker → match re-ranking
@@ -211,6 +211,7 @@ Two tracks. Each track can host as many platforms as needed. All platforms in La
 - GAAI governance active: all execution via backlog
 - Cloudflare Workers (not Pages) for all deployment
 - AI augments the product — does not replace it
+- **⚠️ Google OAuth sensitive scope review (pre-go-live blocker):** Le scope `calendar.events` requiert une vérification formelle de l'app Google pour les utilisateurs externes (domain verification, privacy policy, security assessment). Process peut prendre plusieurs semaines. À initier immédiatement — bloque le go-live de E06S10/E06S11.
 
 ---
 
