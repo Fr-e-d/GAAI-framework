@@ -89,10 +89,10 @@ items:
     epic: E06
     title: "Matching engine scoring function + match API"
     priority: high
-    status: refined
+    status: done
     artefact: contexts/artefacts/stories/E06S05.story.md
     dependencies: [E06S02]
-    notes: "Pure function, JSONB-based, configurable weights. Can run in parallel with E06S03 and E06S04."
+    notes: "DONE 2026-02-20. QA PASS (1 remediation cycle). All 12 ACs met. scoreMatch() pure function + POST /api/matches/compute + GET /api/matches/:prospect_id. 5 vitest tests PASS. DEC-33 cleanup (MATCHING_JOBS). Unblocks E06S07."
 
   - id: E06S06
     epic: E06
