@@ -71,10 +71,10 @@ items:
     epic: E06
     title: "Auth middleware & Expert registration + profile API"
     priority: high
-    status: refined
+    status: done
     artefact: contexts/artefacts/stories/E06S03.story.md
     dependencies: [E06S02]
-    notes: "JWT validation middleware + POST /api/experts/register + GET/PATCH profile. Can run in parallel with E06S05."
+    notes: "DONE 2026-02-20. QA PASS. All 10 ACs met. JWT middleware + register + GET/PATCH profile + JSONB merge RPC + rate limiting. PR#2 open (auth/security — PR required). Unblocks E06S04."
 
   - id: E06S04
     epic: E06
