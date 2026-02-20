@@ -273,9 +273,6 @@ wrangler secret put GCAL_TOKEN_ENCRYPTION_KEY
 # Paste: base64-encoded 32-byte AES-256 key
 # Generate: openssl rand -base64 32
 
-wrangler secret put WORKER_BASE_URL
-# Staging:    https://callibrate-core-staging.{account}.workers.dev
-# Production: https://api.callibrate.io
 
 **Required redirect URIs in Google Cloud Console (Authorized redirect URIs):**
 - Staging:    https://callibrate-core-staging.{account}.workers.dev/api/gcal/callback
