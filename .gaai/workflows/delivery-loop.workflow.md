@@ -135,10 +135,10 @@ Invoke `coordinate-handoffs`:
 
 ### 8. Merge & Complete Story
 
-**After QA PASS — push, merge, cleanup:**
+**8a. Squash merge to production branch (triggers staging deploy):**
 
 ```bash
-# Push branch
+# Push story branch
 git -C ../{id}-workspace push origin story/{id}
 
 # Squash merge to production (single clean commit per Story)
@@ -150,16 +150,37 @@ $(cat contexts/artefacts/reports/{id}.impl-report.md | head -20)
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 git push origin production
-
-# Cleanup
-git worktree remove ../{id}-workspace
-git branch -d story/{id}
-git push origin --delete story/{id}
+# → GitHub Actions auto-deploys callibrate-core-staging (~60–90s)
 ```
 
 > **PR instead of direct merge** — required for: Tier 3 Stories, database schema changes, auth/security changes. Optional for Tier 1/2 routine Stories (solo founder context). When required: `gh pr create --base production --head story/{id}` before merge.
 
-**Backlog & memory:**
+**8b. Wait for staging deploy:**
+
+Wait 90 seconds after the push for GitHub Actions to complete the staging deploy.
+Confirm the deploy succeeded at: `https://github.com/Fr-e-d/callibrate-core/actions`
+
+**8c. Smoke tests against staging:**
+
+```bash
+STAGING_URL="https://callibrate-core-staging.$(npx wrangler whoami --json 2>/dev/null | grep -o '"subdomain":"[^"]*"' | cut -d'"' -f4).workers.dev"
+# Fallback: get URL from GitHub Actions deploy log or Cloudflare dashboard
+
+# Baseline (always)
+curl -sf "$STAGING_URL/api/health" | grep -q '"status":"ok"' && echo "PASS: health" || echo "FAIL: health"
+
+# Story-specific smoke tests — defined in the execution-plan under smoke_tests section
+# Example for routes story: curl -sf "$STAGING_URL/api/satellites/nonexistent" | grep -q '"error"' && echo "PASS" || echo "FAIL"
+```
+
+**8d. On SMOKE PASS:**
+
+```bash
+# Cleanup story branch + worktree
+git worktree remove ../{id}-workspace
+git branch -d story/{id}
+git push origin --delete story/{id}
+```
 
 Update Story status to `done` in `contexts/backlog/active.backlog.yaml`.
 
@@ -171,7 +192,29 @@ Invoke `memory-retrieve` + `memory-ingest` if new patterns worth persisting were
 
 **If the Story required human intervention or reached 3 QA cycles:** invoke `post-mortem-learning`. Record the friction signal (domain, root cause hypothesis, AC gap if applicable) as a `[FRICTION]` entry in `contexts/memory/decisions.memory.md`. This informs future Discovery refinement.
 
-Proceed to next Story.
+**STOP — report to human:**
+
+```
+✅ Staging validated — callibrate-core-staging deployed and smoke tests PASS.
+
+To deploy to production, run:
+  git tag v0.{EPIC}.{STORY} -m "{id}: {Story title}" && git push origin v0.{EPIC}.{STORY}
+
+GitHub Actions will auto-deploy callibrate-core-prod on tag push.
+Tag format: v0.{EPIC_NUMBER}.{STORY_NUMBER} — e.g. v0.6.8 for E06S08.
+```
+
+**8e. On SMOKE FAIL:**
+
+Do NOT cleanup worktree or story branch.
+Do NOT update backlog.
+
+Remediate on `story/{id}` — fix the failing smoke test root cause.
+Re-run from 8a (squash merge, push, wait, smoke test).
+
+If smoke failure persists after 2 attempts: ESCALATE to human.
+
+Proceed to next Story only after human creates the production tag.
 
 ---
 
@@ -204,11 +247,17 @@ Tier 2/3? ──→ compose-team (+ risk-analysis if needed)
              ↓ atomic commit in worktree
              spawn QA Sub-Agent ──→ {id}.qa-report.md
              ↓
-             PASS → push story/{id} → squash merge → production → cleanup worktree → done
+             PASS → push story/{id} → squash merge → production → push
+                      ↓ GitHub Actions auto-deploys callibrate-core-staging (~90s)
+                      ↓ smoke tests
+                      SMOKE PASS → cleanup worktree → backlog done → STOP + report tag command
+                      SMOKE FAIL → remediate on branch → re-push → retry (max 2x) → ESCALATE
              FAIL → re-spawn Impl + re-spawn QA (max 3 cycles)
              ESCALATE → human intervention required
              ↓ (on ESCALATE or 3 QA cycles)
              post-mortem-learning → [FRICTION] entry in decisions.memory.md
+             ↓ (human creates v0.EPIC.STORY tag)
+             GitHub Actions auto-deploys callibrate-core-prod
 ```
 
 ---
