@@ -7,7 +7,7 @@ tags:
   - conventions
   - procedural
 created_at: 2026-02-19
-updated_at: 2026-02-19
+updated_at: 2026-02-20
 ---
 
 # Patterns & Conventions
@@ -53,6 +53,19 @@ updated_at: 2026-02-19
 - **Queue consumers:** declared in `wrangler.toml` `[[queues.consumers]]` but handler (`queue` export) added in the story that implements the consumer logic — not in bootstrap
 - **Health endpoint:** `GET /api/health` → `{ status: "ok", supabase: "connected"|"error", queues: [...] }` — returns 503 when Supabase unreachable (not 200-always)
 - **Supabase ping in Workers:** `fetch(${SUPABASE_URL}/rest/v1/, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: Bearer ... } })` — uses anon key, not service key
+
+---
+
+## Supabase Patterns
+
+- **Migration files:** `supabase/migrations/{timestamp}_{name}.sql` — tracked in repo, applied via `mcp__supabase__apply_migration` (DDL)
+- **Seed data:** applied via `mcp__supabase__execute_sql` (DML — not tracked as a migration)
+- **Migration version:** auto-assigned at apply time (not the filename timestamp) — `list_migrations` returns actual apply timestamp
+- **TypeScript types:** generated via `mcp__supabase__generate_typescript_types` → written to `src/types/database.ts` — committed alongside every schema migration, never manually edited
+- **Types usage:** `createClient<Database>(url, publishableKey)` — use publishable key with SDK, anon key only for raw REST calls (DEC-37)
+- **Verify after migration:** `mcp__supabase__list_tables` — returns `rls_enabled`, columns with `check` field, FKs directly. Preferred over `information_schema` JOIN for CHECK constraint verification.
+- **RLS pattern — service-role-only tables:** Enable RLS, add no user-facing policies. Service role bypasses automatically. Supabase advisor reports `rls_enabled_no_policy` INFO notice — expected and correct for internal tables (not a security gap).
+- **RLS pattern — user-facing tables:** Enable RLS + add explicit policies per role. Example: `experts` SELECT/UPDATE own row via `auth.uid() = id`.
 
 ---
 

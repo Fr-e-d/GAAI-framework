@@ -62,10 +62,10 @@ items:
     epic: E06
     title: "Database schema & migrations"
     priority: high
-    status: in_progress
+    status: done
     artefact: contexts/artefacts/stories/E06S02.story.md
     dependencies: [E06S01]
-    notes: "9 tables (6 core + 3 feedback: call_experience_surveys, project_satisfaction_surveys, lead_evaluations). GIN indexes, RLS policies, TypeScript types. experts.composite_score field."
+    notes: "DONE 2026-02-20. QA PASS. All 14 ACs met. 9 tables + GIN indexes + RLS + TypeScript types + seed. Unblocks E06S03, E06S05, E06S07, E06S08."
 
   - id: E06S03
     epic: E06
