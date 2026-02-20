@@ -27,11 +27,33 @@ export interface BudgetRange {
 }
 
 export interface ProspectRequirements {
+  challenge?: string;
   skills_needed?: string[];
   industry?: string;
   budget_range?: BudgetRange;
   timeline?: string;
+  company_size?: string;
   languages?: string[];
+}
+
+// ── AI Extraction types (E06S08) ───────────────────────────────────────────────
+
+export type ExtractionField = 'challenge' | 'skills_needed' | 'industry' | 'budget_range' | 'timeline' | 'company_size' | 'languages';
+
+export type FieldConfidence = Partial<Record<ExtractionField, number>>;
+
+export interface ExtractionQuestion {
+  field: string;
+  question: string;
+  options?: string[];
+}
+
+export interface ExtractionResponse {
+  requirements: ProspectRequirements;
+  confidence: FieldConfidence;
+  needs_confirmation: string[];
+  ready_to_match: boolean;
+  confirmation_questions?: ExtractionQuestion[];
 }
 
 export interface MatchingWeights {

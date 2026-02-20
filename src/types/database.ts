@@ -99,6 +99,11 @@ export type Database = {
           availability: string | null
           avatar_url: string | null
           bio: string | null
+          cal_access_token: string | null
+          cal_event_type_id: number | null
+          cal_google_calendar_connected: boolean
+          cal_refresh_token: string | null
+          cal_user_id: string | null
           cal_username: string | null
           composite_score: number | null
           created_at: string | null
@@ -116,6 +121,11 @@ export type Database = {
           availability?: string | null
           avatar_url?: string | null
           bio?: string | null
+          cal_access_token?: string | null
+          cal_event_type_id?: number | null
+          cal_google_calendar_connected?: boolean
+          cal_refresh_token?: string | null
+          cal_user_id?: string | null
           cal_username?: string | null
           composite_score?: number | null
           created_at?: string | null
@@ -133,6 +143,11 @@ export type Database = {
           availability?: string | null
           avatar_url?: string | null
           bio?: string | null
+          cal_access_token?: string | null
+          cal_event_type_id?: number | null
+          cal_google_calendar_connected?: boolean
+          cal_refresh_token?: string | null
+          cal_user_id?: string | null
           cal_username?: string | null
           composite_score?: number | null
           created_at?: string | null
@@ -432,6 +447,11 @@ export type Database = {
           availability: string | null
           avatar_url: string | null
           bio: string | null
+          cal_access_token: string | null
+          cal_event_type_id: number | null
+          cal_google_calendar_connected: boolean
+          cal_refresh_token: string | null
+          cal_user_id: string | null
           cal_username: string | null
           composite_score: number | null
           created_at: string | null
