@@ -1,5 +1,8 @@
 import { Env } from './types/env';
 import { handleMatchCompute, handleMatchGet } from './routes/matches';
+import { authenticate } from './middleware/auth';
+import { handleRegister } from './handlers/experts/register';
+import { handleGetProfile, handlePatchProfile } from './handlers/experts/profile';
 
 const QUEUES = ['email-notifications', 'lead-billing'] as const;
 
@@ -46,6 +49,37 @@ export default {
       return handleMatchGet(request, env, prospectId);
     }
 
-    return new Response('Not Found', { status: 404 });
+    // ── Expert routes (authenticated) ───────────────────────────────────────
+    if (pathname.startsWith('/api/experts/')) {
+      const authResult = await authenticate(request, env);
+      if (authResult.response) {
+        return authResult.response;
+      }
+      const user = authResult.user;
+
+      if (method === 'POST' && pathname === '/api/experts/register') {
+        return handleRegister(request, env, user);
+      }
+
+      const profileMatch = pathname.match(/^\/api\/experts\/([^/]+)\/profile$/);
+      if (profileMatch) {
+        if (method === 'GET') {
+          return handleGetProfile(request, env, user, profileMatch[1]!);
+        }
+        if (method === 'PATCH') {
+          return handlePatchProfile(request, env, user, profileMatch[1]!);
+        }
+      }
+
+      return new Response(JSON.stringify({ error: 'Not Found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ error: 'Not Found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
   },
 } satisfies ExportedHandler<Env>;
