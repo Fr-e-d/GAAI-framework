@@ -33,7 +33,8 @@ updated_at: 2026-02-20
   Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
   ```
 - **Commit types:** `feat` (new Story), `fix` (QA remediation), `chore` (config/tooling), `refactor`, `test`, `docs`
-- **Commit timing:** once, atomically, after all ACs are implemented — before handoff artefact is written
+- **Commit timing:** implémentation atomique sur la branche → puis artefacts (impl-report, qa-report, memory-delta) → puis backlog done + mémoire — TOUT sur `story/{id}`, jamais sur `production` directement
+- **Anti-pattern confirmé (E06S05) :** Ne pas committer les artefacts ou le backlog directement sur `production` après le squash merge. Tous les commits de gouvernance (artefacts, backlog, mémoire) doivent être sur la branche `story/{id}` avant le merge.
 - **Merge strategy:** squash merge to `production` (one commit per Story — clean history)
   ```bash
   git merge --squash story/{id} && git commit -m "feat({id}): {title}"
@@ -53,6 +54,10 @@ updated_at: 2026-02-20
 - **Queue consumers:** declared in `wrangler.toml` `[[queues.consumers]]` but handler (`queue` export) added in the story that implements the consumer logic — not in bootstrap
 - **Health endpoint:** `GET /api/health` → `{ status: "ok", supabase: "connected"|"error", queues: [...] }` — returns 503 when Supabase unreachable (not 200-always)
 - **Supabase ping in Workers:** `fetch(${SUPABASE_URL}/rest/v1/, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: Bearer ... } })` — uses anon key, not service key
+- **Auth middleware pattern (E06S03):** `authenticate(request, env)` returns discriminated union `AuthResult` — caller checks `if (authResult.response)` to short-circuit with 401. Never throws. See `src/middleware/auth.ts`.
+- **Zod validation pattern (E06S03):** Always use `safeParse()` (never `.parse()` — throws). On failure: 422 + `{ error: "Validation failed", details: parsed.error.flatten().fieldErrors }`. Use `z.record(z.string(), z.unknown())` for flexible JSONB object fields (Zod v3 — two-argument form required; single-arg is Zod v4+ only).
+- **Rate limiter pattern (E06S03):** `src/lib/rateLimit.ts` — KV key `rate_limit:{action}:{ip}` where ip = `CF-Connecting-IP` (fallback `'unknown'` in dev). Sliding window via `expirationTtl`. Enforced after auth, before DB operations.
+- **Ownership guard pattern (E06S03):** `user.id !== resourceId` check at handler entry — returns 403 before any DB query. `resourceId` extracted from URL in the router, passed as handler arg.
 
 ---
 
@@ -66,6 +71,9 @@ updated_at: 2026-02-20
 - **Verify after migration:** `mcp__supabase__list_tables` — returns `rls_enabled`, columns with `check` field, FKs directly. Preferred over `information_schema` JOIN for CHECK constraint verification.
 - **RLS pattern — service-role-only tables:** Enable RLS, add no user-facing policies. Service role bypasses automatically. Supabase advisor reports `rls_enabled_no_policy` INFO notice — expected and correct for internal tables (not a security gap).
 - **RLS pattern — user-facing tables:** Enable RLS + add explicit policies per role. Example: `experts` SELECT/UPDATE own row via `auth.uid() = id`.
+- **RPC JSONB merge pattern (E06S03):** Postgres function with `SECURITY DEFINER`, `COALESCE` for scalar fields, `||` operator for JSONB fields. Declare signature manually in `database.ts` `Functions:` block — type generator does not capture function signatures reliably. RPC returns `data[]` — check `data.length === 0` for not-found.
+- **PostgREST error codes:** `PGRST116` = no rows from `.single()` → 404. `23505` = unique violation → 409. Other errors → generic 500 with `error.message` in details.
+- **Service key scope (E06S03, DEC-37):** `createServiceClient(env)` (service key) is used for ALL Worker DB operations and auth token validation (`supabase.auth.getUser(token)`). Anon key retained only for raw REST health check fetch.
 
 ---
 

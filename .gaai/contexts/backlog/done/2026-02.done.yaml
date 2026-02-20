@@ -22,3 +22,13 @@ items:
     artefact: contexts/artefacts/stories/E06S02.story.md
     dependencies: [E06S01]
     notes: "QA PASS. All 14 ACs met. 9 tables (experts, prospects, matches, bookings, leads, satellite_configs, call_experience_surveys, project_satisfaction_surveys, lead_evaluations). GIN indexes on 4 JSONB columns. RLS + experts own-row policies. TypeScript types at src/types/database.ts. Default satellite_config seed inserted. PR #1."
+
+  - id: E06S03
+    epic: E06
+    title: "Auth middleware & Expert registration + profile API"
+    priority: high
+    status: done
+    completed_at: 2026-02-20
+    artefact: contexts/artefacts/stories/E06S03.story.md
+    dependencies: [E06S02]
+    notes: "QA PASS. All 10 ACs met. JWT middleware (supabase.auth.getUser), POST /api/experts/register (Zod, 201/409/422/429), GET/PATCH /api/experts/:id/profile (403 own-guard, JSONB merge via merge_expert_profile RPC). zod added. MATCHING_JOBS removed (DEC-33). merge_expert_profile migration applied. PR #2 (auth/security story — PR required)."
