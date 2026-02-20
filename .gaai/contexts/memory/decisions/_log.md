@@ -423,6 +423,26 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-20-46 — Fiche de préparation : matching bi-directionnel + scoring visible par les deux parties
+
+**Context:** L'événement Google Calendar contient un lien vers une fiche de préparation. La question s'est posée de ce que cette fiche doit contenir au-delà du contexte prospect.
+**Decision:** La fiche prep (`/prep/[booking_token]`) affiche le matching bi-directionnel complet avec scoring, accessible en un clic depuis l'événement Google Calendar, sans authentification. Contenu : (1) détails du call (date, heure, lien Meet) ; (2) contexte prospect — résumé des requirements soumis (besoin, budget, stade, secteur) ; (3) profil expert — prénom, spécialités, bio courte, composite_score tier (rising/established/top — pas le score brut) ; (4) score global du match + breakdown par critère avec label lisible (ex: "Budget aligné — 90/100", "Secteur maîtrisé — 85/100") ; (5) direction bi-directionnelle explicite : "Pourquoi ce prospect vous correspond" (côté expert) + "Pourquoi cet expert vous correspond" (côté prospect). La page est identique pour les deux parties — chacun voit le match de son point de vue. Les données sont lues depuis `bookings` + `prospects.requirements` + `experts.profile/preferences` + `matches.score_breakdown`.
+**Rationale:** Concrétisation directe de la valeur Transparence (context.md). Le call commence avec un contexte partagé et un niveau de confiance établi — les deux parties comprennent le "pourquoi" avant même de se parler. Le `score_breakdown` JSONB est déjà produit par E06S05 (`scoreMatch()`) et stocké dans `matches` — la fiche le rend lisible en langage clair. Différenciateur visible : aucune plateforme existante n'expose ce niveau de transparence sur le matching au prospect et à l'expert simultanément.
+**Impact:** E06S11 AC13 révisé : endpoint `/api/bookings/:token/prep` retourne `{ booking, expert, prospect, match }` avec `match.score`, `match.breakdown[]` (label + score par critère), `match.direction_expert` (pourquoi ce prospect correspond à l'expert), `match.direction_prospect` (pourquoi cet expert correspond au prospect). Requête : JOIN `bookings` → `prospects` + `experts` + `matches` WHERE `expert_id + prospect_id`. Satellite : page `/prep/[token]` lit cet endpoint et l'affiche — UI à définir en E03 (satellite funnel UX).
+**Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-20-45 — Google OAuth app verification : soumettre dès E06S10 staging, pas au lancement produit
+
+**Context:** En Testing mode, Google affiche à chaque expert un écran "This app hasn't been verified" avec un bouton "Back to safety" — friction rédhibitoire pour des experts qui découvrent la plateforme. La confiance est le produit.
+**Decision:** La vérification Google OAuth (sensitive scope `calendar.events`) doit être soumise dès que E06S10 est fonctionnel en staging (pas au lancement produit). Mitigation pour les premiers beta experts : les ajouter manuellement comme "test users" dans Google Cloud Console (until 100 users max) — ils voient toujours un avertissement mais peuvent procéder. Ce canal est acceptable pour 5–10 beta experts contactés directement. La vérification doit être complète avant la campagne LinkedIn de lancement et avant ~80 experts inscrits.
+**Rationale:** Le process de vérification Google prend 2 à 6 semaines pour les sensitive scopes. Attendre le lancement produit = bloquer le lancement ou aller en production avec l'écran d'avertissement = perte de confiance expert = churn onboarding. Soumettre tôt (dès staging) permet à la vérification de se terminer en parallèle du build restant.
+**Impact:** Action founder : (1) créer Google Cloud project + activer Calendar API + credentials OAuth2 (prérequis dev E06S10) ; (2) vérifier `callibrate.io` dans Google Search Console maintenant ; (3) publier privacy policy sur `callibrate.io` (prérequis vérification + RGPD) ; (4) soumettre la vérification dès E06S10 fonctionnel en staging.
+**Date:** 2026-02-20
+
+---
+
 ### DEC-2026-02-20-44 — Booking reminders : Prospect obligatoire (J-1 + H-1), Expert optionnel (dashboard)
 
 **Context:** Un booking confirmé nécessite des rappels pour réduire les no-shows. Expert et prospect ont des besoins différents : le prospect a besoin d'un rappel systématique ; l'expert peut vouloir gérer ses notifications lui-même.
