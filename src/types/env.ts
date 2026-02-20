@@ -20,4 +20,10 @@ export interface Env {
   // Queue producers
   EMAIL_NOTIFICATIONS: Queue;
   LEAD_BILLING: Queue;
+
+  // Google Calendar OAuth (bound via wrangler secret put)
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
+  GCAL_TOKEN_ENCRYPTION_KEY: string;
+  WORKER_BASE_URL: string;
 }
