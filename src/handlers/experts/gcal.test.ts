@@ -145,9 +145,9 @@ describe('handleGcalCallback', () => {
 // ── Test 3: Status endpoint (AC4) ────────────────────────────────────────────
 
 describe('handleGcalStatus', () => {
-  it('returns connected: true when gcal_connected is true', async () => {
+  it('returns connected: true when gcal_refresh_token is non-null (AC4)', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(postgrestSingle({
-      gcal_connected: true,
+      gcal_refresh_token: 'encrypted-refresh-token',
       gcal_email: 'expert@gmail.com',
       gcal_connected_at: '2026-02-20T10:00:00Z',
     }));
@@ -162,9 +162,9 @@ describe('handleGcalStatus', () => {
     expect(body.connected_at).toBe('2026-02-20T10:00:00Z');
   });
 
-  it('returns connected: false when gcal_connected is false', async () => {
+  it('returns connected: false when gcal_refresh_token is null (AC4)', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(postgrestSingle({
-      gcal_connected: false,
+      gcal_refresh_token: null,
       gcal_email: null,
       gcal_connected_at: null,
     }));

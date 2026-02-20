@@ -139,10 +139,11 @@ export async function handleGcalCallback(
   }
 
   // Build update object conditionally (AC3: do NOT include gcal_refresh_token if not present)
+  // AC4: gcal_connected = true only when a refresh token is present (not just any token exchange)
   const updateData: Record<string, unknown> = {
     gcal_access_token: encryptedAccessToken,
     gcal_token_expiry_at: expiry_date ? new Date(expiry_date).toISOString() : null,
-    gcal_connected: true,
+    gcal_connected: encryptedRefreshToken !== undefined,
     gcal_connected_at: new Date().toISOString(),
   };
 
@@ -176,9 +177,10 @@ export async function handleGcalStatus(
   if (user.id !== expertId) return forbidden();
 
   const supabase = createServiceClient(env);
+  // AC4: connected: true only if non-null refresh token exists — select gcal_refresh_token to derive it
   const { data, error } = await supabase
     .from('experts')
-    .select('gcal_connected, gcal_email, gcal_connected_at')
+    .select('gcal_refresh_token, gcal_email, gcal_connected_at')
     .eq('id', expertId)
     .single();
 
@@ -188,7 +190,7 @@ export async function handleGcalStatus(
   }
 
   return json({
-    connected: data.gcal_connected ?? false,
+    connected: data.gcal_refresh_token != null,
     google_email: data.gcal_email ?? null,
     connected_at: data.gcal_connected_at ?? null,
   });
