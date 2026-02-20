@@ -29,18 +29,18 @@ binding = "LEAD_BILLING"
 
 [[kv_namespaces]]
 binding = "SESSIONS"
-id = "PLACEHOLDER_SESSIONS_KV_STAGING_ID"
-preview_id = "PLACEHOLDER_SESSIONS_KV_STAGING_ID"
+id = "eb21bf12dbd74b96928a98c866af62a1"
+preview_id = "eb21bf12dbd74b96928a98c866af62a1"
 
 [[kv_namespaces]]
 binding = "RATE_LIMITING"
-id = "PLACEHOLDER_RATE_LIMITING_KV_STAGING_ID"
-preview_id = "PLACEHOLDER_RATE_LIMITING_KV_STAGING_ID"
+id = "a36dd2f3e3a649a3b605baf3519843ea"
+preview_id = "a36dd2f3e3a649a3b605baf3519843ea"
 
 [[kv_namespaces]]
 binding = "FEATURE_FLAGS"
-id = "PLACEHOLDER_FEATURE_FLAGS_KV_STAGING_ID"
-preview_id = "PLACEHOLDER_FEATURE_FLAGS_KV_STAGING_ID"
+id = "24a3f09adaf34c26805ba2351d773829"
+preview_id = "24a3f09adaf34c26805ba2351d773829"
 
 # ── Staging environment ───────────────────────────────────────────────────────
 
@@ -69,15 +69,15 @@ binding = "LEAD_BILLING"
 
 [[env.staging.kv_namespaces]]
 binding = "SESSIONS"
-id = "PLACEHOLDER_SESSIONS_KV_STAGING_ID"
+id = "eb21bf12dbd74b96928a98c866af62a1"
 
 [[env.staging.kv_namespaces]]
 binding = "RATE_LIMITING"
-id = "PLACEHOLDER_RATE_LIMITING_KV_STAGING_ID"
+id = "a36dd2f3e3a649a3b605baf3519843ea"
 
 [[env.staging.kv_namespaces]]
 binding = "FEATURE_FLAGS"
-id = "PLACEHOLDER_FEATURE_FLAGS_KV_STAGING_ID"
+id = "24a3f09adaf34c26805ba2351d773829"
 
 # ── Production environment ────────────────────────────────────────────────────
 
@@ -106,12 +106,12 @@ binding = "LEAD_BILLING"
 
 [[env.production.kv_namespaces]]
 binding = "SESSIONS"
-id = "PLACEHOLDER_SESSIONS_KV_PROD_ID"
+id = "dc5d4d61b04d44fe827254ae8c8bade8"
 
 [[env.production.kv_namespaces]]
 binding = "RATE_LIMITING"
-id = "PLACEHOLDER_RATE_LIMITING_KV_PROD_ID"
+id = "2305532d36024641a7ceb171dbdf98a2"
 
 [[env.production.kv_namespaces]]
 binding = "FEATURE_FLAGS"
-id = "PLACEHOLDER_FEATURE_FLAGS_KV_PROD_ID"
+id = "4d5d37620fe14ddfb34aa374cbc37ffe"
