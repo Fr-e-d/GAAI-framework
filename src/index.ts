@@ -145,4 +145,10 @@ export default {
       headers: { 'Content-Type': 'application/json' },
     });
   },
+
+  // Queue consumer stub — E06S06 not yet implemented.
+  // Acks all messages to prevent DLQ accumulation until real consumers are wired.
+  async queue(batch: MessageBatch<unknown>, _env: Env): Promise<void> {
+    batch.ackAll();
+  },
 } satisfies ExportedHandler<Env>;
