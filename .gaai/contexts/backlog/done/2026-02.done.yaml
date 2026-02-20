@@ -1,0 +1,24 @@
+# GAAI Done Archive — 2026-02
+# Stories completed and merged to production this month.
+
+items:
+
+  - id: E06S01
+    epic: E06
+    title: "Project bootstrap — Supabase + Cloudflare Workers + Queues + KV"
+    priority: high
+    status: done
+    completed_at: 2026-02-19
+    artefact: contexts/artefacts/stories/E06S01.story.md
+    dependencies: []
+    notes: "QA PASS. AC1/2/6/7 PASS. AC3/4/5/8 DEFERRED(human — wrangler login + provisioning commands in SETUP.md)."
+
+  - id: E06S02
+    epic: E06
+    title: "Database schema & migrations"
+    priority: high
+    status: done
+    completed_at: 2026-02-20
+    artefact: contexts/artefacts/stories/E06S02.story.md
+    dependencies: [E06S01]
+    notes: "QA PASS. All 14 ACs met. 9 tables (experts, prospects, matches, bookings, leads, satellite_configs, call_experience_surveys, project_satisfaction_surveys, lead_evaluations). GIN indexes on 4 JSONB columns. RLS + experts own-row policies. TypeScript types at src/types/database.ts. Default satellite_config seed inserted. PR #1."
