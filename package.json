@@ -6,7 +6,8 @@
     "dev": "wrangler dev",
     "deploy:staging": "wrangler deploy --env staging",
     "deploy:prod": "wrangler deploy --env production",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.0"
@@ -14,6 +15,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241022.0",
     "typescript": "^5.6.3",
+    "vitest": "^4.0.18",
     "wrangler": "^4.0.0"
   }
 }

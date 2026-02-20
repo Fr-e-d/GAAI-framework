@@ -12,5 +12,4 @@ export interface Env {
   // Queue producers
   EMAIL_NOTIFICATIONS: Queue;
   LEAD_BILLING: Queue;
-  MATCHING_JOBS: Queue;
 }
