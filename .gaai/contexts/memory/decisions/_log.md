@@ -413,4 +413,14 @@ updated_at: 2026-02-19
 
 ---
 
+### DEC-2026-02-20-40 — E06S07 : matching synchrone au submit prospect (suppression du push matching-jobs)
+
+**Context:** E06S07 AC3 référençait un push vers la queue `matching-jobs` (supprimée en DEC-33). Le flux nominal du satellite funnel doit être cohérent avec DEC-33 : aucune queue async pour le matching, tout est synchrone à la demande.
+**Decision:** `POST /api/prospects/submit` appelle `scoreMatch()` de façon synchrone pour chaque expert actif et INSERT les résultats dans la table `matches` avant de répondre. La réponse reste `{ prospect_id, token, token_expires_at }` — inchangée. AC6 (202 + `status: "computing"`) est conservé comme garde défensive : il se déclenche uniquement si la table `matches` est vide pour ce `prospect_id` après insert (cas d'erreur ou expert pool vide), jamais dans le flux nominal. Le binding `EXPERT_POOL: KVNamespace` est ajouté comme dépendance de E06S07 pour cacher le pool d'experts actifs (évite N requêtes DB par soumission).
+**Rationale:** DEC-33 a supprimé `matching-jobs` pour over-engineering. E06S07 référençait encore cette queue dans AC3 — incohérence à corriger avant la Delivery. Le matching synchrone est sub-100ms sur un pool MVP (dizaines à centaines d'experts). EXPERT_POOL KV évite une requête DB full-scan à chaque soumission prospect — pattern déjà prévu dans l'architecture (binding déclaré dans env.ts et wrangler.toml par la Delivery de E06S07).
+**Impact:** E06S07 AC3 révisé : synchronous scoreMatch() + INSERT matches, plus de queue push. E06S07 AC6 : note "garde défensive — hors flux nominal" ajoutée. E06S07 dependencies : `EXPERT_POOL: KVNamespace` ajouté (nouveau binding à créer dans env.ts + wrangler.toml). E06S05 `scoreMatch()` : réutilisée telle quelle — aucun changement.
+**Date:** 2026-02-20
+
+---
+
 <!-- Add decisions above this line, newest first -->

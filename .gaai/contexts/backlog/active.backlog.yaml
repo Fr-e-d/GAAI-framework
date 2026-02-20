@@ -110,7 +110,7 @@ items:
     status: refined
     artefact: contexts/artefacts/stories/E06S07.story.md
     dependencies: [E06S02, E06S05]
-    notes: "Config endpoint + prospect submit + anonymized reveal + email capture + booking URL. CORS for satellite domains."
+    notes: "Config endpoint + prospect submit + anonymized reveal + email capture + booking URL. CORS for satellite domains. DEC-40 : AC3 révisé — matching synchrone (scoreMatch() + INSERT matches, plus de queue). AC6 garde défensive. EXPERT_POOL: KVNamespace à créer (env.ts + wrangler.toml)."
 
   - id: E06S08
     epic: E06
