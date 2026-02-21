@@ -29,6 +29,7 @@ dist/
 # Secrets backup — plaintext never committed, only *.enc
 secrets/staging.secrets.txt
 secrets/prod.secrets.txt
+secrets/2FA/*/*.2FA.txt
 
 # Logs
 *.log
