@@ -606,4 +606,14 @@ updated_at: 2026-02-21
 
 ---
 
+### DEC-2026-02-21-59 — n8n remplacé par Cloudflare Workflows pour les triggers async temps-différé
+
+**Context:** E06S06 a implémenté des webhook triggers vers n8n pour deux cas : `booking.confirmed` (notification enrichie expert) et `booking.completed` (orchestration surveys J+7 et J+45). La question posée : pourquoi n8n et pas CF Workflows ? CF Workflows est déjà dans le tech stack (tag "technical pipelines"), supporte le `step.sleep()` natif pour des durées arbitraires (jours/semaines), reste dans l'écosystème CF, TypeScript-natif, et n'ajoute aucune infrastructure supplémentaire. n8n requiert un hébergement dédié (~20€/mois cloud ou VPS) et crée un point de défaillance externe via webhook.
+**Decision:** n8n est retiré du tech stack. CF Workflows remplace n8n pour tous les besoins de workflows async temps-différé du projet (J+7/J+45 surveys, séquences onboarding, notification enrichie). Les webhooks n8n dans E06S06 (AC7, AC10) doivent être remplacés par des triggers CF Workflow. Une histoire E06S13 doit être créée pour : (1) retirer les appels webhook n8n de `email-notifications.ts`, (2) implémenter les CF Workflows pour booking.confirmed et booking.completed, (3) retirer `N8N_WEBHOOK_URL` de `src/types/env.ts`.
+**Rationale:** CF Workflows = même infra, même language, même deploy pipeline, coût nul additionnel. `step.sleep('7 days')` est exactement ce qu'il faut pour J+7/J+45. La modification de délais nécessite un redéploiement — acceptable en contexte solo founder + GAAI (toute modif passe par le backlog de toute façon). Aucun cas d'usage n8n ne justifie l'overhead d'infrastructure externe à ce stade.
+**Impact:** Tech stack : n8n retiré, CF Workflows promu comme mécanisme principal pour workflows async temps-différé. E06S06 AC7/AC10 : webhooks n8n à supprimer via E06S13. `N8N_WEBHOOK_URL` sera retirée de l'Env interface. Secrets n8n staging/prod : ne pas provisionner.
+**Date:** 2026-02-21
+
+---
+
 <!-- Add decisions above this line, newest first -->

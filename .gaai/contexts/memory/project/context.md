@@ -113,8 +113,8 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 
 - **Database / Auth / Storage:** Supabase (PostgreSQL + Auth + Storage)
 - **Edge compute:** Cloudflare Workers (full-stack — NOT Pages, deprecated)
-- **Async / Background jobs:** Cloudflare Queues + Workflows (technical pipelines) — naming convention: `callibrate-core-queue-{resource}-{env}` (DEC-32)
-- **Business automation:** n8n (integrations tierces, notifications, onboarding sequences)
+- **Async / Background jobs:** Cloudflare Queues (async immédiat) + Cloudflare Workflows (durable, temps-différé, multi-step) — naming convention: `callibrate-core-queue-{resource}-{env}` (DEC-32)
+- **Workflows temps-différé:** CF Workflows — `step.sleep()` natif pour J+7/J+45 surveys, séquences onboarding, notifications enrichies (DEC-59). n8n retiré du stack.
 - **Cache / Session:** Cloudflare KV
 - **Email transactionnel:** Resend via `send.callibrate.io` (Cloudflare Queues) — DKIM/SPF/DMARC configurés, tracking OFF (DEC-55). Marketing futur sur sous-domaine séparé.
 - **Calendar / Booking:** Google Calendar API directe (OAuth2 — DEC-41). Cal.com supprimé (Platform fermée aux nouveaux signups 15/12/2025). Token storage : chiffrement AES-256-GCM via Workers Web Crypto (`GCAL_TOKEN_ENCRYPTION_KEY`). Visio : Google Meet auto-généré par booking (`conferenceDataVersion=1`). Teams/Outlook : post-MVP.
