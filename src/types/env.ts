@@ -26,4 +26,9 @@ export interface Env {
   GOOGLE_CLIENT_SECRET: string;
   GCAL_TOKEN_ENCRYPTION_KEY: string;
   WORKER_BASE_URL: string;
+
+  // Queue worker secrets
+  RESEND_API_KEY: string;
+  LEMON_SQUEEZY_API_KEY: string;
+  N8N_WEBHOOK_URL: string;
 }

@@ -8,6 +8,10 @@ import { handleSatelliteConfig } from './routes/satellites';
 import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify } from './routes/prospects';
 import { handleCors, addCorsHeaders, corsForbidden } from './lib/cors';
 import { handleGcalAuthUrl, handleGcalStatus, handleGcalDisconnect, handleGcalCallback } from './handlers/experts/gcal';
+import { consumeEmailNotifications } from './queues/email-notifications';
+import { consumeLeadBilling } from './queues/lead-billing';
+import { EmailNotificationMessage } from './types/queues';
+import { LeadBillingMessage } from './types/queues';
 
 const QUEUES = ['email-notifications', 'lead-billing'] as const;
 
@@ -167,9 +171,14 @@ export default {
     });
   },
 
-  // Queue consumer stub — E06S06 not yet implemented.
-  // Acks all messages to prevent DLQ accumulation until real consumers are wired.
-  async queue(batch: MessageBatch<unknown>, _env: Env): Promise<void> {
-    batch.ackAll();
+  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+    if (batch.queue.includes('email-notifications')) {
+      await consumeEmailNotifications(batch as MessageBatch<EmailNotificationMessage>, env);
+    } else if (batch.queue.includes('lead-billing')) {
+      await consumeLeadBilling(batch as MessageBatch<LeadBillingMessage>, env);
+    } else {
+      console.warn('queue: unknown queue', batch.queue);
+      batch.ackAll();
+    }
   },
 } satisfies ExportedHandler<Env>;
