@@ -102,6 +102,18 @@ updated_at: 2026-02-20
 
 ---
 
+## CF Workflows Patterns (DEC-59, validés contre doc officielle 2026-02-21)
+
+- **wrangler.toml déclaration :** `[[workflows]]` top-level uniquement — `[[env.staging.workflows]]` n'existe pas. L'isolation staging/prod est naturelle : les Worker scripts séparés (`callibrate-core-staging` vs `callibrate-core-prod`) scope leurs instances Workflow indépendamment.
+- **Env access :** `this.env` accessible dans `WorkflowEntrypoint` (même pattern que DurableObject). Tous les secrets et bindings KV/Queue disponibles.
+- **step.sleep :** `await step.sleep('label', duration)` — duration : string humain-lisible (`"7 days"`, `"1 hour"`, `"20 seconds"`) ou number (millisecondes). `step.sleep` ne compte pas dans la limite des 1024 steps.
+- **Sleep acceleration pour smoke tests staging :** Secrets env-specific optionnels `SURVEY_DELAY_7D_MS` / `SURVEY_DELAY_38D_MS`. Absents en prod → valeur par défaut (7j réels). Définis en staging → valeur courte (ex. `7000` = 7 secondes). Pattern : `parseInt(this.env.SURVEY_DELAY_7D_MS ?? String(7 * 24 * 60 * 60 * 1000))`.
+- **Tests :** vitest recommandé officiellement par CF (release avril 2025). Mocker `step.sleep` et `step.do`. `wrangler dev` supporte les Workflows localement (wrangler ≥ 3.89.0). `wrangler dev --remote` NE supporte PAS les Workflows.
+- **CLI instance management :** `wrangler workflows instances list|describe|terminate|restart|pause|resume [WORKFLOW_NAME] [INSTANCE_ID]`. `INSTANCE_ID` peut être `latest`.
+- **Trigger depuis Worker :** `await env.MY_WORKFLOW.create({ params: { ... } })` — le binding est déclaré dans `wrangler.toml` sous `[[workflows]]` avec `binding = "MY_WORKFLOW"`.
+
+---
+
 ## Architecture Patterns
 
 - **Layer rule:** Layer 3 (E02–E05) consumes Layer 2 API only — never touches Layer 1 (Supabase) directly
@@ -109,6 +121,7 @@ updated_at: 2026-02-20
 - **TypeScript:** strict mode, all Workers + Next.js. Types generated from Supabase schema (`src/types/database.ts`)
 - **CF Workers:** no Cloudflare Pages — Workers only (DEC-04)
 - **Async:** never call Resend / Lemon Squeezy / Cal.com synchronously from a Worker request — always via Cloudflare Queue
+- **Async temps-différé (J+7, J+45, séquences) :** CF Workflows avec `step.sleep()` — jamais n8n (DEC-59)
 
 ---
 
