@@ -98,10 +98,10 @@ items:
     epic: E06
     title: "Async queue workers — email, lead-billing"
     priority: high
-    status: refined
+    status: done
     artefact: contexts/artefacts/stories/E06S06.story.md
     dependencies: [E06S03, E06S10, E06S05]
-    notes: "2 queue consumers (email + billing) + retry + DLQ + n8n webhook trigger. matching-jobs supprimée (DEC-33). Dependency E06S04 remplacée par E06S10 (DEC-41) — booking.created messages désormais émis par E06S11, pas par webhook Cal.com."
+    notes: "DONE 2026-02-21. QA PASS. All 9 ACs met. email-notifications consumer (expert.registered → Resend, booking.confirmed → Resend×2 + n8n, booking.completed → n8n) + lead-billing consumer (booking.created → leads INSERT + LS checkout + leads UPDATE). Idempotency via SESSIONS KV. Exponential backoff retry (1s/4s/16s). DB migration: leads.booking_id UNIQUE. 49/49 vitest tests PASS. Unblocks E06S09, E06S11."
 
   - id: E06S07
     epic: E06
