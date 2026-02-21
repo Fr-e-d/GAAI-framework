@@ -12,9 +12,8 @@ metadata:
   updated_at: 2026-02-20
 inputs:
   - problem_statement                      (what needs to be solved)
-  - contexts/memory/project/context.md     (stack, constraints, architecture)
-  - contexts/memory/patterns/conventions.md (established patterns to check against)
-  - contexts/memory/decisions/_log.md      (prior decisions on similar topics)
+  - contexts/memory/index.md               (registry — resolve project context, patterns, decisions files)
+  - contexts/memory/**                     (categories resolved from index.md — project, patterns, decisions)
   - contexts/artefacts/stories/**          (the Story driving the evaluation, if in Delivery)
 outputs:
   - contexts/artefacts/evaluations/{id}.approach-evaluation.md
@@ -46,15 +45,15 @@ Do NOT activate when:
 ### Phase 1 — Problem Framing
 
 1. State the problem precisely: what capability is needed, what constraints apply
-2. Extract relevant constraints from project context:
-   - Tech stack (from `project/context.md`)
-   - Established patterns (from `conventions.md`)
-   - Prior decisions on related topics (from `decisions/_log.md`)
-   - Architectural boundaries (layer rules, async patterns, domain-agnostic requirement)
+2. Read `contexts/memory/index.md`. Resolve and load:
+   - The `project` category file → extract tech stack, architectural boundaries, known constraints
+   - The `patterns` category file → extract established patterns and conventions
+   - The `decisions` category file → extract prior decisions on related topics
+   Do not assume specific file paths — resolve from index.
 3. Define evaluation criteria specific to this problem. Always include:
-   - **Stack compatibility** — does it work with our stack (CF Workers, Supabase, TypeScript, edge compute)?
-   - **Constraint alignment** — does it respect our architectural boundaries?
-   - **Operational fit** — solo founder maintainability, deployment complexity, debugging surface
+   - **Stack compatibility** — does it work with the project's tech stack? (read from project context file, not hardcoded here)
+   - **Constraint alignment** — does it respect the architectural boundaries described in the project context?
+   - **Operational fit** — maintainability given team size and constraints described in project context
    - **Maturity** — production readiness, community support, documentation quality
 4. Add problem-specific criteria as needed (performance, cost, security, scalability, etc.)
 

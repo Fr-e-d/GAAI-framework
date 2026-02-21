@@ -11,11 +11,8 @@ metadata:
   id: SKILL-MEMORY-RETRIEVE-001
   updated_at: 2026-01-27
 inputs:
-  - contexts/memory/index.md
-  - contexts/memory/project/**
-  - contexts/memory/decisions/**
-  - contexts/memory/patterns/**
-  - contexts/memory/summaries/**
+  - contexts/memory/index.md        (registry — read first to discover available categories)
+  - contexts/memory/**              (any category registered in index.md — resolved at runtime)
 outputs:
   - memory_context_bundle
 ---

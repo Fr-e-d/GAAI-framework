@@ -7,7 +7,7 @@ tags:
   - vision
   - scope
 created_at: 2026-02-19
-updated_at: 2026-02-19
+updated_at: 2026-02-21
 ---
 
 # Project Memory
@@ -116,14 +116,14 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 - **Async / Background jobs:** Cloudflare Queues + Workflows (technical pipelines) — naming convention: `callibrate-core-queue-{resource}-{env}` (DEC-32)
 - **Business automation:** n8n (integrations tierces, notifications, onboarding sequences)
 - **Cache / Session:** Cloudflare KV
-- **Email transactionnel:** Resend (via Cloudflare Queues)
+- **Email transactionnel:** Resend via `send.callibrate.io` (Cloudflare Queues) — DKIM/SPF/DMARC configurés, tracking OFF (DEC-55). Marketing futur sur sous-domaine séparé.
 - **Calendar / Booking:** Google Calendar API directe (OAuth2 — DEC-41). Cal.com supprimé (Platform fermée aux nouveaux signups 15/12/2025). Token storage : chiffrement AES-256-GCM via Workers Web Crypto (`GCAL_TOKEN_ENCRYPTION_KEY`). Visio : Google Meet auto-généré par booking (`conferenceDataVersion=1`). Teams/Outlook : post-MVP.
 - **Payment / MoR:** Lemon Squeezy (Merchant of Record — gestion taxes internationales)
 - **Frontend platform:** Next.js 15 (App Router) — callibrate.io + app.callibrate.io (expert dashboard) + satellites
-- **Satellite sites:** Astro (SSG, SEO-first) ou WordPress headless
+- **Satellite sites:** Multi-tenant Cloudflare Worker (`callibrate-satellite`) — hostname routing → `satellite_configs` KV cache (TTL 3600s) → design token injection → HTML render → CF edge cache (DEC-54). Architecture Astro SSG abandonnée.
 - **Dev tooling:** Cloudflare MCP server (`docs.mcp.cloudflare.com/mcp`)
 - **Language:** TypeScript (Workers + Next.js)
-- **Key conventions:** To be defined once first Story is in Delivery
+- **Key conventions:** See `contexts/memory/patterns/conventions.md`
 
 ---
 
@@ -180,7 +180,7 @@ Two tracks. Each track can host as many platforms as needed. All platforms in La
 
 ## Architectural Boundaries
 
-- **AI extraction:** Freetext description → Claude (haiku-4-5) → ProspectRequirements JSONB (CF Worker, stateless — `POST /api/extract`)
+- **AI extraction:** Freetext description → GPT-4o-mini → ProspectRequirements JSONB (CF Worker, stateless — `POST /api/extract`). Migration Haiku→GPT-4o-mini via E06S12 (DEC-48).
 - **Qualification engine:** Quiz funnel (satellite) → requirements JSONB → Supabase (CF Worker)
 - **Matching engine:** Expert profile JSONB vs prospect requirements JSONB → scored matches + composite_score tiebreaker (CF Worker)
 - **Booking layer:** Google Calendar API directe — OAuth2 par expert (E06S10) → freebusy availability + hold slot + events.insert (Meet link) + cancel/reschedule (E06S11). Headless, consommé par satellite funnel widget. Anti double-booking : held status + freebusy re-check à la confirmation.

@@ -103,7 +103,7 @@ Specialists are dispatched by the Implementation Sub-Agent, not by the Orchestra
 ### Core Orchestration
 
 - `evaluate-story` — assess complexity, identify domains, determine tier
-- `compose-team` — read `contexts/specialists.registry.yaml`, select sub-agents
+- `compose-team` — read `agents/specialists.registry.yaml`, select sub-agents
 - `coordinate-handoffs` — validate artefacts, sequence phases, manage retry logic
 
 ### Supporting (Orchestrator-level only)
@@ -221,7 +221,7 @@ Escalation target:
 | Implementation | `agents/sub-agents/implementation.sub-agent.md` |
 | QA | `agents/sub-agents/qa.sub-agent.md` |
 | MicroDelivery | `agents/sub-agents/micro-delivery.sub-agent.md` |
-| Specialists | Defined in `contexts/specialists.registry.yaml` |
+| Specialists | Defined in `agents/specialists.registry.yaml` |
 
 ---
 

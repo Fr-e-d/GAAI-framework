@@ -18,9 +18,7 @@ inputs:
   - marketing_observation_logs  (validated hypotheses, promise drafts — from contexts/artefacts/marketing/**)
   - strategy_artefacts  (validated GTM decisions — from contexts/artefacts/strategy/**)
 outputs:
-  - contexts/memory/project/**
-  - contexts/memory/decisions/**
-  - contexts/memory/patterns/**
+  - contexts/memory/**  (any category registered in index.md)
   - contexts/memory/index.md  (updated)
 ---
 
@@ -40,20 +38,24 @@ Activate after:
 ## Process
 
 1. Read new validated knowledge (discovery results, decisions, architecture insights, validated hypotheses, GTM decisions)
-2. Classify knowledge by memory category: project / decisions / summaries
+2. Read `contexts/memory/index.md` to discover available categories. Classify knowledge into the most appropriate existing category. If no existing category fits, create a new one — name it clearly, create the directory, and register it in `index.md` before writing any file.
 3. Create or update corresponding memory files using standard templates
-4. Register all new entries in memory index
+4. Register all new or modified entries in `contexts/memory/index.md` — this is mandatory, not optional. Any file not in the index is invisible to all other memory skills.
 5. Ensure memory files remain structured and minimal
 
 ---
 
 ## Output
 
-Memory files created at:
+Memory files created at any registered category path (see `contexts/memory/index.md`). Current categories as of last update:
 - `contexts/memory/project/` — project-level facts, architecture, constraints
 - `contexts/memory/decisions/` — governance decisions
 - `contexts/memory/patterns/` — coding conventions, procedural knowledge
-- `contexts/memory/index.md` — updated index
+- `contexts/memory/ops/` — platform operations, DNS, providers, infra procedures
+- `contexts/memory/contacts/` — experts and leads identified during Discovery
+- `contexts/memory/index.md` — updated (always, mandatory)
+
+> **Governance rule:** Any new category must be registered in `index.md` before use. Never write a memory file to an unregistered path.
 
 ---
 

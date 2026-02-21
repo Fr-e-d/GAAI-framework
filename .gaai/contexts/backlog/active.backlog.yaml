@@ -156,3 +156,42 @@ items:
     artefact: contexts/artefacts/stories/E06S12.story.md
     dependencies: [E06S08]
     notes: "DEC-48. Provider swap: claude-haiku-4-5 → gpt-4o-mini. Remove ANTHROPIC_API_KEY + CLOUDFLARE_AI_GATEWAY_URL. Add OPENAI_API_KEY. Same external contract. No CF AI Gateway at this stage (direct OpenAI call). Unblocks removal of Anthropic billing."
+
+  - id: E06S13
+    epic: E06
+    title: "satellite_configs schema extension — brand, content & theme columns"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S13.story.md
+    dependencies: [E06S02]
+    notes: "DEC-53. Pure DB migration. Adds: theme JSONB (design tokens), brand JSONB, content JSONB (meta/copy — unique per satellite), structured_data JSONB (JSON-LD), active BOOLEAN DEFAULT false, updated_at. Updates 'default' seed row. Regenerates TypeScript types. Unblocks E06S14."
+
+  - id: E06S14
+    epic: E06
+    title: "Satellite Worker — multi-tenant scaffold"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S14.story.md
+    dependencies: [E06S13]
+    notes: "DEC-53. New callibrate-satellite CF Worker (separate from callibrate-core). Hostname routing → satellite_configs KV cache (TTL 3600s) → design token injection → HTML render → CF edge cache. Routes: GET / (landing), /robots.txt, /sitemap.xml, /health, POST /admin/cache/purge. Supersedes E03S05 AC2 (Astro build-time). Unblocks all E03 stories."
+
+  - id: E06S15
+    epic: E06
+    title: "Email deliverability hardening — subdomain, DMARC, reply-to, plain text"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S15.story.md
+    dependencies: [E06S06]
+    notes: "DEC-55. Sending subdomain send.callibrate.io (reputation isolation transactional/marketing). DMARC p=none → p=reject. reply_to support@callibrate.io. Plain text fallback. ✅ AC1-AC3 DONE (founder 2026-02-21): Resend domain verified (DKIM+SPF), DMARC p=none via CF, support@ forwarded. Delivery ready for code changes AC4-AC10."
+
+  # ── EPIC E03: Prospect Gets Qualified and Matched to the Right Expert ────
+  # Layer 3.2 — satellite sites. Depends on E02 + E06.
+
+  - id: E03S05
+    epic: E03
+    title: "Crawler access policy — SEO/GEO protection for satellite sites"
+    priority: medium
+    status: refined
+    artefact: contexts/artefacts/stories/E03S05.story.md
+    dependencies: [E06S14]
+    notes: "DEC-53. robots.txt and sitemap.xml generated dynamically by the satellite Worker (E06S14), CF-edge-cached 24h — functionally equivalent to static. AC2 (Astro build-time) superseded by E06S14 AC6. SEO bots: full access. AI training bots blocked. AI answer/search bots: platform pages allowed, /experts/ blocked. Manual founder action: Cloudflare AI Training Bots → Block on all pages."

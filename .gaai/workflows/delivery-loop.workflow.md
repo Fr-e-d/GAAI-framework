@@ -32,7 +32,7 @@ Sub-agents spawned during execution:
 - `agents/sub-agents/planning.sub-agent.md` (Tier 2/3)
 - `agents/sub-agents/implementation.sub-agent.md` (Tier 2/3)
 - `agents/sub-agents/qa.sub-agent.md` (Tier 2/3)
-- Specialists per `contexts/specialists.registry.yaml` (Tier 3 only)
+- Specialists per `agents/specialists.registry.yaml` (Tier 3 only)
 
 ---
 
@@ -42,7 +42,7 @@ Before starting the loop:
 - ✅ Stories are validated (`validate-artefacts` has PASSED)
 - ✅ Acceptance criteria are present and testable
 - ✅ Backlog item status is `refined`
-- ✅ `contexts/specialists.registry.yaml` is present
+- ✅ `agents/specialists.registry.yaml` is present
 
 ---
 

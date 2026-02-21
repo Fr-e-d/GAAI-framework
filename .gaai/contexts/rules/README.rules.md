@@ -76,7 +76,8 @@ A rule must define constraints, not workflows or reasoning. If it contains a pro
 
 **Start customizing here:**
 → [orchestration.rules.md](orchestration.rules.md) — agent authority and execution flows (edit this first)
-→ [skills.rules.md](skills.rules.md) — skill invocation and isolation
+→ [skills.rules.md](skills.rules.md) — skill invocation and isolation (execution)
+→ [skills-design.rules.md](skills-design.rules.md) — skill authoring constraints: modularity, no hardcoded project values
 → [backlog.rules.md](backlog.rules.md) — backlog lifecycle and state transitions
 → [artefacts.rules.md](artefacts.rules.md) — artefact authority and structure
 → [memory.rules.md](memory.rules.md) — memory retrieval and ingestion

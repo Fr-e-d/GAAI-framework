@@ -16,8 +16,9 @@ updated_at: 2026-02-19
 | Category | Path | Purpose | Load frequency |
 |---|---|---|---|
 | `project/` | `project/context.md` | Product vision, scope, stack, constraints, SMART objectives | Every session |
-| `decisions/` | `decisions/_log.md` | Validated choices — 23 decisions logged (append-only) | Selective |
+| `decisions/` | `decisions/_log.md` | Validated choices — append-only | Selective |
 | `patterns/` | `patterns/conventions.md` | Coding conventions, procedural knowledge | Every Delivery session |
+| `ops/` | `ops/platform.md` | Platform operations — DNS, email, providers, procedures | When onboarding team or making infra changes |
 | `contacts/` | `contacts/leads.md` | Experts identifiés pendant Discovery — à contacter au lancement | Delivery phase |
 | `summaries/` | *(empty — add as project grows)* | Compacted episodic knowledge | Selective |
 | `sessions/` | *(empty — add temporary notes here)* | Short-term session exploration | Never (source for summaries) |
@@ -30,8 +31,9 @@ updated_at: 2026-02-19
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-19 (updated: Callibrate, stack, architecture) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-20 (37 décisions) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-21 (58 décisions — DEC-2026-02-19-01 à DEC-2026-02-21-58) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | — |
+| `ops/platform.md` | ops | OPS-001 | 2026-02-21 |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
 
 ---

@@ -11,11 +11,8 @@ metadata:
   id: SKILL-SUMMARIZATION-001
   updated_at: 2026-01-30
 inputs:
-  - contexts/memory/project/**
-  - contexts/memory/decisions/**
-  - contexts/memory/patterns/**
-  - contexts/memory/sessions/**
-  - contexts/memory/summaries/**  (for consolidation)
+  - contexts/memory/index.md        (registry — read first to discover all active categories)
+  - contexts/memory/**              (any category registered in index.md — resolved at runtime)
 outputs:
   - contexts/memory/summaries/*.summary.md
   - contexts/memory/archive/**

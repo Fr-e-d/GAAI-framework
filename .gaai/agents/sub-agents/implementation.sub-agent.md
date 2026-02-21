@@ -52,7 +52,7 @@ DIE     ← Terminates; context window released
 
 ## Specialist Dispatch
 
-The Implementation Sub-Agent reads the execution plan and matches against `contexts/specialists.registry.yaml`. For each trigger match, it spawns the corresponding Specialist Sub-Agent:
+The Implementation Sub-Agent reads the execution plan and matches against `agents/specialists.registry.yaml`. For each trigger match, it spawns the corresponding Specialist Sub-Agent:
 
 ```
 Specialist lifecycle: spawn → execute → handoff-specialist-artefact → die

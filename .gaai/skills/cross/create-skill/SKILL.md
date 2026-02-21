@@ -139,15 +139,11 @@ Optional subdirectories (create only if needed):
 - `references/` — supporting documents the skill references
 - `assets/` — templates or static files the skill produces
 
-### Step 6 — Register the skill
+### Step 6 — Regenerate the skills index
 
-Add an entry to `.gaai/skills/README.skills.md` in the correct category table:
+Invoke `build-skills-index` (`.gaai/skills/cross/build-skills-index/SKILL.md`) to regenerate `.gaai/skills/skills-index.yaml` from the updated frontmatter.
 
-```markdown
-| `{skill-name}` | {description} |
-```
-
-Update the skill count in the header.
+Do not manually edit `skills-index.yaml` — it is a derived artifact.
 
 ### Step 7 — Reference in agent file
 

@@ -6,7 +6,7 @@ tags:
   - decisions
   - governance
 created_at: 2026-02-19
-updated_at: 2026-02-19
+updated_at: 2026-02-21
 ---
 
 # Decision Log
@@ -229,6 +229,8 @@ updated_at: 2026-02-19
 
 ### DEC-2026-02-19-10 — Cal.com for Calendar and Booking (Managed Users)
 
+> ⚠️ **SUPERSEDED by DEC-2026-02-20-41** — Cal.com Platform fermée aux nouveaux signups le 15/12/2025. Architecture booking remplacée par Google Calendar API directe (E06S10 + E06S11).
+
 **Context:** Booking layer requires calendar integration with Google Calendar + Google Meet + Microsoft Teams. Must support programmatic calendar creation per expert (marketplace model).
 **Decision:** Cal.com with managed users API. Experts get a Cal.com managed account created programmatically at registration. Booking widget embedded on satellite sites and callibrate.ai.
 **Rationale:** Cal.com managed users allow creating calendar accounts on behalf of experts — critical for a marketplace. Calendly does not support this model. Native Google Calendar sync + auto Meet link generation + Teams support.
@@ -338,6 +340,8 @@ updated_at: 2026-02-19
 ---
 
 ### DEC-2026-02-20-34 — `cal.setup` : sort de matching-jobs, home à définir en E06S04
+
+> ⚠️ **SUPERSEDED by DEC-2026-02-20-41** — E06S04 superseded. Cal.com supprimé. Le setup expert ne crée plus de managed user Cal.com — l'OAuth Google Calendar (E06S10) remplace intégralement ce mécanisme.
 
 **Context:** `matching-jobs` queue est supprimée (DEC-33). Elle portait deux types de messages : `compute.matches` (over-engineering) et `cal.setup` (création du managed user Cal.com lors de l'inscription expert). Le `cal.setup` est légitime mais n'a plus de queue pour le transporter.
 **Decision:** `cal.setup` est traité de manière synchrone lors de l'inscription expert (POST /api/experts/register → appel Cal.com API directement). Si la latence Cal.com est trop élevée, une queue dédiée `callibrate-core-queue-onboarding-staging/prod` sera créée en E06S04. Décision finale à prendre dans E06S04.
@@ -539,6 +543,66 @@ updated_at: 2026-02-19
 **Decision:** Phase 1 corrige les 6 premières faiblesses. Fix : deal-breaker case-insensitive. Skills : `normalizeSkill()` avec alias map (react.js→react, nodejs, etc.). Industries : `getIndustryProximity()` graduée (banking↔fintech 0.8, e-commerce↔retail 0.9, etc.). Timelines : `parseTimelineDays()` avec ratio-based proximity scoring. Budget : `budget_conversion_factor` configurable dans `MatchingWeights` (default 20, backward-compatible). Tous les utilitaires dans `src/matching/normalize.ts`. Réf: DEC-18, DEC-27.
 **Impact:** `src/matching/normalize.ts` créé (3 fonctions exportées). `src/matching/score.ts` mis à jour (4 scorers + deal-breaker fix). `src/types/matching.ts` étendu (`budget_conversion_factor`, `reliability_modifier`). 11 nouveaux tests, 5 existants inchangés (non-régression vérifiée). Phase 2 (embeddings pgvector) et Phase 3 (ML re-ranking) hors scope.
 **Date:** 2026-02-20
+
+---
+
+### DEC-2026-02-21-53 — Stratégie d'accès crawlers : SEO/GEO autorisé, training bots bloqués, answer bots restreints sur profils
+
+**Context:** Cloudflare propose un toggle pour bloquer les "AI training bots" sur le site. Question : que bloquer pour maximiser le trafic organique (SEO) et la visibilité AI (GEO) tout en évitant que des LLMs répondent directement aux requêtes prospects ("trouve-moi un expert n8n") en énumérant les profils de la directory — contournant ainsi le funnel et le modèle de monétisation.
+**Decision:** Trois catégories de bots traitées différemment : (1) SEO bots (Googlebot, Bingbot) → accès total — indexation traditionnelle non négociable ; (2) AI training bots (GPTBot, CCBot, Google-Extended, anthropic-ai, ClaudeBot) → bloqués sur toutes les pages — les profils experts ne doivent pas être intégrés dans les poids de LLMs futurs ; (3) AI answer/search bots (PerplexityBot, OAI-SearchBot) → accès aux pages plateforme et catégories (GEO : l'AI peut recommander "va sur Callibrate"), mais bloqués sur les URLs de profils individuels (`/experts/`, `/profiles/`) — empêche l'énumération directe des experts sans passer par le funnel. Implémentation via `robots.txt` statique (Astro build time) + `sitemap.xml` excluant les profils. Le toggle Cloudflare ("Block AI training bots → Block on all pages") est une action manuelle founder, sans Story. Story créée : **E03S05** — bloquée par E03S01 (scaffold satellite, URL structure à définir).
+**Rationale:** Le toggle Cloudflare et le `robots.txt` couvrent des couches différentes : Cloudflare agit au niveau CDN/IP (bots non-conformes inclus) ; `robots.txt` couvre les bots conformes. Les deux sont nécessaires. La distinction training vs answer bots est fondamentale : bloquer les answer bots nuit au GEO (Callibrate ne serait pas recommandé par les AI engines) ; les autoriser sur les profils nuit au modèle (bypass du funnel). La solution est une règle par chemin URL, pas un blocage global. Les profils restent indexables par les SEO bots — pas de `noindex`, uniquement des restrictions robots.txt ciblées.
+**Impact:** E03S05 créée et ajoutée au backlog (status: refined, dépend de E03S01). Action manuelle founder immédiate : Cloudflare dashboard → zone satellite → Security → Bots → "Block AI training bots" → "Block on all pages". `llms.txt` évalué et écarté : standard non stable au stade MVP.
+**Date:** 2026-02-21
+
+---
+
+### DEC-2026-02-21-54 — Architecture satellite : Multi-Tenant Worker (not Astro SSG)
+
+**Context:** Choix de l'architecture pour les satellite sites (Layer 3.2, Track prospect). Deux options évaluées : (A) Astro SSG — N projets séparés, N pipelines de build/deploy, worker routes ou custom domains par satellite. (B) Multi-tenant Cloudflare Worker — 1 déploiement, N satellites servis via hostname routing depuis `satellite_configs`. CF Worker Routes évalué et écarté : pertinent uniquement quand un Worker proxyfie devant un serveur d'origine externe — ce n'est pas le modèle Callibrate (le Worker est l'origin). Custom Domains CF = mécanisme correct. Worker Routes non pertinent sauf scénario WordPress-as-origin (non retenu).
+**Decision:** Architecture multi-tenant Worker adoptée. Un seul Worker `callibrate-satellite` sert tous les satellites. Hostname routing → lecture `satellite_configs` (Supabase) → KV cache TTL 3600s → injection design tokens CSS custom properties → rendu HTML → CF edge cache (max-age=300, swr=3600). Ajouter un satellite = INSERT `satellite_configs` + DNS + Custom Domain CF. Zéro déploiement supplémentaire. `satellite_configs` = CMS opérationnel (contenu modifiable sans deploy via Supabase dashboard + endpoint `/admin/cache/purge`). Schema étendu via E06S13 (colonnes `theme`, `brand`, `content`, `structured_data`, `active`). Scaffold Worker via E06S14.
+**Rationale:** Astro SSG n'apporte aucun bénéfice SEO/GEO mesurable : Google ne lit pas le CSS, les LLMs ne voient pas le design. Ce qui compte pour SEO/GEO = contenu textuel unique par satellite (meta_title, hero_headline, value_props — tous dans `satellite_configs.content` JSONB). La performance statique d'Astro est neutralisée par le CF edge cache sur le Worker rendu (comportement équivalent). Astro SSG = N pipelines de build (coût opérationnel croissant) — incompatible avec solo founder. Le design (tokens CSS) peut être 100% partagé entre satellites; le contenu textuel doit être 100% unique (risque SEO = duplicate content textuel, pas similarité visuelle). Un CMS headless externe (Contentful, Sanity) est écarté au MVP : `satellite_configs` JSONB est suffisant; CMS pertinent uniquement quand du contenu éditorial long-form SEO est publié par vertical.
+**Impact:** E06S13 créée (migration satellite_configs — colonnes theme/brand/content/structured_data/active). E06S14 créée (scaffold Worker multi-tenant — hostname routing, KV config cache, token injection, routes /robots.txt /sitemap.xml /health /admin/cache/purge). E03S05 AC2 (Astro build-time) supersédé par E06S14 AC6 (génération dynamique, CF-cached 86400s). E03S05 dependency mise à jour : E03S01 → E06S14. Tous les E03Sxx dépendent de E06S14 (scaffold Layer 3.2).
+**Date:** 2026-02-21
+
+---
+
+### DEC-2026-02-21-55 — Email deliverability : subdomain transactionnel + DMARC + architecture dual-stream
+
+**Context:** Analyse des 10 recommandations Resend deliverability confrontées à l'implémentation E06S06. Évaluation objective : 2 critiques (DMARC, subdomain), 3 nice-to-have (plain text, reply-to, smoke test), 4 non-issues au stade actuel (warm-up, URL matching, 102KB, tracking). Le fondateur confirme que du marketing email est envisageable à terme — la séparation transactionnel/marketing devient impérative dès le départ.
+**Decision:** (1) Sous-domaine transactionnel `send.callibrate.io` configuré dans Resend — isole la réputation ESP du domaine racine `callibrate.io`. (2) DMARC `p=none` immédiat → progression vers `p=reject` après 72h de monitoring (mono-ESP Resend = progression rapide, aucun autre sender légitime à risquer de bloquer). (3) `reply_to: support@callibrate.io` sur tous les emails (UX — pas un facteur de délivrabilité, mais les experts/prospects qui répondent doivent atteindre quelqu'un). (4) Champ `text` ajouté à tous les appels Resend (accessibilité, pas de pénalité délivrabilité prouvée sans plain text). (5) Sous-domaine marketing futur sur un domaine séparé (`news.callibrate.io` ou équivalent) — jamais sur `send.callibrate.io`. (6) `meet.callibrate.io` redirect pour les liens Google Meet : évalué et rejeté — non-issue délivrabilité (liens Google ont une excellente réputation), ajoute un SPOF (si le redirect Worker tombe, les participants ne peuvent pas rejoindre le call), over-engineering MVP. (7) Domain warm-up : non pertinent — Resend shared IPs ont une réputation établie, le volume organique < 100/jour IS the warm-up.
+**Rationale:** La séparation transactionnel/marketing dès J0 est la seule décision structurellement irréversible — migrer un domaine d'envoi plus tard = reset de réputation. Toutes les autres améliorations sont incrémentales et réversibles. SPF déjà configuré par le fondateur.
+**Impact:** E06S15 créée (refined). 3 prérequis fondateur (Resend domain verification, DMARC DNS, support@ mailbox) avant Delivery. Code : `from` sur subdomain, `reply_to`, `text` plain text, env vars `EMAIL_FROM_DOMAIN` + `EMAIL_REPLY_TO`. Architecture email long terme : `send.callibrate.io` = transactionnel (Resend), `news.callibrate.io` = marketing (ESP séparé ou domaine Resend séparé).
+**Date:** 2026-02-21
+
+---
+
+### DEC-2026-02-21-56 — GAAI : Approche hybride de discoverabilité skills/agents (frontmatter + index dérivé)
+
+**Context:** Les skills GAAI avaient des paths mémoire et des valeurs projet hardcodées (CF Workers, Supabase, Haiku) directement dans leurs frontmatter et Process. Le README.skills.md n'avait pas de directive de filtrage pour les agents. La discoverabilité des skills, agents et artefacts a été évaluée objectivement contre les industry standards 2026 (MCP, LangChain BigTool, A2A Protocol, Agent Skills spec Anthropic, RAG-MCP paper arXiv:2505.03275).
+**Decision:** Adoption de l'approche hybride issue des best practices 2026 : (1) YAML frontmatter = source de vérité (chaque SKILL.md se décrit lui-même, self-describing) ; (2) index dérivé = vue agrégée générée par un skill dédié (`build-skills-index` → `skills-index.yaml`, `build-agents-index` → `agents-index.yaml`). Chargement progressif en 3 phases (Phase 1 : frontmatter uniquement pour filtrage — ~100 tokens/skill ; Phase 2 : SKILL.md complet si pertinent ; Phase 3 : references/ à l'exécution uniquement). README.skills.md et README.agents.md mis à jour avec le discovery protocol et le schéma frontmatter documenté.
+**Rationale:** Convergence industrie documentée : Agent Skills spec (Anthropic, open-source déc. 2025), Mastra 2026 (BM25 + vector sur frontmatter), RAG-MCP (43% accuracy vs 13.6% all-tools-in-prompt). Le frontmatter est le correct mécanisme — les index dérivés sont des caches d'agrégation. La maintenance manuelle d'un catalogue plat crée de la dérive ; la création skills maintient l'index via `create-skill` Step 6. Principe : "Frontmatter = source de vérité. Index = cache dérivé. Jamais l'inverse."
+**Impact:** Deux nouveaux skills cross : `build-skills-index` (SKILL-CRS-017) et `build-agents-index` (SKILL-CRS-018). `create-skill` Step 6 mis à jour : invoke `build-skills-index` après création. `skills-index.yaml` généré (35 skills). `agents-index.yaml` généré (3 agents + 4 sub-agents). README.skills.md et README.agents.md enrichis avec discovery protocol 3-phase et schéma frontmatter.
+**Date:** 2026-02-21
+
+---
+
+### DEC-2026-02-21-57 — GAAI : `specialists.registry.yaml` déplacé de `contexts/` vers `agents/`
+
+**Context:** Le fichier `specialists.registry.yaml` définit des unités d'exécution avec identité, triggers, skills et context bundle — des entités du système agent. Il était stocké dans `.gaai/contexts/specialists.registry.yaml`, ce qui créait une discontinuité : README.agents.md décrit les specialists comme faisant partie du système agent, mais les pointait vers `contexts/`. La raison historique : le fichier est "consommé comme contexte" par `compose-team`. "Consommé comme contexte" ≠ "appartient à contexts/".
+**Decision:** `specialists.registry.yaml` déplacé vers `.gaai/agents/specialists.registry.yaml`. Tous les fichiers référençant l'ancienne path mis à jour (8 occurrences dans 6 fichiers : compose-team/SKILL.md, evaluate-story/SKILL.md, implementation.sub-agent.md, delivery.agent.md, README.agents.md, delivery-loop.workflow.md). Aucun contenu du fichier modifié.
+**Rationale:** Les specialists définissent des unités d'exécution — ils appartiennent au dossier agents/ pour co-localisation avec les sub-agents dont ils dépendent. La distinction sémantique : `contexts/` = contexte de gouvernance (règles, mémoire, artefacts, backlog) ; `agents/` = définitions des unités d'exécution. Le contenu du fichier est inchangé — seule la localisation est corrigée.
+**Impact:** Path source de vérité : `.gaai/agents/specialists.registry.yaml`. Toutes les références (skills, agents, workflows) mises à jour. Aucun impact fonctionnel.
+**Date:** 2026-02-21
+
+---
+
+### DEC-2026-02-21-58 — GAAI : Règles de design skills (R8-R12) — "Hardcode the framework. Discover the project."
+
+**Context:** Plusieurs skills GAAI hardcodaient des valeurs appartenant au projet (stack CF Workers/Supabase/TypeScript, nom du provider AI Haiku, paths mémoire spécifiques comme `decisions/_log.md`) directement dans leurs frontmatter et Process sections. Cette pratique crée une dérive silencieuse : quand le projet évolue (stack change, nouveau provider, nouvelle catégorie mémoire), les skills restent faux sans erreur visible. Constat identique : aucune règle formelle n'existait pour encadrer l'authoring des skills.
+**Decision:** Création de `.gaai/contexts/rules/skills-design.rules.md` (RULES-SKILLS-DESIGN-002) avec 5 règles formelles : R8 (ne jamais hardcoder des paths de ressources projet), R9 (ne jamais hardcoder des valeurs projet spécifiques — stack, provider, team), R10 (référencer la mémoire par catégorie via index.md, jamais par path), R11 (les constantes structurelles sont l'exception — state machines, schemas, severity scales), R12 (le frontmatter inputs doit refléter le comportement réel de résolution à runtime). Application rétroactive sur 7 skills existants (memory-retrieve, memory-refresh, summarization, evaluate-story, compose-team, approach-evaluation, gaai-status). Principe directeur : "Hardcode the framework. Discover the project."
+**Rationale:** Le mode d'échec silencieux est plus dangereux qu'un échec bruyant. Un skill avec un path hardcodé ne produit pas d'erreur — il ignore les nouvelles catégories, charge des fichiers inexistants, ou encode les contraintes du projet actuel dans un artefact qui devrait être framework-level. La ligne de démarcation : les constantes du framework (state machines, schemas, severity scales) sont légitimement hardcodées ; les valeurs qui décrivent l'état courant du projet doivent être découvertes à runtime depuis la mémoire.
+**Impact:** Règle de référence pour tout nouvel authoring ou review de skill. Audit checklist ajoutée dans le fichier de règles. README.rules.md mis à jour (référence au nouveau fichier). 7 skills rétroactivement corrigés.
+**Date:** 2026-02-21
 
 ---
 

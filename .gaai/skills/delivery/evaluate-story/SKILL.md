@@ -12,8 +12,8 @@ metadata:
   updated_at: 2026-02-18
 inputs:
   - contexts/artefacts/stories/**       (the Story to evaluate)
-  - contexts/specialists.registry.yaml  (to check domain triggers)
-  - contexts/memory/project/context.md  (project context)
+  - agents/specialists.registry.yaml    (to check domain triggers)
+  - contexts/memory/index.md            (registry — resolve project context file from `project` category)
 outputs:
   - evaluation result (inline — not written to file)
 ---
@@ -49,7 +49,7 @@ Read the full Story artefact: acceptance criteria, complexity field, `depends_on
 
 ### 3. Scan for domain triggers
 
-Read `contexts/specialists.registry.yaml`. Scan the Story's acceptance criteria and title for trigger keywords. Record which specialists would be needed.
+Read `agents/specialists.registry.yaml`. Scan the Story's acceptance criteria and title for trigger keywords. Record which specialists would be needed.
 
 ### 4. Determine tier
 
