@@ -14,7 +14,7 @@ export interface ExpertPoolEntry {
   rate_min: number | null;
   rate_max: number | null;
   composite_score: number | null;
-  total_leads: number; // TODO(E06S09): populate from leads table count
+  total_leads: number;
 }
 
 const KV_KEY = 'expert_pool';
@@ -47,6 +47,23 @@ export async function loadExpertPool(env: Env): Promise<ExpertPoolEntry[]> {
     return [];
   }
 
+  // Query actual lead counts per expert (replaces hardcoded 0)
+  const expertIds = experts.map((e) => e.id);
+  const leadCountMap = new Map<string, number>();
+
+  if (expertIds.length > 0) {
+    const { data: leadRows } = await supabase
+      .from('leads')
+      .select('expert_id')
+      .in('expert_id', expertIds);
+
+    for (const row of leadRows ?? []) {
+      if (row.expert_id) {
+        leadCountMap.set(row.expert_id, (leadCountMap.get(row.expert_id) ?? 0) + 1);
+      }
+    }
+  }
+
   const pool: ExpertPoolEntry[] = experts.map((e) => ({
     id: e.id,
     profile: e.profile,
@@ -54,7 +71,7 @@ export async function loadExpertPool(env: Env): Promise<ExpertPoolEntry[]> {
     rate_min: e.rate_min,
     rate_max: e.rate_max,
     composite_score: e.composite_score,
-    total_leads: 0, // TODO(E06S09): populate from leads table count
+    total_leads: leadCountMap.get(e.id) ?? 0,
   }));
 
   // 3. Write back to KV (non-blocking on failure)

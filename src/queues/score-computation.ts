@@ -202,10 +202,11 @@ async function computeRecencyScore(
 }
 
 // AC7: trust_score — static profile completeness (5 criteria × 20pts each)
+// Criteria use only MVP-collected data (post-delivery correction 2026-02-22)
 async function computeTrustScore(expertId: string, supabase: TypedSupabaseClient): Promise<number> {
   const { data, error } = await supabase
     .from('experts')
-    .select('verified_at, bio, profile')
+    .select('verified_at, bio, headline, gcal_connected, profile')
     .eq('id', expertId)
     .single();
 
@@ -219,28 +220,18 @@ async function computeTrustScore(expertId: string, supabase: TypedSupabaseClient
   // Criterion 1: verified email (20pts) — verified_at is non-null
   if (data.verified_at !== null) score += 20;
 
-  // Criterion 2: bio (non-empty) AND ≥3 portfolio items (20pts) — both required
-  const portfolioItems = p?.portfolio_items;
-  if (
-    data.bio !== null &&
-    data.bio.trim().length > 0 &&
-    Array.isArray(portfolioItems) &&
-    portfolioItems.length >= 3
-  ) {
-    score += 20;
-  }
+  // Criterion 2: bio non-empty (20pts) — collected via E06S03 register form
+  if (data.bio !== null && data.bio.trim().length > 0) score += 20;
 
-  // Criterion 3: LinkedIn URL present (20pts)
-  const linkedinUrl = p?.linkedin_url;
-  if (typeof linkedinUrl === 'string' && linkedinUrl.trim().length > 0) score += 20;
+  // Criterion 3: Google Calendar connected (20pts) — collected via E06S10 OAuth
+  if (data.gcal_connected === true) score += 20;
 
-  // Criterion 4: years_experience declared ≥ 3 (20pts)
-  const yearsExp = p?.years_experience;
-  if (typeof yearsExp === 'number' && yearsExp >= 3) score += 20;
+  // Criterion 4: headline non-empty (20pts) — collected via E06S03 register form
+  if (data.headline !== null && data.headline.trim().length > 0) score += 20;
 
-  // Criterion 5: ≥1 certification/credential in profile JSONB (20pts)
-  const certifications = p?.certifications;
-  if (Array.isArray(certifications) && certifications.length >= 1) score += 20;
+  // Criterion 5: ≥3 skills in profile JSONB (20pts) — collected via E06S03 PATCH profile
+  const skills = p?.skills;
+  if (Array.isArray(skills) && skills.length >= 3) score += 20;
 
   return score;
 }

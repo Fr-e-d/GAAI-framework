@@ -6,7 +6,7 @@ tags:
   - decisions
   - governance
 created_at: 2026-02-19
-updated_at: 2026-02-21
+updated_at: 2026-02-22
 ---
 
 # Decision Log
@@ -14,6 +14,176 @@ updated_at: 2026-02-21
 > Append-only. Never delete or overwrite decisions.
 > Only the Discovery Agent may add entries (or Bootstrap Agent during initialization).
 > Format: one entry per decision, newest at top.
+
+---
+
+### DEC-2026-02-22-68 — Billing Model — LS Usage-Based Subscription + Internal Credit Accounting
+
+**Context:** Le billing per-lead checkout (un checkout LS par lead) crée de la friction (expert doit cliquer à chaque lead) et des coûts de refund (LS garde ses fees sur les remboursements). Le projet a besoin d'un modèle qui supporte : (1) carte on file avec auto-charge, (2) flag/restore instantané sans frais LS, (3) LS comme MoR pour la gestion fiscale, (4) anti-gaming transparent. Analyse des modèles industrie : Thumbtack et Bark utilisent des crédits prépayés ; Angi (post-pay auto-charge) est le plus controversé (amende FTC $7.2M). LS supporte les usage-based subscriptions ($0/mois, carte on file, charge en fin de cycle basée sur l'usage reporté).
+**Decision:** Modèle hybride — LS usage-based subscription pour le billing + credit accounting interne pour le flag/restore temps réel.
+
+**Flux complet :**
+1. Expert active son pipeline → souscription LS $0/mois "Lead Pipeline" (entre sa carte une fois)
+2. Lead créé → crédits déduits en interne instantanément, prix et breakdown affichés dans le dashboard
+3. Expert peut flag "non qualifié" dans les 7 jours → crédits restaurés en interne (zéro transaction LS)
+4. Silence ou confirmation explicite après 7 jours → lead confirmé → usage reporté à LS
+5. Fin de cycle billing LS → LS charge automatiquement le total usage confirmé → carte on file
+6. Carte échoue → LS dunning automatique (retry) → si échec final : leads pausés
+
+**Usage reporting différé de 7 jours :** L'usage n'est reporté à LS qu'après expiration du flag window. Leads flaggés ne sont jamais reportés → jamais chargés → pas de refund nécessaire. Élimine le misalignment flag/billing cycle.
+
+**Crédit d'accueil :** 100€ offerts à l'activation (internal credit, pas de charge LS). Permet à l'expert de tester 1-2 leads sans engagement financier.
+
+**Expert controls :**
+- `max_lead_price` — plafond par lead (deal-breaker au matching, DEC-67)
+- `spending_limit` — plafond mensuel de dépense. Quand atteint → leads pausés → notification.
+- Dashboard affiche : solde crédits temps réel, progression spending limit, nombre de leads manqués (cause : solde insuffisant OU max_lead_price dépassé)
+
+**Anti-gaming — règles transparentes dès l'onboarding (mise à jour DEC-30) :**
+- `qualification_rate = leads_confirmed / total_leads` reste composant du composite_score
+- Règles communiquées explicitement à l'onboarding : "Les experts qui confirment leurs leads reçoivent de meilleurs leads. Un taux de flag élevé réduit naturellement ta visibilité dans le matching."
+- Framing positif uniquement (jamais "si tu triches → sanctions"). Conforme aux principes de communication expert (context.md).
+- Dashboard affiche la qualification_rate de l'expert + explication de son impact
+
+**Balance check au matching :** `expert.credit_balance >= lead_price` est un prérequis pour le match. Si insuffisant → expert exclu du match pour ce lead + notification "Ton solde est insuffisant pour recevoir ce lead. Recharge pour réactiver."
+
+**Évolution post-M3 :** Si l'auto-charge instantané (vs fin de cycle) devient critique, migration payment layer vers Stripe (PaymentIntents + saved PaymentMethod). LS reste MoR tant que le volume ne justifie pas Stripe Tax + service de filing fiscal.
+
+**Rationale:** Le modèle usage-based LS préserve le MoR (taxes gérées par LS) tout en offrant carte on file + auto-billing. Le credit accounting interne permet le flag/restore instantané sans LS fees. Le report d'usage différé de 7 jours résout le misalignment flag/cycle. L'anti-gaming communiqué en positif est conforme aux valeurs Transparence et Agentivité.
+**Impact:** Mise à jour DEC-30 (flux billing révisé). Nouveau produit LS : "Lead Pipeline" usage-based subscription. Nouvelles structures DB : `experts.credit_balance` INTEGER (centimes), `credit_transactions` table. CF Workflow ou Cron Trigger pour report usage LS après 7j. E05S01/S02 : révisés pour modèle crédits. E06S06 lead-billing consumer : révisé pour debit/restore pattern.
+**Date:** 2026-02-22
+
+---
+
+### DEC-2026-02-22-67 — Dynamic Lead Pricing — Budget Tier × Qualification Modifier
+
+**Context:** Le prix du lead était fixé à "100–200€" (context.md, PRD-001) sans grille ni formule. Un prix unique crée une friction : un prospect à 3 000€ de budget et un prospect à 100 000€ ne représentent pas la même valeur pour l'expert. Le pricing doit refléter la valeur potentielle du lead pour l'expert tout en restant transparent et prédictible (calcul ROI).
+
+Benchmarks secteur : appointment setting B2B cold 200–500€/meeting, lead qualifié agence B2B 150–400€/lead, Upwork 20% du premier projet, LinkedIn Sales Navigator ~120€/mois (pas par lead). Un lead Callibrate est chaud, pré-qualifié, auto-initié → vaut structurellement plus qu'un lead froid.
+
+**Decision:** Tarification dynamique basée sur 2 facteurs publiés :
+
+**Facteur 1 — Budget prospect déclaré (primaire).** `budget_range.max` détermine le tier :
+
+| Budget prospect (max déclaré) | Prix base | Ratio coût/valeur attendue (conv. 30%) |
+|---|---|---|
+| Non déclaré ou < 5 000€ | 49€ | ~3% |
+| 5 000 – 20 000€ | 89€ | ~1.5% |
+| 20 000 – 50 000€ | 149€ | ~1% |
+| 50 000€+ | 229€ | ~0.5% |
+
+**Facteur 2 — Niveau de qualification (modificateur) :**
+- Standard (confidence 0.6–0.8) : prix base × 1.0
+- Premium (confidence > 0.8 sur tous les champs, budget explicite, timeline précise) : prix base × 1.15
+
+**Grille résultante publiée :**
+
+| Budget prospect | Standard | Premium (+15%) |
+|---|---|---|
+| Non déclaré / < 5k€ | 49€ | 56€ |
+| 5k – 20k€ | 89€ | 102€ |
+| 20k – 50k€ | 149€ | 171€ |
+| 50k€+ | 229€ | 263€ |
+
+**Match score = filtre + ranking, PAS facteur de prix.** Le même lead coûte le même prix à tous les experts qui le reçoivent. Raisons : (1) le match score varie par expert pour le même prospect → prix différents pour le même lead = confus et injuste, (2) match élevé = prix plus élevé → incentive perverse (expert pénalisé pour être un bon match), (3) aucune plateforme B2B leader n'utilise le match score comme variable de prix.
+
+**Expert `max_lead_price` :** L'expert peut fixer un plafond par lead via `preferences.max_lead_price`. Agit comme deal-breaker au matching : si `final_price > max_lead_price` → expert exclu du match pour ce lead. Pas de limite par défaut (tous les tiers éligibles). Dashboard affiche : nombre de leads manqués à cause du max + estimation du % du pool accessible avec le max actuel. Information factuelle au moment du réglage, jamais manipulatoire.
+
+**Budget non déclaré :** Tier par défaut (49€). Le prospect ne sait pas que son budget influence le prix du lead — pas d'incentive à sous-déclarer. Le prospect déclare son budget pour le matching (être connecté au bon expert), pas pour le pricing. Sous-déclarer dégrade la qualité de son propre match (guard-rail naturel). La déclaration de budget peut être configurée comme obligatoire ou optionnelle par satellite/vertical via `satellite_configs.quiz_schema`.
+
+**Rationale:** Le budget prospect est le seul facteur directement corrélé à la valeur du deal, transparent, prédictible, et conforme aux standards industrie (Thumbtack : prix par valeur du job, Bark : crédits variables par valeur estimée). La qualification en 2 niveaux ajoute une nuance de valeur sans complexifier le calcul ROI. Tous les ratios coût/valeur sont très favorables à l'expert (<3%) → le pricing est un no-brainer à tous les tiers.
+**Impact:** Remplacement du range "100–200€" dans context.md et PRD-001. Formule de calcul implémentée dans `processLeadBilling`. `leads.amount` renseigné à la création du lead. Grille publiée dans l'onboarding expert et le dashboard.
+**Date:** 2026-02-22
+
+---
+
+### DEC-2026-02-22-66 — Hyperdrive + postgres.js replaces Supabase JS for DB queries
+
+**Context:** All 48 database queries use `@supabase/supabase-js` (PostgREST/HTTP). Each Worker invocation opens a new HTTP connection — no pooling, no caching. The score-computation consumer (7 sequential queries) pays ~210ms in HTTP overhead. Supabase Micro plan has 60 connection limit.
+**Decision:** Hyperdrive (free on Workers Paid) for TCP connection pooling + query caching. `postgres` v3.4.4+ (tagged template SQL, zero sub-dependencies, serverless-native) replaces Supabase JS for all DB queries. No ORM (Drizzle) — SQL direct with existing types via `sql<T[]>`. Supabase JS retained ONLY for `supabase.auth.getUser()` in auth middleware. Connection string: Supabase Direct (port 5432, bypasses Supavisor). Config: `prepare: true` for Hyperdrive query cache compatibility.
+**Rationale:** 6× latency improvement on multi-query paths. Connection pooling protects against Supabase connection exhaustion. postgres.js tagged templates are injection-safe, zero-config, type-safe with existing interfaces. No RLS dependency (service key bypass). Migration is mechanical (48 queries, 11 files).
+**Impact:** E06S18 (foundation story). All subsequent stories (E06S19–E06S26) build on this.
+**Date:** 2026-02-22
+
+---
+
+### DEC-2026-02-22-65 — Analytics Engine for matching observability
+
+**Context:** No observability into matching pipeline performance (latency, cache hits, scoring quality).
+**Decision:** Analytics Engine dataset `matching-metrics`. Fire-and-forget `writeDataPoint()` (not awaited, try/catch). Tracks: latency_ms, cache_layer, pool_size, vectorize_candidates, top_score, mean_score. No-op if binding missing.
+**Rationale:** Free (100K events/day on Workers Paid), zero-latency (fire-and-forget), queryable via CF Dashboard/GraphQL.
+**Impact:** E06S26. Binding: `MATCHING_ANALYTICS: AnalyticsEngineDataset`.
+**Date:** 2026-02-22
+
+---
+
+### DEC-2026-02-22-64 — CF Rate Limiting binding replaces manual KV rate limiter
+
+**Context:** Current rate limiting uses manual KV-based implementation (10 req/60s per IP). Wastes KV reads/writes on every request.
+**Decision:** CF Rate Limiting binding (free on Workers Paid) replaces `src/lib/rateLimit.ts`. 30 req/min per IP on public endpoints. Native binding API — zero storage overhead.
+**Rationale:** Native, free, no KV waste, cleaner code. `RATE_LIMITING` KV namespace removable after migration.
+**Impact:** E06S20. Removes KV dependency for rate limiting.
+**Date:** 2026-02-22
+
+---
+
+### DEC-2026-02-22-63 — Turnstile on public prospect endpoints
+
+**Context:** `POST /api/prospects/submit` is unauthenticated and publicly accessible. No bot protection.
+**Decision:** Turnstile invisible CAPTCHA on `POST /api/prospects/submit`. Server-side verification via `challenges.cloudflare.com/turnstile/v0/siteverify`. Test mode in staging/dev (test keys always pass). Missing/invalid token → 422.
+**Rationale:** Free, invisible, zero friction for real users. Protects the most critical public endpoint.
+**Impact:** E06S20. Requires `TURNSTILE_SECRET_KEY` secret + site key from CF Dashboard.
+**Date:** 2026-02-22
+
+---
+
+### DEC-2026-02-22-62 — Vectorize + Workers AI for semantic matching
+
+**Context:** Current matching relies on 30 manual SKILL_ALIASES and 8 INDUSTRY_PROXIMITY pairs. Fails on long tail: "data science" ≠ "machine learning", "medtech" ≠ "biotech".
+**Decision:** `@cf/baai/bge-base-en-v1.5` (768 dims) for embeddings. Vectorize cosine similarity for semantic pre-filtering (top-K candidates). `scoreMatch()` deterministic for final ranking. Blended scoring: 0.7 × exact + 0.3 × vector. Graceful fallback if Vectorize unavailable → deterministic-only path.
+**Rationale:** Semantic matching captures relationships that alias maps cannot. Vectorize pre-filtering reduces scoring from O(N) to O(K). Workers AI free tier (10K neurons/day) sufficient for registration-time embeddings.
+**Impact:** E06S21 (infrastructure) + E06S22 (scoring integration). Bindings: `AI: Ai`, `EXPERT_INDEX: VectorizeIndex`.
+**Date:** 2026-02-22
+
+---
+
+### DEC-2026-02-22-61 — D1 as edge serving layer (hybrid Supabase + D1)
+
+**Context:** Expert pool reads are the hottest read path. KV is fast but not queryable. Need edge SQL for filtered reads.
+**Decision:** Supabase = source of truth. D1 = edge read cache (denormalized expert_pool table). Cron sync every 5 min via Hyperdrive. Fallback chain: Cache API → D1 → Hyperdrive. D1 is read-only in this architecture.
+**Rationale:** D1 provides sub-5ms edge SQL reads. Combined with Cache API L1 (~0ms), origin DB hit rate drops to near-zero for reads. Cron sync keeps D1 fresh within 5 minutes.
+**Impact:** E06S23 (D1 + sync) + E06S19 (Cache API L1). Binding: `EXPERT_DB: D1Database`.
+**Date:** 2026-02-22
+
+---
+
+### DEC-2026-02-22-60 (REVISED) — Scalable Matching Engine: implement now
+
+**Supersedes:** DEC-2026-02-22-60 (documentation only)
+**Context:** Matching engine works but has 5 structural weaknesses: B1 (O(N) match inserts), B2 (KV bypass), B3 (30 manual skill aliases), B4 (8 manual industry pairs), B5 (no scale infrastructure). Analysis confirms: matching IS the core value, Hyperdrive is free, migration is mechanical, risk of connection exhaustion is real.
+**Decision:** Implement in 4 phases. Phase 1: Hyperdrive + postgres.js + Smart Placement + bug fixes (E06S18). Phase 2 (parallel): Cache API L1 (E06S19) + Rate Limiting + Turnstile (E06S20) + Vectorize infra (E06S21) + Analytics (E06S26). Phase 3: Semantic scoring (E06S22) + D1 edge (E06S23). Phase 4: Service Bindings (E06S24) + Durable Objects (E06S25). Total additional CF cost: ~$7-8/month.
+**Rationale:** The matching engine is the platform's core value proposition. Broken matches = broken trust = lost users. Hyperdrive + postgres.js foundation is $0 and makes every subsequent story faster. Connection pooling is a safety net against Supabase Micro's 60-connection limit.
+**Impact:** 9 new stories (E06S18–E06S26) added to backlog. Critical path: E06S18 → E06S21 → E06S22 → E06S24.
+**Date:** 2026-02-22
+
+---
+
+### DEC-2026-02-22-60 — Scoring/Matching Scalability Path (documentation only)
+
+**Context:** E06S09 delivered with in-memory scoring for MVP scale (10-50 experts). Need to document the scaling path before it becomes urgent, without implementing anything now.
+**Decision:** Scaling path documented in 4 phases:
+
+| Phase | Seuil | Mécanisme | Impact |
+|-------|-------|-----------|--------|
+| Phase 1 (MVP) | 10-50 experts | In-memory scoring, KV cache pool, pure function | Actuel — sous 100ms |
+| Phase 2 | 100-500 experts | SQL pre-filtering via GIN indexes (`profile->'industries' ?| ARRAY[...]`) avant chargement mémoire. KV pool splitté par satellite_id | Réduit le pool scoré de 60-80% |
+| Phase 3 | 500-2000 | Durable Object avec expert pool warm en mémoire. Cursor-based KV pagination | Latence stable |
+| Phase 4 | 2000+ | pgvector embeddings pour matching sémantique skills. ML re-ranking | Qualité matching + scale |
+
+**Pas d'implémentation maintenant.** Le seuil Phase 2 (100 experts) est un bon signal pour déclencher la prochaine optimisation. Story dédiée à créer quand ce seuil approche.
+**Rationale:** Documenter le chemin avant qu'il soit urgent permet de prendre des décisions architecturales informées (ex: GIN indexes déjà en place via E06S02). Chaque phase est un palier autonome — pas de big bang.
+**Impact:** Documentation only. No code changes. Informs future story creation when thresholds approach.
+**Date:** 2026-02-22
 
 ---
 
@@ -43,6 +213,7 @@ updated_at: 2026-02-21
 **Decision:** L'expert n'est facturé que sur un lead confirmé qualifié. Flux : (1) Call confirmé → lead en statut `pending` → `billing_deadline_at = now() + 7 days`. (2) Expert peut flag "non qualifié" dans les 7 jours → pas de billing, flag enregistré. (3) Silence ou confirmation explicite au bout de 7 jours → Lemon Squeezy checkout déclenché automatiquement. Anti-gaming : `qualification_rate = leads_confirmed / total_leads` est un composant du composite_score. Expert qui flag systématiquement → `qualification_rate` chute → composite_score baisse → moins visible dans le matching → moins de leads. Pas de sanction explicite — le système se régule naturellement.
 **Rationale:** Aligne parfaitement les incentives : experts honnêtes paient leurs bons leads et montent dans le ranking. Fraudeurs descendent et reçoivent moins de leads. Zéro overhead de support ou de dispute. La conséquence est graduelle et proportionnelle. Silence = satisfait = facturé (un expert insatisfait prend la peine de flag — l'inaction est un signal positif).
 **Impact:** `leads.qualification_status` (pending / confirmed / flagged) + `leads.billing_deadline_at`. E06S06 : billing queue consumer vérifie billing_deadline_at — déclenche checkout si deadline atteinte sans flag. Composite score (DEC-19) : `qualification_rate` ajouté comme composant — remplace ou complète `hire_rate`. E05S01/S02 : flux revu — expert peut flag dans les 7j, sinon checkout auto. DEC-14 : billing trigger = confirmation expert ou silence 7j (pas Cal.com webhook direct).
+**Note (2026-02-22) :** Flux billing révisé par DEC-68. Le modèle passe de checkout LS par lead à LS usage-based subscription + credit accounting interne. La période de flag 7 jours et l'anti-gaming (qualification_rate) restent inchangés. `billing_deadline_at` remplacé par le report d'usage différé à LS (7 jours après création du lead si pas de flag). Nouveauté : les règles anti-gaming sont communiquées explicitement à l'expert dès l'onboarding et visibles dans le dashboard (transparence des règles, framing positif — jamais punitif).
 **Date:** 2026-02-19
 
 ---
@@ -53,6 +224,7 @@ updated_at: 2026-02-21
 **Decision:** Le système observe le comportement de l'expert (leads acceptés/déclinés, scores J+48, taux de conversion) et génère des **suggestions de mise à jour de profil** — jamais des modifications automatiques. La config de l'expert ne change que sur son accord explicite ("Appliquer" dans le dashboard). Pas de flags `source: inferred/manual`, pas de différenciation UI complexe. Observer → Suggérer → Expert approuve. C'est tout. L'expert peut modifier ses critères à tout moment depuis le dashboard, indépendamment de toute suggestion.
 **Rationale:** Appliquer silencieusement des préférences déduites — même si visibles et éditables — introduit de la complexité d'implémentation (flags JSONB, UI différenciée) et un risque résiduel d'impact non voulu. Le modèle Suggest + Approve est plus simple, plus sûr, et plus respectueux de l'agentivité de l'expert. Les humains changent : leurs critères aussi. Rien ne doit figer sans leur accord.
 **Impact:** E02S04 (dashboard expert) : section "Ton profil de matching" — affiche les critères actifs en langage clair + bouton d'édition libre. Notification suggérée après N leads : "Basé sur ton activité récente, on suggère d'ajuster ton profil → [Voir la suggestion]". Expert approuve ou ignore. E06S09 : écrit les suggestions dans `expert.preference_suggestions` JSONB — ne touche jamais à `expert.preferences` directement.
+**Note (2026-02-22) :** L'écriture dans `expert.preference_suggestions` est déférée post-M2 (volume de données insuffisant au MVP pour détecter des patterns significatifs). Story dédiée à créer quand >=50 leads traités sur la plateforme.
 **Date:** 2026-02-19
 
 ---
@@ -140,7 +312,7 @@ updated_at: 2026-02-21
 ### DEC-2026-02-19-19 — Composite Score System (Trust + Engagement + Outcome)
 
 **Context:** Match ranking needs a quality signal beyond criteria overlap — to surface experts who deliver great experiences, not just matching profiles.
-**Decision:** `composite_score = call_experience_avg × 0.30 + trust_score × 0.20 + client_satisfaction_avg × 0.20 + qualification_rate × 0.15 + recency_score × 0.15`. Used as tiebreaker in match ranking. Starts at 0 — no score inflation before real data. `qualification_rate` (DEC-30) remplace `hire_rate` comme signal d'honnêteté et d'alignement — expert qui confirme ses leads qualifiés vs expert qui flag systématiquement.
+**Decision:** `composite_score = call_experience_avg × 0.35 + trust_score × 0.20 + client_satisfaction_avg × 0.20 + hire_rate × 0.10 + recency_score × 0.15`. Used as tiebreaker in match ranking. Starts at 0 — no score inflation before real data. `hire_rate` = conversion_declared count / total evaluations — measures actual outcome signal. Note: `qualification_rate` (DEC-30) is a distinct billing compliance metric (leads_confirmed / total_leads) used in the anti-gaming reliability modifier — not the same as `hire_rate` in the composite formula.
 **Rationale:** Composite weighting prioritizes the call experience (0.35) — the unit of value delivery — while incorporating trust verification (0.20), client satisfaction (0.20), conversion outcome (0.10), and freshness (0.15). All components measurable from day 1.
 **Impact:** `experts.composite_score` + `experts.score_updated_at` fields. E06S09 computes on each feedback event. E06S05 uses as tiebreaker. Displayed to prospects as anonymized quality tier.
 **Date:** 2026-02-19

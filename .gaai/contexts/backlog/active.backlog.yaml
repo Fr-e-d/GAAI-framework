@@ -128,7 +128,7 @@ items:
     status: done
     artefact: contexts/artefacts/stories/E06S09.story.md
     dependencies: [E06S02, E06S06]
-    notes: "DONE 2026-02-21. QA PASS. All 11 ACs met. score-computation queue consumer (call_experience×0.35 + trust×0.20 + satisfaction×0.20 + hire_rate×0.10 + recency×0.15). Triggered by all 3 feedback events. KV idempotency. Two-step join (matchIds→bookingIds) for survey queries. 71/71 vitest tests PASS. ⚠️ Human action required: create 4 CF queues (callibrate-core-queue-score-computation-staging/-dlq/-prod/-dlq) before staging smoke tests."
+    notes: "DONE 2026-02-21. QA PASS. All 11 ACs met. score-computation queue consumer (call_experience×0.35 + trust×0.20 + satisfaction×0.20 + hire_rate×0.10 + recency×0.15). Triggered by all 3 feedback events. KV idempotency. Two-step join (matchIds→bookingIds) for survey queries. 71/71 vitest tests PASS. ⚠️ Human action required: create 4 CF queues (callibrate-core-queue-score-computation-staging/-dlq/-prod/-dlq) before staging smoke tests. Post-delivery correction (2026-02-22): trust_score criteria replaced (aspirational JSONB → MVP-available data: bio, headline, gcal_connected, skills>=3). total_leads hardcoded 0 → actual DB query in expertPool.ts + matches.ts."
 
   - id: E06S10
     epic: E06
@@ -188,10 +188,104 @@ items:
     epic: E06
     title: "Replace n8n webhooks with CF Workflows (booking.confirmed + booking.completed)"
     priority: high
-    status: backlog
+    status: refined
     artefact: contexts/artefacts/stories/E06S16.story.md
     dependencies: [E06S06]
     notes: "DEC-59. Retirer les appels n8n webhook de email-notifications.ts (AC7, AC10 E06S06). Implémenter 2 CF Workflows : (1) BookingConfirmedWorkflow — notification enrichie expert avec contexte prospect ; (2) BookingCompletedWorkflow — step.sleep('7 days') → survey call experience prospect, step.sleep('38 days') → survey satisfaction projet. Retirer N8N_WEBHOOK_URL de Env interface. [[workflows]] top-level uniquement dans wrangler.toml (pas [[env.staging.workflows]] — n'existe pas). Isolation staging/prod via Worker scripts séparés. Sleep acceleration staging via secrets SURVEY_DELAY_7D_MS / SURVEY_DELAY_38D_MS (absents en prod → valeurs réelles). this.env accessible dans WorkflowEntrypoint."
+
+  - id: E06S17
+    epic: E06
+    title: "Survey submission endpoints (feedback loop activation)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S17.story.md
+    dependencies: [E06S09, E06S16]
+    notes: "3 endpoints: POST /api/surveys/call-experience (token-gated), POST /api/surveys/project-satisfaction (token-gated), POST /api/evaluations/lead (JWT expert auth). Dispatches to SCORE_COMPUTATION queue. Completes the feedback loop chain: E06S16 sends emails → E06S17 receives submissions → E06S09 recomputes composite_score."
+
+  # ── Scalable Matching Engine — Phase 1 (Foundation) ──────────────────────────
+  # DEC-60 (revised): Hyperdrive + postgres.js + Vectorize + D1 + Analytics
+  # Critical path: E06S18 → E06S21 → E06S22 → E06S24
+
+  - id: E06S18
+    epic: E06
+    title: "Hyperdrive + postgres.js + Smart Placement + bug fixes (foundation)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S18.story.md
+    dependencies: []
+    notes: "DEC-66. Foundation story — all scalable matching stories depend on this. Install postgres v3.4.4+, Hyperdrive binding, Smart Placement, migrate ALL 48 DB queries from Supabase JS to postgres.js tagged templates. Fix B1 (prospects.ts top-20 only) + B2 (matches.ts use loadExpertPool). Keep Supabase JS for auth only. Human action: create Hyperdrive config + provide ID."
+
+  - id: E06S19
+    epic: E06
+    title: "Cache API L1 for expert pool"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S19.story.md
+    dependencies: [E06S18]
+    notes: "DEC-61. Cache API (per-datacenter, 60s TTL) as L1 before KV read in expertPool.ts. Read chain: Cache API → KV → Hyperdrive. Zero config, code-only change."
+
+  - id: E06S20
+    epic: E06
+    title: "Security hardening — Rate Limiting binding + Turnstile"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S20.story.md
+    dependencies: [E06S18]
+    notes: "DEC-63 + DEC-64. Replace manual KV rate limiter with CF Rate Limiting binding (free). Add Turnstile invisible CAPTCHA on POST /api/prospects/submit. Human action: create Turnstile site key in CF Dashboard."
+
+  - id: E06S21
+    epic: E06
+    title: "Vectorize infrastructure + embedding pipeline"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S21.story.md
+    dependencies: [E06S18]
+    notes: "DEC-62. Vectorize index expert-profiles (768 dims, cosine). Workers AI @cf/baai/bge-base-en-v1.5 for embeddings. Expert registration + profile PATCH trigger embedding. Admin reindex endpoint. Vectorize failure does NOT block registration. Human action: create Vectorize index."
+
+  - id: E06S22
+    epic: E06
+    title: "Semantic scoring integration"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S22.story.md
+    dependencies: [E06S21, E06S18]
+    notes: "DEC-62. Vectorize pre-filter (top-100 candidates) + blend: 0.7×exact + 0.3×vector. Graceful fallback to deterministic-only if Vectorize unavailable. 'machine learning' matches 'deep learning'."
+
+  - id: E06S23
+    epic: E06
+    title: "D1 edge serving + Cron sync"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S23.story.md
+    dependencies: [E06S18, E06S19]
+    notes: "DEC-61. D1 expert-pool-edge as denormalized edge serving layer. Cron */5 * * * * incremental sync via Hyperdrive. Read chain: Cache API → D1 → Hyperdrive fallback. Human action: create D1 database."
+
+  - id: E06S24
+    epic: E06
+    title: "Service Bindings — Worker split"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S24.story.md
+    dependencies: [E06S22, E06S23, E06S18]
+    notes: "Phase 4. callibrate-matching Worker with Service Binding. Core = gateway (auth, routing). Matching = compute (Vectorize, D1, scoring). Zero-network-hop RPC. Independent deployment."
+
+  - id: E06S25
+    epic: E06
+    title: "Durable Objects — expert pool write coordinator"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S25.story.md
+    dependencies: [E06S23, E06S21]
+    notes: "Phase 4. ExpertPoolDO singleton — batches D1 + Vectorize writes with 5s alarm. Async via waitUntil. Cron sync (E06S23) as safety net. ~$5/month."
+
+  - id: E06S26
+    epic: E06
+    title: "Analytics Engine — matching observability"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S26.story.md
+    dependencies: [E06S18]
+    notes: "DEC-65. Analytics Engine dataset matching-metrics. Fire-and-forget writeDataPoint(). Tracks latency, cache hits, pool size, scoring quality. No-op if binding missing. Human action: create dataset."
 
   # ── EPIC E03: Prospect Gets Qualified and Matched to the Right Expert ────
   # Layer 3.2 — satellite sites. Depends on E02 + E06.

@@ -1,7 +1,7 @@
 ---
 type: memory_index
 id: MEMORY-INDEX
-updated_at: 2026-02-19
+updated_at: 2026-02-22
 ---
 
 # Memory Map
@@ -31,7 +31,7 @@ updated_at: 2026-02-19
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-19 (updated: Callibrate, stack, architecture) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-21 (58 décisions — DEC-2026-02-19-01 à DEC-2026-02-21-58) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-22 (66 décisions — DEC-2026-02-19-01 à DEC-2026-02-22-66) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | — |
 | `ops/platform.md` | ops | OPS-001 | 2026-02-21 |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
@@ -61,7 +61,25 @@ updated_at: 2026-02-19
 | `artefacts/stories/E06S06.story.md` | Story | Refined — blocked by E06S03 + E06S04 + E06S05 |
 | `artefacts/stories/E06S07.story.md` | Story | Refined — blocked by E06S02 + E06S05 |
 | `artefacts/stories/E06S08.story.md` | Story | Refined — blocked by E06S01 + E06S02 (parallel with E06S07) |
-| `artefacts/stories/E06S09.story.md` | Story | Refined — blocked by E06S02 + E06S06 |
+| `artefacts/stories/E06S09.story.md` | Story | Done — composite score worker |
+| `artefacts/stories/E06S10.story.md` | Story | Done — Google Calendar OAuth layer |
+| `artefacts/stories/E06S11.story.md` | Story | Refined — booking engine |
+| `artefacts/stories/E06S12.story.md` | Story | Refined — GPT-4o-mini migration |
+| `artefacts/stories/E06S13.story.md` | Story | Refined — satellite_configs schema extension |
+| `artefacts/stories/E06S14.story.md` | Story | Refined — satellite Worker multi-tenant |
+| `artefacts/stories/E06S15.story.md` | Story | Refined — email deliverability hardening |
+| `artefacts/stories/E06S16.story.md` | Story | Backlog → Refined — CF Workflows (n8n replacement) |
+| `artefacts/stories/E06S17.story.md` | Story | Refined — survey submission endpoints |
+| `artefacts/stories/E06S18.story.md` | Story | Refined — Hyperdrive + postgres.js foundation (DEC-66) |
+| `artefacts/stories/E06S19.story.md` | Story | Refined — Cache API L1 expert pool (DEC-61) |
+| `artefacts/stories/E06S20.story.md` | Story | Refined — Rate Limiting + Turnstile (DEC-63/64) |
+| `artefacts/stories/E06S21.story.md` | Story | Refined — Vectorize infra + embeddings (DEC-62) |
+| `artefacts/stories/E06S22.story.md` | Story | Refined — Semantic scoring integration (DEC-62) |
+| `artefacts/stories/E06S23.story.md` | Story | Refined — D1 edge serving + Cron sync (DEC-61) |
+| `artefacts/stories/E06S24.story.md` | Story | Refined — Service Bindings Worker split |
+| `artefacts/stories/E06S25.story.md` | Story | Refined — Durable Objects write coordinator |
+| `artefacts/stories/E06S26.story.md` | Story | Refined — Analytics Engine observability (DEC-65) |
+| `artefacts/stories/E03S05.story.md` | Story | Refined — crawler access policy |
 | `artefacts/strategy/GTM-001.md` | Strategy | GTM plan — 4 phases, binary PASS/FAIL gates, J0–J90 — Phase 0 restructurée (DEC-31) |
 | `artefacts/manifesto/MANIFESTO-001.md` | Manifesto | Manifeste public Callibrate — draft FR — pay-for-value + game theory + invitation |
 | `artefacts/marketing/E01S01-reddit-posts.md` | Marketing | Reddit discussion posts + observation log |

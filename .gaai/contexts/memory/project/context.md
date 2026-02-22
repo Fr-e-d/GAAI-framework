@@ -7,7 +7,7 @@ tags:
   - vision
   - scope
 created_at: 2026-02-19
-updated_at: 2026-02-21
+updated_at: 2026-02-22
 ---
 
 # Project Memory
@@ -129,8 +129,15 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 
 ## Monetization
 
-- **Pay-per-call:** 100–200€ per booked call — no subscription, no monthly commitment
-- **Logic:** Expert pays only when a prospect books a call. Platform earns only when both sides get value.
+- **Pay-per-lead, dynamic pricing (DEC-67) :** Prix basé sur budget prospect × qualification level. Grille publiée :
+  - Non déclaré / < 5k€ : 49€ (standard) / 56€ (premium)
+  - 5k – 20k€ : 89€ / 102€
+  - 20k – 50k€ : 149€ / 171€
+  - 50k€+ : 229€ / 263€
+- **Billing model (DEC-68) :** LS usage-based subscription — $0/mois, carte on file, auto-charge fin de cycle. Credit accounting interne pour flag/restore instantané. 100€ crédit d'accueil.
+- **Logic:** Expert pays only for confirmed leads (7-day flag window, DEC-30). Usage reported to LS after flag window expiration. Platform earns only when both sides get value.
+- **Expert controls :** `max_lead_price` (plafond par lead, deal-breaker au matching) + `spending_limit` (plafond mensuel). Dashboard affiche leads manqués (cause : solde insuffisant ou max_lead_price dépassé).
+- **Anti-gaming :** qualification_rate (leads_confirmed / total_leads) dans composite_score. Règles communiquées dès l'onboarding, en positif. Dashboard affiche le taux et son impact.
 - **Premium options (post-MVP):** Visibility boost, Top Match badge
 - **Subscriptions:** Explicitly deferred to post-M3 — only if experts demand volume bundles after lead quality is proven
 
@@ -164,7 +171,7 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 **Layer 2 — Services / API**
 - Cloudflare Workers: all API endpoints, business logic, matching engine, AI extraction, score computation
 - Cloudflare Queues: async workers (email, billing, score) — matching is synchronous (DEC-33)
-- n8n: time-based workflows (survey triggers, onboarding sequences)
+- Cloudflare Workflows: durable time-delayed workflows (survey triggers J+7/J+45, onboarding sequences) via `step.sleep()` (DEC-59)
 - This layer is domain-agnostic — no UI concerns, no platform-specific assumptions
 
 **Layer 3 — Interfaces**
@@ -186,9 +193,9 @@ Two tracks. Each track can host as many platforms as needed. All platforms in La
 - **Booking layer:** Google Calendar API directe — OAuth2 par expert (E06S10) → freebusy availability + hold slot + events.insert (Meet link) + cancel/reschedule (E06S11). Headless, consommé par satellite funnel widget. Anti double-booking : held status + freebusy re-check à la confirmation.
 - **Lead billing trigger:** booking confirmed → Lemon Squeezy one-time checkout → lead billed (pay-per-call)
 - **Score computation:** Feedback events (call_experience + satisfaction + lead_eval) → composite_score (CF Queue consumer)
-- **Feedback loop:** n8n triggers J+7 and J+45 survey emails → submissions → score worker → match re-ranking
+- **Feedback loop:** CF Workflows triggers J+7 and J+45 survey emails (`step.sleep`) → submissions → score worker → match re-ranking (DEC-59, E06S16)
 - **Expert dashboard:** Profile, criteria, lead pipeline, analytics, composite_score tier — servi par `app.callibrate.io`
-- **Notification layer:** Cloudflare Queues → Resend (email) / n8n (complex workflows, time-based triggers)
+- **Notification layer:** Cloudflare Queues → Resend (email) / CF Workflows (durable, time-delayed — DEC-59)
 
 ---
 
