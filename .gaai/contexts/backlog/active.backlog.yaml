@@ -125,10 +125,10 @@ items:
     epic: E06
     title: "Expert composite score computation worker"
     priority: high
-    status: refined
+    status: done
     artefact: contexts/artefacts/stories/E06S09.story.md
     dependencies: [E06S02, E06S06]
-    notes: "score-computation queue consumer. Formula: call_experience×0.35 + trust×0.20 + satisfaction×0.20 + hire_rate×0.10 + recency×0.15. Triggered by all three feedback events. Re-ranks pending matches after score update."
+    notes: "DONE 2026-02-21. QA PASS. All 11 ACs met. score-computation queue consumer (call_experience×0.35 + trust×0.20 + satisfaction×0.20 + hire_rate×0.10 + recency×0.15). Triggered by all 3 feedback events. KV idempotency. Two-step join (matchIds→bookingIds) for survey queries. 71/71 vitest tests PASS. ⚠️ Human action required: create 4 CF queues (callibrate-core-queue-score-computation-staging/-dlq/-prod/-dlq) before staging smoke tests."
 
   - id: E06S10
     epic: E06

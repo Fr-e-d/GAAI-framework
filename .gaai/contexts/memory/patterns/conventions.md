@@ -74,6 +74,9 @@ updated_at: 2026-02-20
 - **OAuth connected status derivation (E06S10):** `connected: data.gcal_refresh_token != null` — derive from actual token column presence, not from a stored `gcal_connected` boolean. The boolean can drift; the token presence is ground truth.
 - **Google OAuth token response field (E06S10 post-delivery fix):** Google's `/oauth2/googleapis.com/token` returns `expires_in` (integer, seconds from now), NOT `expiry_date` (absolute ms timestamp used by google-auth-library). Calculate expiry as `new Date(Date.now() + expires_in * 1000).toISOString()`.
 - **Google OAuth email scope (E06S10 post-delivery fix):** Calendar scopes alone (`calendar.events`, `calendar.readonly`) do NOT grant access to user email. Include `openid email` in the scope string to allow the userinfo endpoint to return `email`. Full scope string: `openid email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly`.
+- **Two-step join pattern for indirect FK tables (E06S09):** `call_experience_surveys` and `project_satisfaction_surveys` join to `experts` through `bookings → matches`. Fetch `matchIds` (via `matches.expert_id`) then `bookingIds` (via `bookings.match_id IN matchIds`) once in the parent function, then pass ID arrays to component functions. Avoids unreliable 2-level PostgREST nested filter. Pattern: `from('matches').select('id').eq('expert_id', expertId)` → `from('bookings').select('id').in('match_id', matchIds)`.
+- **Parallel component computation pattern (E06S09):** When multiple DB-touching functions share pre-fetched ID arrays, run them concurrently via `Promise.all([...])`. Fetch shared data once at the parent level, pass arrays as arguments. Result: 7 DB queries/invocation (vs. up to 15 with individual nested fetches).
+- **Profile JSONB canonical keys for trust_score (E06S09):** `experts.profile` uses these keys for trust_score computation (5 × 20pt each): `portfolio_items: unknown[]` (>0 items), `linkedin_url: string` (present), `years_experience: number` (≥2), `certifications: unknown[]` (>0 items), `bio` or `description: string` (present). Future profile handlers MUST use these same keys.
 
 ---
 
@@ -153,8 +156,7 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 | KV — rate limiting | `callibrate-core-kv-rate-limiting-staging` | `callibrate-core-kv-rate-limiting-prod` |
 | KV — feature flags | `callibrate-core-kv-feature-flags-staging` | `callibrate-core-kv-feature-flags-prod` |
 | KV — expert pool | `callibrate-core-kv-expert-pool-staging` | `callibrate-core-kv-expert-pool-prod` |
-
-Score computation queue (`callibrate-core-queue-score-computation-staging/prod`) added in E06S09.
+| Queue — score computation | `callibrate-core-queue-score-computation-staging` | `callibrate-core-queue-score-computation-prod` |
 
 ---
 
