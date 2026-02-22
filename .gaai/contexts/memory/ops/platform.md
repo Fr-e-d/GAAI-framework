@@ -9,7 +9,7 @@ tags:
   - email
   - providers
 created_at: 2026-02-21
-updated_at: 2026-02-21
+updated_at: 2026-02-22
 ---
 
 # Platform Operations
@@ -119,7 +119,7 @@ Le détail technique (robots.txt, sitemap) est implémenté dans chaque satellit
 | **Resend** | Email transactionnel (confirmations booking, notifications) | ops@callibrate.io |
 | **Lemon Squeezy** | Paiements (Merchant of Record — gestion TVA internationale) | ops@callibrate.io |
 | **Google Cloud** | OAuth2 Google Calendar (booking layer) | ops@callibrate.io |
-| **n8n** | Automatisation business (surveys, onboarding sequences) | ops@callibrate.io |
+| ~~**n8n**~~ | SUPPRIMÉ (DEC-59) — remplacé par Cloudflare Workflows | — |
 | **OpenAI** | Extraction freetext prospect via GPT-4o-mini (`/api/extract`) | ops@callibrate.io |
 
 ---

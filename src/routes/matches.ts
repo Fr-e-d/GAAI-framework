@@ -90,6 +90,23 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
     return jsonResponse({ computed: 0, top_matches: [] });
   }
 
+  // Query actual lead counts per expert for reliability modifier
+  const expertIds = experts.map((e) => e.id);
+  const leadCountMap = new Map<string, number>();
+
+  if (expertIds.length > 0) {
+    const { data: leadRows } = await supabase
+      .from('leads')
+      .select('expert_id')
+      .in('expert_id', expertIds);
+
+    for (const row of leadRows ?? []) {
+      if (row.expert_id) {
+        leadCountMap.set(row.expert_id, (leadCountMap.get(row.expert_id) ?? 0) + 1);
+      }
+    }
+  }
+
   // Score each expert
   const requirements = (prospect.requirements ?? {}) as ProspectRequirements;
 
@@ -104,7 +121,7 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
     const raw = scoreMatch(profile, prefs, requirements, weights);
     const matchScore = applyReliabilityModifier(raw, {
       composite_score: expert.composite_score,
-      total_leads: 0, // TODO(E06S09): populate from leads table count
+      total_leads: leadCountMap.get(expert.id) ?? 0,
     });
 
     return { expert, matchScore };

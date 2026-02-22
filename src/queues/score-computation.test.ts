@@ -60,6 +60,8 @@ function makeEnv(kv: KVNamespace, overrides: Partial<Env> = {}): Env {
 interface TestExpertProfile {
   verified_at: string | null;
   bio: string | null;
+  headline: string | null;
+  gcal_connected: boolean;
   profile: Record<string, unknown> | null;
 }
 
@@ -213,11 +215,10 @@ describe('consumeScoreComputation', () => {
     expertProfile = {
       verified_at: '2026-01-01T00:00:00Z',
       bio: 'Expert bio here',
+      headline: 'AI Automation Expert',
+      gcal_connected: true,
       profile: {
-        portfolio_items: [{}, {}, {}],
-        linkedin_url: 'https://linkedin.com/in/expert',
-        years_experience: 5,
-        certifications: [{ name: 'AWS' }],
+        skills: ['n8n', 'python', 'react'],
       },
     } as TestExpertProfile,
     updateResult = { error: null } as { error: null | { message: string } },
@@ -420,7 +421,7 @@ describe('consumeScoreComputation', () => {
       satisfactionSurveys: [],
       leadEvaluations: [],
       mostRecentBookingScheduledAt: null,
-      expertProfile: { verified_at: null, bio: null, profile: null },
+      expertProfile: { verified_at: null, bio: null, headline: null, gcal_connected: false, profile: null },
     });
 
     vi.mocked(createServiceClient).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof createServiceClient>);
@@ -451,7 +452,7 @@ describe('consumeScoreComputation', () => {
         { conversion_declared: null },
       ],
       mostRecentBookingScheduledAt: null,
-      expertProfile: { verified_at: null, bio: null, profile: null },
+      expertProfile: { verified_at: null, bio: null, headline: null, gcal_connected: false, profile: null },
     });
 
     vi.mocked(createServiceClient).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof createServiceClient>);
@@ -475,7 +476,7 @@ describe('consumeScoreComputation', () => {
     const { fromMock, updateFn } = buildScoringMock({
       leadEvaluations: [],
       mostRecentBookingScheduledAt: null,
-      expertProfile: { verified_at: null, bio: null, profile: null },
+      expertProfile: { verified_at: null, bio: null, headline: null, gcal_connected: false, profile: null },
     });
 
     vi.mocked(createServiceClient).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof createServiceClient>);
@@ -497,7 +498,7 @@ describe('consumeScoreComputation', () => {
     const { fromMock, updateFn } = buildScoringMock({
       leadEvaluations: [{ conversion_declared: null }, { conversion_declared: null }],
       mostRecentBookingScheduledAt: null,
-      expertProfile: { verified_at: null, bio: null, profile: null },
+      expertProfile: { verified_at: null, bio: null, headline: null, gcal_connected: false, profile: null },
     });
 
     vi.mocked(createServiceClient).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof createServiceClient>);
@@ -518,7 +519,7 @@ describe('consumeScoreComputation', () => {
 
     const { fromMock, updateFn } = buildScoringMock({
       mostRecentBookingScheduledAt: new Date(Date.now() - 15 * 86400000).toISOString(),
-      expertProfile: { verified_at: null, bio: null, profile: null },
+      expertProfile: { verified_at: null, bio: null, headline: null, gcal_connected: false, profile: null },
     });
 
     vi.mocked(createServiceClient).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof createServiceClient>);
@@ -541,7 +542,7 @@ describe('consumeScoreComputation', () => {
 
     const { fromMock, updateFn } = buildScoringMock({
       mostRecentBookingScheduledAt: new Date(Date.now() - 105 * 86400000).toISOString(),
-      expertProfile: { verified_at: null, bio: null, profile: null },
+      expertProfile: { verified_at: null, bio: null, headline: null, gcal_connected: false, profile: null },
     });
 
     vi.mocked(createServiceClient).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof createServiceClient>);
@@ -564,7 +565,7 @@ describe('consumeScoreComputation', () => {
 
     const { fromMock, updateFn } = buildScoringMock({
       mostRecentBookingScheduledAt: new Date(Date.now() - 200 * 86400000).toISOString(),
-      expertProfile: { verified_at: null, bio: null, profile: null },
+      expertProfile: { verified_at: null, bio: null, headline: null, gcal_connected: false, profile: null },
     });
 
     vi.mocked(createServiceClient).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof createServiceClient>);
@@ -586,7 +587,7 @@ describe('consumeScoreComputation', () => {
 
     const { fromMock, updateFn } = buildScoringMock({
       mostRecentBookingScheduledAt: null,
-      expertProfile: { verified_at: null, bio: null, profile: null },
+      expertProfile: { verified_at: null, bio: null, headline: null, gcal_connected: false, profile: null },
     });
 
     vi.mocked(createServiceClient).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof createServiceClient>);
@@ -601,7 +602,7 @@ describe('consumeScoreComputation', () => {
 
   // ── A12: trust_score — fully complete profile → 100 ──────────────────────
 
-  it('A12: trust_score — fully complete profile → 100', async () => {
+  it('A12: trust_score — verified + bio + gcal + headline + 3 skills → 100', async () => {
     const kv = makeKv(null);
     const env = makeEnv(kv);
 
@@ -610,11 +611,10 @@ describe('consumeScoreComputation', () => {
       expertProfile: {
         verified_at: '2026-01-01T00:00:00Z',
         bio: 'Expert bio here',
+        headline: 'AI Automation Expert',
+        gcal_connected: true,
         profile: {
-          portfolio_items: [{ title: 'P1' }, { title: 'P2' }, { title: 'P3' }],
-          linkedin_url: 'https://linkedin.com/in/expert',
-          years_experience: 5,
-          certifications: [{ name: 'AWS Certified' }],
+          skills: ['n8n', 'python', 'react'],
         },
       },
     });
@@ -630,9 +630,9 @@ describe('consumeScoreComputation', () => {
     expect(updateArgs.composite_score).toBe(20);
   });
 
-  // ── A13: trust_score — null profile → 20 ─────────────────────────────────
+  // ── A13: trust_score — null profile + verified → 20 ─────────────────────────────────
 
-  it('A13: trust_score — null profile + verified → 20', async () => {
+  it('A13: trust_score — null profile + verified only → 20', async () => {
     const kv = makeKv(null);
     const env = makeEnv(kv);
 
@@ -641,6 +641,8 @@ describe('consumeScoreComputation', () => {
       expertProfile: {
         verified_at: '2026-01-01T00:00:00Z',
         bio: null,
+        headline: null,
+        gcal_connected: false,
         profile: null,
       },
     });
@@ -656,9 +658,9 @@ describe('consumeScoreComputation', () => {
     expect(updateArgs.composite_score).toBe(4);
   });
 
-  // ── A14: trust — only 2 portfolio items → criterion 2 fails ──────────────
+  // ── A14: trust — only 2 skills → criterion 5 fails ──────────────
 
-  it('A14: trust_score — bio present but only 2 portfolio items → criterion 2 fails', async () => {
+  it('A14: trust_score — only 2 skills → criterion 5 fails', async () => {
     const kv = makeKv(null);
     const env = makeEnv(kv);
 
@@ -667,11 +669,10 @@ describe('consumeScoreComputation', () => {
       expertProfile: {
         verified_at: '2026-01-01T00:00:00Z',
         bio: 'My bio',
+        headline: 'Expert headline',
+        gcal_connected: true,
         profile: {
-          portfolio_items: [{ title: 'P1' }, { title: 'P2' }], // only 2
-          linkedin_url: 'https://linkedin.com/in/expert',
-          years_experience: 5,
-          certifications: [{ name: 'AWS' }],
+          skills: ['n8n', 'python'], // only 2 — criterion 5 fails
         },
       },
     });
@@ -682,15 +683,15 @@ describe('consumeScoreComputation', () => {
     const message = makeMockMessage(body);
     await consumeScoreComputation(makeBatch([message]), env);
 
-    // trust = 80 (criterion 2 fails — only 2 portfolio items)
+    // trust = 80 (criterion 5 fails — only 2 skills)
     // composite = 80*0.20 = 16
     const updateArgs = updateFn.mock.calls[0]![0] as { composite_score: number };
     expect(updateArgs.composite_score).toBe(16);
   });
 
-  // ── A15: trust — years_experience = 2 → criterion 4 fails ────────────────
+  // ── A15: trust — gcal_connected = false → criterion 3 fails ────────────────
 
-  it('A15: trust_score — years_experience = 2 → criterion 4 fails', async () => {
+  it('A15: trust_score — gcal_connected = false → criterion 3 fails', async () => {
     const kv = makeKv(null);
     const env = makeEnv(kv);
 
@@ -699,11 +700,10 @@ describe('consumeScoreComputation', () => {
       expertProfile: {
         verified_at: '2026-01-01T00:00:00Z',
         bio: 'My bio',
+        headline: 'Expert headline',
+        gcal_connected: false, // fails criterion 3
         profile: {
-          portfolio_items: [{ title: 'P1' }, { title: 'P2' }, { title: 'P3' }],
-          linkedin_url: 'https://linkedin.com/in/expert',
-          years_experience: 2, // fails criterion 4
-          certifications: [{ name: 'AWS' }],
+          skills: ['n8n', 'python', 'react'],
         },
       },
     });
@@ -714,7 +714,7 @@ describe('consumeScoreComputation', () => {
     const message = makeMockMessage(body);
     await consumeScoreComputation(makeBatch([message]), env);
 
-    // trust = 80 (criterion 4 fails)
+    // trust = 80 (criterion 3 fails — gcal not connected)
     // composite = 80*0.20 = 16
     const updateArgs = updateFn.mock.calls[0]![0] as { composite_score: number };
     expect(updateArgs.composite_score).toBe(16);
@@ -739,13 +739,13 @@ describe('consumeScoreComputation', () => {
       expertProfile: {
         verified_at: '2026-01-01T00:00:00Z',
         bio: 'My bio',
+        headline: 'Expert headline',
+        gcal_connected: false, // fails criterion 3 → -20
         profile: {
-          portfolio_items: [{ title: 'P1' }, { title: 'P2' }, { title: 'P3' }],
-          linkedin_url: 'https://linkedin.com/in/expert',
-          years_experience: 2, // fails criterion 4 → trust = 80
-          certifications: [], // empty → fails criterion 5 → trust = 60
+          skills: ['n8n', 'python'], // only 2 → fails criterion 5 → -20
         },
       },
+      // trust = 60 (verified + bio + headline = 60, gcal=false, skills<3)
     });
 
     vi.mocked(createServiceClient).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof createServiceClient>);
@@ -768,7 +768,7 @@ describe('consumeScoreComputation', () => {
     const kv = makeKv(null);
     const env = makeEnv(kv);
     const { fromMock, updateFn } = buildScoringMock({
-      expertProfile: { verified_at: null, bio: null, profile: null },
+      expertProfile: { verified_at: null, bio: null, headline: null, gcal_connected: false, profile: null },
     });
     vi.mocked(createServiceClient).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof createServiceClient>);
 
@@ -781,7 +781,7 @@ describe('consumeScoreComputation', () => {
     const kv = makeKv(null);
     const env = makeEnv(kv);
     const { fromMock, updateFn } = buildScoringMock({
-      expertProfile: { verified_at: null, bio: null, profile: null },
+      expertProfile: { verified_at: null, bio: null, headline: null, gcal_connected: false, profile: null },
     });
     vi.mocked(createServiceClient).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof createServiceClient>);
 
