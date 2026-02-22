@@ -31,7 +31,7 @@ updated_at: 2026-02-22
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-19 (updated: Callibrate, stack, architecture) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-22 (66 décisions — DEC-2026-02-19-01 à DEC-2026-02-22-66) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-22 (69 décisions — DEC-2026-02-19-01 à DEC-2026-02-22-69) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | — |
 | `ops/platform.md` | ops | OPS-001 | 2026-02-21 |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
@@ -71,11 +71,11 @@ updated_at: 2026-02-22
 | `artefacts/stories/E06S16.story.md` | Story | Backlog → Refined — CF Workflows (n8n replacement) |
 | `artefacts/stories/E06S17.story.md` | Story | Refined — survey submission endpoints |
 | `artefacts/stories/E06S18.story.md` | Story | Refined — Hyperdrive + postgres.js foundation (DEC-66) |
-| `artefacts/stories/E06S19.story.md` | Story | Refined — Cache API L1 expert pool (DEC-61) |
+| `artefacts/stories/E06S19.story.md` | Story | CANCELLED — merged into E06S23 |
 | `artefacts/stories/E06S20.story.md` | Story | Refined — Rate Limiting + Turnstile (DEC-63/64) |
 | `artefacts/stories/E06S21.story.md` | Story | Refined — Vectorize infra + embeddings (DEC-62) |
 | `artefacts/stories/E06S22.story.md` | Story | Refined — Semantic scoring integration (DEC-62) |
-| `artefacts/stories/E06S23.story.md` | Story | Refined — D1 edge serving + Cron sync (DEC-61) |
+| `artefacts/stories/E06S23.story.md` | Story | Refined — D1 edge serving + Cache API L1 + Cron sync (absorbs E06S19) (DEC-61) |
 | `artefacts/stories/E06S24.story.md` | Story | Refined — Service Bindings Worker split |
 | `artefacts/stories/E06S25.story.md` | Story | Refined — Durable Objects write coordinator |
 | `artefacts/stories/E06S26.story.md` | Story | Refined — Analytics Engine observability (DEC-65) |
