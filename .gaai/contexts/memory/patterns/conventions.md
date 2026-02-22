@@ -7,7 +7,7 @@ tags:
   - conventions
   - procedural
 created_at: 2026-02-19
-updated_at: 2026-02-20
+updated_at: 2026-02-22
 ---
 
 # Patterns & Conventions

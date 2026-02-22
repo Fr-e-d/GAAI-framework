@@ -3,8 +3,8 @@
 # Source of truth: frontmatter in each SKILL.md
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-02-21
-total: 35
+generated_at: 2026-02-23
+total: 36
 
 # ─────────────────────────────────────────────
 # DISCOVERY — skills that produce artefacts
@@ -210,6 +210,15 @@ cross:
     tags: []
     updated_at: 2026-01-30
     path: cross/consistency-check/SKILL.md
+
+  - id: SKILL-CRS-019
+    name: delivery-readiness-audit
+    description: "Spot-check AC internal consistency and scan for pending revisions on delivery-ready stories. Activated by /gaai-status --audit as Section 5. Complements the standard status checks with depth checks that standard status skips for speed."
+    category: cross
+    track: cross-cutting
+    tags: [governance, delivery-gate, coherence]
+    updated_at: 2026-02-23
+    path: cross/delivery-readiness-audit/SKILL.md
 
   - id: SKILL-CONTEXT-BUILDING-001
     name: context-building

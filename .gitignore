@@ -34,3 +34,7 @@ secrets/2FA/*/*.2FA.txt
 # Logs
 *.log
 wrangler.log
+
+# GAAI Delivery Daemon
+.gaai/.delivery-locks/
+.gaai/.delivery-daemon.log

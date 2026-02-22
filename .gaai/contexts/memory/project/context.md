@@ -111,11 +111,17 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 
 ## Tech Stack & Conventions
 
-- **Database / Auth / Storage:** Supabase (PostgreSQL + Auth + Storage)
-- **Edge compute:** Cloudflare Workers (full-stack — NOT Pages, deprecated)
+- **Database / Auth / Storage:** Supabase (PostgreSQL + Auth + Storage). Source of truth.
+- **DB connection pooling:** Hyperdrive (free on Workers Paid — TCP pooling + query caching). Connection string: Supabase Direct port 5432 (DEC-66)
+- **DB client:** postgres.js v3.4.4+ (tagged template SQL, injection-safe). Replaces Supabase JS for all queries. Supabase JS retained only for `supabase.auth.getUser()` (DEC-66)
+- **Edge compute:** Cloudflare Workers (full-stack — NOT Pages, deprecated) + Smart Placement (DEC-66)
 - **Async / Background jobs:** Cloudflare Queues (async immédiat) + Cloudflare Workflows (durable, temps-différé, multi-step) — naming convention: `callibrate-core-queue-{resource}-{env}` (DEC-32)
 - **Workflows temps-différé:** CF Workflows — `step.sleep()` natif pour J+7/J+45 surveys, séquences onboarding, notifications enrichies (DEC-59). n8n retiré du stack.
-- **Cache / Session:** Cloudflare KV
+- **Cache / Session:** Cloudflare KV — sessions + feature flags only. KV eliminated from expert pool read path (DEC-69)
+- **Edge read cache:** D1 (`expert-pool-edge`) + Cache API L1 (60s TTL, per-datacenter). Read chain: Cache API → D1 → Hyperdrive fallback. Cron sync */5 via Hyperdrive (DEC-61, DEC-69)
+- **Semantic search:** Vectorize index (`expert-profiles`, 768 dims, cosine) + Workers AI `@cf/baai/bge-base-en-v1.5` embeddings. Blended scoring: 0.7×exact + 0.3×vector. Graceful fallback to deterministic-only (DEC-62)
+- **Security:** CF Rate Limiting binding (replaces manual KV limiter, DEC-64) + Turnstile invisible CAPTCHA on public endpoints (DEC-63)
+- **Observability:** Analytics Engine dataset `matching-metrics` — fire-and-forget, no-op if binding missing (DEC-65)
 - **Email transactionnel:** Resend via `send.callibrate.io` (Cloudflare Queues) — DKIM/SPF/DMARC configurés, tracking OFF (DEC-55). Marketing futur sur sous-domaine séparé.
 - **Calendar / Booking:** Google Calendar API directe (OAuth2 — DEC-41). Cal.com supprimé (Platform fermée aux nouveaux signups 15/12/2025). Token storage : chiffrement AES-256-GCM via Workers Web Crypto (`GCAL_TOKEN_ENCRYPTION_KEY`). Visio : Google Meet auto-généré par booking (`conferenceDataVersion=1`). Teams/Outlook : post-MVP.
 - **Payment / MoR:** Lemon Squeezy (Merchant of Record — gestion taxes internationales)
@@ -165,13 +171,17 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 3-layer architecture. Each layer consumes the layer below it.
 
 **Layer 1 — Data**
-- Supabase (PostgreSQL): experts, prospects, matches, bookings, leads, satellite_configs + feedback tables
-- Source of truth for all structured data. No business logic at this layer.
+- Supabase (PostgreSQL): experts, prospects, matches, bookings, leads, satellite_configs + feedback tables. Source of truth.
+- D1 (`expert-pool-edge`): denormalized expert pool edge cache. Read-only, synced every 5 min via Cron + Hyperdrive (DEC-61)
+- No business logic at this layer.
 
 **Layer 2 — Services / API**
-- Cloudflare Workers: all API endpoints, business logic, matching engine, AI extraction, score computation
+- Cloudflare Workers: all API endpoints, business logic, matching engine, AI extraction, score computation. Smart Placement enabled (DEC-66)
+- Hyperdrive: TCP connection pooling + query caching for all DB queries via postgres.js (DEC-66)
+- Vectorize + Workers AI: semantic pre-filtering (top-100 candidates) + blended scoring for matching engine (DEC-62)
 - Cloudflare Queues: async workers (email, billing, score) — matching is synchronous (DEC-33)
 - Cloudflare Workflows: durable time-delayed workflows (survey triggers J+7/J+45, onboarding sequences) via `step.sleep()` (DEC-59)
+- Analytics Engine: matching pipeline observability — latency, cache hits, pool size, scoring quality (DEC-65)
 - This layer is domain-agnostic — no UI concerns, no platform-specific assumptions
 
 **Layer 3 — Interfaces**
@@ -189,9 +199,9 @@ Two tracks. Each track can host as many platforms as needed. All platforms in La
 
 - **AI extraction:** Freetext description → GPT-4o-mini → ProspectRequirements JSONB (CF Worker, stateless — `POST /api/extract`). Migration Haiku→GPT-4o-mini via E06S12 (DEC-48).
 - **Qualification engine:** Quiz funnel (satellite) → requirements JSONB → Supabase (CF Worker)
-- **Matching engine:** Expert profile JSONB vs prospect requirements JSONB → scored matches + composite_score tiebreaker (CF Worker)
+- **Matching engine:** Expert profile JSONB vs prospect requirements JSONB → scored matches + composite_score tiebreaker (CF Worker). Scalable path: Vectorize pre-filter (top-100) → blended 0.7×exact + 0.3×vector scoring. Read chain: Cache API L1 → D1 edge → Hyperdrive. Service Bindings Worker split planned (DEC-60 revised)
 - **Booking layer:** Google Calendar API directe — OAuth2 par expert (E06S10) → freebusy availability + hold slot + events.insert (Meet link) + cancel/reschedule (E06S11). Headless, consommé par satellite funnel widget. Anti double-booking : held status + freebusy re-check à la confirmation.
-- **Lead billing trigger:** booking confirmed → Lemon Squeezy one-time checkout → lead billed (pay-per-call)
+- **Lead billing:** Credit debit interne instantané à la création du lead → 7-day flag window → usage reporté à LS après expiration. LS usage-based subscription auto-charge fin de cycle (DEC-68). `max_lead_price` + `spending_limit` controls (DEC-67/68)
 - **Score computation:** Feedback events (call_experience + satisfaction + lead_eval) → composite_score (CF Queue consumer)
 - **Feedback loop:** CF Workflows triggers J+7 and J+45 survey emails (`step.sleep`) → submissions → score worker → match re-ranking (DEC-59, E06S16)
 - **Expert dashboard:** Profile, criteria, lead pipeline, analytics, composite_score tier — servi par `app.callibrate.io`

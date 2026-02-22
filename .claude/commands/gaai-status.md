@@ -1,6 +1,6 @@
 # /gaai-status
 
-Show current GAAI project state: backlog, memory, and health.
+Show current GAAI project state: backlog, memory, and health. Optionally run delivery readiness checks.
 
 ## What This Does
 
@@ -9,12 +9,14 @@ Runs a complete status report:
 2. Memory evaluation (structure discovery, staleness, accuracy, optimization)
 3. Recent decisions
 4. Framework health check
+5. **Delivery readiness checks** (optional — triggered by `--audit` flag or when explicitly requested)
 
 ## When to Use
 
 - At the start of a session to orient yourself
 - To check what's ready to deliver
 - To verify the framework is correctly set up
+- **Before triggering `/gaai-deliver`** — run `/gaai-status --audit` to verify AC completeness and pending revisions
 
 ## Instructions for Claude Code
 
@@ -99,6 +101,42 @@ From the decisions log file discovered via `index.md`, list the 5 most recent en
 - Confirm `index.md` was updated recently (within the last active session)
 - Note any open pre-go-live blockers visible in backlog notes
 - Flag any `in_progress` backlog item that may represent a stale lock
+
+---
+
+### Section 5 — Delivery Readiness (optional — `--audit` flag)
+
+**Only run this section if the user passes `--audit` as argument** (e.g., `/gaai-status --audit`), or explicitly asks for delivery readiness checks. Skip entirely otherwise to keep the standard status report fast.
+
+This section uses the `delivery-readiness-audit` skill (`.gaai/skills/cross/delivery-readiness-audit/SKILL.md`).
+
+**5a. AC internal consistency — spot-check READY stories**
+
+For each story identified as "ready to deliver" in Section 1:
+- Open the story artefact file
+- Scan all acceptance criteria for internal cross-references: if an AC references a column, endpoint, table, queue, or resource, verify it is declared elsewhere in the same story (typically in the schema migration AC or a prior AC)
+- Flag any AC that references something not declared — e.g., a column used in AC12 but missing from the schema migration in AC11
+- Severity: CRITICAL if it would cause the Delivery Agent to produce incomplete code
+
+**5b. Pending revisions scan**
+
+Scan all backlog item `notes` fields for patterns indicating unresolved work:
+- References containing "sera révisé", "à réviser", "story à générer", "à créer", "TODO", "à remplacer"
+- `DEC-` references that flag a future change not yet captured as a backlog story
+
+For each match:
+- State the backlog item ID, the DEC reference, and the pending action
+- Check whether a corresponding story already exists in the backlog
+- Flag as IMPORTANT if no story exists yet
+
+**5c. Delivery verdict**
+
+Produce a summary:
+- Count of stories truly ready (all deps met + ACs internally consistent)
+- Count of issues by severity (CRITICAL / IMPORTANT / MINOR)
+- Verdict: **READY FOR DELIVERY** (0 critical issues) or **ISSUES TO RESOLVE FIRST** (list critical issues)
+
+If issues are found, offer to fix the ones that are safe for Discovery to fix (metadata corrections, missing columns in ACs, stale dates). Never fix product decisions or scope — escalate those to the human.
 
 ---
 

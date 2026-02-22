@@ -30,10 +30,10 @@ updated_at: 2026-02-22
 
 | File | Category | ID | Last updated |
 |---|---|---|---|
-| `project/context.md` | project | PROJECT-001 | 2026-02-19 (updated: Callibrate, stack, architecture) |
+| `project/context.md` | project | PROJECT-001 | 2026-02-22 (updated: pricing DEC-67, billing DEC-68, scalable matching DEC-60–69) |
 | `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-22 (69 décisions — DEC-2026-02-19-01 à DEC-2026-02-22-69) |
-| `patterns/conventions.md` | patterns | PATTERNS-001 | — |
-| `ops/platform.md` | ops | OPS-001 | 2026-02-21 |
+| `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-22 (CF Workflows patterns, score computation patterns, trust_score criteria) |
+| `ops/platform.md` | ops | OPS-001 | 2026-02-22 |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
 
 ---
