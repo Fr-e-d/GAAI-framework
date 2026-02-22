@@ -17,6 +17,16 @@ updated_at: 2026-02-22
 
 ---
 
+### DEC-2026-02-22-69 — KV eliminated from expert pool read path; E06S19 merged into E06S23
+
+**Context:** The expert pool cache architecture planned 3 layers: Cache API (L1) → KV (L2) → Hyperdrive (L3). Analysis revealed KV adds no value over D1: KV has a 25 Mo per-value limit (~5,000 experts max), no SQL filtering, ~50ms latency. D1 provides SQL WHERE filtering, sub-5ms edge reads, 10 Go limit, and $0.001/M rows. R2 was also evaluated and rejected — `list()` does not support metadata filtering, making it unsuitable for queryable structured data.
+**Decision:** KV removed from expert pool read path. E06S19 (Cache API L1 for KV) cancelled and absorbed into E06S23. New read chain: Cache API (L1, 60s, per-datacenter) → D1 (L2, SQL queryable, edge) → Hyperdrive (L3, source of truth). `EXPERT_POOL` KV namespace retained only if used by other features.
+**Rationale:** Simpler architecture (2 cache layers instead of 3), no 25 Mo limit, SQL filtering enables satellite-specific pools without client-side filtering, lower cost ($0.001/M vs $0.50/M). One fewer story to implement.
+**Impact:** E06S19 cancelled. E06S23 updated (absorbs Cache API L1 scope, dependency on E06S19 removed). Backlog, epic E06, and memory index updated.
+**Date:** 2026-02-22
+
+---
+
 ### DEC-2026-02-22-68 — Billing Model — LS Usage-Based Subscription + Internal Credit Accounting
 
 **Context:** Le billing per-lead checkout (un checkout LS par lead) crée de la friction (expert doit cliquer à chaque lead) et des coûts de refund (LS garde ses fees sur les remboursements). Le projet a besoin d'un modèle qui supporte : (1) carte on file avec auto-charge, (2) flag/restore instantané sans frais LS, (3) LS comme MoR pour la gestion fiscale, (4) anti-gaming transparent. Analyse des modèles industrie : Thumbtack et Bark utilisent des crédits prépayés ; Angi (post-pay auto-charge) est le plus controversé (amende FTC $7.2M). LS supporte les usage-based subscriptions ($0/mois, carte on file, charge en fin de cycle basée sur l'usage reporté).

@@ -101,7 +101,7 @@ items:
     status: done
     artefact: contexts/artefacts/stories/E06S06.story.md
     dependencies: [E06S03, E06S10, E06S05]
-    notes: "DONE 2026-02-21. QA PASS. All 9 ACs met. email-notifications consumer (expert.registered → Resend, booking.confirmed → Resend×2 + n8n, booking.completed → n8n) + lead-billing consumer (booking.created → leads INSERT + LS checkout + leads UPDATE). Idempotency via SESSIONS KV. Exponential backoff retry (1s/4s/16s). DB migration: leads.booking_id UNIQUE. 49/49 vitest tests PASS. ⚠️ DEC-59: n8n webhooks (AC7/AC10) à remplacer par CF Workflows via E06S16. Unblocks E06S09, E06S11, E06S16."
+    notes: "DONE 2026-02-21. QA PASS. All 9 ACs met. email-notifications consumer (expert.registered → Resend, booking.confirmed → Resend×2 + n8n, booking.completed → n8n) + lead-billing consumer (booking.created → leads INSERT + LS checkout + leads UPDATE). Idempotency via SESSIONS KV. Exponential backoff retry (1s/4s/16s). DB migration: leads.booking_id UNIQUE. 49/49 vitest tests PASS. ⚠️ DEC-59: n8n webhooks (AC7/AC10) à remplacer par CF Workflows via E06S16. ⚠️ DEC-68: lead-billing consumer sera révisé — modèle passe de checkout LS par lead à credit debit interne + usage-based LS reporting (story E05 à générer). Unblocks E06S09, E06S11, E06S16."
 
   - id: E06S07
     epic: E06
@@ -215,14 +215,7 @@ items:
     dependencies: []
     notes: "DEC-66. Foundation story — all scalable matching stories depend on this. Install postgres v3.4.4+, Hyperdrive binding, Smart Placement, migrate ALL 48 DB queries from Supabase JS to postgres.js tagged templates. Fix B1 (prospects.ts top-20 only) + B2 (matches.ts use loadExpertPool). Keep Supabase JS for auth only. Human action: create Hyperdrive config + provide ID."
 
-  - id: E06S19
-    epic: E06
-    title: "Cache API L1 for expert pool"
-    priority: high
-    status: refined
-    artefact: contexts/artefacts/stories/E06S19.story.md
-    dependencies: [E06S18]
-    notes: "DEC-61. Cache API (per-datacenter, 60s TTL) as L1 before KV read in expertPool.ts. Read chain: Cache API → KV → Hyperdrive. Zero config, code-only change."
+  # E06S19 CANCELLED — merged into E06S23 (KV eliminated, Cache API L1 absorbed into D1 story)
 
   - id: E06S20
     epic: E06
@@ -253,12 +246,12 @@ items:
 
   - id: E06S23
     epic: E06
-    title: "D1 edge serving + Cron sync"
+    title: "D1 edge serving + Cache API L1 + Cron sync (absorbs E06S19)"
     priority: high
     status: refined
     artefact: contexts/artefacts/stories/E06S23.story.md
-    dependencies: [E06S18, E06S19]
-    notes: "DEC-61. D1 expert-pool-edge as denormalized edge serving layer. Cron */5 * * * * incremental sync via Hyperdrive. Read chain: Cache API → D1 → Hyperdrive fallback. Human action: create D1 database."
+    dependencies: [E06S18]
+    notes: "DEC-61. D1 expert-pool-edge + Cache API L1 (60s TTL). Read chain: Cache API → D1 → Hyperdrive fallback. KV eliminated from expert pool read path. Cron */5 sync via Hyperdrive. Absorbs former E06S19 (Cache API L1). Human action: create D1 database."
 
   - id: E06S24
     epic: E06
