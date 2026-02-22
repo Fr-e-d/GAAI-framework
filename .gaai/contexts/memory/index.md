@@ -1,7 +1,7 @@
 ---
 type: memory_index
 id: MEMORY-INDEX
-updated_at: 2026-02-22
+updated_at: 2026-02-23
 ---
 
 # Memory Map
@@ -20,9 +20,9 @@ updated_at: 2026-02-22
 | `patterns/` | `patterns/conventions.md` | Coding conventions, procedural knowledge | Every Delivery session |
 | `ops/` | `ops/platform.md` | Platform operations — DNS, email, providers, procedures | When onboarding team or making infra changes |
 | `contacts/` | `contacts/leads.md` | Experts identifiés pendant Discovery — à contacter au lancement | Delivery phase |
-| `summaries/` | *(empty — add as project grows)* | Compacted episodic knowledge | Selective |
+| `summaries/` | `summaries/decisions-01-59.summary.md` | Compacted decision summaries | Selective |
 | `sessions/` | *(empty — add temporary notes here)* | Short-term session exploration | Never (source for summaries) |
-| `archive/` | *(empty — moved here after compaction)* | Historical storage | Rarely |
+| `archive/` | `archive/decisions-01-59.archive.md` | Full text of archived decisions | Rarely |
 
 ---
 
@@ -31,10 +31,12 @@ updated_at: 2026-02-22
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-22 (updated: pricing DEC-67, billing DEC-68, scalable matching DEC-60–69) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-22 (69 décisions — DEC-2026-02-19-01 à DEC-2026-02-22-69) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-23 (10 active entries — DEC-60 to DEC-69. Older entries compacted.) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-22 (CF Workflows patterns, score computation patterns, trust_score criteria) |
 | `ops/platform.md` | ops | OPS-001 | 2026-02-22 |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
+| `summaries/decisions-01-59.summary.md` | summaries | SUMMARY-DECISIONS-01-59 | 2026-02-23 |
+| `archive/decisions-01-59.archive.md` | archive | ARCHIVE-DECISIONS-01-59 | 2026-02-23 |
 
 ---
 
