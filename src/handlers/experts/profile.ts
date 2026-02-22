@@ -108,15 +108,15 @@ export async function handlePatchProfile(
   // AC8: JSONB merge via RPC
   const { data, error } = await supabase.rpc('merge_expert_profile', {
     p_id: expertId,
-    p_display_name: display_name ?? null,
-    p_headline: headline ?? null,
-    p_bio: bio ?? null,
-    p_rate_min: rate_min ?? null,
-    p_rate_max: rate_max ?? null,
-    p_availability: availability ?? null,
-    p_profile: (profile as Json) ?? null,
-    p_preferences: (preferences as Json) ?? null,
-  });
+    ...(display_name !== undefined && { p_display_name: display_name }),
+    ...(headline !== undefined && { p_headline: headline }),
+    ...(bio !== undefined && { p_bio: bio }),
+    ...(rate_min !== undefined && { p_rate_min: rate_min }),
+    ...(rate_max !== undefined && { p_rate_max: rate_max }),
+    ...(availability !== undefined && { p_availability: availability }),
+    ...(profile !== undefined && { p_profile: profile as Json }),
+    ...(preferences !== undefined && { p_preferences: preferences as Json }),
+  } as { p_id: string });
 
   if (error) {
     return new Response(

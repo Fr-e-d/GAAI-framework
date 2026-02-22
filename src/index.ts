@@ -14,6 +14,13 @@ import { consumeScoreComputation } from './queues/score-computation';
 import { EmailNotificationMessage } from './types/queues';
 import { LeadBillingMessage } from './types/queues';
 import { ScoreComputationMessage } from './types/queues';
+import { handleGetAvailability } from './handlers/bookings/availability';
+import { handleHold } from './handlers/bookings/hold';
+import { handleConfirm } from './handlers/bookings/confirm';
+import { handleCancel } from './handlers/bookings/cancel';
+import { handleReschedule } from './handlers/bookings/reschedule';
+import { handleGetPrep } from './handlers/bookings/prep';
+import { handleScheduled } from './handlers/bookings/cron';
 
 const QUEUES = ['email-notifications', 'lead-billing', 'score-computation'] as const;
 
@@ -124,6 +131,62 @@ export default {
       );
     }
 
+    // ── Expert availability (CORS-gated, no JWT) ─────────────────────────────────
+    const expertAvailMatch = pathname.match(/^\/api\/experts\/([^/]+)\/availability$/);
+    if (method === 'GET' && expertAvailMatch && expertAvailMatch[1]) {
+      const corsResult = await handleCors(request, env);
+      if (corsResult.preflight) return corsResult.preflight;
+      if (!corsResult.allowed) return corsForbidden(corsResult.origin);
+      const response = await handleGetAvailability(request, env, expertAvailMatch[1]);
+      return addCorsHeaders(response, corsResult.origin);
+    }
+
+    // ── Booking routes (CORS-gated) ───────────────────────────────────────────
+    if (pathname.startsWith('/api/bookings/')) {
+      // GET /api/bookings/:token/prep — public, no CORS check
+      const prepMatch = pathname.match(/^\/api\/bookings\/([^/]+)\/prep$/);
+      if (method === 'GET' && prepMatch && prepMatch[1]) {
+        return handleGetPrep(request, env, prepMatch[1]);
+      }
+
+      const corsResult = await handleCors(request, env);
+      if (corsResult.preflight) return corsResult.preflight;
+      if (!corsResult.allowed) return corsForbidden(corsResult.origin);
+
+      // POST /api/bookings/hold
+      if (method === 'POST' && pathname === '/api/bookings/hold') {
+        const response = await handleHold(request, env);
+        return addCorsHeaders(response, corsResult.origin);
+      }
+
+      const bookingIdMatch = pathname.match(/^\/api\/bookings\/([^/]+)\/(confirm|reschedule)$/);
+      if (bookingIdMatch && bookingIdMatch[1] && bookingIdMatch[2]) {
+        const bookingId = bookingIdMatch[1];
+        const action = bookingIdMatch[2];
+
+        if (method === 'POST' && action === 'confirm') {
+          const response = await handleConfirm(request, env, bookingId);
+          return addCorsHeaders(response, corsResult.origin);
+        }
+        if (method === 'POST' && action === 'reschedule') {
+          const response = await handleReschedule(request, env, bookingId);
+          return addCorsHeaders(response, corsResult.origin);
+        }
+      }
+
+      // DELETE /api/bookings/:id
+      const bookingDeleteMatch = pathname.match(/^\/api\/bookings\/([^/]+)$/);
+      if (method === 'DELETE' && bookingDeleteMatch && bookingDeleteMatch[1]) {
+        const response = await handleCancel(request, env, bookingDeleteMatch[1]);
+        return addCorsHeaders(response, corsResult.origin);
+      }
+
+      return addCorsHeaders(
+        new Response(JSON.stringify({ error: 'Not Found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }),
+        corsResult.origin,
+      );
+    }
+
     // ── Expert routes (authenticated) ───────────────────────────────────────
     if (pathname.startsWith('/api/experts/')) {
       const authResult = await authenticate(request, env);
@@ -171,6 +234,10 @@ export default {
       status: 404,
       headers: { 'Content-Type': 'application/json' },
     });
+  },
+
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    await handleScheduled(controller, env);
   },
 
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
