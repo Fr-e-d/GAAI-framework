@@ -28,6 +28,12 @@ export async function consumeEmailNotifications(
         case 'booking.completed':
           await triggerN8nBookingCompleted(body, env);
           break;
+        case 'booking.cancelled':
+        case 'booking.rescheduled':
+        case 'booking.reminder_prospect':
+        case 'booking.reminder_expert':
+          // TODO(E06S15/E06S16): implement notification — stub acks for now
+          break;
         default: {
           const exhaustiveCheck: never = body;
           console.warn('email-notifications: unknown message type', (exhaustiveCheck as EmailNotificationMessage & { type: string }).type);

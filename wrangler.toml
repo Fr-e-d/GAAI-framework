@@ -57,6 +57,10 @@ binding = "EXPERT_POOL"
 id = "68927a33fd9a46ec8b537a22a9cf2d20"
 preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
 
+# Top-level (used by wrangler dev)
+[triggers]
+crons = ["*/5 * * * *", "*/15 * * * *"]
+
 # ── Staging environment ───────────────────────────────────────────────────────
 
 [env.staging]
@@ -111,6 +115,9 @@ id = "24a3f09adaf34c26805ba2351d773829"
 binding = "EXPERT_POOL"
 id = "68927a33fd9a46ec8b537a22a9cf2d20"
 
+[env.staging.triggers]
+crons = ["*/5 * * * *", "*/15 * * * *"]
+
 # ── Production environment ────────────────────────────────────────────────────
 
 [env.production]
@@ -164,3 +171,6 @@ id = "4d5d37620fe14ddfb34aa374cbc37ffe"
 [[env.production.kv_namespaces]]
 binding = "EXPERT_POOL"
 id = "af0c9c22c77b45ffbac4215009a295d4"
+
+[env.production.triggers]
+crons = ["*/5 * * * *", "*/15 * * * *"]

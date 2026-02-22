@@ -18,39 +18,95 @@ export type Database = {
         Row: {
           cal_booking_id: string | null
           cal_meeting_url: string | null
+          confirmed_at: string | null
           created_at: string | null
+          description: string | null
           duration_min: number | null
+          end_at: string | null
+          expert_id: string | null
+          gcal_event_id: string | null
+          held_until: string | null
           id: string
           match_id: string | null
+          meeting_url: string | null
+          prep_token: string | null
+          prospect_email: string | null
+          prospect_id: string | null
+          prospect_name: string | null
+          reminder_h1_sent_at: string | null
+          reminder_j1_sent_at: string | null
           scheduled_at: string | null
+          start_at: string | null
           status: string | null
         }
         Insert: {
           cal_booking_id?: string | null
           cal_meeting_url?: string | null
+          confirmed_at?: string | null
           created_at?: string | null
+          description?: string | null
           duration_min?: number | null
+          end_at?: string | null
+          expert_id?: string | null
+          gcal_event_id?: string | null
+          held_until?: string | null
           id?: string
           match_id?: string | null
+          meeting_url?: string | null
+          prep_token?: string | null
+          prospect_email?: string | null
+          prospect_id?: string | null
+          prospect_name?: string | null
+          reminder_h1_sent_at?: string | null
+          reminder_j1_sent_at?: string | null
           scheduled_at?: string | null
+          start_at?: string | null
           status?: string | null
         }
         Update: {
           cal_booking_id?: string | null
           cal_meeting_url?: string | null
+          confirmed_at?: string | null
           created_at?: string | null
+          description?: string | null
           duration_min?: number | null
+          end_at?: string | null
+          expert_id?: string | null
+          gcal_event_id?: string | null
+          held_until?: string | null
           id?: string
           match_id?: string | null
+          meeting_url?: string | null
+          prep_token?: string | null
+          prospect_email?: string | null
+          prospect_id?: string | null
+          prospect_name?: string | null
+          reminder_h1_sent_at?: string | null
+          reminder_j1_sent_at?: string | null
           scheduled_at?: string | null
+          start_at?: string | null
           status?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "bookings_expert_id_fkey"
+            columns: ["expert_id"]
+            isOneToOne: false
+            referencedRelation: "experts"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "bookings_match_id_fkey"
             columns: ["match_id"]
             isOneToOne: false
             referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_prospect_id_fkey"
+            columns: ["prospect_id"]
+            isOneToOne: false
+            referencedRelation: "prospects"
             referencedColumns: ["id"]
           },
         ]
@@ -97,6 +153,7 @@ export type Database = {
       experts: {
         Row: {
           availability: string | null
+          availability_rules: Json | null
           avatar_url: string | null
           bio: string | null
           cal_username: string | null
@@ -115,11 +172,13 @@ export type Database = {
           profile: Json | null
           rate_max: number | null
           rate_min: number | null
+          reminder_settings: Json | null
           score_updated_at: string | null
           verified_at: string | null
         }
         Insert: {
           availability?: string | null
+          availability_rules?: Json | null
           avatar_url?: string | null
           bio?: string | null
           cal_username?: string | null
@@ -138,11 +197,13 @@ export type Database = {
           profile?: Json | null
           rate_max?: number | null
           rate_min?: number | null
+          reminder_settings?: Json | null
           score_updated_at?: string | null
           verified_at?: string | null
         }
         Update: {
           availability?: string | null
+          availability_rules?: Json | null
           avatar_url?: string | null
           bio?: string | null
           cal_username?: string | null
@@ -161,6 +222,7 @@ export type Database = {
           profile?: Json | null
           rate_max?: number | null
           rate_min?: number | null
+          reminder_settings?: Json | null
           score_updated_at?: string | null
           verified_at?: string | null
         }
@@ -255,7 +317,7 @@ export type Database = {
           {
             foreignKeyName: "leads_booking_id_fkey"
             columns: ["booking_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "bookings"
             referencedColumns: ["id"]
           },
@@ -435,18 +497,19 @@ export type Database = {
     Functions: {
       merge_expert_profile: {
         Args: {
+          p_availability?: string
+          p_bio?: string
+          p_display_name?: string
+          p_headline?: string
           p_id: string
-          p_display_name?: string | null
-          p_headline?: string | null
-          p_bio?: string | null
-          p_rate_min?: number | null
-          p_rate_max?: number | null
-          p_availability?: string | null
-          p_profile?: Json | null
-          p_preferences?: Json | null
+          p_preferences?: Json
+          p_profile?: Json
+          p_rate_max?: number
+          p_rate_min?: number
         }
         Returns: {
           availability: string | null
+          availability_rules: Json | null
           avatar_url: string | null
           bio: string | null
           cal_username: string | null
@@ -465,9 +528,16 @@ export type Database = {
           profile: Json | null
           rate_max: number | null
           rate_min: number | null
+          reminder_settings: Json | null
           score_updated_at: string | null
           verified_at: string | null
         }[]
+        SetofOptions: {
+          from: "*"
+          to: "experts"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
     }
     Enums: {
