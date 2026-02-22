@@ -11,3 +11,9 @@ export type LeadBillingMessage = {
   expert_id: string;
   prospect_id: string;
 };
+
+// score-computation queue
+export type ScoreComputationMessage =
+  | { type: 'feedback.call_experience'; expert_id: string }
+  | { type: 'feedback.project_satisfaction'; expert_id: string }
+  | { type: 'feedback.lead_evaluation'; expert_id: string };

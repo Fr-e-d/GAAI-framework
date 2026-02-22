@@ -10,10 +10,12 @@ import { handleCors, addCorsHeaders, corsForbidden } from './lib/cors';
 import { handleGcalAuthUrl, handleGcalStatus, handleGcalDisconnect, handleGcalCallback } from './handlers/experts/gcal';
 import { consumeEmailNotifications } from './queues/email-notifications';
 import { consumeLeadBilling } from './queues/lead-billing';
+import { consumeScoreComputation } from './queues/score-computation';
 import { EmailNotificationMessage } from './types/queues';
 import { LeadBillingMessage } from './types/queues';
+import { ScoreComputationMessage } from './types/queues';
 
-const QUEUES = ['email-notifications', 'lead-billing'] as const;
+const QUEUES = ['email-notifications', 'lead-billing', 'score-computation'] as const;
 
 async function checkSupabase(env: Env): Promise<'connected' | 'error'> {
   try {
@@ -176,6 +178,8 @@ export default {
       await consumeEmailNotifications(batch as MessageBatch<EmailNotificationMessage>, env);
     } else if (batch.queue.includes('lead-billing')) {
       await consumeLeadBilling(batch as MessageBatch<LeadBillingMessage>, env);
+    } else if (batch.queue.includes('score-computation')) {
+      await consumeScoreComputation(batch as MessageBatch<ScoreComputationMessage>, env);
     } else {
       console.warn('queue: unknown queue', batch.queue);
       batch.ackAll();

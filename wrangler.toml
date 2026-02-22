@@ -19,6 +19,12 @@ dead_letter_queue = "callibrate-core-queue-lead-billing-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
+[[queues.consumers]]
+queue = "callibrate-core-queue-score-computation-staging"
+dead_letter_queue = "callibrate-core-queue-score-computation-staging-dlq"
+max_batch_size = 10
+max_batch_timeout = 5
+
 [[queues.producers]]
 queue = "callibrate-core-queue-email-notifications-staging"
 binding = "EMAIL_NOTIFICATIONS"
@@ -26,6 +32,10 @@ binding = "EMAIL_NOTIFICATIONS"
 [[queues.producers]]
 queue = "callibrate-core-queue-lead-billing-staging"
 binding = "LEAD_BILLING"
+
+[[queues.producers]]
+queue = "callibrate-core-queue-score-computation-staging"
+binding = "SCORE_COMPUTATION"
 
 [[kv_namespaces]]
 binding = "SESSIONS"
@@ -67,6 +77,12 @@ dead_letter_queue = "callibrate-core-queue-lead-billing-staging-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
+[[env.staging.queues.consumers]]
+queue = "callibrate-core-queue-score-computation-staging"
+dead_letter_queue = "callibrate-core-queue-score-computation-staging-dlq"
+max_batch_size = 10
+max_batch_timeout = 5
+
 [[env.staging.queues.producers]]
 queue = "callibrate-core-queue-email-notifications-staging"
 binding = "EMAIL_NOTIFICATIONS"
@@ -74,6 +90,10 @@ binding = "EMAIL_NOTIFICATIONS"
 [[env.staging.queues.producers]]
 queue = "callibrate-core-queue-lead-billing-staging"
 binding = "LEAD_BILLING"
+
+[[env.staging.queues.producers]]
+queue = "callibrate-core-queue-score-computation-staging"
+binding = "SCORE_COMPUTATION"
 
 [[env.staging.kv_namespaces]]
 binding = "SESSIONS"
@@ -111,6 +131,12 @@ dead_letter_queue = "callibrate-core-queue-lead-billing-prod-dlq"
 max_batch_size = 10
 max_batch_timeout = 5
 
+[[env.production.queues.consumers]]
+queue = "callibrate-core-queue-score-computation-prod"
+dead_letter_queue = "callibrate-core-queue-score-computation-prod-dlq"
+max_batch_size = 10
+max_batch_timeout = 5
+
 [[env.production.queues.producers]]
 queue = "callibrate-core-queue-email-notifications-prod"
 binding = "EMAIL_NOTIFICATIONS"
@@ -118,6 +144,10 @@ binding = "EMAIL_NOTIFICATIONS"
 [[env.production.queues.producers]]
 queue = "callibrate-core-queue-lead-billing-prod"
 binding = "LEAD_BILLING"
+
+[[env.production.queues.producers]]
+queue = "callibrate-core-queue-score-computation-prod"
+binding = "SCORE_COMPUTATION"
 
 [[env.production.kv_namespaces]]
 binding = "SESSIONS"
