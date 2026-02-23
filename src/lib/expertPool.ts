@@ -1,9 +1,9 @@
-// ── Expert pool KV cache ───────────────────────────────────────────────────────
-// Loads the active expert pool from EXPERT_POOL KVNamespace (AC3, DEC-40).
-// Cache-aside pattern: KV hit → return directly; miss → load from DB + write KV.
-// TTL: 300s (5 minutes) — new experts appear within 5 minutes of registration.
+// Expert pool read chain (E06S23)
+// AC8: Cache API L1 (60s TTL) → D1 → Hyperdrive fallback
+// AC14: EXPERT_POOL KV removed from read path (KV binding retained for other uses)
 
 import { createSql } from './db';
+import { getCachedPool, writeCachePool, loadFromD1, upsertToD1 } from './d1ExpertPool';
 import type { Json } from '../types/database';
 import type { Env } from '../types/env';
 import type { ExpertRow } from '../types/db';
@@ -18,32 +18,44 @@ export interface ExpertPoolEntry {
   total_leads: number;
 }
 
-const KV_KEY = 'expert_pool';
-const KV_TTL_SECONDS = 300;
-
+// AC8: three-tier read chain
 export async function loadExpertPool(env: Env): Promise<ExpertPoolEntry[]> {
-  // 1. Try KV cache
-  let cached: ExpertPoolEntry[] | null = null;
-  try {
-    cached = await env.EXPERT_POOL.get<ExpertPoolEntry[]>(KV_KEY, { type: 'json' });
-  } catch {
-    // KV read failure — proceed to DB fallback
+  // 1. Cache API L1 — AC8, AC9 (60s TTL, per-datacenter)
+  const fromCache = await getCachedPool();
+  if (fromCache !== null && fromCache.length > 0) {
+    return fromCache;
   }
 
-  if (cached !== null && Array.isArray(cached)) {
-    return cached;
+  // 2. D1 edge — AC8, AC10
+  if (env.EXPERT_DB) {
+    try {
+      const fromD1 = await loadFromD1(env.EXPERT_DB);
+      if (fromD1.length > 0) {
+        // AC10: write-back to Cache API on D1 hit
+        await writeCachePool(fromD1);
+        return fromD1;
+      }
+    } catch {
+      // D1 failure — fall through to Hyperdrive (AC12)
+    }
   }
 
-  // 2. Cache miss — load from DB
+  // 3. Hyperdrive fallback — AC11, AC12
+  return loadFromHyperdrive(env);
+}
+
+// Hyperdrive path: reads from Supabase via postgres.js + Hyperdrive connection pooling
+async function loadFromHyperdrive(env: Env): Promise<ExpertPoolEntry[]> {
   const sql = createSql(env);
 
-  const expertRows = await sql<Pick<ExpertRow, 'id' | 'profile' | 'preferences' | 'rate_min' | 'rate_max' | 'composite_score'>[]>`
-    SELECT id, profile, preferences, rate_min, rate_max, composite_score
+  const expertRows = await sql<
+    Pick<ExpertRow, 'id' | 'profile' | 'preferences' | 'rate_min' | 'rate_max' | 'composite_score'>[]
+  >`SELECT id, profile, preferences, rate_min, rate_max, composite_score
     FROM experts WHERE availability != 'unavailable'`;
 
   if (expertRows.length === 0) return [];
 
-  const expertIds = expertRows.map(e => e.id);
+  const expertIds = expertRows.map((e) => e.id);
   const leadRows = await sql<{ expert_id: string }[]>`
     SELECT expert_id FROM leads WHERE expert_id = ANY(${expertIds})`;
 
@@ -64,11 +76,14 @@ export async function loadExpertPool(env: Env): Promise<ExpertPoolEntry[]> {
     total_leads: leadCountMap.get(e.id) ?? 0,
   }));
 
-  // 3. Write back to KV (non-blocking on failure)
-  try {
-    await env.EXPERT_POOL.put(KV_KEY, JSON.stringify(pool), { expirationTtl: KV_TTL_SECONDS });
-  } catch {
-    // KV write failure — pool still usable for this request
+  // AC11: write-back to Cache API and D1 on both-miss path
+  await writeCachePool(pool);
+  if (env.EXPERT_DB) {
+    try {
+      await upsertToD1(env.EXPERT_DB, pool);
+    } catch {
+      // D1 write failure is non-blocking
+    }
   }
 
   return pool;
