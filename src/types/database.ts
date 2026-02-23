@@ -462,30 +462,48 @@ export type Database = {
       }
       satellite_configs: {
         Row: {
+          active: boolean
+          brand: Json | null
+          content: Json | null
           created_at: string | null
           domain: string | null
           id: string
           label: string | null
           matching_weights: Json
           quiz_schema: Json
+          structured_data: Json | null
+          theme: Json | null
+          updated_at: string | null
           vertical: string | null
         }
         Insert: {
+          active?: boolean
+          brand?: Json | null
+          content?: Json | null
           created_at?: string | null
           domain?: string | null
           id: string
           label?: string | null
           matching_weights: Json
           quiz_schema: Json
+          structured_data?: Json | null
+          theme?: Json | null
+          updated_at?: string | null
           vertical?: string | null
         }
         Update: {
+          active?: boolean
+          brand?: Json | null
+          content?: Json | null
           created_at?: string | null
           domain?: string | null
           id?: string
           label?: string | null
           matching_weights?: Json
           quiz_schema?: Json
+          structured_data?: Json | null
+          theme?: Json | null
+          updated_at?: string | null
           vertical?: string | null
         }
         Relationships: []
