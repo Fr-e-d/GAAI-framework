@@ -738,7 +738,9 @@ LOCK_FILE="$LOCK_DIR/$story_id.lock"
 echo \$\$ > "\$LOCK_FILE"
 
 on_exit() {
-  rm -f "\$LOCK_FILE" "$wrapper"
+  set +x 2>/dev/null || true
+  rm -f "\$LOCK_FILE"
+  # DEBUG: keep wrapper for inspection (normally: rm -f "$wrapper")
   if [[ \$EXIT_CODE -ne 0 ]]; then
     # Check if the delivery already marked the story as done
     # (interactive mode: user closes terminal after successful delivery → non-zero exit)
@@ -797,8 +799,12 @@ fi
 
 echo ""
 echo "Delivery finished (exit \$EXIT_CODE). Closing in 10s..."
+echo "Full output saved to: $delivery_log"
 sleep 10
 WRAPPER_EOF
+
+  # DEBUG: save a copy of the generated wrapper for inspection
+  cp "$wrapper" "$LOG_DIR/${story_id}_wrapper_debug.sh" 2>/dev/null || true
 
   chmod +x "$wrapper"
 
