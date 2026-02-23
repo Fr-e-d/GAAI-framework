@@ -10,6 +10,7 @@ export interface ExpertRow {
   cal_username: string | null;
   composite_score: number | null;
   created_at: string | null;
+  credit_balance: number;
   display_name: string | null;
   gcal_access_token: string | null;
   gcal_connected: boolean | null;
@@ -18,6 +19,9 @@ export interface ExpertRow {
   gcal_refresh_token: string | null;
   gcal_token_expiry_at: string | null;
   headline: string | null;
+  ls_subscription_id: string | null;
+  ls_subscription_item_id: string | null;
+  ls_subscription_status: string | null;
   preferences: Json | null;
   profile: Json | null;
   rate_max: number | null;
@@ -96,12 +100,16 @@ export interface LeadRow {
   amount: number | null;
   billed_at: string | null;
   booking_id: string | null;
+  confirmed_at: string | null;
   created_at: string | null;
   expert_id: string | null;
+  flag_reason: string | null;
+  flagged_at: string | null;
   ls_checkout_id: string | null;
   ls_order_id: string | null;
   prospect_id: string | null;
   status: string | null;
+  usage_reported_at: string | null;
 }
 
 export interface CallExperienceSurveyRow {

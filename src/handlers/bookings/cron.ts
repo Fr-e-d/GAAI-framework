@@ -1,6 +1,7 @@
 import { Env } from '../../types/env';
 import { createSql } from '../../lib/db';
 import { syncExpertPoolToD1 } from '../../cron/syncExpertPool';
+import { handleLsBillingCron } from '../../cron/lsBillingCron';
 import type { BookingRow, ExpertRow } from '../../types/db';
 
 // AC13: scheduled() handler dispatches to sync function (AC4)
@@ -13,6 +14,9 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
     await cleanupExpiredHolds(env);
   } else if (cron === '*/15 * * * *') {
     await dispatchReminders(env);
+  } else if (cron === '0 * * * *') {
+    // E06S33: hourly LS billing cron — auto-confirm leads + report usage
+    await handleLsBillingCron(env);
   } else {
     console.warn('handleScheduled: unknown cron', cron);
   }
