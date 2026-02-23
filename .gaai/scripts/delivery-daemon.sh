@@ -753,17 +753,21 @@ echo ""
 cd "$PROJECT_DIR"
 unset CLAUDECODE 2>/dev/null || true
 
-# Heartbeat: touch log file periodically so the daemon knows we're alive
-touch "$delivery_log"
-(while kill -0 \$\$ 2>/dev/null; do touch "$delivery_log"; sleep 60; done) &
-HB_PID=\$!
+# Print mode (-p): claude processes the prompt and exits, freeing the daemon slot.
+# --allowedTools grants delivery tools selectively (not yolo).
+ALLOWED="Read,Write,Edit,Glob,Grep,Bash,Task,WebFetch,WebSearch,Skill,NotebookEdit"
 
-# Interactive mode (positional prompt, no -p): user approves each tool use
-# --max-turns is print-mode only, not passed here
-claude "/gaai-deliver $story_id"
-EXIT_CODE=\$?
+if command -v gtimeout &>/dev/null; then
+  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "/gaai-deliver $story_id" --allowedTools "\$ALLOWED" 2>&1 | tee -a "$delivery_log"
+  EXIT_CODE=\${PIPESTATUS[0]}
+else
+  claude $CLAUDE_FLAGS -p "/gaai-deliver $story_id" --allowedTools "\$ALLOWED" 2>&1 | tee -a "$delivery_log"
+  EXIT_CODE=\${PIPESTATUS[0]}
+fi
 
-kill \$HB_PID 2>/dev/null || true
+echo ""
+echo "Delivery finished (exit \$EXIT_CODE). Closing in 10s..."
+sleep 10
 WRAPPER_EOF
 
   chmod +x "$wrapper"
