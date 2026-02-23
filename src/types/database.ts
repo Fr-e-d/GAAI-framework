@@ -646,6 +646,24 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      debit_lead_credit: {
+        Args: {
+          p_expert_id: string
+          p_booking_id: string
+          p_prospect_id: string
+          p_amount: number
+        }
+        Returns: Json
+      }
+      restore_lead_credit: {
+        Args: {
+          p_expert_id: string
+          p_lead_id: string
+          p_amount: number
+          p_flag_reason: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

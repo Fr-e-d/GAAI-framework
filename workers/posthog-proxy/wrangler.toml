@@ -1,0 +1,26 @@
+name = "callibrate-posthog-proxy-dev"
+main = "src/index.ts"
+compatibility_date = "2024-10-22"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Staging ────────────────────────────────────────────────────────────────────
+
+[env.staging]
+name = "callibrate-posthog-proxy-staging"
+
+[[env.staging.routes]]
+pattern = "ph.staging.callibrate.io/*"
+zone_name = "callibrate.io"
+
+# ── Production ─────────────────────────────────────────────────────────────────
+
+[env.production]
+name = "callibrate-posthog-proxy-prod"
+
+[[env.production.routes]]
+pattern = "ph.callibrate.io/*"
+zone_name = "callibrate.io"
+
+# ── No secrets required ────────────────────────────────────────────────────────
+# This Worker is a transparent proxy — no PostHog API keys are stored here.
+# PostHog credentials travel in the event payload from the client.
