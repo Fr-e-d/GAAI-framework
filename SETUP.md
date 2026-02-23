@@ -520,6 +520,7 @@ The MCP server runs via `npx mcp-remote@latest` — no local installation requir
 
 ---
 
+
 ## PostHog Proxy Worker — `callibrate-posthog-proxy` (E07S01)
 
 The PostHog proxy routes analytics events through a first-party subdomain (`ph.callibrate.io`),
@@ -609,3 +610,36 @@ curl -X POST https://ph.staging.callibrate.io/ingest/batch \
   -d '{"api_key":"phc_test","batch":[]}'
 ```
 
+---
+
+## PostHog Dashboards Setup (E07S04)
+
+Creates 3 pre-configured dashboards in PostHog EU Cloud:
+- **Prospect Conversion Funnel** — 5-step funnel with `satellite_id` breakdown, last 30 days
+- **Expert Activation Funnel** — 4-step funnel from registration to first booking, last 30 days
+- **Business Overview** — daily trends (form submissions, bookings, registrations) + conversion rate
+
+### Prerequisites
+
+1. PostHog EU Cloud account with a project created (E07S01 prerequisite)
+2. **Personal API Key** — NOT the Project API Key (the Dashboard API requires a Personal API Key)
+   - Generate at: `https://eu.posthog.com/settings/user-api-keys`
+   - Required scopes: Dashboard read + write, Insight read + write
+3. **Project ID** — the numeric ID visible in your PostHog project URL:
+   `https://eu.posthog.com/project/{PROJECT_ID}/...`
+
+### Run the script
+
+```bash
+POSTHOG_PERSONAL_API_KEY=phx_xxx POSTHOG_PROJECT_ID=12345 npx tsx scripts/posthog-setup-dashboards.ts
+```
+
+The script is **idempotent** — running it multiple times is safe. If a dashboard with the same name already exists, it is skipped. Dashboard URLs are printed on success.
+
+### What the script creates
+
+| Dashboard | Insight type | Key config |
+|-----------|-------------|------------|
+| Prospect Conversion Funnel | FUNNELS | 5 steps, breakdown: `satellite_id`, 14-day window, 30d range |
+| Expert Activation Funnel | FUNNELS | 4 steps, 30-day window, 30d range |
+| Business Overview | TRENDS (×4) | Daily counts + formula-based conversion rate |
