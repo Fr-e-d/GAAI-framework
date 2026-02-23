@@ -18,6 +18,7 @@ import {
 import { scoreMatch, applyReliabilityModifier } from '../matching/score';
 import { signProspectToken, verifyProspectToken } from '../lib/jwt';
 import { loadExpertPool } from '../lib/expertPool';
+import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -104,6 +105,7 @@ function normalizeRequirements(quizAnswers: Record<string, unknown>): ProspectRe
 // ── POST /api/prospects/submit ─────────────────────────────────────────────────
 
 export async function handleProspectSubmit(request: Request, env: Env): Promise<Response> {
+  const startTime = Date.now();
   let body: { satellite_id?: unknown; quiz_answers?: unknown; utm_source?: unknown; utm_campaign?: unknown };
   try {
     body = await request.json();
@@ -175,6 +177,7 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
   }
 
   // AC3: scoreMatch() synchronously for each expert
+  const scoredResults: { score: number }[] = [];
   if (experts.length > 0) {
     const matchRows: Database['public']['Tables']['matches']['Insert'][] = experts.map((expert) => {
       const profile: ExpertProfile = {
@@ -189,6 +192,7 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
         total_leads: expert.total_leads,
       });
 
+      scoredResults.push({ score });
       return {
         prospect_id: prospect.id,
         expert_id: expert.id,
@@ -202,6 +206,21 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
     // AC3: INSERT all scored results (best-effort — AC6 guard covers insert failures)
     await supabase.from('matches').insert(matchRows);
   }
+
+  // AC2/AC3: fire-and-forget analytics — does not block response
+  const topScore = scoredResults.length > 0 ? Math.max(...scoredResults.map((r) => r.score)) : 0;
+  const meanScore =
+    scoredResults.length > 0
+      ? scoredResults.reduce((sum, r) => sum + r.score, 0) / scoredResults.length
+      : 0;
+  writeMatchingDataPoint(env, {
+    endpoint: '/api/prospects/submit',
+    satelliteId: satellite_id,
+    latencyMs: Date.now() - startTime,
+    poolSize: experts.length,
+    topScore,
+    meanScore,
+  });
 
   // AC3: sign JWT token (24h TTL)
   const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);

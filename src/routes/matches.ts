@@ -12,6 +12,7 @@ import {
   type ScoreBreakdown,
 } from '../types/matching';
 import { scoreMatch, applyReliabilityModifier } from '../matching/score';
+import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ function deriveQualityTier(compositeScore: number | null): QualityTier {
 // AC7: loads prospect + available experts, scores, stores top-20, returns results
 
 export async function handleMatchCompute(request: Request, env: Env): Promise<Response> {
+  const startTime = Date.now();
   let body: { prospect_id?: unknown; satellite_id?: unknown };
   try {
     body = await request.json();
@@ -163,6 +165,20 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
       rate_min: expert.rate_min ?? null,
       rate_max: expert.rate_max ?? null,
     };
+  });
+
+  // AC2/AC3: fire-and-forget analytics — does not block response
+  const meanScore =
+    scored.length > 0
+      ? scored.reduce((sum, s) => sum + s.matchScore.score, 0) / scored.length
+      : 0;
+  writeMatchingDataPoint(env, {
+    endpoint: '/api/matches/compute',
+    satelliteId: typeof effectiveSatelliteId === 'string' ? effectiveSatelliteId : '',
+    latencyMs: Date.now() - startTime,
+    poolSize: experts.length,
+    topScore: top20[0]?.matchScore.score ?? 0,
+    meanScore,
   });
 
   return jsonResponse({ computed: top20.length, top_matches: topMatches });
