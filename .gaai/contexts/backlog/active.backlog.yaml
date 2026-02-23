@@ -357,7 +357,7 @@ items:
     epic: E07
     title: "PostHog EU — compte + dashboards + MCP (founder setup)"
     priority: high
-    status: ready
+    status: refined
     artefact: contexts/artefacts/stories/E07S06.story.md
     dependencies: [E07S05, E06S27]
     notes: "Founder-executed. Crée le compte PostHog EU Cloud, configure POSTHOG_API_KEY correcte, run le script posthog-setup-dashboards.ts, connecte le MCP server dans Claude Code, configure ph.callibrate.io CNAME. Bloque l'observabilité analytics. Peut tourner en parallèle de E06S28."
@@ -368,7 +368,7 @@ items:
     epic: E06
     title: "Staging — Provisionnement infra CF (Hyperdrive + D1 + Vectorize + Workflows + Rate Limiter + Workers)"
     priority: critical
-    status: ready
+    status: refined
     artefact: contexts/artefacts/stories/E06S27.story.md
     dependencies: []
     notes: "Founder-executed. Crée toutes les ressources CF manquantes (Hyperdrive, D1 expert-pool-edge, Vectorize expert-profiles, CF Workflows, Rate Limiter) + déploie workers/matching et workers/posthog-proxy en staging + étend le scope du CF API token CI/CD + met à jour wrangler.toml avec les IDs + smoke test /api/health. Bloque E06S28 et E06S29."
@@ -377,7 +377,7 @@ items:
     epic: E06
     title: "Staging — Secrets manquants (Core + Satellite + Turnstile)"
     priority: critical
-    status: ready
+    status: refined
     artefact: contexts/artefacts/stories/E06S28.story.md
     dependencies: [E06S27]
     notes: "Founder-executed. Sets: SURVEY_TOKEN_SECRET + TURNSTILE_SECRET_KEY sur callibrate-core-staging ; SURVEY_DELAY_7D_MS=60000 + SURVEY_DELAY_38D_MS=120000 dans wrangler.toml vars staging ; SUPABASE_URL + SUPABASE_ANON_KEY + POSTHOG_API_KEY sur callibrate-satellite-staging ; Turnstile site créé dans CF Dashboard. Vérifie que E06S16 utilise SURVEY_TOKEN_SECRET (pas PROSPECT_TOKEN_SECRET). Bloque E06S29."
@@ -386,7 +386,7 @@ items:
     epic: E06
     title: "Staging — Smoke test end-to-end"
     priority: critical
-    status: ready
+    status: refined
     artefact: contexts/artefacts/stories/E06S29.story.md
     dependencies: [E06S27, E06S28]
     notes: "Founder-executed. Valide le happy path complet sur staging via curl : /api/health → register → extract → submit → matches → booking hold. Vérifie Analytics Engine + PostHog (si E07S06 done). Bloquant pour M1 ('Full loop working end-to-end')."
@@ -395,7 +395,7 @@ items:
     epic: E06
     title: "Google OAuth — Sensitive scope review (calendar.events)"
     priority: high
-    status: ready
+    status: refined
     artefact: contexts/artefacts/stories/E06S30.story.md
     dependencies: []
     notes: "Founder-executed. Bloquer go-live. Délai 4–6 semaines minimum. À initier immédiatement en parallèle. Requis : Privacy Policy + Terms publiés sur callibrate.io/privacy + callibrate.io/terms, domaine vérifié Google Search Console, formulaire de vérification OAuth soumis avec démo vidéo. Sans ça : seuls les 100 test users listés dans Google Cloud Console peuvent connecter leur Calendar."
