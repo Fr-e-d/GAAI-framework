@@ -77,6 +77,17 @@ binding = "EXPERT_DB"
 database_name = "expert-pool-edge"
 database_id = "PLACEHOLDER_D1_DATABASE_ID"
 
+# CF Workflows (top-level only — not per-env; isolation via separate Worker scripts)
+[[workflows]]
+binding = "BOOKING_CONFIRMED_WORKFLOW"
+name = "booking-confirmed-workflow"
+class_name = "BookingConfirmedWorkflow"
+
+[[workflows]]
+binding = "BOOKING_COMPLETED_WORKFLOW"
+name = "booking-completed-workflow"
+class_name = "BookingCompletedWorkflow"
+
 # Top-level (used by wrangler dev)
 [triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
