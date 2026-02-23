@@ -120,16 +120,14 @@ id = "24a3f09adaf34c26805ba2351d773829"
 binding = "EXPERT_POOL"
 id = "68927a33fd9a46ec8b537a22a9cf2d20"
 
-<<<<<<< HEAD
 [[env.staging.analytics_engine_datasets]]
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
-=======
+
 [[env.staging.rate_limiting]]
 binding = "RATE_LIMITER"
 namespace_id = 1002
 simple = { limit = 30, period = 60 }
->>>>>>> dfdf22f (feat(E06S20): security hardening — rate limiting binding + Turnstile)
 
 [env.staging.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
@@ -186,16 +184,14 @@ id = "4d5d37620fe14ddfb34aa374cbc37ffe"
 binding = "EXPERT_POOL"
 id = "af0c9c22c77b45ffbac4215009a295d4"
 
-<<<<<<< HEAD
 [[env.production.analytics_engine_datasets]]
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
-=======
+
 [[env.production.rate_limiting]]
 binding = "RATE_LIMITER"
 namespace_id = 1003
 simple = { limit = 30, period = 60 }
->>>>>>> dfdf22f (feat(E06S20): security hardening — rate limiting binding + Turnstile)
 
 [env.production.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
