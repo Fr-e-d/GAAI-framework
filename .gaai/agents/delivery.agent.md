@@ -4,7 +4,7 @@ id: AGENT-DELIVERY-001
 role: delivery-orchestrator
 responsibility: coordinate-sub-agents-to-deliver-validated-stories
 track: delivery
-updated_at: 2026-02-20
+updated_at: 2026-02-23
 ---
 
 # Delivery Agent (GAAI)
@@ -49,16 +49,20 @@ If an action requires writing code or producing a plan, it belongs to a sub-agen
 The backlog is the single source of truth. **Never infer story selection from git branch, artefact existence, or working directory.**
 
 Selection algorithm:
-1. If a story ID was passed as argument → use that story. Verify `status: refined`.
+1. If a story ID was passed as argument → use that story. Verify `status: refined` or `in_progress`.
 2. If no argument → pick the first story with `status: refined` in `active.backlog.yaml` (top-to-bottom).
 3. A story with `status: done` is done — regardless of what branches, artefacts, or files exist.
+4. A story with `status: in_progress` is valid for delivery — the daemon (or another manual launch) already claimed it.
 
 ### Pre-Flight Checks
 
 Before acting on any Story, the Delivery Orchestrator must:
-1. Confirm the Story has `status: refined` in the backlog
-2. Verify acceptance criteria are present and unambiguous
-3. Articulate the execution approach — tier, sub-agent composition, context bundles — before spawning anything
+1. Pull latest staging: `flock .gaai/.delivery-locks/.staging.lock git pull origin staging`
+2. Confirm the Story has `status: refined` or `status: in_progress` in the backlog
+3. If `refined` → mark `in_progress` + commit + push staging (manual launch case)
+4. If `in_progress` → proceed (daemon already marked it)
+5. Verify acceptance criteria are present and unambiguous
+6. Articulate the execution approach — tier, sub-agent composition, context bundles — before spawning anything
 
 If acceptance criteria are ambiguous or missing: stop. Escalate to Discovery. Do not interpret intent.
 
@@ -119,33 +123,39 @@ Specialists are dispatched by the Implementation Sub-Agent, not by the Orchestra
 
 The Delivery Orchestrator is responsible for the full git lifecycle of every Story.
 
+**INVARIANT: The main working tree stays on `staging` at ALL times.** The daemon polls in the main working tree. Deliveries work in worktrees. All staging operations are serialized via `flock .gaai/.delivery-locks/.staging.lock`.
+
 ```
-BEFORE execution  → git checkout -b story/{id} production
+BEFORE execution  → flock: git pull origin staging
+                    mark in_progress + commit + push staging (if not already done by daemon)
+                    git branch story/{id} staging   (NO checkout — main stays on staging)
                     git worktree add ../{id}-workspace story/{id}
 
 AFTER impl PASS   → atomic commit inside ../{id}-workspace
 
 AFTER QA PASS     → push story/{id}
-                    squash merge → production
-                    git push origin production
-                    cleanup: worktree remove + branch delete
+                    flock: git pull + merge --squash story/{id} + push staging (code)
+                    flock: update backlog done + push staging (governance)
+                    cleanup: worktree remove + branch delete (local + remote)
 
-NEVER             → commit directly to production
+NEVER             → interact with the production branch
+                    git checkout away from staging in the main working tree
                     implement without a branch
                     leave stale worktrees or branches
 ```
 
-**PR required for:** Tier 3 Stories · database schema migrations · auth/security changes.
-**PR optional for:** Tier 1/2 routine Stories (solo founder context — squash merge directly).
+Promotion staging → production is a human action via GitHub PR. The AI never touches production.
 
 ---
 
 ## Orchestration Flow
 
 ```
-Read backlog → select next ready Story
+Read backlog (git show origin/staging:...) → select next ready Story
        ↓
-git checkout -b story/{id} + worktree add ../{id}-workspace
+flock: git pull staging → mark in_progress → commit → push staging
+       ↓
+git branch story/{id} staging (NO checkout) + worktree add ../{id}-workspace
        ↓
 invoke evaluate-story
        ↓
@@ -170,8 +180,8 @@ Tier 2 or 3? → assemble context bundle
            PASS → collect {id}.memory-delta.md
                   → if verdict DRIFT_DETECTED or NEW_KNOWLEDGE_FOUND or DRIFT_AND_NEW_KNOWLEDGE:
                       flag Discovery with delta report before marking done
-                  → push story/{id} → squash merge → production → cleanup
-                  → mark Story done → proceed
+                  → push story/{id} → flock: squash merge → staging → push
+                  → flock: mark Story done → push staging → cleanup
            FAIL → re-spawn Implementation Sub-Agent with qa-report (max 2 re-spawns)
                   → re-spawn QA Sub-Agent
                   → if still FAIL after 2 cycles → ESCALATE

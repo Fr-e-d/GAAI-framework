@@ -10,24 +10,31 @@ set -euo pipefail
 #   sorts by priority, checks dependencies, and returns the
 #   first actionable item.
 #
-#   Also supports: listing all ready items, showing a
-#   dependency graph, and detecting priority conflicts.
+#   Also supports: listing all ready items, outputting ready
+#   IDs, showing a dependency graph, detecting priority
+#   conflicts, and updating story status in-place.
 #
 # Usage:
 #   ./scripts/backlog-scheduler.sh [options] <backlog-active-yaml>
+#   echo "$yaml" | ./scripts/backlog-scheduler.sh --stdin [options]
 #
 # Options:
 #   --next          Select next ready item (default)
 #   --list          List all ready items sorted by priority
+#   --ready-ids     Output ready story IDs, one per line
 #   --graph         Show dependency graph for all active items
 #   --conflicts     Show priority conflicts (high-priority items
 #                   blocked by lower-priority dependencies)
+#   --set-status <id> <status>  Update a story's status in the
+#                   YAML file. Requires file path (not --stdin).
+#   --stdin         Read YAML from stdin instead of file
 #
 # Inputs:
-#   positional — path to active.backlog.yaml
+#   positional — path to active.backlog.yaml (unless --stdin)
 #
 # Outputs:
 #   stdout — ID of the next ready backlog item (--next),
+#            ready IDs one per line (--ready-ids),
 #            or formatted list/graph/conflicts report
 #
 # Exit codes:
@@ -39,16 +46,32 @@ set -euo pipefail
 
 MODE="next"
 BACKLOG_FILE=""
+FROM_STDIN=false
+SET_STATUS_ID=""
+SET_STATUS_VAL=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --next)      MODE="next";      shift ;;
-    --list)      MODE="list";      shift ;;
-    --graph)     MODE="graph";     shift ;;
-    --conflicts) MODE="conflicts"; shift ;;
+    --next)       MODE="next";       shift ;;
+    --list)       MODE="list";       shift ;;
+    --ready-ids)  MODE="ready-ids";  shift ;;
+    --graph)      MODE="graph";      shift ;;
+    --conflicts)  MODE="conflicts";  shift ;;
+    --set-status)
+      MODE="set-status"
+      SET_STATUS_ID="${2:-}"
+      SET_STATUS_VAL="${3:-}"
+      if [[ -z "$SET_STATUS_ID" || -z "$SET_STATUS_VAL" ]]; then
+        >&2 echo "Error: --set-status requires <id> and <status>"
+        >&2 echo "Usage: $0 --set-status <id> <status> <backlog-active-yaml>"
+        exit 1
+      fi
+      shift 3
+      ;;
+    --stdin)      FROM_STDIN=true;   shift ;;
     -*)
       >&2 echo "Unknown option: $1"
-      >&2 echo "Usage: $0 [--next|--list|--graph|--conflicts] <backlog-active-yaml>"
+      >&2 echo "Usage: $0 [--next|--list|--ready-ids|--graph|--conflicts|--set-status <id> <status>] [--stdin] [<backlog-active-yaml>]"
       exit 1
       ;;
     *)
@@ -58,15 +81,28 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$BACKLOG_FILE" ]]; then
-  >&2 echo "Usage: $0 [--next|--list|--graph|--conflicts] <backlog-active-yaml>"
-  >&2 echo "Example: $0 .gaai/contexts/backlog/active.backlog.yaml"
-  exit 1
-fi
-
-if [[ ! -f "$BACKLOG_FILE" ]]; then
-  >&2 echo "Error: backlog file '$BACKLOG_FILE' not found"
-  exit 2
+# ── Validate inputs ──────────────────────────────────────────
+if [[ "$MODE" == "set-status" ]]; then
+  # set-status always operates on a file (not stdin)
+  if [[ -z "$BACKLOG_FILE" ]]; then
+    >&2 echo "Error: --set-status requires a backlog file path"
+    >&2 echo "Usage: $0 --set-status <id> <status> <backlog-active-yaml>"
+    exit 1
+  fi
+  if [[ ! -f "$BACKLOG_FILE" ]]; then
+    >&2 echo "Error: backlog file '$BACKLOG_FILE' not found"
+    exit 2
+  fi
+elif ! $FROM_STDIN; then
+  if [[ -z "$BACKLOG_FILE" ]]; then
+    >&2 echo "Usage: $0 [--next|--list|--ready-ids|--graph|--conflicts] [--stdin] [<backlog-active-yaml>]"
+    >&2 echo "Example: $0 .gaai/contexts/backlog/active.backlog.yaml"
+    exit 1
+  fi
+  if [[ ! -f "$BACKLOG_FILE" ]]; then
+    >&2 echo "Error: backlog file '$BACKLOG_FILE' not found"
+    exit 2
+  fi
 fi
 
 if ! command -v python3 &>/dev/null; then
@@ -74,192 +110,237 @@ if ! command -v python3 &>/dev/null; then
   exit 3
 fi
 
-python3 - "$BACKLOG_FILE" "$MODE" << 'PYEOF'
+# ── set-status mode: modify file in-place ────────────────────
+if [[ "$MODE" == "set-status" ]]; then
+  python3 -c "
+import sys, re
+
+file_path, target_id, new_status = sys.argv[1], sys.argv[2], sys.argv[3]
+
+with open(file_path, 'r') as f:
+    lines = f.readlines()
+
+in_target = False
+modified = False
+
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    if re.match(r'-\s+id:\s+' + re.escape(target_id) + r'\s*$', stripped):
+        in_target = True
+        continue
+    if in_target:
+        if re.match(r'-\s+id:\s+', stripped):
+            break
+        m = re.match(r'^(\s+status:\s+)\S+', line)
+        if m:
+            lines[i] = m.group(1) + new_status + '\n'
+            modified = True
+            break
+
+if not modified:
+    print(f'Error: could not update status for {target_id}', file=sys.stderr)
+    sys.exit(1)
+
+with open(file_path, 'w') as f:
+    f.writelines(lines)
+
+print(f'{target_id} -> {new_status}')
+" "$BACKLOG_FILE" "$SET_STATUS_ID" "$SET_STATUS_VAL"
+  exit $?
+fi
+
+# ── Read backlog content ─────────────────────────────────────
+if $FROM_STDIN; then
+  BACKLOG_CONTENT=$(cat)
+else
+  BACKLOG_CONTENT=$(cat "$BACKLOG_FILE")
+fi
+
+# ── Python parser + all read modes ───────────────────────────
+# The Python script is stored in a variable to avoid quoting issues
+# with python3 -c. Content is piped via stdin, mode via argv.
+read -r -d '' PYTHON_PARSER << 'PYEOF' || true
 import sys
 import re
 
-backlog_file = sys.argv[1]
-mode = sys.argv[2]
+mode = sys.argv[1]
+content = sys.stdin.read()
 
-with open(backlog_file, 'r') as f:
-    content = f.read()
-
-# ── YAML block parser ──────────────────────────────────────
+# -- YAML block parser --
 items = []
 current = {}
 in_depends = False
-in_criteria = False
 
 for line in content.splitlines():
     stripped = line.strip()
 
-    if stripped.startswith('- id:'):
+    if stripped.startswith("- id:"):
         if current:
             items.append(current)
         current = {
-            'id': stripped.split(':', 1)[1].strip(),
-            'title': '',
-            'status': 'draft',
-            'priority': 'low',
-            'complexity': 1,
-            'depends_on': [],
+            "id": stripped.split(":", 1)[1].strip(),
+            "title": "",
+            "status": "draft",
+            "priority": "low",
+            "complexity": 1,
+            "depends_on": [],
         }
         in_depends = False
-        in_criteria = False
 
     elif current:
-        if stripped.startswith('title:'):
-            current['title'] = stripped.split(':', 1)[1].strip().strip('"\'')
-        elif stripped.startswith('status:'):
-            current['status'] = stripped.split(':', 1)[1].strip()
+        if stripped.startswith("title:"):
+            current["title"] = stripped.split(":", 1)[1].strip().strip("\"'")
+        elif stripped.startswith("status:"):
+            current["status"] = stripped.split(":", 1)[1].strip()
             in_depends = False
-        elif stripped.startswith('priority:'):
-            current['priority'] = stripped.split(':', 1)[1].strip()
+        elif stripped.startswith("priority:"):
+            current["priority"] = stripped.split(":", 1)[1].strip()
             in_depends = False
-        elif stripped.startswith('complexity:'):
+        elif stripped.startswith("complexity:"):
             try:
-                current['complexity'] = int(stripped.split(':', 1)[1].strip())
+                current["complexity"] = int(stripped.split(":", 1)[1].strip())
             except ValueError:
                 pass
             in_depends = False
-        elif stripped.startswith('depends_on:'):
-            val = stripped.split(':', 1)[1].strip()
-            if val and val not in ('[]', ''):
-                # inline list: depends_on: [BL-001, BL-002]
-                ids = re.findall(r'[\w-]+', val)
-                current['depends_on'].extend(ids)
+        elif stripped.startswith("depends_on:") or stripped.startswith("dependencies:"):
+            val = stripped.split(":", 1)[1].strip()
+            if val and val not in ("[]", ""):
+                ids = re.findall(r"[\w-]+", val)
+                current["depends_on"].extend(ids)
                 in_depends = False
             else:
                 in_depends = True
-        elif in_depends and stripped.startswith('- '):
+        elif in_depends and stripped.startswith("- "):
             dep = stripped[2:].strip()
             if dep:
-                current['depends_on'].append(dep)
-        elif stripped and not stripped.startswith('#') and not stripped.startswith('- '):
+                current["depends_on"].append(dep)
+        elif stripped and not stripped.startswith("#") and not stripped.startswith("- "):
             in_depends = False
 
 if current:
     items.append(current)
 
-# ── Helpers ────────────────────────────────────────────────
-priority_order = {'high': 0, 'medium': 1, 'low': 2}
-
-done_ids = {i['id'] for i in items if i.get('status') in ('done', 'cancelled')}
-all_ids  = {i['id'] for i in items}
+# -- Helpers --
+priority_order = {"high": 0, "medium": 1, "low": 2}
+done_ids = {i["id"] for i in items if i.get("status") in ("done", "cancelled")}
 
 def is_ready(item):
-    if item.get('status') != 'refined':
+    if item.get("status") != "refined":
         return False
-    unresolved = [d for d in item.get('depends_on', []) if d and d not in done_ids]
-    return len(unresolved) == 0
+    return all(d in done_ids for d in item.get("depends_on", []) if d)
 
 def unresolved_deps(item):
-    return [d for d in item.get('depends_on', []) if d and d not in done_ids]
+    return [d for d in item.get("depends_on", []) if d and d not in done_ids]
 
 def sort_key(item):
-    return (priority_order.get(item.get('priority', 'low'), 2), item.get('complexity', 1))
+    return (priority_order.get(item.get("priority", "low"), 2), item.get("complexity", 1))
 
 ready_items = sorted([i for i in items if is_ready(i)], key=sort_key)
 
-# ── Mode: next ─────────────────────────────────────────────
-if mode == 'next':
+# -- Mode: next --
+if mode == "next":
     if ready_items:
-        print(ready_items[0]['id'])
+        print(ready_items[0]["id"])
     else:
-        print('NO_ITEM_READY')
+        print("NO_ITEM_READY")
     sys.exit(0)
 
-# ── Mode: list ─────────────────────────────────────────────
-if mode == 'list':
+# -- Mode: ready-ids --
+if mode == "ready-ids":
+    for item in ready_items:
+        print(item["id"])
+    sys.exit(0)
+
+# -- Mode: list --
+if mode == "list":
     if not ready_items:
-        print('No items ready. Check backlog for refined items with resolved dependencies.')
+        print("No items ready. Check backlog for refined items with resolved dependencies.")
         sys.exit(0)
-    print(f'Ready items ({len(ready_items)}):')
+    print(f"Ready items ({len(ready_items)}):")
     print()
     for item in ready_items:
-        priority = item.get('priority', 'low').upper()
-        complexity = item.get('complexity', '?')
-        title = item.get('title', '(no title)')
-        print(f'  [{priority}] {item["id"]} — {title} (complexity: {complexity})')
+        priority = item.get("priority", "low").upper()
+        complexity = item.get("complexity", "?")
+        title = item.get("title", "(no title)")
+        print(f'  [{priority}] {item["id"]} \u2014 {title} (complexity: {complexity})')
     sys.exit(0)
 
-# ── Mode: graph ────────────────────────────────────────────
-if mode == 'graph':
-    active_items = [i for i in items if i.get('status') not in ('done', 'cancelled')]
+# -- Mode: graph --
+if mode == "graph":
+    active_items = [i for i in items if i.get("status") not in ("done", "cancelled")]
     if not active_items:
-        print('No active items.')
+        print("No active items.")
         sys.exit(0)
-    print('Dependency graph (active items):')
+    print("Dependency graph (active items):")
     print()
     for item in sorted(active_items, key=sort_key):
-        status  = item.get('status', '?')
-        priority = item.get('priority', 'low')
-        title   = item.get('title', '(no title)')
-        deps    = item.get('depends_on', [])
+        status   = item.get("status", "?")
+        priority = item.get("priority", "low")
+        title    = item.get("title", "(no title)")
+        deps     = item.get("depends_on", [])
 
-        # Status indicator
         if is_ready(item):
-            indicator = '✅'
-        elif status == 'in-progress':
-            indicator = '🔄'
+            indicator = "\u2705"
+        elif status in ("in_progress", "in-progress"):
+            indicator = "\U0001f504"
         elif deps:
-            indicator = '🔒'
+            indicator = "\U0001f512"
         else:
-            indicator = '⏳'
+            indicator = "\u23f3"
 
-        print(f'  {indicator} {item["id"]} [{priority}] — {title}')
+        print(f'  {indicator} {item["id"]} [{priority}] \u2014 {title}')
         for dep in deps:
-            dep_status = next((i.get('status','?') for i in items if i['id'] == dep), 'unknown')
-            resolved = '✓' if dep in done_ids else '✗'
-            print(f'       └─ {resolved} depends on {dep} (status: {dep_status})')
+            dep_status = next((i.get("status","?") for i in items if i["id"] == dep), "unknown")
+            resolved = "\u2713" if dep in done_ids else "\u2717"
+            print(f'       \u2514\u2500 {resolved} depends on {dep} (status: {dep_status})')
     print()
-    print('Legend: ✅ ready  🔄 in-progress  🔒 blocked  ⏳ not yet refined')
+    print("Legend: \u2705 ready  \U0001f504 in-progress  \U0001f512 blocked  \u23f3 not yet refined")
     sys.exit(0)
 
-# ── Mode: conflicts ────────────────────────────────────────
-if mode == 'conflicts':
+# -- Mode: conflicts --
+if mode == "conflicts":
     conflicts = []
-    active_items = [i for i in items if i.get('status') not in ('done', 'cancelled')]
+    active_items = [i for i in items if i.get("status") not in ("done", "cancelled")]
 
     for item in active_items:
-        if item.get('status') != 'refined':
+        if item.get("status") != "refined":
             continue
         unres = unresolved_deps(item)
         if not unres:
             continue
-        # check if any dep has lower priority
-        item_prio = priority_order.get(item.get('priority', 'low'), 2)
+        item_prio = priority_order.get(item.get("priority", "low"), 2)
         for dep_id in unres:
-            dep = next((i for i in items if i['id'] == dep_id), None)
+            dep = next((i for i in items if i["id"] == dep_id), None)
             if dep is None:
                 conflicts.append({
-                    'item': item,
-                    'dep_id': dep_id,
-                    'type': 'missing',
-                    'detail': 'dependency not found in backlog'
+                    "dep_id": dep_id,
+                    "item_id": item["id"],
+                    "type": "missing",
+                    "detail": f'{dep_id} listed as dependency of {item["id"]} but not found in backlog'
                 })
                 continue
-            dep_prio = priority_order.get(dep.get('priority', 'low'), 2)
+            dep_prio = priority_order.get(dep.get("priority", "low"), 2)
             if dep_prio > item_prio:
                 conflicts.append({
-                    'item': item,
-                    'dep_id': dep_id,
-                    'type': 'priority_inversion',
-                    'detail': f'{item["id"]} ({item.get("priority")}) is blocked by {dep_id} ({dep.get("priority")})'
+                    "dep_id": dep_id,
+                    "item_id": item["id"],
+                    "type": "priority_inversion",
+                    "detail": f'{item["id"]} ({item.get("priority")}) is blocked by {dep_id} ({dep.get("priority")})'
                 })
 
     if not conflicts:
-        print('No priority conflicts detected.')
+        print("No priority conflicts detected.")
         sys.exit(0)
 
-    print(f'Priority conflicts ({len(conflicts)}):')
+    print(f"Priority conflicts ({len(conflicts)}):")
     print()
     for c in conflicts:
-        print(f'  ⚠️  {c["detail"]}')
+        print(f'  \u26a0\ufe0f  {c["detail"]}')
         if c["type"] == "priority_inversion":
-            print(f'      → Consider raising priority of {c["dep_id"]} or lowering {c["item"]["id"]}')
+            print(f'      \u2192 Consider raising priority of {c["dep_id"]} or lowering {c["item_id"]}')
         elif c["type"] == "missing":
-            print(f'      → {c["dep_id"]} is listed as a dependency but not found in backlog')
+            print(f'      \u2192 {c["dep_id"]} is listed as a dependency but not found in backlog')
     sys.exit(0)
-
 PYEOF
+
+echo "$BACKLOG_CONTENT" | python3 -c "$PYTHON_PARSER" "$MODE"

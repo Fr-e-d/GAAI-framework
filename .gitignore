@@ -37,4 +37,5 @@ wrangler.log
 
 # GAAI Delivery Daemon
 .gaai/.delivery-locks/
+.gaai/.delivery-logs/
 .gaai/.delivery-daemon.log
