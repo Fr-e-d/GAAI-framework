@@ -22,6 +22,10 @@ import { handleReschedule } from './handlers/bookings/reschedule';
 import { handleGetPrep } from './handlers/bookings/prep';
 import { handleScheduled } from './handlers/bookings/cron';
 
+// CF Workflows — must be named exports so the runtime can locate the classes
+export { BookingConfirmedWorkflow } from './workflows/booking-confirmed.workflow';
+export { BookingCompletedWorkflow } from './workflows/booking-completed.workflow';
+
 const QUEUES = ['email-notifications', 'lead-billing', 'score-computation'] as const;
 
 async function checkSupabase(env: Env): Promise<'connected' | 'error'> {

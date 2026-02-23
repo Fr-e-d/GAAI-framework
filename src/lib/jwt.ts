@@ -57,6 +57,28 @@ export async function signProspectToken(
   };
 }
 
+// ── signSurveyToken ────────────────────────────────────────────────────────────
+// Returns a signed JWT with 30-day TTL for survey submission links.
+// Payload: { booking_id, prospect_id, exp }.
+
+export async function signSurveyToken(
+  bookingId: string,
+  prospectId: string,
+  secret: string,
+): Promise<string> {
+  const encoder = new TextEncoder();
+  const exp = Math.floor(Date.now() / 1000) + 30 * 86400; // 30 days
+
+  const header = toBase64Url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
+  const payload = toBase64Url(encoder.encode(JSON.stringify({ booking_id: bookingId, prospect_id: prospectId, exp })));
+  const signingInput = `${header}.${payload}`;
+
+  const key = await importHmacKey(secret, 'sign');
+  const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(signingInput));
+
+  return `${signingInput}.${toBase64Url(signatureBuffer)}`;
+}
+
 // ── verifyProspectToken ────────────────────────────────────────────────────────
 // Returns true only if: signature valid + not expired + prospect_id matches.
 
