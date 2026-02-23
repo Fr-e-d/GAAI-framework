@@ -3,6 +3,17 @@ main = "src/index.ts"
 compatibility_date = "2024-10-22"
 compatibility_flags = ["nodejs_compat"]
 
+[placement]
+mode = "smart"
+
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+# ⚠️ REPLACE with real Hyperdrive config ID after running (E06S27 AC1):
+#   npx wrangler hyperdrive create callibrate-core-hyperdrive-staging \
+#     --connection-string "postgresql://postgres:[PASSWORD]@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+localConnectionString = "postgresql://postgres:postgres@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
+
 # ── Default (dev) environment — local only, never deployed ───────────────────
 # Binds to staging remote resources (queues, KV, Supabase).
 # Secrets loaded from .dev.vars (gitignored).
@@ -61,6 +72,37 @@ preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
+# D1 edge database for expert pool — provisioned E06S27
+[[d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge-staging"
+database_id = "7d8ce9de-71ac-482f-8e3e-5c023729fe8f"
+
+# Workers AI binding (E06S21)
+[ai]
+binding = "AI"
+
+# Vectorize index binding (E06S21) — index provisioned E06S27
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+# Rate Limiter (E06S20) — namespace_id is a self-assigned integer, auto-provisioned on first deploy
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }
+
+# Durable Object — ExpertPoolDO write coordinator (E06S25)
+[[durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
+
+# DO migration tag (required for new classes)
+[[migrations]]
+tag = "v1"
+new_classes = ["ExpertPoolDO"]
+
 # Top-level (used by wrangler dev)
 [triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
@@ -75,6 +117,11 @@ preview_urls = true
 WORKER_BASE_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
 EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
+
+[[env.staging.hyperdrive]]
+binding = "HYPERDRIVE"
+# ⚠️ REPLACE after creating Hyperdrive config (E06S27 AC1)
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
 
 [[env.staging.queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-staging"
@@ -126,6 +173,37 @@ id = "68927a33fd9a46ec8b537a22a9cf2d20"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
+# D1 edge database — provisioned E06S27
+[[env.staging.d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge-staging"
+database_id = "7d8ce9de-71ac-482f-8e3e-5c023729fe8f"
+
+# Workers AI binding (E06S21)
+[env.staging.ai]
+binding = "AI"
+
+# Vectorize index binding (E06S21)
+[[env.staging.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+# Rate Limiter (E06S20) — namespace_id auto-provisioned on first deploy
+[[env.staging.ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1002"
+simple = { limit = 30, period = 60 }
+
+# Service Binding to callibrate-matching-staging (E06S24)
+[[env.staging.services]]
+binding = "MATCHING_SERVICE"
+service = "callibrate-matching-staging"
+
+# Durable Object binding (E06S25)
+[[env.staging.durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
+
 [env.staging.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
 
@@ -138,6 +216,11 @@ name = "callibrate-core-prod"
 WORKER_BASE_URL = "https://api.callibrate.io"
 EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
+
+[[env.production.hyperdrive]]
+binding = "HYPERDRIVE"
+# ⚠️ REPLACE at launch with production Hyperdrive config ID
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
 
 [[env.production.queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-prod"
@@ -188,6 +271,37 @@ id = "af0c9c22c77b45ffbac4215009a295d4"
 [[env.production.analytics_engine_datasets]]
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
+
+# D1 edge database — provisioned E06S27
+[[env.production.d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge-prod"
+database_id = "ab015247-cecc-4f0f-a56a-474f73055a78"
+
+# Workers AI binding (E06S21)
+[env.production.ai]
+binding = "AI"
+
+# Vectorize index binding (E06S21)
+[[env.production.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+# Rate Limiter (E06S20) — namespace_id auto-provisioned on first deploy
+[[env.production.ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1003"
+simple = { limit = 30, period = 60 }
+
+# Service Binding to callibrate-matching-prod (E06S24)
+[[env.production.services]]
+binding = "MATCHING_SERVICE"
+service = "callibrate-matching-prod"
+
+# Durable Object binding (E06S25)
+[[env.production.durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
 
 [env.production.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]

@@ -1,0 +1,102 @@
+name = "callibrate-matching-dev"
+main = "src/index.ts"
+compatibility_date = "2024-10-22"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Default (dev) environment — local only, never deployed ───────────────────
+
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+# ⚠️ REPLACE with real Hyperdrive config ID after running (E06S27 AC1):
+#   npx wrangler hyperdrive create callibrate-core-hyperdrive-staging \
+#     --connection-string "postgresql://postgres:[PASSWORD]@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+localConnectionString = "postgresql://postgres:postgres@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
+
+[[kv_namespaces]]
+binding = "EXPERT_POOL"
+id = "68927a33fd9a46ec8b537a22a9cf2d20"
+preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
+
+# D1 edge database — provisioned E06S27
+[[d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge-staging"
+database_id = "7d8ce9de-71ac-482f-8e3e-5c023729fe8f"
+
+[ai]
+binding = "AI"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+[[analytics_engine_datasets]]
+binding = "MATCHING_ANALYTICS"
+dataset = "matching-metrics"
+
+# ── Staging ────────────────────────────────────────────────────────────────────
+
+[env.staging]
+name = "callibrate-matching-staging"
+
+[[env.staging.hyperdrive]]
+binding = "HYPERDRIVE"
+# ⚠️ REPLACE after creating Hyperdrive config (E06S27 AC1)
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+
+[[env.staging.kv_namespaces]]
+binding = "EXPERT_POOL"
+id = "68927a33fd9a46ec8b537a22a9cf2d20"
+
+# D1 edge database — provisioned E06S27
+[[env.staging.d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge-staging"
+database_id = "7d8ce9de-71ac-482f-8e3e-5c023729fe8f"
+
+[env.staging.ai]
+binding = "AI"
+
+[[env.staging.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+[[env.staging.analytics_engine_datasets]]
+binding = "MATCHING_ANALYTICS"
+dataset = "matching-metrics"
+
+# ── Production ─────────────────────────────────────────────────────────────────
+
+[env.production]
+name = "callibrate-matching-prod"
+
+[[env.production.hyperdrive]]
+binding = "HYPERDRIVE"
+# ⚠️ REPLACE at launch with production Hyperdrive config ID
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+
+[[env.production.kv_namespaces]]
+binding = "EXPERT_POOL"
+id = "af0c9c22c77b45ffbac4215009a295d4"
+
+# D1 edge database — provisioned E06S27
+[[env.production.d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge-prod"
+database_id = "ab015247-cecc-4f0f-a56a-474f73055a78"
+
+[env.production.ai]
+binding = "AI"
+
+[[env.production.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+[[env.production.analytics_engine_datasets]]
+binding = "MATCHING_ANALYTICS"
+dataset = "matching-metrics"
+
+# ── Secrets (set via wrangler secret put per env) ──────────────────────────────
+# SUPABASE_URL          — for admin reindex auth validation
+# SUPABASE_SERVICE_KEY  — for admin reindex auth validation
