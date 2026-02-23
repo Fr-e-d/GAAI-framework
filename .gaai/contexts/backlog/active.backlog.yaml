@@ -83,7 +83,7 @@ items:
     epic: E06
     title: "Cal.com managed users integration + webhook endpoint"
     priority: high
-    status: superseded
+    status: cancelled
     artefact: contexts/artefacts/stories/E06S04.story.md
     dependencies: [E06S03]
     notes: "SUPERSEDED 2026-02-20 by DEC-41. Cal.com Platform fermée aux nouveaux signups depuis 15/12/2025. Remplacée par E06S10 (Google Calendar OAuth layer) + E06S11 (Booking engine). Les colonnes cal_* en DB sont conservées sans nettoyage jusqu'au post-MVP."
