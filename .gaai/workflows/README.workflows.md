@@ -44,6 +44,22 @@ Each track has its own workflow, agents, rules, and artefacts.
 
 ---
 
+## Branch Model
+
+All AI-driven delivery targets the **`staging`** branch. AI agents never interact with `production`.
+
+```
+staging  ←── AI works here (backlog, worktrees, squash merge, push)
+   │
+   PR staging → production  ←── Human review on GitHub
+   │
+production  ←── Never touched by AI. Deploy via GitHub Actions on merge/tag.
+```
+
+The `delivery-daemon.sh` script automates backlog polling and session launch. See `scripts/README.scripts.md`.
+
+---
+
 ## Usage Notes
 
 - Workflows are **prose descriptions** of the process, not automation scripts

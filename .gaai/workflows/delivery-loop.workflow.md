@@ -2,10 +2,12 @@
 type: workflow
 id: WORKFLOW-DELIVERY-LOOP-001
 track: delivery
-updated_at: 2026-02-18
+updated_at: 2026-02-23
 ---
 
 # Delivery Loop Workflow
+
+> **Branch model:** The delivery workflow targets the `staging` branch. AI never interacts with `production`. Promotion staging → production is a human action via GitHub PR.
 
 ## Purpose
 
@@ -50,19 +52,32 @@ Before starting the loop:
 
 ### 0. Git Setup (before any execution)
 
+**CRITICAL INVARIANT: The main working tree stays on `staging` at ALL times.** The daemon polls in the main working tree. Deliveries work in worktrees. All staging operations (pull, merge, push) are serialized via `flock .gaai/.delivery-locks/.staging.lock`.
+
 For every Story, before any implementation begins:
 
 ```bash
-# Create isolated branch from production
-git checkout production
-git pull origin production
-git checkout -b story/{id}
+# Step 0a: Sync with latest staging (under flock if concurrent)
+flock .gaai/.delivery-locks/.staging.lock bash -c '
+  git pull origin staging
+'
 
-# Create worktree — agent works in isolated directory, never in the main repo
+# Step 0b: Mark in_progress + push (cross-device coordination)
+# If daemon-launched: already done by the daemon. Skip if status is already in_progress.
+# If manual launch: the delivery agent does this itself.
+flock .gaai/.delivery-locks/.staging.lock bash -c '
+  scripts/backlog-scheduler.sh --set-status {id} in_progress contexts/backlog/active.backlog.yaml
+  git add .gaai/contexts/backlog/active.backlog.yaml
+  git commit -m "chore({id}): in_progress [delivery]"
+  git push origin staging
+'
+
+# Step 0c: Create branch WITHOUT switching (main stays on staging)
+git branch story/{id} staging
 git worktree add ../{id}-workspace story/{id}
 ```
 
-All sub-agents operate exclusively inside `../{id}-workspace/`. The main working directory is never touched during delivery. If two Stories run in parallel, each has its own worktree — zero filesystem conflicts.
+All sub-agents operate exclusively inside `../{id}-workspace/`. The main working directory stays on `staging` and is never switched. If two Stories run in parallel, each has its own worktree — zero filesystem conflicts.
 
 > Solo founder shortcut: for Tier 1 (MicroDelivery, low-risk, no schema changes), worktree is optional — branch only is acceptable.
 
@@ -135,25 +150,27 @@ Invoke `coordinate-handoffs`:
 
 ### 8. Merge & Complete Story
 
-**8a. Squash merge to production branch (triggers staging deploy):**
+**8a. Squash merge to staging branch (triggers staging deploy):**
 
 ```bash
 # Push story branch
 git -C ../{id}-workspace push origin story/{id}
 
-# Squash merge to production (single clean commit per Story)
-git checkout production
-git merge --squash story/{id}
-git commit -m "feat({id}): {Story title}
+# Squash merge to staging (serialized via flock for concurrent deliveries)
+flock .gaai/.delivery-locks/.staging.lock bash -c '
+  git pull origin staging
+  git merge --squash story/{id}
+  git commit -m "feat({id}): {Story title}
 
-$(cat contexts/artefacts/reports/{id}.impl-report.md | head -20)
+  $(head -20 contexts/artefacts/reports/{id}.impl-report.md)
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
-git push origin production
+  Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+  git push origin staging
+'
 # → GitHub Actions auto-deploys callibrate-core-staging (~60–90s)
 ```
 
-> **PR instead of direct merge** — required for: Tier 3 Stories, database schema changes, auth/security changes. Optional for Tier 1/2 routine Stories (solo founder context). When required: `gh pr create --base production --head story/{id}` before merge.
+> The AI never pushes to `production`. Promotion staging → production is a human action via GitHub PR.
 
 **8b. Wait for staging deploy:**
 
@@ -182,7 +199,17 @@ git branch -d story/{id}
 git push origin --delete story/{id}
 ```
 
-Update Story status to `done` in `contexts/backlog/active.backlog.yaml`.
+Update Story status to `done` in `contexts/backlog/active.backlog.yaml` (under flock, commit + push to staging).
+
+```bash
+flock .gaai/.delivery-locks/.staging.lock bash -c '
+  git pull origin staging
+  scripts/backlog-scheduler.sh --set-status {id} done contexts/backlog/active.backlog.yaml
+  git add .gaai/contexts/backlog/active.backlog.yaml
+  git commit -m "chore({id}): done [delivery]"
+  git push origin staging
+'
+```
 
 Move completed Story to `contexts/backlog/done/{YYYY-MM}.done.yaml`.
 
@@ -197,11 +224,9 @@ Invoke `memory-retrieve` + `memory-ingest` if new patterns worth persisting were
 ```
 ✅ Staging validated — callibrate-core-staging deployed and smoke tests PASS.
 
-To deploy to production, run:
-  git tag v0.{EPIC}.{STORY} -m "{id}: {Story title}" && git push origin v0.{EPIC}.{STORY}
-
-GitHub Actions will auto-deploy callibrate-core-prod on tag push.
-Tag format: v0.{EPIC_NUMBER}.{STORY_NUMBER} — e.g. v0.6.8 for E06S08.
+To deploy to production:
+  Create a GitHub PR: staging → production
+  Review changes, merge, GitHub Actions auto-deploys callibrate-core-prod.
 ```
 
 **8e. On SMOKE FAIL:**
@@ -221,11 +246,13 @@ Proceed to next Story only after human creates the production tag.
 ## Flow Diagram
 
 ```
-active.backlog.yaml
+active.backlog.yaml (read via git show origin/staging:...)
        ↓
 Pick next ready Story
        ↓
-git checkout -b story/{id} + worktree add ../{id}-workspace
+flock: git pull staging → mark in_progress → commit → push staging
+       ↓
+git branch story/{id} staging (NO checkout) + worktree add ../{id}-workspace
        ↓
 evaluate-story
        ↓
@@ -247,16 +274,17 @@ Tier 2/3? ──→ compose-team (+ risk-analysis if needed)
              ↓ atomic commit in worktree
              spawn QA Sub-Agent ──→ {id}.qa-report.md
              ↓
-             PASS → push story/{id} → squash merge → production → push
+             PASS → push story/{id} → flock: squash merge → staging → push
                       ↓ GitHub Actions auto-deploys callibrate-core-staging (~90s)
                       ↓ smoke tests
-                      SMOKE PASS → cleanup worktree → backlog done → STOP + report tag command
+                      SMOKE PASS → flock: backlog done → push staging → cleanup worktree
+                                   → STOP + report (human creates PR staging→production)
                       SMOKE FAIL → remediate on branch → re-push → retry (max 2x) → ESCALATE
              FAIL → re-spawn Impl + re-spawn QA (max 3 cycles)
              ESCALATE → human intervention required
              ↓ (on ESCALATE or 3 QA cycles)
              post-mortem-learning → [FRICTION] entry in decisions.memory.md
-             ↓ (human creates v0.EPIC.STORY tag)
+             ↓ (human merges PR staging→production)
              GitHub Actions auto-deploys callibrate-core-prod
 ```
 

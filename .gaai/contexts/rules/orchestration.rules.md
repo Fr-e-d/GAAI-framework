@@ -102,9 +102,36 @@ draft → refined → in_progress → done | failed
 - Delivery must update status to `in_progress` when execution begins, then `done` on PASS
 - Failed executions must be marked `failed` with artefact notes
 
+## 🌿 Branch Rules
+
+All AI-driven execution targets the **`staging`** branch. The `production` branch is human-only.
+
+- AI agents MUST NOT push to, merge to, or interact with `production`
+- Delivery creates story branches from staging: `git branch story/{id} staging` (no checkout)
+- All implementation happens in worktrees (`git worktree add`)
+- Squash merges back to staging are serialized via `flock`
+- Promotion staging → production is a human action via GitHub PR
+
+A pre-push hook (`.githooks/pre-push`) enforces this rule at the git level.
+
+---
+
 ## ⏰ Cron / Automation Responsibilities
 
-Cron jobs are **allowed and encouraged**, but limited to governance tasks.
+Cron jobs and the **Delivery Daemon** are **allowed and encouraged**, but limited to governance tasks.
+
+### Delivery Daemon (`scripts/delivery-daemon.sh`)
+
+The daemon automates backlog polling and Claude Code session launch:
+- Polls staging for `refined` stories at a configurable interval
+- Marks stories `in_progress` on staging before launch (cross-device coordination)
+- Launches Claude Code in isolated worktrees (tmux on VPS, Terminal.app on macOS)
+- Monitors session health (heartbeat, `--max-turns` limit)
+- Marks stories `failed` on non-zero exit (human must review and reset to `refined`)
+
+The daemon is a **governance automation** — it does not reason, implement, or make decisions.
+
+### Other Cron Jobs
 
 Cron MAY trigger:
 - backlog polling (check for `refined` items)
