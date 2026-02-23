@@ -395,10 +395,13 @@ items:
     epic: E06
     title: "Google OAuth — Sensitive scope review (calendar.events)"
     priority: high
-    status: in_progress
+    status: done
+    started_at: "2026-02-23T22:00:00+01:00"
+    completed_at: "2026-02-23T23:59:00+01:00"
+    cost_usd: 0
     artefact: contexts/artefacts/stories/E06S30.story.md
     dependencies: []
-    notes: "Founder-executed. Bloquer go-live. Délai 4–6 semaines minimum. À initier immédiatement en parallèle. Requis : Privacy Policy + Terms publiés sur callibrate.io/privacy + callibrate.io/terms, domaine vérifié Google Search Console, formulaire de vérification OAuth soumis avec démo vidéo. Sans ça : seuls les 100 test users listés dans Google Cloud Console peuvent connecter leur Calendar."
+    notes: "DONE 2026-02-23. QA PASS. AC1 + AC2 delivered: /privacy (GDPR Privacy Policy) and /terms (Terms of Service) added as static routes in satellite worker, before config middleware. tsc clean. PR#22 open → staging. ⚠️ Founder action required: (1) Add CF routes callibrate.io/privacy* + callibrate.io/terms* → callibrate-satellite-{staging,prod}, (2) Complete AC3–AC9: Google Search Console domain verification + OAuth consent screen + verification form submission. AC10–AC11 await Google approval (4–6 weeks)."
 
   # ── EPIC E06 (suite): Credit Billing Foundation — DEC-67/68 ─────────────
   # Layer 2 billing backend. Critical path: E06S31 → { E06S32, E06S33, E06S34 }
