@@ -180,6 +180,7 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 - **Satellite Worker uses Hono** for routing (first use in the project). Core Worker remains regex-based. Both patterns are valid.
 - **Satellite config resolution pattern:** `resolveConfig(hostname, env)` — KV cache-aside (key: `satellite:config:${hostname}`, TTL: 3600s) with Supabase REST fallback (anon key). Non-blocking KV write on miss. Returns null on DB miss or Supabase unreachable → caller handles 302 redirect.
 - **Cache purge endpoint:** `POST /admin/cache/purge` with `x-admin-secret` header validation. Deletes KV key. Returns `{ purged: true, domain }`.
+- **Regle operationnelle (non-negotiable) :** Tout INSERT, UPDATE ou DELETE sur `satellite_configs` en DB DOIT etre suivi d'un purge du cache KV config pour le domaine concerne. Sans purge, l'ancienne config reste servie jusqu'a expiration du TTL (1h). Purge : `curl -X POST https://[domain]/admin/cache/purge -H "x-admin-secret: ..." -H "Content-Type: application/json" -d '{"domain":"[domain]"}'`. Le deploiement de code n'invalide PAS le cache KV (seulement le cache edge CDN). Pas de skill GAAI — action manuelle du founder.
 
 ---
 
