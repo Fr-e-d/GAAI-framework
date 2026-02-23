@@ -8,8 +8,7 @@ const mockEnv = {
   SUPABASE_URL: 'https://test.supabase.co',
   SUPABASE_ANON_KEY: 'test-anon-key',
   SUPABASE_SERVICE_KEY: 'test-service-key',
-  ANTHROPIC_API_KEY: 'test-anthropic-key',
-  CLOUDFLARE_AI_GATEWAY_URL: 'https://gateway.ai.cloudflare.com/v1/account/gateway/anthropic',
+  OPENAI_API_KEY: 'test-openai-key',
 } as unknown as Env;
 
 // ── Realistic 150-word freetext (AC10) ────────────────────────────────────────
@@ -28,88 +27,108 @@ before our busy season in 3 months. We work primarily in French but the system s
 customers too.
 `.trim();
 
-// ── Mock Claude tool_use response (all 7 fields present, all confidence > 0.5) ─
+// ── Mock OpenAI tool_calls response (all 7 fields present, all confidence > 0.5) ─
 
 const MOCK_HIGH_CONFIDENCE_RESPONSE = {
-  id: 'msg_test',
-  type: 'message',
-  role: 'assistant',
-  content: [
+  id: 'chatcmpl-test',
+  object: 'chat.completion',
+  choices: [
     {
-      type: 'tool_use',
-      id: 'toolu_test',
-      name: 'extract_requirements',
-      input: {
-        requirements: {
-          challenge:
-            'Automate customer support first-level responses to handle 500+ weekly tickets with AI, integrated with Zendesk',
-          skills_needed: ['Claude API', 'GPT-4', 'Zendesk API', 'n8n', 'AI automation'],
-          industry: 'e-commerce',
-          budget_range: { min: 5000, max: 15000 },
-          timeline: '3 months',
-          company_size: '50-200',
-          languages: ['French', 'English'],
-        },
-        confidence: {
-          challenge: 0.95,
-          skills_needed: 0.85,
-          industry: 0.9,
-          budget_range: 0.9,
-          timeline: 0.85,
-          company_size: 0.8,
-          languages: 0.9,
-        },
-        confirmation_questions: [],
-      },
-    },
-  ],
-  model: 'claude-haiku-4-5-20251001',
-  stop_reason: 'tool_use',
-  usage: { input_tokens: 120, output_tokens: 200 },
-};
-
-// ── Mock Claude response with low-confidence fields ──────────────────────────
-
-const MOCK_LOW_CONFIDENCE_RESPONSE = {
-  id: 'msg_test2',
-  type: 'message',
-  role: 'assistant',
-  content: [
-    {
-      type: 'tool_use',
-      id: 'toolu_test2',
-      name: 'extract_requirements',
-      input: {
-        requirements: {
-          challenge: 'Build an AI chatbot for customer service',
-          skills_needed: ['AI', 'chatbot'],
-          industry: 'retail',
-          budget_range: { min: 0, max: 0 },
-          timeline: '',
-          company_size: '',
-          languages: [],
-        },
-        confidence: {
-          challenge: 0.8,
-          skills_needed: 0.6,  // low
-          industry: 0.5,       // low
-          budget_range: 0.1,   // low
-          timeline: 0.1,       // low
-          company_size: 0.1,   // low
-          languages: 0.4,      // low
-        },
-        confirmation_questions: [
-          { field: 'budget_range', question: 'What is your budget range for this project (in EUR)?', options: ['< 5k€', '5–15k€', '15–50k€', '50k€+'] },
-          { field: 'timeline', question: 'When do you need this project delivered?', options: ['< 1 month', '1–3 months', '3–6 months', 'Flexible'] },
-          { field: 'company_size', question: 'How many employees does your company have?', options: ['1–10', '11–50', '51–200', '200+'] },
-          { field: 'industry', question: 'What industry does your company operate in?' },
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_test',
+            type: 'function',
+            function: {
+              name: 'extract_requirements',
+              arguments: JSON.stringify({
+                requirements: {
+                  challenge:
+                    'Automate customer support first-level responses to handle 500+ weekly tickets with AI, integrated with Zendesk',
+                  skills_needed: ['Claude API', 'GPT-4', 'Zendesk API', 'n8n', 'AI automation'],
+                  industry: 'e-commerce',
+                  budget_range: { min: 5000, max: 15000 },
+                  timeline: '3 months',
+                  company_size: '50-200',
+                  languages: ['French', 'English'],
+                },
+                confidence: {
+                  challenge: 0.95,
+                  skills_needed: 0.85,
+                  industry: 0.9,
+                  budget_range: 0.9,
+                  timeline: 0.85,
+                  company_size: 0.8,
+                  languages: 0.9,
+                },
+                confirmation_questions: [],
+              }),
+            },
+          },
         ],
       },
+      finish_reason: 'tool_calls',
     },
   ],
-  model: 'claude-haiku-4-5-20251001',
-  stop_reason: 'tool_use',
-  usage: { input_tokens: 80, output_tokens: 150 },
+  model: 'gpt-4o-mini',
+  usage: { prompt_tokens: 120, completion_tokens: 200, total_tokens: 320 },
+};
+
+// ── Mock OpenAI response with low-confidence fields ───────────────────────────
+
+const MOCK_LOW_CONFIDENCE_RESPONSE = {
+  id: 'chatcmpl-test2',
+  object: 'chat.completion',
+  choices: [
+    {
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_test2',
+            type: 'function',
+            function: {
+              name: 'extract_requirements',
+              arguments: JSON.stringify({
+                requirements: {
+                  challenge: 'Build an AI chatbot for customer service',
+                  skills_needed: ['AI', 'chatbot'],
+                  industry: 'retail',
+                  budget_range: { min: 0, max: 0 },
+                  timeline: '',
+                  company_size: '',
+                  languages: [],
+                },
+                confidence: {
+                  challenge: 0.8,
+                  skills_needed: 0.6,  // low
+                  industry: 0.5,       // low
+                  budget_range: 0.1,   // low
+                  timeline: 0.1,       // low
+                  company_size: 0.1,   // low
+                  languages: 0.4,      // low
+                },
+                confirmation_questions: [
+                  { field: 'budget_range', question: 'What is your budget range for this project (in EUR)?', options: ['< 5k€', '5–15k€', '15–50k€', '50k€+'] },
+                  { field: 'timeline', question: 'When do you need this project delivered?', options: ['< 1 month', '1–3 months', '3–6 months', 'Flexible'] },
+                  { field: 'company_size', question: 'How many employees does your company have?', options: ['1–10', '11–50', '51–200', '200+'] },
+                  { field: 'industry', question: 'What industry does your company operate in?' },
+                ],
+              }),
+            },
+          },
+        ],
+      },
+      finish_reason: 'tool_calls',
+    },
+  ],
+  model: 'gpt-4o-mini',
+  usage: { prompt_tokens: 80, completion_tokens: 150, total_tokens: 230 },
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -266,11 +285,11 @@ describe('handleExtract — POST /api/extract', () => {
     }
   });
 
-  // ── AC8: Claude API errors propagate as 502 ──────────────────────────────────
+  // ── AC8: OpenAI API errors propagate as 502 ──────────────────────────────────
 
-  it('AC8 — returns 502 when Anthropic API returns non-200', async () => {
+  it('AC8 — returns 502 when OpenAI API returns non-200', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ error: { type: 'authentication_error' } }), {
+      new Response(JSON.stringify({ error: { message: 'Invalid API key' } }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -286,14 +305,20 @@ describe('handleExtract — POST /api/extract', () => {
     expect(res.status).toBe(502);
   });
 
-  // ── AC2: tool_use not returned → 500 ────────────────────────────────────────
+  // ── AC2: tool_calls not returned → 500 ──────────────────────────────────────
 
-  it('AC2 — returns 500 when Anthropic returns no tool_use block', async () => {
+  it('AC2 — returns 500 when OpenAI returns no tool_calls', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ id: 'msg', type: 'message', content: [{ type: 'text', text: 'hello' }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          id: 'chatcmpl-test',
+          choices: [{ message: { role: 'assistant', content: 'hello', tool_calls: [] } }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
 
     const req = new Request('https://api.callibrate.io/api/extract', {
