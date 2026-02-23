@@ -443,7 +443,7 @@ items:
     epic: E06
     title: "LS usage-based subscription + welcome credit + usage reporting cron (DEC-68)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S33.story.md
     dependencies: [E06S31]
     notes: "DEC-68. LS webhook (HMAC verified) for subscription lifecycle. 100€ welcome credit on activation. Hourly cron: auto-confirm leads past 7-day flag window + report usage to LS API. Founder action: create LS product + webhook + secret."
