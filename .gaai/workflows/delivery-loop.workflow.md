@@ -148,60 +148,62 @@ Invoke `coordinate-handoffs`:
 - FAIL → re-spawn Implementation Sub-Agent with qa-report, then re-spawn QA Sub-Agent (max 3 cycles — see `qa.sub-agent.md`)
 - ESCALATE → stop, surface to human
 
-### 8. Merge & Complete Story
+### 8. Create PR & Complete Story
 
-**8a. Squash merge to staging branch (triggers staging deploy):**
+**8a. Push story branch and create PR to staging:**
 
 ```bash
-# Push story branch
+# Push story branch to origin
 git -C ../{id}-workspace push origin story/{id}
 
-# Squash merge to staging (serialized via flock for concurrent deliveries)
+# Create PR targeting staging (human will review and merge)
+gh pr create --base staging --head story/{id} \
+  --title "feat({id}): {Story title}" \
+  --body "$(cat <<'EOF'
+## Summary
+{1-3 bullet points from impl-report}
+
+## Test Results
+- Tests: {X}/{X} pass
+- TSC: clean
+- QA Verdict: PASS
+
+## Changes Delivered
+| File | Purpose |
+|------|---------|
+{table from impl-report}
+
+## Story
+- ID: {id}
+- Artefact: .gaai/contexts/artefacts/stories/{id}.story.md
+
+🤖 Generated with [GAAI Delivery Agent](https://github.com/Fr-e-d/GAAI-framework)
+EOF
+)"
+```
+
+> The AI never merges to staging. It creates a PR for human review. The human merges when satisfied.
+
+**8b. Delivery artefacts (commit to staging):**
+
+Artefact files (execution-plan, impl-report, qa-report, memory-delta) are committed directly to staging since they are governance files, not application code:
+
+```bash
 flock .gaai/.delivery-locks/.staging.lock bash -c '
   git pull origin staging
-  git merge --squash story/{id}
-  git commit -m "feat({id}): {Story title}
-
-  $(head -20 contexts/artefacts/reports/{id}.impl-report.md)
-
-  Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+  git add .gaai/contexts/artefacts/
+  git commit -m "docs({id}): delivery artefacts — plan, impl-report, qa-report, memory-delta"
   git push origin staging
 '
-# → GitHub Actions auto-deploys callibrate-core-staging (~60–90s)
 ```
 
-> The AI never pushes to `production`. Promotion staging → production is a human action via GitHub PR.
-
-**8b. Wait for staging deploy:**
-
-Wait 90 seconds after the push for GitHub Actions to complete the staging deploy.
-Confirm the deploy succeeded at: `https://github.com/Fr-e-d/callibrate-core/actions`
-
-**8c. Smoke tests against staging:**
+**8c. Mark Story done + cleanup worktree:**
 
 ```bash
-STAGING_URL="https://callibrate-core-staging.$(npx wrangler whoami --json 2>/dev/null | grep -o '"subdomain":"[^"]*"' | cut -d'"' -f4).workers.dev"
-# Fallback: get URL from GitHub Actions deploy log or Cloudflare dashboard
-
-# Baseline (always)
-curl -sf "$STAGING_URL/api/health" | grep -q '"status":"ok"' && echo "PASS: health" || echo "FAIL: health"
-
-# Story-specific smoke tests — defined in the execution-plan under smoke_tests section
-# Example for routes story: curl -sf "$STAGING_URL/api/satellites/nonexistent" | grep -q '"error"' && echo "PASS" || echo "FAIL"
-```
-
-**8d. On SMOKE PASS:**
-
-```bash
-# Cleanup story branch + worktree
+# Remove worktree (but keep story branch — needed for the PR)
 git worktree remove ../{id}-workspace
-git branch -d story/{id}
-git push origin --delete story/{id}
-```
 
-Update Story status to `done` in `contexts/backlog/active.backlog.yaml` (under flock, commit + push to staging).
-
-```bash
+# Update backlog
 flock .gaai/.delivery-locks/.staging.lock bash -c '
   git pull origin staging
   scripts/backlog-scheduler.sh --set-status {id} done contexts/backlog/active.backlog.yaml
@@ -210,6 +212,8 @@ flock .gaai/.delivery-locks/.staging.lock bash -c '
   git push origin staging
 '
 ```
+
+> **Note:** The story branch is NOT deleted. It stays on origin for the PR. GitHub can auto-delete branches after PR merge (configure in repo Settings → General → "Automatically delete head branches").
 
 Move completed Story to `contexts/backlog/done/{YYYY-MM}.done.yaml`.
 
@@ -222,24 +226,20 @@ Invoke `memory-retrieve` + `memory-ingest` if new patterns worth persisting were
 **STOP — report to human:**
 
 ```
-✅ Staging validated — callibrate-core-staging deployed and smoke tests PASS.
+✅ PR created for review: {PR_URL}
 
-To deploy to production:
-  Create a GitHub PR: staging → production
-  Review changes, merge, GitHub Actions auto-deploys callibrate-core-prod.
+Story: {id} — {Story title}
+QA: PASS ({X}/{X} tests, tsc clean)
+
+Next: review and merge the PR on GitHub.
 ```
 
-**8e. On SMOKE FAIL:**
+**8d. On PR creation failure:**
 
-Do NOT cleanup worktree or story branch.
-Do NOT update backlog.
-
-Remediate on `story/{id}` — fix the failing smoke test root cause.
-Re-run from 8a (squash merge, push, wait, smoke test).
-
-If smoke failure persists after 2 attempts: ESCALATE to human.
-
-Proceed to next Story only after human creates the production tag.
+If `gh pr create` fails (e.g., branch conflict, auth issue):
+- Log the error
+- Do NOT update backlog to done
+- ESCALATE to human with the error details
 
 ---
 
@@ -274,12 +274,10 @@ Tier 2/3? ──→ compose-team (+ risk-analysis if needed)
              ↓ atomic commit in worktree
              spawn QA Sub-Agent ──→ {id}.qa-report.md
              ↓
-             PASS → push story/{id} → flock: squash merge → staging → push
-                      ↓ GitHub Actions auto-deploys callibrate-core-staging (~90s)
-                      ↓ smoke tests
-                      SMOKE PASS → flock: backlog done → push staging → cleanup worktree
-                                   → STOP + report (human creates PR staging→production)
-                      SMOKE FAIL → remediate on branch → re-push → retry (max 2x) → ESCALATE
+             PASS → push story/{id} → gh pr create --base staging
+                      → flock: commit artefacts + mark done → push staging
+                      → cleanup worktree (keep branch for PR)
+                      → STOP + report PR URL (human reviews + merges on GitHub)
              FAIL → re-spawn Impl + re-spawn QA (max 3 cycles)
              ESCALATE → human intervention required
              ↓ (on ESCALATE or 3 QA cycles)

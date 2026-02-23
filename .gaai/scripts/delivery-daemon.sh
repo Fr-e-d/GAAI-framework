@@ -40,6 +40,7 @@ set -euo pipefail
 #   GAAI_DELIVERY_TIMEOUT=14400      hard kill timeout in seconds (default: 4h, last resort)
 #   GAAI_MAX_TURNS=200               max claude tool-call turns per delivery (primary safety)
 #   GAAI_HEARTBEAT_STALE=900         seconds without log output before killing (default: 15min)
+#   GAAI_CLAUDE_MODEL=sonnet          claude model to use (default: sonnet)
 #   GAAI_STALENESS_THRESHOLD=15000   seconds before orphan in_progress is stale (default: timeout+10min)
 #   GAAI_SKIP_PERMISSIONS=true       force --dangerously-skip-permissions
 #   GAAI_SKIP_PERMISSIONS=false      force interactive mode (even on VPS)
@@ -90,6 +91,7 @@ MAX_CONCURRENT="${GAAI_MAX_CONCURRENT:-1}"
 TARGET_BRANCH="${GAAI_TARGET_BRANCH:-staging}"
 DELIVERY_TIMEOUT="${GAAI_DELIVERY_TIMEOUT:-14400}"   # 4h hard kill (last resort)
 MAX_TURNS="${GAAI_MAX_TURNS:-200}"                    # primary safety net
+CLAUDE_MODEL="${GAAI_CLAUDE_MODEL:-sonnet}"           # model (sonnet = cost-effective)
 HEARTBEAT_STALE="${GAAI_HEARTBEAT_STALE:-900}"        # 15min no output = stuck
 STALENESS_THRESHOLD="${GAAI_STALENESS_THRESHOLD:-}"   # auto-computed below
 DRY_RUN=false
@@ -131,7 +133,7 @@ else
 fi
 
 # Claude flags (expanded into wrapper scripts at generation time)
-CLAUDE_FLAGS="--max-turns $MAX_TURNS"
+CLAUDE_FLAGS="--model $CLAUDE_MODEL --max-turns $MAX_TURNS"
 if [[ "$SKIP_PERMISSIONS" == "true" ]]; then
   CLAUDE_FLAGS="--dangerously-skip-permissions $CLAUDE_FLAGS"
 fi
@@ -818,6 +820,7 @@ echo "  ╠═══════════════════════
 echo -e "  ║${NC}${CYAN}  Branch:         ${BOLD}${TARGET_BRANCH}${NC}${CYAN}                               ║"
 echo -e "  ║${NC}${CYAN}  Poll interval:  ${BOLD}${POLL_INTERVAL}s${NC}${CYAN}                                 ║"
 echo -e "  ║${NC}${CYAN}  Max concurrent: ${BOLD}${MAX_CONCURRENT}${NC}${CYAN}                                  ║"
+echo -e "  ║${NC}${CYAN}  Model:          ${BOLD}${CLAUDE_MODEL}${NC}${CYAN}                             ║"
 echo -e "  ║${NC}${CYAN}  Launcher:       ${BOLD}${LAUNCHER}${NC}${CYAN}                           ║"
 echo -e "  ║${NC}${CYAN}  Skip perms:     ${BOLD}${SKIP_PERMISSIONS}${NC}${CYAN}                              ║"
 echo -e "  ║${NC}${CYAN}  Max turns:      ${BOLD}${MAX_TURNS}${NC}${CYAN}                                ║"
