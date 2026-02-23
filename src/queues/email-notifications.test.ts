@@ -54,6 +54,8 @@ function makeEnv(kv: KVNamespace, overrides: Partial<Env> = {}): Env {
     RESEND_API_KEY: 'test-resend-key',
     N8N_WEBHOOK_URL: 'https://n8n.example.com/webhook',
     LEMON_SQUEEZY_API_KEY: 'test-ls-key',
+    EMAIL_FROM_DOMAIN: 'send.callibrate.io',
+    EMAIL_REPLY_TO: 'support@callibrate.io',
     ...overrides,
   } as unknown as Env;
 }
@@ -100,6 +102,12 @@ describe('consumeEmailNotifications', () => {
     const resendBody = JSON.parse(resendInit.body as string);
     expect(resendBody.to).toContain('expert@example.com');
     expect(resendBody.subject).toBe('Welcome to Callibrate');
+    expect(resendBody.from).toBe('Callibrate <notifications@send.callibrate.io>');
+    expect(resendBody.reply_to).toBe('support@callibrate.io');
+    expect(resendBody.text).toBeTypeOf('string');
+    expect(resendBody.text).toContain('Hi Alice');
+    expect(resendBody.text).toContain('welcome to the Callibrate expert network');
+    expect(resendBody.text).not.toContain('<p>');
 
     // KV marked
     expect(kv.put).toHaveBeenCalledWith('idem:email-notifications:msg-1', '1', { expirationTtl: 86400 });
@@ -165,6 +173,28 @@ describe('consumeEmailNotifications', () => {
     expect(calls[0]![0]).toBe('https://api.resend.com/emails');
     expect(calls[1]![0]).toBe('https://api.resend.com/emails');
     expect(calls[2]![0]).toBe('https://n8n.example.com/webhook/booking-confirmed');
+
+    // Parse both Resend payloads
+    const expertResendBody = JSON.parse(calls[0]![1].body as string);
+    const prospectResendBody = JSON.parse(calls[1]![1].body as string);
+
+    // Expert email assertions (E06S15)
+    expect(expertResendBody.from).toBe('Callibrate <notifications@send.callibrate.io>');
+    expect(expertResendBody.reply_to).toBe('support@callibrate.io');
+    expect(expertResendBody.text).toBeTypeOf('string');
+    expect(expertResendBody.text).toContain('Hi Alice');
+    expect(expertResendBody.text).toContain('https://meet.example.com/abc');
+    expect(expertResendBody.text).not.toContain('<p>');
+    expect(expertResendBody.text).not.toContain('<a ');
+
+    // Prospect email assertions (E06S15)
+    expect(prospectResendBody.from).toBe('Callibrate <notifications@send.callibrate.io>');
+    expect(prospectResendBody.reply_to).toBe('support@callibrate.io');
+    expect(prospectResendBody.text).toBeTypeOf('string');
+    expect(prospectResendBody.text).toContain('Your call has been confirmed');
+    expect(prospectResendBody.text).toContain('https://meet.example.com/abc');
+    expect(prospectResendBody.text).not.toContain('<p>');
+    expect(prospectResendBody.text).not.toContain('<a ');
 
     // KV marked
     expect(kv.put).toHaveBeenCalledWith('idem:email-notifications:msg-1', '1', { expirationTtl: 86400 });

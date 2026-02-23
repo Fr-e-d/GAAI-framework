@@ -54,7 +54,10 @@ async function sendResendEmail(
   apiKey: string,
   to: string,
   subject: string,
-  html: string
+  html: string,
+  text: string,
+  fromDomain: string,
+  replyTo: string
 ): Promise<void> {
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -63,10 +66,12 @@ async function sendResendEmail(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: 'Callibrate <notifications@callibrate.io>',
+      from: `Callibrate <notifications@${fromDomain}>`,
       to: [to],
       subject,
       html,
+      text,
+      reply_to: replyTo,
     }),
   });
   if (!res.ok) {
@@ -83,7 +88,10 @@ async function sendExpertRegisteredEmail(
     env.RESEND_API_KEY,
     body.email,
     'Welcome to Callibrate',
-    `<p>Hi ${body.name}, welcome to the Callibrate expert network.</p><p>Your profile is now active. Pre-qualified leads will be booked directly to your calendar.</p>`
+    `<p>Hi ${body.name}, welcome to the Callibrate expert network.</p><p>Your profile is now active. Pre-qualified leads will be booked directly to your calendar.</p>`,
+    `Hi ${body.name}, welcome to the Callibrate expert network.\n\nYour profile is now active. Pre-qualified leads will be booked directly to your calendar.`,
+    env.EMAIL_FROM_DOMAIN || 'callibrate.io',
+    env.EMAIL_REPLY_TO || 'support@callibrate.io'
   );
 }
 
@@ -120,7 +128,10 @@ async function sendBookingConfirmedEmails(
     env.RESEND_API_KEY,
     expert.gcal_email,
     'New booking confirmed',
-    `<p>Hi ${expert.display_name ?? 'Expert'},</p><p>A new call has been booked with a prospect.</p><p>Meeting link: <a href="${body.meeting_url}">${body.meeting_url}</a></p><p>Scheduled: ${body.scheduled_at}</p>`
+    `<p>Hi ${expert.display_name ?? 'Expert'},</p><p>A new call has been booked with a prospect.</p><p>Meeting link: <a href="${body.meeting_url}">${body.meeting_url}</a></p><p>Scheduled: ${body.scheduled_at}</p>`,
+    `Hi ${expert.display_name ?? 'Expert'},\n\nA new call has been booked with a prospect.\n\nMeeting link: ${body.meeting_url}\n\nScheduled: ${body.scheduled_at}`,
+    env.EMAIL_FROM_DOMAIN || 'callibrate.io',
+    env.EMAIL_REPLY_TO || 'support@callibrate.io'
   );
 
   // Email to prospect
@@ -128,7 +139,10 @@ async function sendBookingConfirmedEmails(
     env.RESEND_API_KEY,
     prospect.email,
     'Your booking is confirmed',
-    `<p>Your call has been confirmed.</p><p>Meeting link: <a href="${body.meeting_url}">${body.meeting_url}</a></p><p>Scheduled: ${body.scheduled_at}</p>`
+    `<p>Your call has been confirmed.</p><p>Meeting link: <a href="${body.meeting_url}">${body.meeting_url}</a></p><p>Scheduled: ${body.scheduled_at}</p>`,
+    `Your call has been confirmed.\n\nMeeting link: ${body.meeting_url}\n\nScheduled: ${body.scheduled_at}`,
+    env.EMAIL_FROM_DOMAIN || 'callibrate.io',
+    env.EMAIL_REPLY_TO || 'support@callibrate.io'
   );
 }
 

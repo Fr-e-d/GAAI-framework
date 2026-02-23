@@ -31,4 +31,8 @@ export interface Env {
   RESEND_API_KEY: string;
   LEMON_SQUEEZY_API_KEY: string;
   N8N_WEBHOOK_URL: string;
+
+  // Email deliverability (non-secret vars in wrangler.toml)
+  EMAIL_FROM_DOMAIN: string;
+  EMAIL_REPLY_TO: string;
 }

@@ -280,6 +280,42 @@ wrangler secret put GCAL_TOKEN_ENCRYPTION_KEY
 
 ---
 
+## Email Deliverability — Sending Domain & DMARC (E06S15)
+
+### Sending domain: `send.callibrate.io`
+
+Transactional emails are sent from `notifications@send.callibrate.io` via Resend.
+The subdomain isolates ESP reputation from the root domain, allowing a future
+marketing email subdomain without cross-contamination.
+
+**Resend dashboard setup:**
+1. Add domain `send.callibrate.io` in Resend > Domains
+2. Add the 3 DNS records Resend provides (DKIM x2 + SPF)
+3. Verify the domain in Resend
+4. Disable click tracking and open tracking (transactional emails only)
+
+### DMARC record
+
+Add a TXT record on `_dmarc.callibrate.io`:
+
+```
+v=DMARC1; p=none; rua=mailto:<report-address>@dmarc-reports.cloudflare.net
+```
+
+Start with `p=none` (monitoring). Upgrade to `p=reject` after 72h of clean reports.
+Reports are managed via Cloudflare DMARC Management.
+
+### Environment variables (non-secret)
+
+| Variable | Purpose | Default value |
+|---|---|---|
+| `EMAIL_FROM_DOMAIN` | Sending subdomain for Resend | `send.callibrate.io` |
+| `EMAIL_REPLY_TO` | Reply-to address on all transactional emails | `support@callibrate.io` |
+
+These are set as `[vars]` in `wrangler.toml` (staging + production) and in `.dev.vars` for local development.
+
+---
+
 ## Step 6 — Verify Local Dev
 
 Install dependencies (one-time):
