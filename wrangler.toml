@@ -69,6 +69,14 @@ preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
+# AC1: D1 edge database for expert pool (expert-pool-edge)
+# Human action required: wrangler d1 create expert-pool-edge --env staging
+# Then: wrangler d1 execute expert-pool-edge --file=d1/expert-pool-edge.schema.sql --env staging
+[[d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge"
+database_id = "PLACEHOLDER_D1_DATABASE_ID"
+
 # Top-level (used by wrangler dev)
 [triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
@@ -138,6 +146,11 @@ id = "68927a33fd9a46ec8b537a22a9cf2d20"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
+[[env.staging.d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge"
+database_id = "PLACEHOLDER_D1_DATABASE_ID"
+
 [env.staging.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
 
@@ -204,6 +217,11 @@ id = "af0c9c22c77b45ffbac4215009a295d4"
 [[env.production.analytics_engine_datasets]]
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
+
+[[env.production.d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge"
+database_id = "PLACEHOLDER_D1_DATABASE_ID"
 
 [env.production.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
