@@ -684,11 +684,18 @@ unset CLAUDECODE 2>/dev/null || true
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
 
+# Slash commands don't work in -p mode — expand the command file into a prompt
+DELIVERY_PROMPT=\$(cat "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
+
 if command -v timeout &>/dev/null; then
-  timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "/gaai-deliver $story_id" 2>&1 | tee -a "$delivery_log"
+  timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
+
+Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 else
-  claude $CLAUDE_FLAGS -p "/gaai-deliver $story_id" 2>&1 | tee -a "$delivery_log"
+  claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
+
+Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 fi
 
@@ -768,15 +775,23 @@ unset CLAUDECODE 2>/dev/null || true
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
 
+# Slash commands don't work in -p mode — expand the command file into a prompt
+# See: https://code.claude.com/docs/en/headless
+DELIVERY_PROMPT=\$(cat "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
+
 # Print mode (-p): claude processes the prompt and exits, freeing the daemon slot.
 # --allowedTools grants delivery tools selectively (not yolo).
 ALLOWED="Read,Write,Edit,Glob,Grep,Bash,Task,WebFetch,WebSearch,Skill,NotebookEdit"
 
 if command -v gtimeout &>/dev/null; then
-  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "/gaai-deliver $story_id" --allowedTools "\$ALLOWED" 2>&1 | tee -a "$delivery_log"
+  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
+
+Deliver story: $story_id" --allowedTools "\$ALLOWED" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 else
-  claude $CLAUDE_FLAGS -p "/gaai-deliver $story_id" --allowedTools "\$ALLOWED" 2>&1 | tee -a "$delivery_log"
+  claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
+
+Deliver story: $story_id" --allowedTools "\$ALLOWED" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 fi
 
