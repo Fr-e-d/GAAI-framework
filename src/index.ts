@@ -21,6 +21,7 @@ import { handleCancel } from './handlers/bookings/cancel';
 import { handleReschedule } from './handlers/bookings/reschedule';
 import { handleGetPrep } from './handlers/bookings/prep';
 import { handleScheduled } from './handlers/bookings/cron';
+import { handleVectorizeReindex } from './handlers/admin/vectorize';
 import { handleFlagLead } from './handlers/leads/flag';
 import { handleConfirmLead } from './handlers/leads/confirm';
 import { handleCallExperienceSurvey } from './handlers/surveys/call-experience';
@@ -285,6 +286,17 @@ export default {
         }
       }
 
+      return new Response(JSON.stringify({ error: 'Not Found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ── Admin routes (service-key auth) ─────────────────────────────────────────
+    if (pathname.startsWith('/api/admin/')) {
+      if (method === 'POST' && pathname === '/api/admin/vectorize/reindex') {
+        return handleVectorizeReindex(request, env, ctx);
+      }
       return new Response(JSON.stringify({ error: 'Not Found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
