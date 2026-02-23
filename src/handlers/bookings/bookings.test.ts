@@ -1,10 +1,19 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { computeFreeSlots, DEFAULT_AVAILABILITY_RULES } from '../../lib/availability';
 import { handleHold } from './hold';
 import { handleConfirm } from './confirm';
 import { handleCancel } from './cancel';
 
-// Mock Env
+// ── Mock db ────────────────────────────────────────────────────────────────────
+
+vi.mock('../../lib/db', () => ({
+  createSql: vi.fn(),
+}));
+
+import { createSql } from '../../lib/db';
+
+// ── Mock Env ───────────────────────────────────────────────────────────────────
+
 const mockEnv = {
   SUPABASE_URL: 'https://test.supabase.co',
   SUPABASE_ANON_KEY: 'anon-key',
@@ -28,19 +37,7 @@ const mockEnv = {
   N8N_WEBHOOK_URL: '',
 };
 
-// PostgREST returns arrays for list queries, single objects (via Accept: application/vnd.pgrst.object) for single()
-// The supabase-js client adds Content-Range header parsing for count etc.
-// For simplicity: mock responses as PostgREST array format for list, object for single.
-function postgrestResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Range': '0-0/*',
-      ...headers,
-    },
-  });
-}
+// ── computeFreeSlots tests (pure, no DB) ─────────────────────────────────────
 
 describe('computeFreeSlots', () => {
   it('should compute free slots respecting working hours, buffer, and min notice', () => {
@@ -111,26 +108,22 @@ describe('computeFreeSlots', () => {
   });
 });
 
+// ── handleHold tests ──────────────────────────────────────────────────────────
+
 describe('handleHold', () => {
   beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn());
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
 
   it('should return 200 with booking_id on happy path', async () => {
-    const mockFetch = vi.mocked(fetch);
-
-    // The supabase-js client translates .select().eq().in().lt().gt() → GET with query params
-    // PostgREST returns an array for list queries
-    // Mock 1: Conflict check — returns empty array (no conflicts)
-    mockFetch.mockResolvedValueOnce(postgrestResponse([]));
-    // Mock 2: Match lookup (.maybeSingle()) — returns null body with 406 or empty array
-    mockFetch.mockResolvedValueOnce(postgrestResponse(null, 200));
-    // Mock 3: Insert .select('id, held_until').single() — returns single object
-    mockFetch.mockResolvedValueOnce(postgrestResponse({ id: 'booking-456', held_until: '2026-02-23T10:10:00Z' }));
+    const mockSql = vi.fn() as Mock;
+    // Call 1: conflict check → no conflicts
+    mockSql.mockResolvedValueOnce([]);
+    // Call 2: match lookup → no match (optional)
+    mockSql.mockResolvedValueOnce([]);
+    // Call 3: INSERT bookings RETURNING id, held_until
+    mockSql.mockResolvedValueOnce([{ id: 'booking-456', held_until: '2026-02-23T10:10:00Z' }]);
+    (createSql as Mock).mockReturnValue(mockSql);
 
     const request = new Request('https://test.workers.dev/api/bookings/hold', {
       method: 'POST',
@@ -144,18 +137,17 @@ describe('handleHold', () => {
     });
 
     const response = await handleHold(request, mockEnv as unknown as Parameters<typeof handleHold>[1]);
-    expect([200, 500]).toContain(response.status);
-    if (response.status === 200) {
-      const body = await response.json() as Record<string, string>;
-      expect(body.booking_id).toBeDefined();
-    }
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, string>;
+    expect(body.booking_id).toBe('booking-456');
+    expect(body.held_until).toBeDefined();
   });
 
   it('should return 409 when slot is already taken', async () => {
-    const mockFetch = vi.mocked(fetch);
-
+    const mockSql = vi.fn() as Mock;
     // Conflict check returns an array with one conflict
-    mockFetch.mockResolvedValueOnce(postgrestResponse([{ id: 'existing-booking' }]));
+    mockSql.mockResolvedValueOnce([{ id: 'existing-booking' }]);
+    (createSql as Mock).mockReturnValue(mockSql);
 
     const request = new Request('https://test.workers.dev/api/bookings/hold', {
       method: 'POST',
@@ -175,20 +167,22 @@ describe('handleHold', () => {
   });
 });
 
+// ── handleConfirm tests ───────────────────────────────────────────────────────
+
 describe('handleConfirm', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
+    vi.clearAllMocks();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
-    vi.clearAllMocks();
   });
 
   it('should attempt GCal event creation with conferenceDataVersion=1', async () => {
-    const mockFetch = vi.mocked(fetch);
+    const mockSql = vi.fn() as Mock;
 
-    // Mock 1: Fetch booking (held, not expired) — single()
-    mockFetch.mockResolvedValueOnce(postgrestResponse({
+    // Call 1: Fetch booking
+    mockSql.mockResolvedValueOnce([{
       id: 'booking-1',
       expert_id: 'expert-1',
       prospect_id: 'prospect-1',
@@ -198,30 +192,37 @@ describe('handleConfirm', () => {
       held_until: '2999-01-01T00:00:00Z',
       prep_token: 'test-prep-token',
       match_id: 'match-1',
-    }));
+    }]);
 
-    // Mock 2: Fetch expert — single()
-    mockFetch.mockResolvedValueOnce(postgrestResponse({
+    // Call 2: Fetch expert
+    mockSql.mockResolvedValueOnce([{
       gcal_email: 'expert@gmail.com',
       gcal_access_token: 'encrypted-token',
       gcal_token_expiry_at: '2999-01-01T00:00:00Z',
       display_name: 'Expert Name',
-    }));
+    }]);
 
-    // Mock 3: getAccessToken — experts table single()
-    mockFetch.mockResolvedValueOnce(postgrestResponse({
+    // Call 3: getAccessToken — SELECT gcal_access_token, gcal_token_expiry_at FROM experts
+    mockSql.mockResolvedValueOnce([{
       gcal_access_token: 'encrypted-token',
       gcal_token_expiry_at: '2999-01-01T00:00:00Z',
-    }));
+    }]);
 
-    // After getAccessToken: either decryptToken succeeds or fails (crypto.subtle env)
-    // If decryption fails → refreshGcalToken is called → fetch OAuth token endpoint
-    // We allow the test to proceed to any observable outcome
+    // Remaining calls (prospect, satellite, booking update) — permissive fallback
+    mockSql.mockResolvedValue([]);
 
-    // Remaining mocks: GCal freebusy, prospects, GCal insert, booking update
-    // Since the flow may branch at crypto.subtle, make all remaining mocks permissive
-    mockFetch.mockResolvedValue(new Response(JSON.stringify({
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    // GCal freebusy — no conflicts
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       calendars: { 'expert@gmail.com': { busy: [] } },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    // Remaining fetch calls (GCal insert, token refresh if needed) — permissive
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      id: 'gcal-event-1',
+      hangoutLink: 'https://meet.google.com/abc-def-ghi',
+      htmlLink: 'https://calendar.google.com/event?eid=...',
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
     const request = new Request('https://test.workers.dev/api/bookings/booking-1/confirm', {
@@ -240,10 +241,10 @@ describe('handleConfirm', () => {
   });
 
   it('should return 409 when freebusy re-check detects slot taken (AC6)', async () => {
-    const mockFetch = vi.mocked(fetch);
+    const mockSql = vi.fn() as Mock;
 
-    // Mock 1: Fetch booking — single()
-    mockFetch.mockResolvedValueOnce(postgrestResponse({
+    // Call 1: Fetch booking
+    mockSql.mockResolvedValueOnce([{
       id: 'booking-1',
       expert_id: 'expert-1',
       prospect_id: 'prospect-1',
@@ -253,24 +254,32 @@ describe('handleConfirm', () => {
       held_until: '2999-01-01T00:00:00Z',
       prep_token: 'prep-token',
       match_id: null,
-    }));
+    }]);
 
-    // Mock 2: Fetch expert — single()
-    mockFetch.mockResolvedValueOnce(postgrestResponse({
+    // Call 2: Fetch expert
+    mockSql.mockResolvedValueOnce([{
       gcal_email: 'expert@gmail.com',
       gcal_access_token: 'encrypted',
       gcal_token_expiry_at: '2999-01-01T00:00:00Z',
       display_name: 'Expert',
-    }));
+    }]);
 
-    // Mock 3: getAccessToken experts table
-    mockFetch.mockResolvedValueOnce(postgrestResponse({
+    // Call 3: getAccessToken — SELECT gcal_access_token, gcal_token_expiry_at FROM experts
+    mockSql.mockResolvedValueOnce([{
       gcal_access_token: 'encrypted',
       gcal_token_expiry_at: '2999-01-01T00:00:00Z',
-    }));
+    }]);
 
-    // Mock 4: GCal freebusy — CONFLICT (slot taken)
-    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+    // Call 4: DELETE FROM bookings WHERE id = bookingId (AC6 slot_taken cleanup)
+    mockSql.mockResolvedValueOnce([]);
+
+    // Permissive fallback for any additional calls
+    mockSql.mockResolvedValue([]);
+
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    // GCal freebusy — CONFLICT (slot taken)
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       calendars: {
         'expert@gmail.com': {
           busy: [{ start: '2026-02-24T09:50:00Z', end: '2026-02-24T10:30:00Z' }],
@@ -278,11 +287,8 @@ describe('handleConfirm', () => {
       },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
-    // Mock 5: Supabase delete (AC6)
-    mockFetch.mockResolvedValueOnce(postgrestResponse([]));
-
-    // Additional mocks for refresh token path if needed
-    mockFetch.mockResolvedValue(postgrestResponse({}));
+    // Permissive fallback for token refresh fetch if triggered
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
 
     const request = new Request('https://test.workers.dev/api/bookings/booking-1/confirm', {
       method: 'POST',
@@ -300,28 +306,32 @@ describe('handleConfirm', () => {
   });
 });
 
+// ── handleCancel tests ────────────────────────────────────────────────────────
+
 describe('handleCancel', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
+    vi.clearAllMocks();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
-    vi.clearAllMocks();
   });
 
   it('should cancel booking and return 200', async () => {
-    const mockFetch = vi.mocked(fetch);
+    const mockSql = vi.fn() as Mock;
 
-    // Booking fetch — single() (no gcal_event_id)
-    mockFetch.mockResolvedValueOnce(postgrestResponse({
+    // Call 1: SELECT booking (no gcal_event_id)
+    mockSql.mockResolvedValueOnce([{
       id: 'booking-1',
       expert_id: 'expert-1',
       gcal_event_id: null,
       status: 'confirmed',
-    }));
+    }]);
 
-    // Supabase status update
-    mockFetch.mockResolvedValueOnce(postgrestResponse({}));
+    // Call 2: UPDATE bookings SET status = 'cancelled'
+    mockSql.mockResolvedValueOnce([]);
+
+    (createSql as Mock).mockReturnValue(mockSql);
 
     const request = new Request('https://test.workers.dev/api/bookings/booking-1', { method: 'DELETE' });
     const response = await handleCancel(request, mockEnv as unknown as Parameters<typeof handleCancel>[1], 'booking-1');
@@ -331,33 +341,33 @@ describe('handleCancel', () => {
   });
 
   it('should treat GCal 404 on event delete as success (AC10)', async () => {
-    const mockFetch = vi.mocked(fetch);
+    const mockSql = vi.fn() as Mock;
 
-    // Booking fetch — single() (has gcal_event_id)
-    mockFetch.mockResolvedValueOnce(postgrestResponse({
+    // Call 1: SELECT booking (has gcal_event_id)
+    mockSql.mockResolvedValueOnce([{
       id: 'booking-1',
       expert_id: 'expert-1',
       gcal_event_id: 'gcal-event-123',
       status: 'confirmed',
-    }));
+    }]);
 
-    // getAccessToken — experts table single()
-    mockFetch.mockResolvedValueOnce(postgrestResponse({
+    // Call 2: getAccessToken — SELECT gcal_access_token, gcal_token_expiry_at FROM experts
+    mockSql.mockResolvedValueOnce([{
       gcal_access_token: 'encrypted',
       gcal_token_expiry_at: '2999-01-01T00:00:00Z',
-    }));
+    }]);
+
+    // Call 3: UPDATE bookings SET status = 'cancelled'
+    mockSql.mockResolvedValueOnce([]);
+
+    (createSql as Mock).mockReturnValue(mockSql);
 
     // GCal delete returns 404 (already deleted) — treated as success (AC10)
-    mockFetch.mockResolvedValueOnce(new Response(null, { status: 404 }));
-
-    // Supabase status update
-    mockFetch.mockResolvedValueOnce(postgrestResponse({}));
-
-    // EMAIL_NOTIFICATIONS.send already mocked in env
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 404 }));
 
     const request = new Request('https://test.workers.dev/api/bookings/booking-1', { method: 'DELETE' });
     const response = await handleCancel(request, mockEnv as unknown as Parameters<typeof handleCancel>[1], 'booking-1');
-    // 200 if crypto.subtle succeeds; crypto path may vary
+    // 200 if crypto.subtle succeeds in test env; 502 if token decryption fails
     expect([200, 502]).toContain(response.status);
   });
 });

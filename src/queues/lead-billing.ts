@@ -2,7 +2,8 @@ import { Env } from '../types/env';
 import { LeadBillingMessage } from '../types/queues';
 import { isAlreadyProcessed, markProcessed } from '../lib/idempotency';
 import { handleMessageFailure } from '../lib/retryQueue';
-import { createServiceClient } from '../lib/supabase';
+import { createSql } from '../lib/db';
+import type { LeadRow, ExpertRow } from '../types/db';
 
 // TODO: move to env secrets once Lemon Squeezy account is configured
 const LS_STORE_ID = 'YOUR_LS_STORE_ID';
@@ -41,52 +42,41 @@ async function processLeadBilling(
   body: LeadBillingMessage,
   env: Env
 ): Promise<void> {
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
   // Step 1: Insert lead with status 'pending', handle partial-failure retries
   let leadId: string;
 
-  const { data: insertedLead, error: insertErr } = await supabase
-    .from('leads')
-    .insert({
-      booking_id: body.booking_id,
-      expert_id: body.expert_id,
-      prospect_id: body.prospect_id,
-      status: 'pending',
-    })
-    .select('id')
-    .single();
-
-  if (insertErr) {
-    if (insertErr.code === '23505') {
+  try {
+    const [inserted] = await sql<Pick<LeadRow, 'id'>[]>`
+      INSERT INTO leads (booking_id, expert_id, prospect_id, status)
+      VALUES (${body.booking_id}, ${body.expert_id}, ${body.prospect_id}, 'pending')
+      RETURNING id`;
+    if (!inserted) throw new Error('Insert failed');
+    leadId = inserted.id;
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') {
       // Unique constraint violation — lead already exists from a previous partial attempt
-      const { data: existingLead, error: fetchErr } = await supabase
-        .from('leads')
-        .select('id')
-        .eq('booking_id', body.booking_id)
-        .single();
-      if (fetchErr || !existingLead) {
-        throw new Error(`Failed to fetch existing lead for booking ${body.booking_id}: ${fetchErr?.message}`);
+      const [existing] = await sql<Pick<LeadRow, 'id'>[]>`
+        SELECT id FROM leads WHERE booking_id = ${body.booking_id}`;
+      if (!existing) {
+        throw new Error(`Failed to fetch existing lead for booking ${body.booking_id}`);
       }
-      leadId = existingLead.id;
+      leadId = existing.id;
     } else {
-      throw new Error(`Failed to insert lead: ${insertErr.message}`);
+      throw new Error(`Failed to insert lead: ${String(err)}`);
     }
-  } else {
-    leadId = insertedLead.id;
   }
 
   // Step 2: Fetch expert gcal_email for Lemon Squeezy checkout attribution
-  const { data: expert, error: expertErr } = await supabase
-    .from('experts')
-    .select('gcal_email')
-    .eq('id', body.expert_id)
-    .single();
+  const [expert] = await sql<Pick<ExpertRow, 'gcal_email'>[]>`
+    SELECT gcal_email FROM experts WHERE id = ${body.expert_id}`;
 
-  const expertEmail = expert?.gcal_email ?? '';
-  if (expertErr) {
-    throw new Error(`Failed to fetch expert ${body.expert_id}: ${expertErr.message}`);
+  if (!expert) {
+    throw new Error(`Failed to fetch expert ${body.expert_id}`);
   }
+
+  const expertEmail = expert.gcal_email ?? '';
 
   // Step 3: Create Lemon Squeezy checkout
   const lsRes = await fetch('https://api.lemonsqueezy.com/v1/checkouts', {
@@ -127,12 +117,5 @@ async function processLeadBilling(
 
   // Step 4: Update lead with checkout ID and 'billed' status
   // 'billed' at MVP = checkout link created (payment is manual via expert clicking the link)
-  const { error: updateErr } = await supabase
-    .from('leads')
-    .update({ ls_checkout_id: lsCheckoutId, status: 'billed' })
-    .eq('id', leadId);
-
-  if (updateErr) {
-    throw new Error(`Failed to update lead ${leadId}: ${updateErr.message}`);
-  }
+  await sql`UPDATE leads SET ls_checkout_id = ${lsCheckoutId}, status = 'billed' WHERE id = ${leadId}`;
 }

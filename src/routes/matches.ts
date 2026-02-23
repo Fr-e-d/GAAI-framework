@@ -1,5 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-import type { Database, Json } from '../types/database';
+import type { Json } from '../types/database';
 import type { Env } from '../types/env';
 import {
   DEFAULT_WEIGHTS,
@@ -13,6 +12,9 @@ import {
 } from '../types/matching';
 import { scoreMatch, applyReliabilityModifier } from '../matching/score';
 import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
+import { createSql } from '../lib/db';
+import { loadExpertPool } from '../lib/expertPool';
+import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../types/db';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,7 @@ function deriveQualityTier(compositeScore: number | null): QualityTier {
 
 // ── POST /api/matches/compute ─────────────────────────────────────────────────
 // AC7: loads prospect + available experts, scores, stores top-20, returns results
+// AC10 (B2 fix): uses loadExpertPool(env) instead of direct DB query for experts
 
 export async function handleMatchCompute(request: Request, env: Env): Promise<Response> {
   const startTime = Date.now();
@@ -51,18 +54,12 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
     return errorResponse('prospect_id is required', 422, { prospect_id: 'must be a non-empty string' });
   }
 
-  const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false },
-  });
+  const sql = createSql(env);
 
   // Load prospect requirements
-  const { data: prospect, error: prospectErr } = await supabase
-    .from('prospects')
-    .select('id, requirements, satellite_id')
-    .eq('id', prospect_id)
-    .maybeSingle();
+  const [prospect] = await sql<Pick<ProspectRow, 'id' | 'requirements' | 'satellite_id'>[]>`
+    SELECT id, requirements, satellite_id FROM prospects WHERE id = ${prospect_id}`;
 
-  if (prospectErr) return errorResponse('Database error', 500);
   if (!prospect) return errorResponse('Prospect not found', 404);
 
   // Resolve matching weights (satellite override or default)
@@ -70,50 +67,24 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
   let weights: MatchingWeights = DEFAULT_WEIGHTS;
 
   if (typeof effectiveSatelliteId === 'string' && effectiveSatelliteId) {
-    const { data: satConfig } = await supabase
-      .from('satellite_configs')
-      .select('matching_weights')
-      .eq('id', effectiveSatelliteId)
-      .maybeSingle();
+    const [satConfig] = await sql<Pick<SatelliteConfigRow, 'matching_weights'>[]>`
+      SELECT matching_weights FROM satellite_configs WHERE id = ${effectiveSatelliteId}`;
 
     if (satConfig?.matching_weights && typeof satConfig.matching_weights === 'object') {
       weights = satConfig.matching_weights as unknown as MatchingWeights;
     }
   }
 
-  // Load all available experts
-  const { data: experts, error: expertsErr } = await supabase
-    .from('experts')
-    .select('id, profile, preferences, rate_min, rate_max, composite_score')
-    .neq('availability', 'unavailable');
-
-  if (expertsErr) return errorResponse('Database error', 500);
-  if (!experts || experts.length === 0) {
+  // B2 fix (AC10): Load experts via loadExpertPool (KV-cached) instead of direct DB query
+  const expertPool = await loadExpertPool(env);
+  if (expertPool.length === 0) {
     return jsonResponse({ computed: 0, top_matches: [] });
   }
 
-  // Query actual lead counts per expert for reliability modifier
-  const expertIds = experts.map((e) => e.id);
-  const leadCountMap = new Map<string, number>();
-
-  if (expertIds.length > 0) {
-    const { data: leadRows } = await supabase
-      .from('leads')
-      .select('expert_id')
-      .in('expert_id', expertIds);
-
-    for (const row of leadRows ?? []) {
-      if (row.expert_id) {
-        leadCountMap.set(row.expert_id, (leadCountMap.get(row.expert_id) ?? 0) + 1);
-      }
-    }
-  }
-
-  // Score each expert
+  // Score each expert using the pool (includes pre-computed total_leads)
   const requirements = (prospect.requirements ?? {}) as ProspectRequirements;
 
-  const scored = experts.map((expert) => {
-    // Merge DB-column rates into the profile for the pure scoring function (AC1)
+  const scored = expertPool.map((expert) => {
     const profile: ExpertProfile = {
       ...((expert.profile ?? {}) as ExpertProfile),
       rate_min: expert.rate_min,
@@ -123,7 +94,7 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
     const raw = scoreMatch(profile, prefs, requirements, weights);
     const matchScore = applyReliabilityModifier(raw, {
       composite_score: expert.composite_score,
-      total_leads: leadCountMap.get(expert.id) ?? 0,
+      total_leads: expert.total_leads,
     });
 
     return { expert, matchScore };
@@ -135,18 +106,14 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
 
   // Upsert into matches table: delete existing, then insert fresh
   if (top20.length > 0) {
-    await supabase.from('matches').delete().eq('prospect_id', prospect_id);
+    await sql`DELETE FROM matches WHERE prospect_id = ${prospect_id}`;
 
-    const matchRows: Database['public']['Tables']['matches']['Insert'][] = top20.map(({ expert, matchScore }) => ({
-      prospect_id,
-      expert_id: expert.id,
-      score: matchScore.score,
-      score_breakdown: matchScore.breakdown as unknown as Json,
-      status: 'active',
-      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7-day TTL
-    }));
-
-    await supabase.from('matches').insert(matchRows);
+    for (const { expert, matchScore } of top20) {
+      await sql`
+        INSERT INTO matches (prospect_id, expert_id, score, score_breakdown, status, expires_at)
+        VALUES (${prospect_id}, ${expert.id}, ${matchScore.score}, ${JSON.stringify(matchScore.breakdown)}::jsonb, 'active', ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()})
+        ON CONFLICT DO NOTHING`;
+    }
   }
 
   // Build anonymized MatchResult list
@@ -195,34 +162,25 @@ export async function handleMatchGet(request: Request, env: Env, prospectId: str
   const pageSize = 5;
   const offset = (page - 1) * pageSize;
 
-  const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false },
-  });
+  const sql = createSql(env);
 
   // Fetch matches (excluding expired), sorted by score DESC, paginated
-  const { data: matches, error: matchErr } = await supabase
-    .from('matches')
-    .select('id, expert_id, score, score_breakdown')
-    .eq('prospect_id', prospectId)
-    .neq('status', 'expired')
-    .order('score', { ascending: false })
-    .range(offset, offset + pageSize - 1);
+  const matches = await sql<Pick<MatchRow, 'id' | 'expert_id' | 'score' | 'score_breakdown'>[]>`
+    SELECT id, expert_id, score, score_breakdown FROM matches
+    WHERE prospect_id = ${prospectId} AND status != 'expired'
+    ORDER BY score DESC
+    LIMIT ${pageSize} OFFSET ${offset}`;
 
-  if (matchErr) return errorResponse('Database error', 500);
   if (!matches || matches.length === 0) {
     return jsonResponse({ results: [], page, page_size: pageSize, total: 0 });
   }
 
   // Fetch expert composite_score and profile for tiebreaker and anonymized fields
   const expertIds = matches.map((m) => m.expert_id).filter(Boolean) as string[];
-  const { data: experts, error: expertErr } = await supabase
-    .from('experts')
-    .select('id, composite_score, profile, rate_min, rate_max')
-    .in('id', expertIds);
+  const experts = await sql<Pick<ExpertRow, 'id' | 'composite_score' | 'profile' | 'rate_min' | 'rate_max'>[]>`
+    SELECT id, composite_score, profile, rate_min, rate_max FROM experts WHERE id = ANY(${expertIds})`;
 
-  if (expertErr) return errorResponse('Database error', 500);
-
-  const expertMap = new Map((experts ?? []).map((e) => [e.id, e]));
+  const expertMap = new Map(experts.map((e) => [e.id, e]));
 
   // Build anonymized results — AC9: no display_name, avatar_url, cal_username
   const results: MatchResult[] = matches.map((match) => {

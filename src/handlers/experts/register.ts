@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
-import { createServiceClient } from '../../lib/supabase';
+import { createSql } from '../../lib/db';
 import { checkRateLimit } from '../../lib/rateLimit';
+import type { ExpertRow } from '../../types/db';
 
 const RegisterSchema = z.object({
   display_name: z.string().min(1, 'display_name is required').max(100),
@@ -53,25 +54,20 @@ export async function handleRegister(
   }
 
   const { display_name, headline, bio, rate_min, rate_max } = parsed.data;
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
   // Insert expert row (Google Calendar OAuth layer wired in E06S10 — DEC-41)
-  const { data: expert, error } = await supabase
-    .from('experts')
-    .insert({
-      id: user.id,
-      display_name,
-      headline: headline ?? null,
-      bio: bio ?? null,
-      rate_min: rate_min ?? null,
-      rate_max: rate_max ?? null,
-    })
-    .select('id, display_name')
-    .single();
-
-  if (error) {
+  let expert: Pick<ExpertRow, 'id' | 'display_name'>;
+  try {
+    const [row] = await sql<Pick<ExpertRow, 'id' | 'display_name'>[]>`
+      INSERT INTO experts (id, display_name, headline, bio, rate_min, rate_max)
+      VALUES (${user.id}, ${display_name}, ${headline ?? null}, ${bio ?? null}, ${rate_min ?? null}, ${rate_max ?? null})
+      RETURNING id, display_name`;
+    if (!row) throw new Error('Insert failed');
+    expert = row;
+  } catch (err) {
     // AC4: Duplicate detection — Postgres unique violation
-    if (error.code === '23505') {
+    if ((err as { code?: string }).code === '23505') {
       return new Response(
         JSON.stringify({ error: 'Expert already registered' }),
         {
@@ -81,7 +77,7 @@ export async function handleRegister(
       );
     }
     return new Response(
-      JSON.stringify({ error: 'Registration failed', details: { message: error.message } }),
+      JSON.stringify({ error: 'Registration failed', details: { message: String(err) } }),
       {
         status: 500,
         headers: { 'Content-Type': 'application/json' },

@@ -1,6 +1,7 @@
 import { Env } from '../../types/env';
-import { createServiceClient } from '../../lib/supabase';
-import { Json } from '../../types/database';
+import { createSql } from '../../lib/db';
+import type { Json } from '../../types/database';
+import type { BookingRow, ProspectRow, ExpertRow, MatchRow } from '../../types/db';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -42,16 +43,14 @@ export async function handleGetPrep(
   env: Env,
   prepToken: string
 ): Promise<Response> {
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
   // Fetch booking by prep_token
-  const { data: booking, error } = await supabase
-    .from('bookings')
-    .select('id, expert_id, prospect_id, match_id, start_at, end_at, meeting_url, duration_min, prep_token')
-    .eq('prep_token', prepToken)
-    .single();
+  const [booking] = await sql<Pick<BookingRow, 'id' | 'expert_id' | 'prospect_id' | 'match_id' | 'start_at' | 'end_at' | 'meeting_url' | 'duration_min' | 'prep_token'>[]>`
+    SELECT id, expert_id, prospect_id, match_id, start_at, end_at, meeting_url, duration_min, prep_token
+    FROM bookings WHERE prep_token = ${prepToken}`;
 
-  if (error || !booking) return json({ error: 'Not Found' }, 404);
+  if (!booking) return json({ error: 'Not Found' }, 404);
 
   // Check token expiry: expires at start_at + 2h
   if (!booking.start_at) return json({ error: 'Not Found' }, 404);
@@ -59,38 +58,24 @@ export async function handleGetPrep(
   if (new Date() > expiresAt) return json({ error: 'prep_token_expired' }, 404);
 
   // Fetch prospect
-  const { data: prospect } = await supabase
-    .from('prospects')
-    .select('requirements, email')
-    .eq('id', booking.prospect_id!)
-    .single();
+  const [prospect] = await sql<Pick<ProspectRow, 'requirements' | 'email'>[]>`
+    SELECT requirements, email FROM prospects WHERE id = ${booking.prospect_id!}`;
 
   // Fetch expert
-  const { data: expert } = await supabase
-    .from('experts')
-    .select('display_name, bio, profile, composite_score')
-    .eq('id', booking.expert_id!)
-    .single();
+  const [expert] = await sql<Pick<ExpertRow, 'display_name' | 'bio' | 'profile' | 'composite_score'>[]>`
+    SELECT display_name, bio, profile, composite_score FROM experts WHERE id = ${booking.expert_id!}`;
 
   // Fetch match (by match_id or query)
   let matchData: { score: number | null; score_breakdown: Json | null } | null = null;
   if (booking.match_id) {
-    const { data: m } = await supabase
-      .from('matches')
-      .select('score, score_breakdown')
-      .eq('id', booking.match_id)
-      .single();
-    matchData = m;
+    const [m] = await sql<Pick<MatchRow, 'score' | 'score_breakdown'>[]>`
+      SELECT score, score_breakdown FROM matches WHERE id = ${booking.match_id}`;
+    matchData = m ?? null;
   } else if (booking.expert_id && booking.prospect_id) {
-    const { data: m } = await supabase
-      .from('matches')
-      .select('score, score_breakdown')
-      .eq('expert_id', booking.expert_id)
-      .eq('prospect_id', booking.prospect_id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    matchData = m;
+    const [m] = await sql<Pick<MatchRow, 'score' | 'score_breakdown'>[]>`
+      SELECT score, score_breakdown FROM matches WHERE expert_id = ${booking.expert_id}
+      AND prospect_id = ${booking.prospect_id} ORDER BY created_at DESC LIMIT 1`;
+    matchData = m ?? null;
   }
 
   const req = (prospect?.requirements ?? {}) as Record<string, unknown>;

@@ -4,8 +4,7 @@
 // AC7/AC8: POST /api/prospects/:id/identify
 // AC10: consistent error shape { error: string, details?: object }
 
-import { createClient } from '@supabase/supabase-js';
-import type { Json, Database } from '../types/database';
+import type { Json } from '../types/database';
 import type { Env } from '../types/env';
 import {
   DEFAULT_WEIGHTS,
@@ -19,6 +18,8 @@ import { scoreMatch, applyReliabilityModifier } from '../matching/score';
 import { signProspectToken, verifyProspectToken } from '../lib/jwt';
 import { loadExpertPool } from '../lib/expertPool';
 import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
+import { createSql } from '../lib/db';
+import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../types/db';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -125,18 +126,12 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
     return errorResponse('Validation failed', 422, { quiz_answers: 'must be an object' });
   }
 
-  const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false },
-  });
+  const sql = createSql(env);
 
   // Load satellite config
-  const { data: satellite, error: satErr } = await supabase
-    .from('satellite_configs')
-    .select('quiz_schema, matching_weights')
-    .eq('id', satellite_id)
-    .maybeSingle();
+  const [satellite] = await sql<Pick<SatelliteConfigRow, 'quiz_schema' | 'matching_weights'>[]>`
+    SELECT quiz_schema, matching_weights FROM satellite_configs WHERE id = ${satellite_id}`;
 
-  if (satErr) return errorResponse('Database error', 500);
   if (!satellite) return errorResponse('Satellite not found', 404);
 
   // AC2: validate quiz_answers has all required keys from quiz_schema
@@ -152,20 +147,12 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
   const requirements = normalizeRequirements(answers);
 
   // AC3: create prospect row
-  const { data: prospect, error: prospectErr } = await supabase
-    .from('prospects')
-    .insert({
-      satellite_id,
-      quiz_answers: answers as unknown as Json,
-      requirements: requirements as unknown as Json,
-      status: 'anonymous',
-      utm_source: typeof utm_source === 'string' ? utm_source : null,
-      utm_campaign: typeof utm_campaign === 'string' ? utm_campaign : null,
-    })
-    .select('id')
-    .single();
+  const [prospect] = await sql<Pick<ProspectRow, 'id'>[]>`
+    INSERT INTO prospects (satellite_id, quiz_answers, requirements, status, utm_source, utm_campaign)
+    VALUES (${satellite_id}, ${JSON.stringify(answers)}::jsonb, ${JSON.stringify(requirements)}::jsonb, 'anonymous', ${typeof utm_source === 'string' ? utm_source : null}, ${typeof utm_campaign === 'string' ? utm_campaign : null})
+    RETURNING id`;
 
-  if (prospectErr || !prospect) return errorResponse('Database error', 500);
+  if (!prospect) return errorResponse('Database error', 500);
 
   // AC3: load expert pool from KV (with DB fallback)
   const experts = await loadExpertPool(env);
@@ -177,9 +164,10 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
   }
 
   // AC3: scoreMatch() synchronously for each expert
+  // B1 fix (AC9): insert maximum 20 match rows (sorted by score DESC)
   const scoredResults: { score: number }[] = [];
   if (experts.length > 0) {
-    const matchRows: Database['public']['Tables']['matches']['Insert'][] = experts.map((expert) => {
+    const matchRows = experts.map((expert) => {
       const profile: ExpertProfile = {
         ...((expert.profile ?? {}) as ExpertProfile),
         rate_min: expert.rate_min,
@@ -203,8 +191,18 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
       };
     });
 
-    // AC3: INSERT all scored results (best-effort — AC6 guard covers insert failures)
-    await supabase.from('matches').insert(matchRows);
+    // B1 fix: sort by score DESC and take top 20
+    const top20Rows = matchRows
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      .slice(0, 20);
+
+    // AC3: INSERT top 20 scored results
+    for (const row of top20Rows) {
+      await sql`
+        INSERT INTO matches (prospect_id, expert_id, score, score_breakdown, status, expires_at)
+        VALUES (${row.prospect_id}, ${row.expert_id}, ${row.score}, ${JSON.stringify(row.score_breakdown)}::jsonb, ${row.status}, ${row.expires_at})
+        ON CONFLICT DO NOTHING`;
+    }
   }
 
   // AC2/AC3: fire-and-forget analytics — does not block response
@@ -253,19 +251,13 @@ export async function handleProspectMatches(
     return errorResponse('Forbidden', 403);
   }
 
-  const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false },
-  });
+  const sql = createSql(env);
 
   // AC5: load all matches for prospect, ordered by score DESC
-  const { data: matches, error: matchErr } = await supabase
-    .from('matches')
-    .select('id, expert_id, score, score_breakdown')
-    .eq('prospect_id', prospectId)
-    .neq('status', 'expired')
-    .order('score', { ascending: false });
-
-  if (matchErr) return errorResponse('Database error', 500);
+  const matches = await sql<Pick<MatchRow, 'id' | 'expert_id' | 'score' | 'score_breakdown'>[]>`
+    SELECT id, expert_id, score, score_breakdown FROM matches
+    WHERE prospect_id = ${prospectId} AND status != 'expired'
+    ORDER BY score DESC`;
 
   // AC6: defensive guard — empty matches table
   if (!matches || matches.length === 0) {
@@ -274,14 +266,10 @@ export async function handleProspectMatches(
 
   // Load expert profiles for anonymized fields
   const expertIds = matches.map((m) => m.expert_id).filter((id): id is string => Boolean(id));
-  const { data: experts, error: expertErr } = await supabase
-    .from('experts')
-    .select('id, composite_score, profile, rate_min, rate_max')
-    .in('id', expertIds);
+  const experts = await sql<Pick<ExpertRow, 'id' | 'composite_score' | 'profile' | 'rate_min' | 'rate_max'>[]>`
+    SELECT id, composite_score, profile, rate_min, rate_max FROM experts WHERE id = ANY(${expertIds})`;
 
-  if (expertErr) return errorResponse('Database error', 500);
-
-  const expertMap = new Map((experts ?? []).map((e) => [e.id, e]));
+  const expertMap = new Map(experts.map((e) => [e.id, e]));
 
   // AC5: anonymized expert cards — no display_name, avatar_url, cal_username
   const anonymizedMatches = matches.map((match, idx) => {
@@ -336,18 +324,12 @@ export async function handleProspectIdentify(
     return errorResponse('Validation failed', 422, { email: 'must be a valid email address' });
   }
 
-  const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false },
-  });
+  const sql = createSql(env);
 
   // AC8: check if prospect already identified
-  const { data: prospect, error: fetchErr } = await supabase
-    .from('prospects')
-    .select('id, email')
-    .eq('id', prospectId)
-    .maybeSingle();
+  const [prospect] = await sql<Pick<ProspectRow, 'id' | 'email'>[]>`
+    SELECT id, email FROM prospects WHERE id = ${prospectId}`;
 
-  if (fetchErr) return errorResponse('Database error', 500);
   if (!prospect) return errorResponse('Prospect not found', 404);
 
   if (prospect.email !== null) {
@@ -355,24 +337,15 @@ export async function handleProspectIdentify(
   }
 
   // AC7: update prospect with email + status
-  const { error: updateErr } = await supabase
-    .from('prospects')
-    .update({ email, status: 'identified' })
-    .eq('id', prospectId);
-
-  if (updateErr) return errorResponse('Database error', 500);
+  await sql`UPDATE prospects SET email = ${email}, status = 'identified' WHERE id = ${prospectId}`;
 
   // Load matches to get expert_ids, sorted by score DESC
-  const { data: matches, error: matchErr } = await supabase
-    .from('matches')
-    .select('expert_id, score')
-    .eq('prospect_id', prospectId)
-    .neq('status', 'expired')
-    .order('score', { ascending: false });
+  const matches = await sql<Pick<MatchRow, 'expert_id' | 'score'>[]>`
+    SELECT expert_id, score FROM matches
+    WHERE prospect_id = ${prospectId} AND status != 'expired'
+    ORDER BY score DESC`;
 
-  if (matchErr) return errorResponse('Database error', 500);
-
-  const expertIds = (matches ?? [])
+  const expertIds = matches
     .map((m) => m.expert_id)
     .filter((id): id is string => Boolean(id));
 
@@ -381,15 +354,11 @@ export async function handleProspectIdentify(
   }
 
   // AC7: load full expert profiles
-  const { data: expertRows, error: expertErr } = await supabase
-    .from('experts')
-    .select('id, display_name, headline, bio, profile, rate_min, rate_max, cal_username')
-    .in('id', expertIds);
+  const expertRows = await sql<Pick<ExpertRow, 'id' | 'display_name' | 'headline' | 'bio' | 'profile' | 'rate_min' | 'rate_max' | 'cal_username'>[]>`
+    SELECT id, display_name, headline, bio, profile, rate_min, rate_max, cal_username FROM experts WHERE id = ANY(${expertIds})`;
 
-  if (expertErr) return errorResponse('Database error', 500);
-
-  const expertMap = new Map((expertRows ?? []).map((e) => [e.id, e]));
-  const matchScoreMap = new Map((matches ?? []).map((m) => [m.expert_id ?? '', m.score ?? 0]));
+  const expertMap = new Map(expertRows.map((e) => [e.id, e]));
+  const matchScoreMap = new Map(matches.map((m) => [m.expert_id ?? '', m.score ?? 0]));
 
   // AC7: full profiles with booking_url
   const expertProfiles = expertIds
