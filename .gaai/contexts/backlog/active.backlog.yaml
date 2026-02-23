@@ -309,7 +309,7 @@ items:
     epic: E07
     title: "Satellite client-side instrumentation (prospect UX tracking)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E07S02.story.md
     dependencies: [E07S01]
     notes: "PostHog JS SDK injected in satellite landing.ts. Autocapture + session replay + cookieless mode. Events: page_view, cta_clicked. Rage clicks + dead clicks + heatmaps automatic. Human action: POSTHOG_API_KEY secret for satellite worker."
