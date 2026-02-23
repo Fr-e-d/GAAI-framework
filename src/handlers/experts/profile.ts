@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
-import { createServiceClient } from '../../lib/supabase';
-import { Json } from '../../types/database';
-import { upsertExpertEmbedding, ExpertProfile } from '../../lib/vectorize';
 import { createSql } from '../../lib/db';
+import { notifyExpertPoolDO } from '../../durable-objects/expertPoolDO';
+import { upsertExpertEmbedding, ExpertProfile } from '../../lib/vectorize';
 import type { ExpertRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
 
@@ -120,18 +119,26 @@ export async function handlePatchProfile(
     });
   }
 
+  const updated = rows[0]!;
+
+  // AC5 (E06S25): Notify ExpertPoolDO — fire-and-forget, must NOT block response
+  notifyExpertPoolDO(env, ctx, {
+    id: expertId,
+    profile: (updated.profile as Record<string, unknown>) ?? {},
+    preferences: (updated.preferences as Record<string, unknown>) ?? {},
+    rate_min: updated.rate_min ?? null,
+    rate_max: updated.rate_max ?? null,
+    composite_score: updated.composite_score ?? null,
+    total_leads: 0,
+    availability: updated.availability ?? null,
+  });
+
   // AC4, AC7: Fire-and-forget re-embedding — failure must NOT block profile update
-  const updatedExpert = rows[0] as {
-    profile?: ExpertProfile;
-    rate_min?: number | null;
-    rate_max?: number | null;
-    availability?: string | null;
-  };
   upsertExpertEmbedding(env, ctx, expertId, {
-    profile: (updatedExpert.profile as ExpertProfile) ?? {},
-    rate_min: updatedExpert.rate_min ?? null,
-    rate_max: updatedExpert.rate_max ?? null,
-    availability: updatedExpert.availability ?? null,
+    profile: (updated.profile as ExpertProfile) ?? {},
+    rate_min: updated.rate_min ?? null,
+    rate_max: updated.rate_max ?? null,
+    availability: updated.availability ?? null,
   });
 
   const fieldsUpdated: string[] = [];
@@ -150,7 +157,7 @@ export async function handlePatchProfile(
     properties: { fields_updated: fieldsUpdated },
   }));
 
-  return new Response(JSON.stringify(rows[0]), {
+  return new Response(JSON.stringify(updated), {
     status: 200,
     headers: JSON_HEADERS,
   });

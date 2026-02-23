@@ -3,6 +3,14 @@ import { consumeLeadBilling } from './lead-billing';
 import type { Env } from '../types/env';
 import type { LeadBillingMessage } from '../types/queues';
 
+// ── Mock supabase ──────────────────────────────────────────────────────────────
+
+vi.mock('../lib/supabase', () => ({
+  createServiceClient: vi.fn(),
+}));
+
+import { createServiceClient } from '../lib/supabase';
+
 // ── Mock db ────────────────────────────────────────────────────────────────────
 
 vi.mock('../lib/db', () => ({

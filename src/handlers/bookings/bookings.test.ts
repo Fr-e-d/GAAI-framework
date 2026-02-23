@@ -25,7 +25,6 @@ const mockCtx = {
 
 // ── Mock Env ───────────────────────────────────────────────────────────────────
 
-
 const mockEnv = {
   SUPABASE_URL: 'https://test.supabase.co',
   SUPABASE_ANON_KEY: 'anon-key',
@@ -147,6 +146,7 @@ describe('handleHold', () => {
         prospect_id: 'prospect-1',
       }),
     });
+
 
     const response = await handleHold(request, mockEnv as unknown as Parameters<typeof handleHold>[1], mockCtx);
     expect([200, 500]).toContain(response.status);

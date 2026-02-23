@@ -3,6 +3,7 @@ import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
 import { createSql } from '../../lib/db';
 import { checkRateLimit } from '../../lib/rateLimit';
+import { notifyExpertPoolDO } from '../../durable-objects/expertPoolDO';
 import { upsertExpertEmbedding } from '../../lib/vectorize';
 import type { ExpertRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
@@ -93,6 +94,18 @@ export async function handleRegister(
     type: 'expert.registered',
     expert_id: user.id,
     email: user.email ?? '',
+  });
+
+  // AC5 (E06S25): Notify ExpertPoolDO — fire-and-forget, must NOT block response
+  notifyExpertPoolDO(env, ctx, {
+    id: user.id,
+    profile: {},
+    preferences: {},
+    rate_min: rate_min ?? null,
+    rate_max: rate_max ?? null,
+    composite_score: null,
+    total_leads: 0,
+    availability: null,
   });
 
   // AC3, AC7: Fire-and-forget embedding — failure must NOT block registration

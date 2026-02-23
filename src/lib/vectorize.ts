@@ -24,16 +24,18 @@ export function upsertExpertEmbedding(
     rate_min?: number | null;
     rate_max?: number | null;
     availability?: string | null;
-  }
+  },
 ): void {
+  const { AI: ai, VECTORIZE: vectorize } = env;
+  if (!ai || !vectorize) return;
   ctx.waitUntil(
     (async () => {
       try {
         const text = buildEmbeddingText(profileData.profile);
 
-        const result = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
+        const result = (await ai.run('@cf/baai/bge-base-en-v1.5', {
           text: [text],
-        }) as { data: number[][] };
+        })) as { data: number[][] };
 
         const vector = result.data[0];
         if (!vector || vector.length === 0) {
@@ -48,7 +50,7 @@ export function upsertExpertEmbedding(
         if (profileData.rate_max != null) metadata.rate_max = profileData.rate_max;
         if (profileData.availability != null) metadata.availability = profileData.availability;
 
-        await env.VECTORIZE.upsert([
+        await vectorize.upsert([
           {
             id: expertId,
             values: vector,
@@ -58,7 +60,7 @@ export function upsertExpertEmbedding(
       } catch (err) {
         console.error('vectorize: upsert failed for expert', expertId, err);
       }
-    })()
+    })(),
   );
 }
 

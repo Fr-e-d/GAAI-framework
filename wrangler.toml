@@ -81,6 +81,18 @@ binding = "AI"
 binding = "VECTORIZE"
 index_name = "expert-profiles"
 
+# Durable Object — ExpertPoolDO write coordinator (E06S25)
+# AC4: singleton via idFromName('expert-pool-coordinator')
+# Human action required: class migration auto-applied on first deploy
+[[durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
+
+# DO migration tag (required for new classes)
+[[migrations]]
+tag = "v1"
+new_classes = ["ExpertPoolDO"]
+
 [[rate_limiting]]
 binding = "RATE_LIMITER"
 namespace_id = 1001
@@ -178,6 +190,11 @@ binding = "AI"
 binding = "VECTORIZE"
 index_name = "expert-profiles"
 
+# Durable Object binding (E06S25)
+[[env.staging.durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
+
 [[env.staging.rate_limiting]]
 binding = "RATE_LIMITER"
 namespace_id = 1002
@@ -259,6 +276,11 @@ binding = "AI"
 [[env.production.vectorize]]
 binding = "VECTORIZE"
 index_name = "expert-profiles"
+
+# Durable Object binding (E06S25)
+[[env.production.durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
 
 [[env.production.rate_limiting]]
 binding = "RATE_LIMITER"

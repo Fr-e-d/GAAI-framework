@@ -23,9 +23,14 @@ export interface Env {
   // Optional: graceful degradation when not yet provisioned
   EXPERT_DB?: D1Database;
 
-  // Vectorize + Workers AI bindings
-  AI: Ai;
-  VECTORIZE: VectorizeIndex;
+  // Vectorize + Workers AI bindings (E06S21)
+  // Optional: graceful degradation when not yet provisioned
+  AI?: Ai;
+  VECTORIZE?: VectorizeIndex;
+
+  // Durable Object — expert pool write coordinator (AC1–AC5, E06S25)
+  // Optional: graceful degradation when not yet provisioned
+  EXPERT_POOL_DO?: DurableObjectNamespace;
 
   // Worker secrets (bound via wrangler secret put)
   PROSPECT_TOKEN_SECRET: string;
