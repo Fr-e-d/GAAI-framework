@@ -133,10 +133,10 @@ BEFORE execution  → flock: git pull origin staging
 
 AFTER impl PASS   → atomic commit inside ../{id}-workspace
 
-AFTER QA PASS     → push story/{id}
-                    flock: git pull + merge --squash story/{id} + push staging (code)
-                    flock: update backlog done + push staging (governance)
-                    cleanup: worktree remove + branch delete (local + remote)
+AFTER QA PASS     → push story/{id} to origin
+                    gh pr create --base staging --head story/{id} (human reviews + merges)
+                    flock: commit artefacts + mark done + push staging (governance)
+                    cleanup: worktree remove (keep branch for PR — GitHub auto-deletes after merge)
 
 NEVER             → interact with the production branch
                     git checkout away from staging in the main working tree
@@ -180,8 +180,9 @@ Tier 2 or 3? → assemble context bundle
            PASS → collect {id}.memory-delta.md
                   → if verdict DRIFT_DETECTED or NEW_KNOWLEDGE_FOUND or DRIFT_AND_NEW_KNOWLEDGE:
                       flag Discovery with delta report before marking done
-                  → push story/{id} → flock: squash merge → staging → push
-                  → flock: mark Story done → push staging → cleanup
+                  → push story/{id} → gh pr create --base staging
+                  → flock: commit artefacts + mark done → push staging
+                  → cleanup worktree (keep branch for PR)
            FAIL → re-spawn Implementation Sub-Agent with qa-report (max 2 re-spawns)
                   → re-spawn QA Sub-Agent
                   → if still FAIL after 2 cycles → ESCALATE

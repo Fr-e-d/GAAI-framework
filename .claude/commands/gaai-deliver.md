@@ -9,10 +9,11 @@ Runs the Delivery Loop:
 2. Selects the next ready Story (status: refined)
 3. Builds execution context
 4. Creates an execution plan
-5. Implements the Story
+5. Implements the Story in a git worktree
 6. Runs QA gate
 7. Remediates failures if needed
-8. Marks done when PASS
+8. Creates a **PR to staging** via `gh pr create` (human reviews + merges)
+9. Marks done in backlog
 
 ## When to Use
 
@@ -46,4 +47,8 @@ When in doubt: pass the story ID as argument to avoid ambiguity.
 
 Follow the delivery loop exactly. Do not skip QA. If QA fails, invoke `remediate-failures`. If a fix requires changing product scope, STOP and escalate to the human.
 
-Report PASS or FAIL at completion.
+### PR-Based Delivery (Non-Negotiable)
+
+After QA PASS, the delivery agent **creates a PR** to staging via `gh pr create`. The agent does NOT merge directly to staging. The human reviews the PR on GitHub and merges when satisfied.
+
+Report PASS or FAIL at completion. Include the PR URL in the STOP report.
