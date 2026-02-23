@@ -170,7 +170,7 @@ items:
     epic: E06
     title: "Satellite Worker — multi-tenant scaffold"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S14.story.md
     dependencies: [E06S13]
     notes: "DEC-53. New callibrate-satellite CF Worker (separate from callibrate-core). Hostname routing → satellite_configs KV cache (TTL 3600s) → design token injection → HTML render → CF edge cache. Routes: GET / (landing), /robots.txt, /sitemap.xml, /health, POST /admin/cache/purge. Supersedes E03S05 AC2 (Astro build-time). Unblocks all E03 stories."
