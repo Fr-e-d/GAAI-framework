@@ -1,4 +1,5 @@
 import { Env } from './types/env';
+export { ExpertPoolDO } from './durable-objects/expertPoolDO';
 import { handleMatchCompute, handleMatchGet } from './routes/matches';
 import { handleExtract } from './routes/extract';
 import { authenticate } from './middleware/auth';
@@ -39,7 +40,7 @@ async function checkSupabase(env: Env): Promise<'connected' | 'error'> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const { pathname, method } = { pathname: url.pathname, method: request.method };
 
@@ -196,7 +197,7 @@ export default {
       const user = authResult.user;
 
       if (method === 'POST' && pathname === '/api/experts/register') {
-        return handleRegister(request, env, user);
+        return handleRegister(request, env, user, ctx);
       }
 
       const profileMatch = pathname.match(/^\/api\/experts\/([^/]+)\/profile$/);
@@ -205,7 +206,7 @@ export default {
           return handleGetProfile(request, env, user, profileMatch[1]!);
         }
         if (method === 'PATCH') {
-          return handlePatchProfile(request, env, user, profileMatch[1]!);
+          return handlePatchProfile(request, env, user, profileMatch[1]!, ctx);
         }
       }
 

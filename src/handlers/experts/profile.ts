@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
 import { createSql } from '../../lib/db';
+import { notifyExpertPoolDO } from '../../durable-objects/expertPoolDO';
 import type { ExpertRow } from '../../types/db';
 
 const VALID_AVAILABILITY = ['available', 'limited', 'unavailable'] as const;
@@ -57,7 +58,8 @@ export async function handlePatchProfile(
   request: Request,
   env: Env,
   user: AuthUser,
-  expertId: string
+  expertId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   // AC7 / AC8: Own profile only
   if (user.id !== expertId) {
@@ -115,7 +117,21 @@ export async function handlePatchProfile(
     });
   }
 
-  return new Response(JSON.stringify(rows[0]), {
+  const updated = rows[0]!;
+
+  // AC5 (E06S25): Notify ExpertPoolDO — fire-and-forget, must NOT block response
+  notifyExpertPoolDO(env, ctx, {
+    id: expertId,
+    profile: (updated.profile as Record<string, unknown>) ?? {},
+    preferences: (updated.preferences as Record<string, unknown>) ?? {},
+    rate_min: updated.rate_min ?? null,
+    rate_max: updated.rate_max ?? null,
+    composite_score: updated.composite_score ?? null,
+    total_leads: 0,
+    availability: updated.availability ?? null,
+  });
+
+  return new Response(JSON.stringify(updated), {
     status: 200,
     headers: JSON_HEADERS,
   });
