@@ -63,6 +63,7 @@ async function processLeadBilling(
     // Any non-null timeline string signals the prospect provided a timeline (premium eligibility)
     timeline_days: requirements?.timeline != null ? 30 : null,
     ...(requirements?.skills_needed ? { skills: requirements.skills_needed } : {}),
+  
   });
 
   // Step 3: Atomic credit debit via PostgreSQL RPC function (AC1, AC3)

@@ -19,6 +19,10 @@ export interface Env {
   FEATURE_FLAGS: KVNamespace;
   EXPERT_POOL: KVNamespace;
 
+  // D1 — expert pool edge cache (AC1, E06S23)
+  // Optional: graceful degradation when not yet provisioned
+  EXPERT_DB?: D1Database;
+
   // Vectorize + Workers AI bindings
   AI: Ai;
   VECTORIZE: VectorizeIndex;
