@@ -1,6 +1,7 @@
 import { Env } from '../../types/env';
 import { createSql } from '../../lib/db';
 import type { BookingRow } from '../../types/db';
+import { captureEvent } from '../../lib/posthog';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -9,7 +10,7 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-export async function handleHold(request: Request, env: Env): Promise<Response> {
+export async function handleHold(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   let body: unknown;
   try {
     body = await request.json();
@@ -55,6 +56,12 @@ export async function handleHold(request: Request, env: Env): Promise<Response> 
   if (!booking) {
     return json({ error: 'Failed to create hold' }, 500);
   }
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${expert_id}`,
+    event: 'booking.held',
+    properties: { expert_id, duration_min: 20 },
+  }));
 
   return json({ booking_id: booking.id, held_until: booking.held_until });
 }

@@ -5,6 +5,7 @@ import { createSql } from '../../lib/db';
 import { checkRateLimit } from '../../lib/rateLimit';
 import { notifyExpertPoolDO } from '../../durable-objects/expertPoolDO';
 import type { ExpertRow } from '../../types/db';
+import { captureEvent } from '../../lib/posthog';
 
 const RegisterSchema = z.object({
   display_name: z.string().min(1, 'display_name is required').max(100),
@@ -94,6 +95,7 @@ export async function handleRegister(
     email: user.email ?? '',
   });
 
+
   // AC5 (E06S25): Notify ExpertPoolDO — fire-and-forget, must NOT block response
   notifyExpertPoolDO(env, ctx, {
     id: user.id,
@@ -105,6 +107,17 @@ export async function handleRegister(
     total_leads: 0,
     availability: null,
   });
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${user.id}`,
+    event: 'expert.registered',
+    properties: {
+      has_headline: headline !== undefined && headline !== null,
+      has_bio: bio !== undefined && bio !== null,
+      rate_min: rate_min ?? null,
+      rate_max: rate_max ?? null,
+    },
+  }));
 
   // Return 201
   return new Response(

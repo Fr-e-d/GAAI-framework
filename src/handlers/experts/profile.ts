@@ -4,6 +4,7 @@ import { AuthUser } from '../../middleware/auth';
 import { createSql } from '../../lib/db';
 import { notifyExpertPoolDO } from '../../durable-objects/expertPoolDO';
 import type { ExpertRow } from '../../types/db';
+import { captureEvent } from '../../lib/posthog';
 
 const VALID_AVAILABILITY = ['available', 'limited', 'unavailable'] as const;
 
@@ -117,6 +118,7 @@ export async function handlePatchProfile(
     });
   }
 
+
   const updated = rows[0]!;
 
   // AC5 (E06S25): Notify ExpertPoolDO — fire-and-forget, must NOT block response
@@ -130,6 +132,22 @@ export async function handlePatchProfile(
     total_leads: 0,
     availability: updated.availability ?? null,
   });
+
+  const fieldsUpdated: string[] = [];
+  if (display_name !== undefined) fieldsUpdated.push('display_name');
+  if (headline !== undefined) fieldsUpdated.push('headline');
+  if (bio !== undefined) fieldsUpdated.push('bio');
+  if (rate_min !== undefined) fieldsUpdated.push('rate_min');
+  if (rate_max !== undefined) fieldsUpdated.push('rate_max');
+  if (availability !== undefined) fieldsUpdated.push('availability');
+  if (profile !== undefined) fieldsUpdated.push('profile');
+  if (preferences !== undefined) fieldsUpdated.push('preferences');
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${expertId}`,
+    event: 'expert.profile_updated',
+    properties: { fields_updated: fieldsUpdated },
+  }));
 
   return new Response(JSON.stringify(updated), {
     status: 200,

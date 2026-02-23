@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '../types/database';
 import type { Env } from '../types/env';
+import { captureEvent } from '../lib/posthog';
 import type {
   ExtractionField,
   ExtractionQuestion,
@@ -127,7 +128,7 @@ const EXTRACT_TOOL = {
 // ── POST /api/extract ─────────────────────────────────────────────────────────
 // AC1–AC8: Stateless freetext extraction service
 
-export async function handleExtract(request: Request, env: Env): Promise<Response> {
+export async function handleExtract(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   // ── Parse and validate request body (AC1) ───────────────────────────────────
   let body: { text?: unknown; satellite_id?: unknown };
   try {
@@ -188,6 +189,8 @@ export async function handleExtract(request: Request, env: Env): Promise<Respons
     tool_choice: { type: 'function', function: { name: 'extract_requirements' } },
   };
 
+  const llmStart = Date.now();
+
   let openaiRes: Response;
   try {
     openaiRes = await fetch(OPENAI_API_URL, {
@@ -217,6 +220,14 @@ export async function handleExtract(request: Request, env: Env): Promise<Respons
   } catch {
     return errorResponse('Invalid response from OpenAI API', 500);
   }
+
+  const llmLatencyMs = Date.now() - llmStart;
+  const openaiUsage = (() => {
+    if (typeof openaiData !== 'object' || openaiData === null) return 0;
+    const usage = (openaiData as Record<string, unknown>)['usage'];
+    if (typeof usage !== 'object' || usage === null) return 0;
+    return (usage as Record<string, unknown>)['total_tokens'] ?? 0;
+  })();
 
   const toolCallResult = extractOpenAIToolCall(openaiData);
   if (!toolCallResult) {
@@ -257,6 +268,17 @@ export async function handleExtract(request: Request, env: Env): Promise<Respons
     ready_to_match,
     ...(filteredQuestions ? { confirmation_questions: filteredQuestions } : {}),
   };
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: 'system:extract',
+    event: 'llm.extraction_completed',
+    properties: {
+      model: MODEL,
+      tokens_used: openaiUsage,
+      latency_ms: llmLatencyMs,
+      satellite_id: typeof satellite_id === 'string' ? satellite_id : null,
+    },
+  }));
 
   return jsonResponse(response);
 }
