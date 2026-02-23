@@ -139,13 +139,13 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 
 | Segment | Values |
 |---|---|
-| `{scope}` | `callibrate-core` · `callibrate-io` · `callibrate-ai` |
+| `{scope}` | `callibrate-core` · `callibrate-satellite` · `callibrate-io` · `callibrate-ai` |
 | `{entity}` | `queue` · `kv` · `r2` · `d1` · `workflow` — **omitted for Workers** |
 | `{resource}` | functional slug (e.g. `email-notifications`, `sessions`) |
 | `{env}` | `staging` · `prod` — never `production`, never `dev` |
 
 - **Dev exception:** `wrangler dev` binds to staging resources. No `-dev` resources exist.
-- **Scope ownership:** KV · Queue · R2 · D1 · Workflow → always `callibrate-core`. UI workers (`callibrate-io`, `callibrate-ai`) never own storage.
+- **Scope ownership:** KV · Queue · R2 · D1 · Workflow → always `callibrate-core` (except: `callibrate-satellite` owns its own KV for config caching). UI workers (`callibrate-io`, `callibrate-ai`) never own storage.
 - **Workers:** named as `{scope}-{env}` (no entity segment) — e.g. `callibrate-core-staging`
 - **KV namespaces:** created with explicit names via `wrangler kv namespace create "callibrate-core-kv-sessions-staging"` — never rely on `--env` auto-naming
 - **DLQs:** `{queue-full-name}-dlq` — e.g. `callibrate-core-queue-email-notifications-staging-dlq`
@@ -162,6 +162,24 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 | KV — feature flags | `callibrate-core-kv-feature-flags-staging` | `callibrate-core-kv-feature-flags-prod` |
 | KV — expert pool | `callibrate-core-kv-expert-pool-staging` | `callibrate-core-kv-expert-pool-prod` |
 | Queue — score computation | `callibrate-core-queue-score-computation-staging` | `callibrate-core-queue-score-computation-prod` |
+
+### Active Cloudflare resources (callibrate-satellite)
+
+| Resource | Staging | Production |
+|---|---|---|
+| Worker | `callibrate-satellite-staging` | `callibrate-satellite-prod` |
+| KV — config cache | `callibrate-satellite-kv-config-staging` | `callibrate-satellite-kv-config-prod` |
+
+---
+
+## Multi-Worker Project Structure (E06S14)
+
+- **Secondary Workers** live in `workers/{name}/` subdirectory (e.g. `workers/satellite/`)
+- Each has its own `package.json`, `wrangler.toml`, `tsconfig.json`
+- GitHub Actions deploy all Workers in parallel (separate jobs in same workflow)
+- **Satellite Worker uses Hono** for routing (first use in the project). Core Worker remains regex-based. Both patterns are valid.
+- **Satellite config resolution pattern:** `resolveConfig(hostname, env)` — KV cache-aside (key: `satellite:config:${hostname}`, TTL: 3600s) with Supabase REST fallback (anon key). Non-blocking KV write on miss. Returns null on DB miss or Supabase unreachable → caller handles 302 redirect.
+- **Cache purge endpoint:** `POST /admin/cache/purge` with `x-admin-secret` header validation. Deletes KV key. Returns `{ purged: true, domain }`.
 
 ---
 
