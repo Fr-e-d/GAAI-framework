@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { Env } from '../../types/env';
 import { createServiceClient } from '../../lib/supabase';
 import { authenticate } from '../../middleware/auth';
+import { captureEvent } from '../../lib/posthog';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -25,6 +26,7 @@ const LeadEvaluationSchema = z.object({
 export async function handleLeadEvaluation(
   request: Request,
   env: Env,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   // JWT auth (AC3 — expert session)
   const authResult = await authenticate(request, env);
@@ -90,6 +92,15 @@ export async function handleLeadEvaluation(
 
   // Dispatch to SCORE_COMPUTATION queue (AC7)
   await env.SCORE_COMPUTATION.send({ type: 'feedback.lead_evaluation', expert_id: expertId });
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${expertId}`,
+    event: 'survey.lead_evaluation_submitted',
+    properties: {
+      lead_quality_score: score,
+      conversion_declared: conversion_declared ?? false,
+    },
+  }));
 
   return json({ id: evaluation.id }, 201);
 }

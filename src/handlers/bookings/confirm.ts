@@ -1,6 +1,7 @@
 import { Env } from '../../types/env';
 import { createServiceClient } from '../../lib/supabase';
 import { getAccessToken, gcalFreebusy, gcalInsertEvent, GcalApiError } from '../../lib/gcalClient';
+import { captureEvent } from '../../lib/posthog';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -12,14 +13,15 @@ function json(data: unknown, status = 200): Response {
 export async function handleConfirm(
   request: Request,
   env: Env,
-  bookingId: string
+  bookingId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   const supabase = createServiceClient(env);
 
   // Fetch booking
   const { data: booking, error: bookingError } = await supabase
     .from('bookings')
-    .select('id, expert_id, prospect_id, start_at, end_at, status, held_until, prep_token, match_id')
+    .select('id, expert_id, prospect_id, start_at, end_at, status, held_until, prep_token, match_id, duration_min')
     .eq('id', bookingId)
     .single();
 
@@ -182,6 +184,16 @@ export async function handleConfirm(
     meeting_url: gcalResult.meetingUrl ?? '',
     scheduled_at: booking.start_at!,
   });
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${booking.expert_id!}`,
+    event: 'booking.confirmed',
+    properties: {
+      expert_id: booking.expert_id!,
+      prospect_id: booking.prospect_id!,
+      duration_min: booking.duration_min ?? 20,
+    },
+  }));
 
   return json({
     booking_id: bookingId,

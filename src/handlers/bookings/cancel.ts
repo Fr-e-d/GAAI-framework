@@ -1,6 +1,7 @@
 import { Env } from '../../types/env';
 import { createServiceClient } from '../../lib/supabase';
 import { getAccessToken, gcalDeleteEvent, GcalApiError } from '../../lib/gcalClient';
+import { captureEvent } from '../../lib/posthog';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -10,9 +11,10 @@ function json(data: unknown, status = 200): Response {
 }
 
 export async function handleCancel(
-  _request: Request,
+  request: Request,
   env: Env,
-  bookingId: string
+  bookingId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   const supabase = createServiceClient(env);
 
@@ -45,6 +47,18 @@ export async function handleCancel(
     type: 'booking.cancelled',
     booking_id: bookingId,
   });
+
+  let cancelReason: string | null = null;
+  try {
+    const body = await request.clone().json() as Record<string, unknown>;
+    if (typeof body['reason'] === 'string') cancelReason = body['reason'];
+  } catch { /* Optional body */ }
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${booking.expert_id ?? 'unknown'}`,
+    event: 'booking.cancelled',
+    properties: { expert_id: booking.expert_id ?? null, reason: cancelReason },
+  }));
 
   return json({ cancelled: true });
 }
