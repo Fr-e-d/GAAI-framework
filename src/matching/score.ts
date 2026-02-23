@@ -17,6 +17,7 @@ export function scoreMatch(
   expertPreferences: ExpertPreferences,
   prospectRequirements: ProspectRequirements,
   weights: MatchingWeights,
+  semanticSimilarity?: number, // AC4/AC5/AC6: cosine similarity from Vectorize (0.0–1.0), undefined in fallback path
 ): MatchScore {
   // AC6: bi-directional deal-breaker check (short-circuit)
   // Fix DEC-49: case-insensitive comparison
@@ -39,11 +40,12 @@ export function scoreMatch(
   }
 
   const breakdown: ScoreBreakdown = {
-    skills_overlap: scoreSkillsOverlap(expertProfile, prospectRequirements, weights.skills_overlap),
-    industry_match: scoreIndustryMatch(expertProfile, prospectRequirements, weights.industry_match),
+    skills_overlap: scoreSkillsOverlap(expertProfile, prospectRequirements, weights.skills_overlap, semanticSimilarity),
+    industry_match: scoreIndustryMatch(expertProfile, prospectRequirements, weights.industry_match, semanticSimilarity),
     budget_compatibility: scoreBudgetCompatibility(expertProfile, prospectRequirements, weights),
     timeline_match: scoreTimelineMatch(expertPreferences, prospectRequirements, weights.timeline_match),
     language_match: scoreLanguageMatch(expertProfile, expertPreferences, prospectRequirements, weights.language_match),
+    ...(semanticSimilarity !== undefined ? { semantic_similarity: semanticSimilarity } : {}),
   };
 
   const score =
@@ -91,27 +93,37 @@ export function applyReliabilityModifier(
 // ── Scorers ─────────────────────────────────────────────────────────────────
 
 // AC3: skills_overlap = (matching skills count / prospect.skills_needed.length) * weight
+// AC4: blends 0.7 × exactMatch + 0.3 × vectorSimilarity when semanticSimilarity provided
 // Uses normalizeSkill() for alias resolution (DEC-49)
 function scoreSkillsOverlap(
   profile: ExpertProfile,
   requirements: ProspectRequirements,
   weight: number,
+  semanticSimilarity?: number,
 ): number {
   const needed = requirements.skills_needed ?? [];
   if (needed.length === 0) return 0;
 
   const expertSkills = (profile.skills ?? []).map(normalizeSkill);
   const matchCount = needed.filter((s) => expertSkills.includes(normalizeSkill(s))).length;
+  const exactRatio = matchCount / needed.length;
 
-  return (matchCount / needed.length) * weight;
+  // AC4: blend 0.7 × exact + 0.3 × vector when semanticSimilarity available
+  const blendedRatio = semanticSimilarity !== undefined
+    ? 0.7 * exactRatio + 0.3 * semanticSimilarity
+    : exactRatio;
+
+  return blendedRatio * weight;
 }
 
-// AC4: graduated industry match with proximity scoring (DEC-49)
-// Exact match → full weight; proximity match → proximity × weight; unknown pair → 0
+// AC4 (original): graduated industry match with proximity scoring (DEC-49)
+// Exact match → full weight; proximity match → proximity × weight
+// AC5: unknown industry pair (proximity = 0) → use vector similarity as fallback
 function scoreIndustryMatch(
   profile: ExpertProfile,
   requirements: ProspectRequirements,
   weight: number,
+  semanticSimilarity?: number,
 ): number {
   if (!requirements.industry) return 0;
 
@@ -125,7 +137,9 @@ function scoreIndustryMatch(
     if (bestProximity === 1) break; // exact match — can't improve
   }
 
-  return bestProximity * weight;
+  // AC5: known pair → use proximity; unknown pair → vector similarity fallback
+  if (bestProximity > 0) return bestProximity * weight;
+  return (semanticSimilarity ?? 0) * weight;
 }
 
 // AC5: budget_compatibility with configurable conversion factor (DEC-49)

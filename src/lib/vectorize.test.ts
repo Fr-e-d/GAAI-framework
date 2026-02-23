@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { buildEmbeddingText, upsertExpertEmbedding } from './vectorize';
+import { buildEmbeddingText, upsertExpertEmbedding, buildProspectEmbeddingText, queryVectorizeForProspect } from './vectorize';
 import type { Env } from '../types/env';
 
 const mockAi = {
@@ -8,6 +8,7 @@ const mockAi = {
 
 const mockVectorize = {
   upsert: vi.fn(),
+  query: vi.fn(),
 };
 
 const mockEnv = {
@@ -119,5 +120,60 @@ describe('upsertExpertEmbedding', () => {
     const result = upsertExpertEmbedding(mockEnv, mockCtx, 'expert-sync', { profile: {} });
     expect(result).toBeUndefined();
     expect(mockCtx.waitUntil).toHaveBeenCalledOnce();
+  });
+});
+
+// ── buildProspectEmbeddingText (E06S22) ────────────────────────────────────
+
+describe('buildProspectEmbeddingText', () => {
+  it('formats full requirements correctly', () => {
+    const result = buildProspectEmbeddingText({
+      skills_needed: ['machine learning', 'python'],
+      industry: 'fintech',
+      languages: ['english'],
+    });
+    expect(result).toBe('Skills: machine learning, python. Industries: fintech. Languages: english.');
+  });
+
+  it('formats empty requirements', () => {
+    const result = buildProspectEmbeddingText({});
+    expect(result).toBe('Skills: . Industries: . Languages: .');
+  });
+
+  it('formats partial requirements (skills only)', () => {
+    const result = buildProspectEmbeddingText({ skills_needed: ['deep learning'] });
+    expect(result).toBe('Skills: deep learning. Industries: . Languages: .');
+  });
+});
+
+// ── queryVectorizeForProspect (E06S22) ─────────────────────────────────────
+
+describe('queryVectorizeForProspect', () => {
+  it('returns Map of expert_id → cosine similarity', async () => {
+    const fakeVector = Array(768).fill(0.1);
+    mockVectorize.query = vi.fn().mockResolvedValue({
+      matches: [
+        { id: 'expert-1', score: 0.92 },
+        { id: 'expert-2', score: 0.85 },
+        { id: 'expert-3', score: 0.71 },
+      ],
+      count: 3,
+    });
+
+    const result = await queryVectorizeForProspect(mockEnv, fakeVector, 100);
+
+    expect(mockVectorize.query).toHaveBeenCalledWith(fakeVector, { topK: 100 });
+    expect(result.size).toBe(3);
+    expect(result.get('expert-1')).toBe(0.92);
+    expect(result.get('expert-2')).toBe(0.85);
+    expect(result.get('expert-3')).toBe(0.71);
+  });
+
+  it('returns empty Map when no matches', async () => {
+    mockVectorize.query = vi.fn().mockResolvedValue({ matches: [], count: 0 });
+
+    const result = await queryVectorizeForProspect(mockEnv, Array(768).fill(0), 100);
+
+    expect(result.size).toBe(0);
   });
 });
