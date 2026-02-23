@@ -170,7 +170,7 @@ items:
     epic: E06
     title: "Satellite Worker — multi-tenant scaffold"
     priority: high
-    status: done
+    status: failed
     artefact: contexts/artefacts/stories/E06S14.story.md
     dependencies: [E06S13]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 14 ACs met. New callibrate-satellite CF Worker at workers/satellite/ (Hono + TypeScript). Hostname routing → satellite_configs KV cache (TTL 3600s) → Supabase REST fallback → design token injection → HTML render → CF edge cache. Routes: GET / (branded landing), /robots.txt (E03S05 spec), /sitemap.xml, /health, POST /admin/cache/purge (x-admin-secret). Unknown hostname → 302 callibrate.io. SETUP.md + GitHub Actions updated. Unblocks all E03 stories. ⚠️ Human action required: (1) provision KV namespaces (callibrate-satellite-kv-config-staging/-prod), (2) set satellite secrets (SUPABASE_URL, SUPABASE_ANON_KEY, ADMIN_SECRET), (3) update CF API token scope to include callibrate-satellite-*, (4) deploy to prod via tag v0.6.14."
