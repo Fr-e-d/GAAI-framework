@@ -741,23 +741,17 @@ printf '\033[0m\n'
 cd "$PROJECT_DIR"
 unset CLAUDECODE 2>/dev/null || true
 
-if command -v gtimeout &>/dev/null; then
-  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "/gaai-deliver $story_id" 2>&1 | tee -a "$delivery_log"
-  EXIT_CODE=\${PIPESTATUS[0]}
-else
-  claude $CLAUDE_FLAGS -p "/gaai-deliver $story_id" 2>&1 | tee -a "$delivery_log"
-  EXIT_CODE=\${PIPESTATUS[0]}
-fi
+# Heartbeat: touch log file periodically so the daemon knows we're alive
+touch "$delivery_log"
+(while kill -0 \$\$ 2>/dev/null; do touch "$delivery_log"; sleep 60; done) &
+HB_PID=\$!
 
-printf '\n\033[1;36m'
-echo "================================================================"
-echo "  Delivery ended: $story_id (exit \$EXIT_CODE)"
-echo "  Finished: \$(date '+%Y-%m-%d %H:%M:%S')"
-echo "================================================================"
-printf '\033[0m\n'
+# Interactive mode (positional prompt, no -p): user approves each tool use
+# --max-turns is print-mode only, not passed here
+claude "/gaai-deliver $story_id"
+EXIT_CODE=\$?
 
-echo "Press any key to close..."
-read -rsn1
+kill \$HB_PID 2>/dev/null || true
 WRAPPER_EOF
 
   chmod +x "$wrapper"
