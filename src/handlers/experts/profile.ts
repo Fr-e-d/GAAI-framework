@@ -1,8 +1,14 @@
 import { z } from 'zod';
 import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
+<<<<<<< HEAD
 import { createSql } from '../../lib/db';
 import type { ExpertRow } from '../../types/db';
+=======
+import { createServiceClient } from '../../lib/supabase';
+import { Json } from '../../types/database';
+import { upsertExpertEmbedding, ExpertProfile } from '../../lib/vectorize';
+>>>>>>> 902c0cd (feat(E06S21): Vectorize infrastructure + embedding pipeline)
 
 const VALID_AVAILABILITY = ['available', 'limited', 'unavailable'] as const;
 
@@ -57,7 +63,8 @@ export async function handlePatchProfile(
   request: Request,
   env: Env,
   user: AuthUser,
-  expertId: string
+  expertId: string,
+  ctx: ExecutionContext
 ): Promise<Response> {
   // AC7 / AC8: Own profile only
   if (user.id !== expertId) {
@@ -115,7 +122,25 @@ export async function handlePatchProfile(
     });
   }
 
+<<<<<<< HEAD
   return new Response(JSON.stringify(rows[0]), {
+=======
+  // AC4, AC7: Fire-and-forget re-embedding — failure must NOT block profile update
+  const updatedExpert = data[0] as {
+    profile?: ExpertProfile;
+    rate_min?: number | null;
+    rate_max?: number | null;
+    availability?: string | null;
+  };
+  upsertExpertEmbedding(env, ctx, expertId, {
+    profile: (updatedExpert.profile as ExpertProfile) ?? {},
+    rate_min: updatedExpert.rate_min ?? null,
+    rate_max: updatedExpert.rate_max ?? null,
+    availability: updatedExpert.availability ?? null,
+  });
+
+  return new Response(JSON.stringify(data[0]), {
+>>>>>>> 902c0cd (feat(E06S21): Vectorize infrastructure + embedding pipeline)
     status: 200,
     headers: JSON_HEADERS,
   });

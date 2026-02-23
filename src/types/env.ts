@@ -20,6 +20,10 @@ export interface Env {
   // Optional: graceful degradation when not yet provisioned
   EXPERT_DB?: D1Database;
 
+  // Vectorize + Workers AI bindings
+  AI: Ai;
+  VECTORIZE: VectorizeIndex;
+
   // Worker secrets (bound via wrangler secret put)
   PROSPECT_TOKEN_SECRET: string;
 
