@@ -260,13 +260,13 @@ items:
     epic: E06
     title: "Service Bindings — Worker split"
     priority: high
-    status: in_progress
+    status: done
     cost_usd: 0
     started_at: "2026-02-23T17:05:05+01:00"
-    completed_at: null
+    completed_at: "2026-02-23T20:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S24.story.md
     dependencies: [E06S22, E06S23, E06S18]
-    notes: "Phase 4. callibrate-matching Worker with Service Binding. Core = gateway (auth, routing). Matching = compute (Vectorize, D1, scoring). Zero-network-hop RPC. Independent deployment."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 8 ACs met. callibrate-matching Worker at workers/matching/ (Hyperdrive + EXPERT_POOL KV + EXPERT_DB D1 + AI + Vectorize + Analytics Engine). Core delegates via MATCHING_SERVICE?: Fetcher Service Binding. Routes: POST /match (full pipeline), POST /embed (fire-and-forget), POST /admin/reindex (batch). AC6: local deterministic fallback when binding undefined. AC7: Core wrangler.toml no longer declares D1/AI/Vectorize. 107/107 vitest tests. PR#16 open → staging. ⚠️ Human action required: (1) cd workers/matching && npm install, (2) deploy Matching Worker BEFORE Core (callibrate-matching-staging must exist before Core binding resolves), (3) reuse existing Hyperdrive/KV/D1/Vectorize IDs in workers/matching/wrangler.toml."
 
   - id: E06S25
     epic: E06
