@@ -316,6 +316,13 @@ check_heartbeats() {
       continue  # Will be cleaned by clean_stale_locks
     fi
 
+    # Grace period: skip heartbeat for recently-launched sessions
+    # Prevents stale log files from previous runs triggering immediate kills
+    local lock_age=$(( now - $(file_mtime "$lock") ))
+    if (( lock_age < HEARTBEAT_STALE )); then
+      continue
+    fi
+
     # Check delivery log heartbeat
     local logfile="$LOG_DIR/${sid}.log"
     if [[ ! -f "$logfile" ]]; then
@@ -674,6 +681,9 @@ echo ""
 cd "$PROJECT_DIR"
 unset CLAUDECODE 2>/dev/null || true
 
+# Truncate stale log from previous runs (prevents false heartbeat kills)
+: > "$delivery_log"
+
 if command -v timeout &>/dev/null; then
   timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "/gaai-deliver $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -754,6 +764,9 @@ echo ""
 
 cd "$PROJECT_DIR"
 unset CLAUDECODE 2>/dev/null || true
+
+# Truncate stale log from previous runs (prevents false heartbeat kills)
+: > "$delivery_log"
 
 # Print mode (-p): claude processes the prompt and exits, freeing the daemon slot.
 # --allowedTools grants delivery tools selectively (not yolo).
