@@ -3,6 +3,7 @@ import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
 import { createSql } from '../../lib/db';
 import { notifyExpertPoolDO } from '../../durable-objects/expertPoolDO';
+import { upsertExpertEmbedding, ExpertProfile } from '../../lib/vectorize';
 import type { ExpertRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
 
@@ -118,7 +119,6 @@ export async function handlePatchProfile(
     });
   }
 
-
   const updated = rows[0]!;
 
   // AC5 (E06S25): Notify ExpertPoolDO — fire-and-forget, must NOT block response
@@ -130,6 +130,14 @@ export async function handlePatchProfile(
     rate_max: updated.rate_max ?? null,
     composite_score: updated.composite_score ?? null,
     total_leads: 0,
+    availability: updated.availability ?? null,
+  });
+
+  // AC4, AC7: Fire-and-forget re-embedding — failure must NOT block profile update
+  upsertExpertEmbedding(env, ctx, expertId, {
+    profile: (updated.profile as ExpertProfile) ?? {},
+    rate_min: updated.rate_min ?? null,
+    rate_max: updated.rate_max ?? null,
     availability: updated.availability ?? null,
   });
 

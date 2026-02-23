@@ -82,6 +82,7 @@ export interface ScoreBreakdown {
   language_match: number;
   deal_breaker?: boolean;
   reliability_modifier?: number;
+  semantic_similarity?: number; // AC6: raw cosine similarity from Vectorize (0.0–1.0)
 }
 
 export interface MatchScore {

@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { handleGcalAuthUrl, handleGcalStatus, handleGcalCallback, handleGcalDisconnect } from './gcal';
 
-
 // ── Mock db ────────────────────────────────────────────────────────────────────
 
 vi.mock('../../lib/db', () => ({

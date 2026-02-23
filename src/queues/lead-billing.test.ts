@@ -3,7 +3,6 @@ import { consumeLeadBilling } from './lead-billing';
 import type { Env } from '../types/env';
 import type { LeadBillingMessage } from '../types/queues';
 
-
 // ── Mock supabase ──────────────────────────────────────────────────────────────
 
 vi.mock('../lib/supabase', () => ({
@@ -67,6 +66,10 @@ function makeEnv(kv: KVNamespace, overrides: Partial<Env> = {}): Env {
     EMAIL_NOTIFICATIONS: makeEmailQueue(),
     ...overrides,
   } as unknown as Env;
+}
+
+function okFetchResponse(body: unknown = {}): Response {
+  return new Response(JSON.stringify(body), { status: 200 });
 }
 
 // ── Supabase mock builder ──────────────────────────────────────────────────────
