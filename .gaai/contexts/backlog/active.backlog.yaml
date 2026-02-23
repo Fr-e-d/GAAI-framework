@@ -161,7 +161,7 @@ items:
     epic: E06
     title: "satellite_configs schema extension — brand, content & theme columns"
     priority: high
-    status: failed
+    status: refined
     artefact: contexts/artefacts/stories/E06S13.story.md
     dependencies: [E06S02]
     notes: "DEC-53. Pure DB migration. Adds: theme JSONB (design tokens), brand JSONB, content JSONB (meta/copy — unique per satellite), structured_data JSONB (JSON-LD), active BOOLEAN DEFAULT false, updated_at. Updates 'default' seed row. Regenerates TypeScript types. Unblocks E06S14."
@@ -179,7 +179,7 @@ items:
     epic: E06
     title: "Email deliverability hardening — subdomain, DMARC, reply-to, plain text"
     priority: high
-    status: failed
+    status: refined
     artefact: contexts/artefacts/stories/E06S15.story.md
     dependencies: [E06S06]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 10 ACs met. AC1-AC3 founder (DNS/Resend/DMARC). AC4-AC10 delivery: sendResendEmail() uses env.EMAIL_FROM_DOMAIN (send.callibrate.io) + reply_to env.EMAIL_REPLY_TO + plain text fallback all 3 email types. Env interface + wrangler.toml vars. SETUP.md updated. 79/79 vitest tests PASS. ⚠️ Human action required: deploy to prod via tag v0.6.15."
