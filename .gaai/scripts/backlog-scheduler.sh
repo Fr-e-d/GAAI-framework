@@ -221,7 +221,7 @@ if current:
     items.append(current)
 
 # -- Helpers --
-priority_order = {"high": 0, "medium": 1, "low": 2}
+priority_order = {"critical": -1, "high": 0, "medium": 1, "low": 2}
 done_ids = {i["id"] for i in items if i.get("status") in ("done", "cancelled")}
 
 def is_ready(item):
