@@ -3,9 +3,10 @@
 // Cache-aside pattern: KV hit → return directly; miss → load from DB + write KV.
 // TTL: 300s (5 minutes) — new experts appear within 5 minutes of registration.
 
-import { createClient } from '@supabase/supabase-js';
-import type { Json, Database } from '../types/database';
+import { createSql } from './db';
+import type { Json } from '../types/database';
 import type { Env } from '../types/env';
+import type { ExpertRow } from '../types/db';
 
 export interface ExpertPoolEntry {
   id: string;
@@ -34,37 +35,26 @@ export async function loadExpertPool(env: Env): Promise<ExpertPoolEntry[]> {
   }
 
   // 2. Cache miss — load from DB
-  const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false },
-  });
+  const sql = createSql(env);
 
-  const { data: experts, error } = await supabase
-    .from('experts')
-    .select('id, profile, preferences, rate_min, rate_max, composite_score')
-    .neq('availability', 'unavailable');
+  const expertRows = await sql<Pick<ExpertRow, 'id' | 'profile' | 'preferences' | 'rate_min' | 'rate_max' | 'composite_score'>[]>`
+    SELECT id, profile, preferences, rate_min, rate_max, composite_score
+    FROM experts WHERE availability != 'unavailable'`;
 
-  if (error || !experts) {
-    return [];
-  }
+  if (expertRows.length === 0) return [];
 
-  // Query actual lead counts per expert (replaces hardcoded 0)
-  const expertIds = experts.map((e) => e.id);
+  const expertIds = expertRows.map(e => e.id);
+  const leadRows = await sql<{ expert_id: string }[]>`
+    SELECT expert_id FROM leads WHERE expert_id = ANY(${expertIds})`;
+
   const leadCountMap = new Map<string, number>();
-
-  if (expertIds.length > 0) {
-    const { data: leadRows } = await supabase
-      .from('leads')
-      .select('expert_id')
-      .in('expert_id', expertIds);
-
-    for (const row of leadRows ?? []) {
-      if (row.expert_id) {
-        leadCountMap.set(row.expert_id, (leadCountMap.get(row.expert_id) ?? 0) + 1);
-      }
+  for (const row of leadRows) {
+    if (row.expert_id) {
+      leadCountMap.set(row.expert_id, (leadCountMap.get(row.expert_id) ?? 0) + 1);
     }
   }
 
-  const pool: ExpertPoolEntry[] = experts.map((e) => ({
+  const pool: ExpertPoolEntry[] = expertRows.map((e) => ({
     id: e.id,
     profile: e.profile,
     preferences: e.preferences,

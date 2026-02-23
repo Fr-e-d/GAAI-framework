@@ -1,6 +1,7 @@
 import { Env } from '../../types/env';
-import { createServiceClient } from '../../lib/supabase';
+import { createSql } from '../../lib/db';
 import { getAccessToken, gcalFreebusy, gcalPatchEvent, GcalApiError } from '../../lib/gcalClient';
+import type { BookingRow, ExpertRow } from '../../types/db';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -14,15 +15,12 @@ export async function handleReschedule(
   env: Env,
   bookingId: string
 ): Promise<Response> {
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
-  const { data: booking, error } = await supabase
-    .from('bookings')
-    .select('id, expert_id, gcal_event_id, meeting_url, status, start_at, end_at')
-    .eq('id', bookingId)
-    .single();
+  const [booking] = await sql<Pick<BookingRow, 'id' | 'expert_id' | 'gcal_event_id' | 'meeting_url' | 'status' | 'start_at' | 'end_at'>[]>`
+    SELECT id, expert_id, gcal_event_id, meeting_url, status, start_at, end_at FROM bookings WHERE id = ${bookingId}`;
 
-  if (error || !booking) return json({ error: 'Not Found' }, 404);
+  if (!booking) return json({ error: 'Not Found' }, 404);
   if (booking.status !== 'confirmed') return json({ error: 'Booking is not confirmed' }, 409);
   if (!booking.gcal_event_id) return json({ error: 'No GCal event to reschedule' }, 409);
 
@@ -42,27 +40,20 @@ export async function handleReschedule(
   const newEnd = new_end_at as string;
 
   // DB conflict check (excluding self)
-  const { data: conflicts } = await supabase
-    .from('bookings')
-    .select('id')
-    .eq('expert_id', booking.expert_id!)
-    .in('status', ['held', 'confirmed'])
-    .neq('id', bookingId)
-    .lt('start_at', newEnd)
-    .gt('end_at', newStart);
+  const conflicts = await sql<{ id: string }[]>`
+    SELECT id FROM bookings WHERE expert_id = ${booking.expert_id!}
+    AND status = ANY(ARRAY['held', 'confirmed']) AND id != ${bookingId}
+    AND start_at < ${newEnd} AND end_at > ${newStart}`;
 
-  if (conflicts && conflicts.length > 0) {
+  if (conflicts.length > 0) {
     return json({ error: 'slot_taken' }, 409);
   }
 
   // Fetch expert for GCal
-  const { data: expert, error: expertError } = await supabase
-    .from('experts')
-    .select('gcal_email')
-    .eq('id', booking.expert_id!)
-    .single();
+  const [expert] = await sql<Pick<ExpertRow, 'gcal_email'>[]>`
+    SELECT gcal_email FROM experts WHERE id = ${booking.expert_id!}`;
 
-  if (expertError || !expert?.gcal_email) return json({ error: 'Expert not found or GCal not connected' }, 422);
+  if (!expert?.gcal_email) return json({ error: 'Expert not found or GCal not connected' }, 422);
 
   let accessToken: string;
   try {
@@ -107,10 +98,7 @@ export async function handleReschedule(
   }
 
   // Update booking
-  await supabase
-    .from('bookings')
-    .update({ start_at: newStart, end_at: newEnd, scheduled_at: newStart })
-    .eq('id', bookingId);
+  await sql`UPDATE bookings SET start_at = ${newStart}, end_at = ${newEnd}, scheduled_at = ${newStart} WHERE id = ${bookingId}`;
 
   // Push notification
   await env.EMAIL_NOTIFICATIONS.send({
