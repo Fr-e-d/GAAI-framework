@@ -422,10 +422,13 @@ items:
     epic: E06
     title: "Lead-billing consumer — credit debit + flag/restore (DEC-68)"
     priority: high
-    status: in_progress
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-23T23:30:00+01:00"
+    completed_at: "2026-02-24T00:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S32.story.md
     dependencies: [E06S31]
-    notes: "DEC-68. Rewrites E06S06 lead-billing consumer: LS checkout → credit debit at booking time. Atomic transaction (postgres.js BEGIN/COMMIT). Adds POST /api/leads/:id/flag (7-day window, credit restore) + POST /api/leads/:id/confirm. LS checkout code removed."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. lead-billing consumer rewritten: prospect fetch + calculateLeadPrice (DEC-67) + debit_lead_credit RPC (atomic PostgreSQL function). AC2: insufficient_balance → EMAIL_NOTIFICATIONS. AC3: atomicity via Supabase RPC (E06S18 not yet merged — equivalent ACID via plpgsql SECURITY DEFINER). POST /api/leads/:id/flag (7-day window, restore_lead_credit RPC) + POST /api/leads/:id/confirm. LS checkout code removed. 118/118 vitest tests. PR#23 open → staging. ⚠️ Human action required: (1) Apply migration 20260223100001_lead_credit_rpc.sql to Supabase staging, (2) Merge PR#21 (E06S31) before PR#23."
 
   - id: E06S33
     epic: E06
