@@ -275,7 +275,7 @@ items:
     epic: E06
     title: "Analytics Engine — matching observability"
     priority: high
-    status: in_progress
+    status: done
     artefact: contexts/artefacts/stories/E06S26.story.md
     dependencies: [E06S18]
     notes: "DEC-65. Analytics Engine dataset matching-metrics. Fire-and-forget writeDataPoint(). Tracks latency, cache hits, pool size, scoring quality. No-op if binding missing. Human action: create dataset."
