@@ -188,10 +188,10 @@ items:
     epic: E06
     title: "Replace n8n webhooks with CF Workflows (booking.confirmed + booking.completed)"
     priority: high
-    status: in_progress
+    status: done
     artefact: contexts/artefacts/stories/E06S16.story.md
     dependencies: [E06S06]
-    notes: "DEC-59. Retirer les appels n8n webhook de email-notifications.ts (AC7, AC10 E06S06). Implémenter 2 CF Workflows : (1) BookingConfirmedWorkflow — notification enrichie expert avec contexte prospect ; (2) BookingCompletedWorkflow — step.sleep('7 days') → survey call experience prospect, step.sleep('38 days') → survey satisfaction projet. Retirer N8N_WEBHOOK_URL de Env interface. [[workflows]] top-level uniquement dans wrangler.toml (pas [[env.staging.workflows]] — n'existe pas). Isolation staging/prod via Worker scripts séparés. Sleep acceleration staging via secrets SURVEY_DELAY_7D_MS / SURVEY_DELAY_38D_MS (absents en prod → valeurs réelles). this.env accessible dans WorkflowEntrypoint."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. BookingConfirmedWorkflow + BookingCompletedWorkflow. step.sleep acceleration (SURVEY_DELAY_7D_MS / SURVEY_DELAY_38D_MS). signSurveyToken (30d JWT). N8N_WEBHOOK_URL removed. [[workflows]] top-level only. 82/82 vitest tests. PR#6 open. ⚠️ Human action required: (1) set staging secrets SURVEY_DELAY_7D_MS + SURVEY_DELAY_38D_MS, (2) create CF Workflows in dashboard before deploying to staging, (3) deploy to prod via tag v0.6.16. Unblocks E06S17."
 
   - id: E06S17
     epic: E06
