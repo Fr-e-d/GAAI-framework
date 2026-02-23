@@ -443,10 +443,13 @@ items:
     epic: E06
     title: "LS usage-based subscription + welcome credit + usage reporting cron (DEC-68)"
     priority: high
-    status: in_progress
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-24T00:00:00+01:00"
+    completed_at: "2026-02-24T00:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S33.story.md
     dependencies: [E06S31]
-    notes: "DEC-68. LS webhook (HMAC verified) for subscription lifecycle. 100€ welcome credit on activation. Hourly cron: auto-confirm leads past 7-day flag window + report usage to LS API. Founder action: create LS product + webhook + secret."
+    notes: "DONE 2026-02-24. QA PASS (1 remediation cycle). All 13 ACs met. POST /api/webhooks/lemonsqueezy (HMAC-SHA256, KV idempotency). subscription_created: UPDATE experts (ls_subscription_id, ls_subscription_status, ls_subscription_item_id) + 100€ welcome credit. subscription_updated: status mapping. subscription_payment_failed: past_due + email notification. Hourly cron: auto-confirm leads past FLAG_WINDOW_MS + LS usage-records reporting. DB migration: ls_subscription_item_id column. 23/23 vitest tests. PR#27 open → staging. ⚠️ Human action required: (1) wrangler secret put LEMON_SQUEEZY_WEBHOOK_SECRET --env staging/production, (2) Configure LS webhook (subscription_created/updated/payment_failed), (3) Create LS product with usage-based pricing (see SETUP.md), (4) deploy via tag."
 
   - id: E06S34
     epic: E06
@@ -456,6 +459,17 @@ items:
     artefact: contexts/artefacts/stories/E06S34.story.md
     dependencies: [E06S31]
     notes: "DEC-67/68. Adds 3 billing filters to matching engine (pre-scoring): balance >= leadPrice, max_lead_price deal-breaker, spending_limit monthly cap. Fire-and-forget notification on exclusion. Applies to both POST /api/matches/compute and POST /api/prospects/submit."
+
+  # ── EPIC E06 (suite): Monorepo Restructure ──────────────────────────────
+
+  - id: E06S35
+    epic: E06
+    title: "Monorepo restructure — move Core API into workers/api/"
+    priority: medium
+    status: blocked
+    artefact: contexts/artefacts/stories/E06S35.story.md
+    dependencies: []
+    notes: "Structural refactoring. Move src/ + wrangler.toml + package.json + tsconfig.json + d1/ into workers/api/. Root becomes npm workspaces orchestrator. Update GH Actions. Preserve git history via git mv. Best delivered when staging is clean (no pending merges on src/).Recommandation : à délivrer quand staging est propre — ce refactoring conflictera avec tout PR qui touche src/ ou les configs racine."
 
   # ── EPIC E03: Prospect Gets Qualified and Matched to the Right Expert ────
   # Layer 3.2 — satellite sites. Depends on E02 + E06.
