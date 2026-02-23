@@ -257,7 +257,7 @@ items:
     epic: E06
     title: "Service Bindings — Worker split"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S24.story.md
     dependencies: [E06S22, E06S23, E06S18]
     notes: "Phase 4. callibrate-matching Worker with Service Binding. Core = gateway (auth, routing). Matching = compute (Vectorize, D1, scoring). Zero-network-hop RPC. Independent deployment."
