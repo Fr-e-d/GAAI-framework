@@ -2,7 +2,9 @@ import { Env } from '../types/env';
 import { ScoreComputationMessage } from '../types/queues';
 import { isAlreadyProcessed, markProcessed } from '../lib/idempotency';
 import { handleMessageFailure } from '../lib/retryQueue';
-import { createServiceClient, TypedSupabaseClient } from '../lib/supabase';
+import { createSql } from '../lib/db';
+import type { SqlClient } from '../lib/db';
+import type { ExpertRow, MatchRow, BookingRow, CallExperienceSurveyRow, ProjectSatisfactionSurveyRow, LeadEvaluationRow } from '../types/db';
 
 export async function consumeScoreComputation(
   batch: MessageBatch<ScoreComputationMessage>,
@@ -40,19 +42,13 @@ export async function consumeScoreComputation(
 }
 
 async function computeAndSaveCompositeScore(expertId: string, env: Env): Promise<void> {
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
   // Fetch all match IDs for this expert (shared by call_exp, satisfaction, recency)
-  const { data: matchRows, error: matchError } = await supabase
-    .from('matches')
-    .select('id')
-    .eq('expert_id', expertId);
+  const matchRows = await sql<Pick<MatchRow, 'id'>[]>`
+    SELECT id FROM matches WHERE expert_id = ${expertId}`;
 
-  if (matchError) {
-    throw new Error(`Failed to fetch matches for expert ${expertId}: ${matchError.message}`);
-  }
-
-  const matchIds = (matchRows ?? []).map((m) => m.id);
+  const matchIds = matchRows.map((m) => m.id);
 
   // If no matches yet, expert score remains 0 (initialized at registration)
   // Only compute when there is at least one match to avoid meaningless score writes
@@ -61,26 +57,19 @@ async function computeAndSaveCompositeScore(expertId: string, env: Env): Promise
   }
 
   // Fetch booking IDs for those matches (shared by call_exp and satisfaction)
-  let bookingIds: string[] = [];
-  const { data: bookingRows, error: bookingError } = await supabase
-    .from('bookings')
-    .select('id')
-    .in('match_id', matchIds);
+  const bookingRows = await sql<Pick<BookingRow, 'id'>[]>`
+    SELECT id FROM bookings WHERE match_id = ANY(${matchIds})`;
 
-  if (bookingError) {
-    throw new Error(`Failed to fetch bookings for expert ${expertId}: ${bookingError.message}`);
-  }
-
-  bookingIds = (bookingRows ?? []).map((b) => b.id);
+  const bookingIds = bookingRows.map((b) => b.id);
 
   // Compute all 5 components in parallel
   const [callExperienceAvg, clientSatisfactionAvg, hireRate, recencyScore, trustScore] =
     await Promise.all([
-      computeCallExperienceAvg(bookingIds, supabase),
-      computeClientSatisfactionAvg(bookingIds, supabase),
-      computeHireRate(expertId, supabase),
-      computeRecencyScore(matchIds, supabase),
-      computeTrustScore(expertId, supabase),
+      computeCallExperienceAvg(bookingIds, sql),
+      computeClientSatisfactionAvg(bookingIds, sql),
+      computeHireRate(expertId, sql),
+      computeRecencyScore(matchIds, sql),
+      computeTrustScore(expertId, sql),
     ]);
 
   // Composite formula (AC2): weights sum to 1.0
@@ -94,36 +83,20 @@ async function computeAndSaveCompositeScore(expertId: string, env: Env): Promise
   ) / 100;
 
   // Write result atomically (AC2)
-  const { error: updateError } = await supabase
-    .from('experts')
-    .update({
-      composite_score: compositeScore,
-      score_updated_at: new Date().toISOString(),
-    })
-    .eq('id', expertId);
-
-  if (updateError) {
-    throw new Error(`Failed to write composite_score for expert ${expertId}: ${updateError.message}`);
-  }
+  await sql`UPDATE experts SET composite_score = ${compositeScore}, score_updated_at = ${new Date().toISOString()} WHERE id = ${expertId}`;
 }
 
 // AC3: call_experience_avg — average of call_experience_surveys.score × 20 (1–5 → 0–100)
 async function computeCallExperienceAvg(
   bookingIds: string[],
-  supabase: TypedSupabaseClient
+  sql: SqlClient
 ): Promise<number> {
   if (bookingIds.length === 0) return 0;
 
-  const { data, error } = await supabase
-    .from('call_experience_surveys')
-    .select('score')
-    .in('booking_id', bookingIds);
+  const data = await sql<Pick<CallExperienceSurveyRow, 'score'>[]>`
+    SELECT score FROM call_experience_surveys WHERE booking_id = ANY(${bookingIds})`;
 
-  if (error) {
-    throw new Error(`computeCallExperienceAvg: ${error.message}`);
-  }
-
-  const scores = (data ?? [])
+  const scores = data
     .filter((r) => r.score !== null)
     .map((r) => r.score! * 20);
 
@@ -133,20 +106,14 @@ async function computeCallExperienceAvg(
 // AC4: client_satisfaction_avg — average of project_satisfaction_surveys.score × 10 (1–10 → 0–100)
 async function computeClientSatisfactionAvg(
   bookingIds: string[],
-  supabase: TypedSupabaseClient
+  sql: SqlClient
 ): Promise<number> {
   if (bookingIds.length === 0) return 0;
 
-  const { data, error } = await supabase
-    .from('project_satisfaction_surveys')
-    .select('score')
-    .in('booking_id', bookingIds);
+  const data = await sql<Pick<ProjectSatisfactionSurveyRow, 'score'>[]>`
+    SELECT score FROM project_satisfaction_surveys WHERE booking_id = ANY(${bookingIds})`;
 
-  if (error) {
-    throw new Error(`computeClientSatisfactionAvg: ${error.message}`);
-  }
-
-  const scores = (data ?? [])
+  const scores = data
     .filter((r) => r.score !== null)
     .map((r) => r.score! * 10);
 
@@ -154,17 +121,11 @@ async function computeClientSatisfactionAvg(
 }
 
 // AC5: hire_rate — (conversion_declared = true count) / total × 100
-async function computeHireRate(expertId: string, supabase: TypedSupabaseClient): Promise<number> {
-  const { data, error } = await supabase
-    .from('lead_evaluations')
-    .select('conversion_declared')
-    .eq('expert_id', expertId);
+async function computeHireRate(expertId: string, sql: SqlClient): Promise<number> {
+  const data = await sql<Pick<LeadEvaluationRow, 'conversion_declared'>[]>`
+    SELECT conversion_declared FROM lead_evaluations WHERE expert_id = ${expertId}`;
 
-  if (error) {
-    throw new Error(`computeHireRate: ${error.message}`);
-  }
-
-  if (!data || data.length === 0) return 0;
+  if (data.length === 0) return 0;
 
   const converted = data.filter((r) => r.conversion_declared === true).length;
   return (converted / data.length) * 100;
@@ -173,26 +134,18 @@ async function computeHireRate(expertId: string, supabase: TypedSupabaseClient):
 // AC6: recency_score — 100 if last booking < 30 days, linear decrease to 0 at 180 days
 async function computeRecencyScore(
   matchIds: string[],
-  supabase: TypedSupabaseClient
+  sql: SqlClient
 ): Promise<number> {
   if (matchIds.length === 0) return 0;
 
-  const { data, error } = await supabase
-    .from('bookings')
-    .select('scheduled_at')
-    .in('match_id', matchIds)
-    .not('scheduled_at', 'is', null)
-    .order('scheduled_at', { ascending: false })
-    .limit(1);
+  const [latest] = await sql<Pick<BookingRow, 'scheduled_at'>[]>`
+    SELECT scheduled_at FROM bookings WHERE match_id = ANY(${matchIds})
+    AND scheduled_at IS NOT NULL ORDER BY scheduled_at DESC LIMIT 1`;
 
-  if (error) {
-    throw new Error(`computeRecencyScore: ${error.message}`);
-  }
-
-  if (!data || data.length === 0 || !data[0]?.scheduled_at) return 0;
+  if (!latest?.scheduled_at) return 0;
 
   const daysSince =
-    (Date.now() - new Date(data[0].scheduled_at).getTime()) / (1000 * 60 * 60 * 24);
+    (Date.now() - new Date(latest.scheduled_at).getTime()) / (1000 * 60 * 60 * 24);
 
   if (daysSince < 30) return 100;
   if (daysSince >= 180) return 0;
@@ -203,16 +156,11 @@ async function computeRecencyScore(
 
 // AC7: trust_score — static profile completeness (5 criteria × 20pts each)
 // Criteria use only MVP-collected data (post-delivery correction 2026-02-22)
-async function computeTrustScore(expertId: string, supabase: TypedSupabaseClient): Promise<number> {
-  const { data, error } = await supabase
-    .from('experts')
-    .select('verified_at, bio, headline, gcal_connected, profile')
-    .eq('id', expertId)
-    .single();
+async function computeTrustScore(expertId: string, sql: SqlClient): Promise<number> {
+  const [data] = await sql<Pick<ExpertRow, 'verified_at' | 'bio' | 'headline' | 'gcal_connected' | 'profile'>[]>`
+    SELECT verified_at, bio, headline, gcal_connected, profile FROM experts WHERE id = ${expertId}`;
 
-  if (error) {
-    throw new Error(`computeTrustScore: ${error.message}`);
-  }
+  if (!data) throw new Error(`computeTrustScore: expert ${expertId} not found`);
 
   let score = 0;
   const p = data.profile as Record<string, unknown> | null;
@@ -221,13 +169,13 @@ async function computeTrustScore(expertId: string, supabase: TypedSupabaseClient
   if (data.verified_at !== null) score += 20;
 
   // Criterion 2: bio non-empty (20pts) — collected via E06S03 register form
-  if (data.bio !== null && data.bio.trim().length > 0) score += 20;
+  if (data.bio !== null && (data.bio as string).trim().length > 0) score += 20;
 
   // Criterion 3: Google Calendar connected (20pts) — collected via E06S10 OAuth
   if (data.gcal_connected === true) score += 20;
 
   // Criterion 4: headline non-empty (20pts) — collected via E06S03 register form
-  if (data.headline !== null && data.headline.trim().length > 0) score += 20;
+  if (data.headline !== null && (data.headline as string).trim().length > 0) score += 20;
 
   // Criterion 5: ≥3 skills in profile JSONB (20pts) — collected via E06S03 PATCH profile
   const skills = p?.skills;
