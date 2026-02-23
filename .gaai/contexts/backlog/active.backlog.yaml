@@ -210,7 +210,7 @@ items:
     epic: E06
     title: "Hyperdrive + postgres.js + Smart Placement + bug fixes (foundation)"
     priority: high
-    status: in_progress
+    status: failed
     artefact: contexts/artefacts/stories/E06S18.story.md
     dependencies: []
     notes: "DEC-66. Foundation story — all scalable matching stories depend on this. Install postgres v3.4.4+, Hyperdrive binding, Smart Placement, migrate ALL 48 DB queries from Supabase JS to postgres.js tagged templates. Fix B1 (prospects.ts top-20 only) + B2 (matches.ts use loadExpertPool). Keep Supabase JS for auth only. Human action: create Hyperdrive config + provide ID."
