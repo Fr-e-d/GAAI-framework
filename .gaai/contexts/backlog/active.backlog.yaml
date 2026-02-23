@@ -266,7 +266,7 @@ items:
     epic: E06
     title: "Durable Objects — expert pool write coordinator"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S25.story.md
     dependencies: [E06S23, E06S21]
     notes: "Phase 4. ExpertPoolDO singleton — batches D1 + Vectorize writes with 5s alarm. Async via waitUntil. Cron sync (E06S23) as safety net. ~$5/month."
