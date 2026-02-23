@@ -1,7 +1,8 @@
 import { Env } from '../types/env';
-import { createServiceClient } from './supabase';
+import { createSql } from './db';
 import { decryptToken } from './gcalCrypto';
 import { refreshGcalToken } from './gcalRefresh';
+import type { ExpertRow } from '../types/db';
 
 export class GcalApiError extends Error {
   constructor(public readonly gcalStatus: number, public readonly gcalMessage: string) {
@@ -16,14 +17,11 @@ function sleep(ms: number): Promise<void> {
 
 // Gets the current access token — decrypts stored token, refreshes if expired
 export async function getAccessToken(expertId: string, env: Env): Promise<string> {
-  const supabase = createServiceClient(env);
-  const { data, error } = await supabase
-    .from('experts')
-    .select('gcal_access_token, gcal_token_expiry_at')
-    .eq('id', expertId)
-    .single();
+  const sql = createSql(env);
+  const [data] = await sql<Pick<ExpertRow, 'gcal_access_token' | 'gcal_token_expiry_at'>[]>`
+    SELECT gcal_access_token, gcal_token_expiry_at FROM experts WHERE id = ${expertId}`;
 
-  if (error || !data?.gcal_access_token) {
+  if (!data?.gcal_access_token) {
     throw new GcalApiError(0, 'Expert has no stored access token');
   }
 

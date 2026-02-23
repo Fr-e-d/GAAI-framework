@@ -1,4 +1,7 @@
 export interface Env {
+  // Hyperdrive binding (AC2)
+  HYPERDRIVE: Hyperdrive;
+
   // Supabase secrets (bound via wrangler secret put)
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
