@@ -248,7 +248,7 @@ items:
     epic: E06
     title: "D1 edge serving + Cache API L1 + Cron sync (absorbs E06S19)"
     priority: high
-    status: in_progress
+    status: done
     artefact: contexts/artefacts/stories/E06S23.story.md
     dependencies: [E06S18]
     notes: "DEC-61. D1 expert-pool-edge + Cache API L1 (60s TTL). Read chain: Cache API → D1 → Hyperdrive fallback. KV eliminated from expert pool read path. Cron */5 sync via Hyperdrive. Absorbs former E06S19 (Cache API L1). Human action: create D1 database."
