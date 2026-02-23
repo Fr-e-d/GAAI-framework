@@ -50,7 +50,8 @@
       "Read(/etc/shadow)",
       "Read(/etc/passwd)",
       "Edit(.claude/settings.json)",
-      "Edit(.claude/settings.local.json)"
+      "Edit(.claude/settings.local.json)",
+      "Edit(.githooks/pre-push)"
     ]
   }
 }

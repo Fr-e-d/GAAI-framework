@@ -236,6 +236,22 @@ Escalation target:
 
 ---
 
+## Cost & Duration Tracking
+
+Every delivery session must update the following fields on the Story's backlog entry:
+
+| Field | When to set | Format |
+|-------|-------------|--------|
+| `started_at` | When marking `in_progress` (first session only) | ISO 8601 datetime with timezone |
+| `completed_at` | When marking `done` (QA PASS) | ISO 8601 datetime with timezone |
+| `cost_usd` | Post-session (cumulative across sessions) | Number — Claude Code `costUSD` value |
+
+**`cost_usd` source:** The Claude Code CLI `/cost` command shows cumulative session cost at any time. The value displayed at session end (`costUSD` = `total_cost_usd`) is the authoritative total for that session. The Delivery Agent cannot capture it automatically — it must be entered post-session by the human operator (or via a post-session hook). If a Story spans multiple sessions, sum all session costs.
+
+These fields enable tracking total AI delivery time and API-equivalent cost vs Max subscription pricing.
+
+---
+
 ## Final Principle
 
 > The Delivery Orchestrator does not build. It enables building.
