@@ -44,6 +44,9 @@ export async function consumeEmailNotifications(
         case 'booking.reminder_expert':
           // TODO(E06S16+): implement notification — stub acks for now
           break;
+        case 'expert.billing.insufficient_balance':
+          // TODO(E06S33+): implement insufficient balance email — stub acks for now
+          break;
         default: {
           const exhaustiveCheck: never = body;
           console.warn('email-notifications: unknown message type', (exhaustiveCheck as EmailNotificationMessage & { type: string }).type);
