@@ -3,6 +3,7 @@ import { AuthUser } from '../../middleware/auth';
 import { createSql } from '../../lib/db';
 import { encryptToken, decryptToken, GcalDecryptionError } from '../../lib/gcalCrypto';
 import type { ExpertRow } from '../../types/db';
+import { captureEvent } from '../../lib/posthog';
 
 function forbidden(): Response {
   return new Response(JSON.stringify({ error: 'Forbidden' }), {
@@ -66,7 +67,8 @@ export async function handleGcalAuthUrl(
 
 export async function handleGcalCallback(
   request: Request,
-  env: Env
+  env: Env,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
@@ -150,6 +152,14 @@ export async function handleGcalCallback(
     return redirect('/onboarding/gcal-error?reason=db_error');
   }
 
+  if (encryptedRefreshToken !== undefined) {
+    ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+      distinctId: `expert:${expertId}`,
+      event: 'expert.gcal_connected',
+      properties: { expert_id: expertId },
+    }));
+  }
+
   return redirect('/onboarding/gcal-connected');
 }
 
@@ -183,7 +193,8 @@ export async function handleGcalDisconnect(
   _request: Request,
   env: Env,
   user: AuthUser,
-  expertId: string
+  expertId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   if (user.id !== expertId) return forbidden();
 
@@ -214,6 +225,12 @@ export async function handleGcalDisconnect(
   } catch {
     return json({ error: 'Internal Server Error' }, 500);
   }
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${expertId}`,
+    event: 'expert.gcal_disconnected',
+    properties: { expert_id: expertId },
+  }));
 
   return json({ disconnected: true });
 }

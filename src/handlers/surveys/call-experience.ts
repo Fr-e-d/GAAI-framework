@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { Env } from '../../types/env';
 import { createServiceClient } from '../../lib/supabase';
 import { verifySurveyToken } from '../../lib/jwt';
+import { captureEvent } from '../../lib/posthog';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -24,6 +25,7 @@ const CallExperienceSchema = z.object({
 export async function handleCallExperienceSurvey(
   request: Request,
   env: Env,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   let body: unknown;
   try {
@@ -71,6 +73,12 @@ export async function handleCallExperienceSurvey(
 
   // Dispatch to SCORE_COMPUTATION queue (AC7)
   await env.SCORE_COMPUTATION.send({ type: 'feedback.call_experience', expert_id: expertId });
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospect_id}`,
+    event: 'survey.call_experience_submitted',
+    properties: { score, booking_id },
+  }));
 
   return json({ id: survey.id }, 201);
 }
