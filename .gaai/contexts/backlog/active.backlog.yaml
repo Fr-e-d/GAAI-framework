@@ -360,7 +360,7 @@ items:
     status: refined
     artefact: contexts/artefacts/stories/E07S06.story.md
     dependencies: [E07S05, E06S27]
-    notes: "Founder-executed. Crée le compte PostHog EU Cloud, configure POSTHOG_API_KEY correcte, run le script posthog-setup-dashboards.ts, connecte le MCP server dans Claude Code, configure ph.callibrate.io CNAME. Bloque l'observabilité analytics. Peut tourner en parallèle de E06S28."
+    notes: "Founder-executed (partiellement fait). AC1-AC3 DONE (compte PostHog EU créé, POSTHOG_API_KEY=phc_9MGVc1dDaNAugnSHJ692t5YuWFNy2WQ4kIHNvlEsXkr configurée). Reste founder: AC4 Personal API Key (phx_) + AC5 export ~/.zshrc + AC7 MCP restart + AC8 ph.callibrate.io CNAME. AC6 (dashboard script) automatisable si phx_ + project_id fournis. AC9-AC10 (smoke tests) automatisables. Bloque l'observabilité analytics."
 
   # ── EPIC E06 (suite): Staging readiness — Provisionnement & Smoke Test ────
 
