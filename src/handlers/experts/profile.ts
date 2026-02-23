@@ -3,6 +3,7 @@ import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
 import { createServiceClient } from '../../lib/supabase';
 import { Json } from '../../types/database';
+import { upsertExpertEmbedding, ExpertProfile } from '../../lib/vectorize';
 
 const VALID_AVAILABILITY = ['available', 'limited', 'unavailable'] as const;
 
@@ -68,7 +69,8 @@ export async function handlePatchProfile(
   request: Request,
   env: Env,
   user: AuthUser,
-  expertId: string
+  expertId: string,
+  ctx: ExecutionContext
 ): Promise<Response> {
   // AC7 / AC8: Own profile only
   if (user.id !== expertId) {
@@ -134,6 +136,20 @@ export async function handlePatchProfile(
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  // AC4, AC7: Fire-and-forget re-embedding — failure must NOT block profile update
+  const updatedExpert = data[0] as {
+    profile?: ExpertProfile;
+    rate_min?: number | null;
+    rate_max?: number | null;
+    availability?: string | null;
+  };
+  upsertExpertEmbedding(env, ctx, expertId, {
+    profile: (updatedExpert.profile as ExpertProfile) ?? {},
+    rate_min: updatedExpert.rate_min ?? null,
+    rate_max: updatedExpert.rate_max ?? null,
+    availability: updatedExpert.availability ?? null,
+  });
 
   return new Response(JSON.stringify(data[0]), {
     status: 200,
