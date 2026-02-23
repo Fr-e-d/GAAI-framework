@@ -666,6 +666,7 @@ echo "================================================================"
 echo ""
 
 cd "$PROJECT_DIR"
+unset CLAUDECODE 2>/dev/null || true
 
 if command -v timeout &>/dev/null; then
   timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "/gaai-deliver $story_id" 2>&1 | tee -a "$delivery_log"
@@ -738,6 +739,7 @@ echo "================================================================"
 printf '\033[0m\n'
 
 cd "$PROJECT_DIR"
+unset CLAUDECODE 2>/dev/null || true
 
 if command -v gtimeout &>/dev/null; then
   gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "/gaai-deliver $story_id" 2>&1 | tee -a "$delivery_log"
