@@ -197,10 +197,10 @@ items:
     epic: E06
     title: "Survey submission endpoints (feedback loop activation)"
     priority: high
-    status: in_progress
+    status: done
     artefact: contexts/artefacts/stories/E06S17.story.md
     dependencies: [E06S09, E06S16]
-    notes: "3 endpoints: POST /api/surveys/call-experience (token-gated), POST /api/surveys/project-satisfaction (token-gated), POST /api/evaluations/lead (JWT expert auth). Dispatches to SCORE_COMPUTATION queue. Completes the feedback loop chain: E06S16 sends emails → E06S17 receives submissions → E06S09 recomputes composite_score."
+    notes: "DONE 2026-02-23. QA PASS (107/107 vitest, tsc clean). PR #7 open → staging. ⚠️ Pre-deploy: E06S16 must be updated to use env.SURVEY_TOKEN_SECRET (currently uses PROSPECT_TOKEN_SECRET). Both PRs must be merged together."
 
   # ── Scalable Matching Engine — Phase 1 (Foundation) ──────────────────────────
   # DEC-60 (revised): Hyperdrive + postgres.js + Vectorize + D1 + Analytics
