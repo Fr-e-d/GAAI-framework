@@ -380,7 +380,7 @@ items:
     epic: E06
     title: "Staging — Secrets manquants (Core + Satellite + Turnstile)"
     priority: critical
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S28.story.md
     dependencies: [E06S27]
     notes: "Agent-deliverable via wrangler CLI. AC1 (SURVEY_TOKEN_SECRET) + AC2 (TURNSTILE_SECRET_KEY) déjà configurés sur core staging. Reste: AC3 delay vars dans wrangler.toml + AC4 vérif E06S16 token + AC5-AC7 secrets satellite (SUPABASE_URL via Supabase MCP, SUPABASE_ANON_KEY via Supabase MCP, POSTHOG_API_KEY=phc_9MGVc1dDaNAugnSHJ692t5YuWFNy2WQ4kIHNvlEsXkr) + AC8 Turnstile site key=0x4AAAAAAChD0LT5UgifFL-I (var satellite wrangler.toml) + AC9-AC10 smoke tests. Bloque E06S29."
