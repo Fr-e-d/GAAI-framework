@@ -5,9 +5,12 @@ import { createSql } from '../../lib/db';
 import { checkRateLimit } from '../../lib/rateLimit';
 <<<<<<< HEAD
 import type { ExpertRow } from '../../types/db';
+<<<<<<< HEAD
 =======
 import { upsertExpertEmbedding } from '../../lib/vectorize';
 >>>>>>> 902c0cd (feat(E06S21): Vectorize infrastructure + embedding pipeline)
+=======
+>>>>>>> 25fd870 (feat(E06S24): callibrate-matching Worker + Service Binding split)
 
 const RegisterSchema = z.object({
   display_name: z.string().min(1, 'display_name is required').max(100),
@@ -97,13 +100,22 @@ export async function handleRegister(
     email: user.email ?? '',
   });
 
-  // AC3, AC7: Fire-and-forget embedding — failure must NOT block registration
-  upsertExpertEmbedding(env, ctx, user.id, {
-    profile: {},
-    rate_min: rate_min ?? null,
-    rate_max: rate_max ?? null,
-    availability: null,
-  });
+  // AC4 (E06S24): Fire-and-forget embedding via MATCHING_SERVICE — failure must NOT block registration
+  if (env.MATCHING_SERVICE) {
+    ctx.waitUntil(
+      env.MATCHING_SERVICE.fetch(new Request('https://matching/embed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expert_id: user.id,
+          profile: {},
+          rate_min: rate_min ?? null,
+          rate_max: rate_max ?? null,
+          availability: null,
+        }),
+      })).catch((err) => console.error('register: MATCHING_SERVICE embed failed', err))
+    );
+  }
 
   // Return 201
   return new Response(

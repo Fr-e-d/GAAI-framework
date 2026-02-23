@@ -4,11 +4,14 @@ import { AuthUser } from '../../middleware/auth';
 <<<<<<< HEAD
 import { createSql } from '../../lib/db';
 import type { ExpertRow } from '../../types/db';
+<<<<<<< HEAD
 =======
 import { createServiceClient } from '../../lib/supabase';
 import { Json } from '../../types/database';
 import { upsertExpertEmbedding, ExpertProfile } from '../../lib/vectorize';
 >>>>>>> 902c0cd (feat(E06S21): Vectorize infrastructure + embedding pipeline)
+=======
+>>>>>>> 25fd870 (feat(E06S24): callibrate-matching Worker + Service Binding split)
 
 const VALID_AVAILABILITY = ['available', 'limited', 'unavailable'] as const;
 
@@ -123,6 +126,7 @@ export async function handlePatchProfile(
   }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   return new Response(JSON.stringify(rows[0]), {
 =======
   // AC4, AC7: Fire-and-forget re-embedding — failure must NOT block profile update
@@ -138,6 +142,25 @@ export async function handlePatchProfile(
     rate_max: updatedExpert.rate_max ?? null,
     availability: updatedExpert.availability ?? null,
   });
+=======
+  // AC4 (E06S24): Fire-and-forget re-embedding via MATCHING_SERVICE — failure must NOT block profile update
+  const updatedExpert = rows[0] as ExpertRow;
+  if (env.MATCHING_SERVICE) {
+    ctx.waitUntil(
+      env.MATCHING_SERVICE.fetch(new Request('https://matching/embed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expert_id: expertId,
+          profile: updatedExpert.profile ?? {},
+          rate_min: updatedExpert.rate_min ?? null,
+          rate_max: updatedExpert.rate_max ?? null,
+          availability: updatedExpert.availability ?? null,
+        }),
+      })).catch((err) => console.error('profile: MATCHING_SERVICE embed failed', err))
+    );
+  }
+>>>>>>> 25fd870 (feat(E06S24): callibrate-matching Worker + Service Binding split)
 
   return new Response(JSON.stringify(data[0]), {
 >>>>>>> 902c0cd (feat(E06S21): Vectorize infrastructure + embedding pipeline)

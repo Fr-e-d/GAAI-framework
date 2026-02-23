@@ -14,6 +14,7 @@ localConnectionString = "postgresql://postgres:postgres@db.PLACEHOLDER.supabase.
 # ── Default (dev) environment — local only, never deployed ───────────────────
 # Binds to staging remote resources (queues, KV, Supabase).
 # Secrets loaded from .dev.vars (gitignored).
+# Note: MATCHING_SERVICE not bound in dev — Core falls back to local deterministic scoring (AC6).
 
 [[queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-staging"
@@ -85,7 +86,6 @@ binding = "AI"
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "expert-profiles"
-
 # Top-level (used by wrangler dev)
 [triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
@@ -169,6 +169,11 @@ binding = "AI"
 binding = "VECTORIZE"
 index_name = "expert-profiles"
 
+# AC2: Service Binding to callibrate-matching-staging (AC4: zero network hop)
+[[env.staging.services]]
+binding = "MATCHING_SERVICE"
+service = "callibrate-matching-staging"
+
 [env.staging.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
 
@@ -249,6 +254,11 @@ binding = "AI"
 [[env.production.vectorize]]
 binding = "VECTORIZE"
 index_name = "expert-profiles"
+
+# AC2: Service Binding to callibrate-matching-prod (AC4: zero network hop)
+[[env.production.services]]
+binding = "MATCHING_SERVICE"
+service = "callibrate-matching-prod"
 
 [env.production.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]

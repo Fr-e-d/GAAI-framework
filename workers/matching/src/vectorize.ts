@@ -1,13 +1,16 @@
-import type { Env } from '../types/env';
+// Vectorize embedding helpers (ported from core src/lib/vectorize.ts)
+// Adapted to use MatchingEnv instead of core Env.
 
-export interface ExpertProfile {
+import type { MatchingEnv } from './env';
+
+export interface ExpertEmbeddingProfile {
   skills?: string[];
   industries?: string[];
   project_types?: string[];
   languages?: string[];
 }
 
-export function buildEmbeddingText(profile: ExpertProfile): string {
+export function buildEmbeddingText(profile: ExpertEmbeddingProfile): string {
   const skills = (profile.skills ?? []).join(', ');
   const industries = (profile.industries ?? []).join(', ');
   const projectTypes = (profile.project_types ?? []).join(', ');
@@ -15,56 +18,6 @@ export function buildEmbeddingText(profile: ExpertProfile): string {
   return `Skills: ${skills}. Industries: ${industries}. Project types: ${projectTypes}. Languages: ${languages}.`;
 }
 
-export function upsertExpertEmbedding(
-  env: Env,
-  ctx: ExecutionContext,
-  expertId: string,
-  profileData: {
-    profile: ExpertProfile;
-    rate_min?: number | null;
-    rate_max?: number | null;
-    availability?: string | null;
-  }
-): void {
-  ctx.waitUntil(
-    (async () => {
-      try {
-        const text = buildEmbeddingText(profileData.profile);
-
-        const result = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
-          text: [text],
-        }) as { data: number[][] };
-
-        const vector = result.data[0];
-        if (!vector || vector.length === 0) {
-          console.warn('vectorize: empty embedding returned for expert', expertId);
-          return;
-        }
-
-        const metadata: Record<string, string | number | boolean> = {
-          expert_id: expertId,
-        };
-        if (profileData.rate_min != null) metadata.rate_min = profileData.rate_min;
-        if (profileData.rate_max != null) metadata.rate_max = profileData.rate_max;
-        if (profileData.availability != null) metadata.availability = profileData.availability;
-
-        await env.VECTORIZE.upsert([
-          {
-            id: expertId,
-            values: vector,
-            metadata,
-          },
-        ]);
-      } catch (err) {
-        console.error('vectorize: upsert failed for expert', expertId, err);
-      }
-    })()
-  );
-}
-
-// ── Prospect-side semantic query helpers (E06S22) ──────────────────────────
-
-// AC1: build embedding text from prospect requirements
 export function buildProspectEmbeddingText(requirements: {
   skills_needed?: string[];
   industry?: string;
@@ -76,10 +29,49 @@ export function buildProspectEmbeddingText(requirements: {
   return `Skills: ${skills}. Industries: ${industry}. Languages: ${languages}.`;
 }
 
-// AC1: query Vectorize index, returns Map<expert_id, cosine_similarity>
-// topK should be Math.max(pool.length, 100) to satisfy AC2 (no filtering loss when pool < 100)
-export async function queryVectorizeForProspect(
-  env: Env,
+// Fire-and-forget: generate embedding + upsert into Vectorize index
+export function upsertExpertEmbedding(
+  env: MatchingEnv,
+  ctx: ExecutionContext,
+  expertId: string,
+  profileData: {
+    profile: ExpertEmbeddingProfile;
+    rate_min?: number | null;
+    rate_max?: number | null;
+    availability?: string | null;
+  }
+): void {
+  ctx.waitUntil(
+    (async () => {
+      try {
+        const text = buildEmbeddingText(profileData.profile);
+        const result = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
+          text: [text],
+        }) as { data: number[][] };
+
+        const vector = result.data[0];
+        if (!vector || vector.length === 0) {
+          console.warn('vectorize: empty embedding returned for expert', expertId);
+          return;
+        }
+
+        const metadata: Record<string, string | number | boolean> = { expert_id: expertId };
+        if (profileData.rate_min != null) metadata.rate_min = profileData.rate_min;
+        if (profileData.rate_max != null) metadata.rate_max = profileData.rate_max;
+        if (profileData.availability != null) metadata.availability = profileData.availability;
+
+        await env.VECTORIZE.upsert([{ id: expertId, values: vector, metadata }]);
+      } catch (err) {
+        console.error('vectorize: upsert failed for expert', expertId, err);
+      }
+    })()
+  );
+}
+
+// Query Vectorize for prospect semantic pre-filter
+// Returns Map<expert_id, cosine_similarity>
+export async function queryVectorize(
+  env: MatchingEnv,
   vector: number[],
   topK: number,
 ): Promise<Map<string, number>> {

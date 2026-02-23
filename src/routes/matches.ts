@@ -40,7 +40,6 @@ function deriveQualityTier(compositeScore: number | null): QualityTier {
 // AC10 (B2 fix): uses loadExpertPool(env) instead of direct DB query for experts
 
 export async function handleMatchCompute(request: Request, env: Env): Promise<Response> {
-  const startTime = Date.now();
   let body: { prospect_id?: unknown; satellite_id?: unknown };
   try {
     body = await request.json();
@@ -54,6 +53,20 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
     return errorResponse('prospect_id is required', 422, { prospect_id: 'must be a non-empty string' });
   }
 
+  // AC4 (E06S24): Delegate to callibrate-matching via Service Binding (zero network hop)
+  // AC6: Fallback to local deterministic scoring when MATCHING_SERVICE not bound
+  if (env.MATCHING_SERVICE) {
+    return env.MATCHING_SERVICE.fetch(
+      new Request('https://matching/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prospect_id, satellite_id }),
+      })
+    );
+  }
+
+  // AC6 Fallback: local scoring without Vectorize (MATCHING_SERVICE not available in dev/test)
+  const startTime = Date.now();
   const sql = createSql(env);
 
   // Load prospect requirements
