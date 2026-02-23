@@ -161,7 +161,7 @@ items:
     epic: E06
     title: "satellite_configs schema extension — brand, content & theme columns"
     priority: high
-    status: done
+    status: refined
     artefact: contexts/artefacts/stories/E06S13.story.md
     dependencies: [E06S02]
     notes: "DEC-53. Pure DB migration. Adds: theme JSONB (design tokens), brand JSONB, content JSONB (meta/copy — unique per satellite), structured_data JSONB (JSON-LD), active BOOLEAN DEFAULT false, updated_at. Updates 'default' seed row. Regenerates TypeScript types. Unblocks E06S14."
