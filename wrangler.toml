@@ -77,6 +77,27 @@ binding = "EXPERT_DB"
 database_name = "expert-pool-edge"
 database_id = "PLACEHOLDER_D1_DATABASE_ID"
 
+# Workers AI binding (E06S21)
+[ai]
+binding = "AI"
+
+# Vectorize index binding (E06S21)
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+# Durable Object — ExpertPoolDO write coordinator (E06S25)
+# AC4: singleton via idFromName('expert-pool-coordinator')
+# Human action required: class migration auto-applied on first deploy
+[[durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
+
+# DO migration tag (required for new classes)
+[[migrations]]
+tag = "v1"
+new_classes = ["ExpertPoolDO"]
+
 # Top-level (used by wrangler dev)
 [triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
@@ -151,6 +172,20 @@ binding = "EXPERT_DB"
 database_name = "expert-pool-edge"
 database_id = "PLACEHOLDER_D1_DATABASE_ID"
 
+# Workers AI binding (E06S21)
+[env.staging.ai]
+binding = "AI"
+
+# Vectorize index binding (E06S21)
+[[env.staging.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+# Durable Object binding (E06S25)
+[[env.staging.durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
+
 [env.staging.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
 
@@ -222,6 +257,20 @@ dataset = "matching-metrics"
 binding = "EXPERT_DB"
 database_name = "expert-pool-edge"
 database_id = "PLACEHOLDER_D1_DATABASE_ID"
+
+# Workers AI binding (E06S21)
+[env.production.ai]
+binding = "AI"
+
+# Vectorize index binding (E06S21)
+[[env.production.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+# Durable Object binding (E06S25)
+[[env.production.durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
 
 [env.production.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
