@@ -392,10 +392,13 @@ items:
     epic: E06
     title: "Staging — Smoke test end-to-end"
     priority: critical
-    status: in_progress
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-24T00:00:00+01:00"
+    completed_at: "2026-02-24T10:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S29.story.md
     dependencies: [E06S27, E06S28]
-    notes: "Agent-deliverable via curl. AC1-AC9 (happy path curl: health → register → profile → extract → submit → matches → availability) 100% automatisable. AC10-AC11 (CF Dashboard Analytics) vérification visuelle post-delivery par founder. AC12 (PostHog) optionnel. Bloquant pour M1 ('Full loop working end-to-end')."
+    notes: "DONE 2026-02-24. QA PASS (first cycle). All 9 automated ACs met. scripts/smoke-test-staging.sh created — idempotent, macOS-compatible, covers AC1–AC9. Staging fully operational: health 200, satellite 302, expert register/profile/gcal-url, AI extract, prospect submit, match retrieval (empty pool OK), availability graceful fallback (422 gcal_not_connected). Pre-seeded smoke-runner@callibrate.io user (Supabase admin SQL). PR#26 open → staging. AC10–AC11 (CF Dashboard Analytics) + AC12 (PostHog) are founder-executed visual checks."
 
   - id: E06S30
     epic: E06
