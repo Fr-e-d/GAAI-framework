@@ -61,6 +61,17 @@ preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
+# CF Workflows (top-level only — not per-env; isolation via separate Worker scripts)
+[[workflows]]
+binding = "BOOKING_CONFIRMED_WORKFLOW"
+name = "booking-confirmed-workflow"
+class_name = "BookingConfirmedWorkflow"
+
+[[workflows]]
+binding = "BOOKING_COMPLETED_WORKFLOW"
+name = "booking-completed-workflow"
+class_name = "BookingCompletedWorkflow"
+
 # Top-level (used by wrangler dev)
 [triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]

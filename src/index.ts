@@ -25,6 +25,10 @@ import { handleCallExperienceSurvey } from './handlers/surveys/call-experience';
 import { handleProjectSatisfactionSurvey } from './handlers/surveys/project-satisfaction';
 import { handleLeadEvaluation } from './handlers/evaluations/lead';
 
+// CF Workflows — must be named exports so the runtime can locate the classes
+export { BookingConfirmedWorkflow } from './workflows/booking-confirmed.workflow';
+export { BookingCompletedWorkflow } from './workflows/booking-completed.workflow';
+
 const QUEUES = ['email-notifications', 'lead-billing', 'score-computation'] as const;
 
 async function checkSupabase(env: Env): Promise<'connected' | 'error'> {
