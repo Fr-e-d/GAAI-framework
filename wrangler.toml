@@ -3,6 +3,14 @@ main = "src/index.ts"
 compatibility_date = "2024-10-22"
 compatibility_flags = ["nodejs_compat"]
 
+[placement]
+mode = "smart"
+
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+localConnectionString = "postgresql://postgres:postgres@db.PLACEHOLDER.supabase.co:5432/postgres"
+
 # ── Default (dev) environment — local only, never deployed ───────────────────
 # Binds to staging remote resources (queues, KV, Supabase).
 # Secrets loaded from .dev.vars (gitignored).
@@ -76,6 +84,10 @@ WORKER_BASE_URL = "https://callibrate-core-staging.frederic-geens-consulting.wor
 EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
 
+[[env.staging.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+
 [[env.staging.queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-staging"
 dead_letter_queue = "callibrate-core-queue-email-notifications-staging-dlq"
@@ -138,6 +150,10 @@ name = "callibrate-core-prod"
 WORKER_BASE_URL = "https://api.callibrate.io"
 EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
+
+[[env.production.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
 
 [[env.production.queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-prod"
