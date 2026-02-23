@@ -86,6 +86,8 @@ preview_urls = true
 WORKER_BASE_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
 EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
+SURVEY_DELAY_7D_MS = "60000"
+SURVEY_DELAY_38D_MS = "120000"
 
 [[env.staging.queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-staging"

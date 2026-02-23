@@ -63,6 +63,7 @@ function makeEnv(kv: KVNamespace, overrides: Partial<Env> = {}): Env {
     EMAIL_REPLY_TO: 'support@callibrate.io',
     WORKER_BASE_URL: 'https://callibrate-core-staging.workers.dev',
     PROSPECT_TOKEN_SECRET: 'test-secret-32-chars-long-padding',
+    SURVEY_TOKEN_SECRET: 'test-survey-secret-32-chars-paddd',
     BOOKING_CONFIRMED_WORKFLOW: makeWorkflowBinding() as unknown as Workflow,
     BOOKING_COMPLETED_WORKFLOW: makeWorkflowBinding() as unknown as Workflow,
     ...overrides,
