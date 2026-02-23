@@ -368,7 +368,7 @@ items:
     epic: E06
     title: "Staging — Provisionnement infra CF (Hyperdrive + D1 + Vectorize + Workflows + Rate Limiter + Workers)"
     priority: critical
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S27.story.md
     dependencies: []
     notes: "Agent-deliverable via wrangler CLI. Crée toutes les ressources CF manquantes (Hyperdrive, D1 expert-pool-edge, Vectorize expert-profiles, CF Workflows, Rate Limiter) + déploie workers/matching et workers/posthog-proxy en staging + met à jour wrangler.toml avec les IDs + smoke test /api/health. ⚠️ AC1 (Hyperdrive): connection string Supabase requise — l'agent doit la récupérer via env ou Supabase MCP. ⚠️ AC8 (CF API token scope): action Dashboard manuelle — à exclure du scope agent, founder post-delivery. Bloque E06S28 et E06S29."
