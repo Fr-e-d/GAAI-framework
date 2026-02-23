@@ -111,6 +111,11 @@ All AI-driven execution targets the **`staging`** branch. The `production` branc
 - All implementation happens in worktrees (`git worktree add`)
 - Squash merges back to staging are serialized via `flock`
 - Promotion staging → production is a human action via GitHub PR
+- Before creating a story branch, verify that the **previous story's PR is merged** into staging.
+  If a prior story's PR is open (not yet merged), the Delivery Agent must wait before starting the next story.
+  This prevents chained branch conflicts and ensures each story builds on a clean staging base.
+- After creating a PR, immediately enable GitHub auto-merge: `gh pr merge --auto --squash story/{id}`.
+  This ensures PRs merge automatically when CI passes, without human intervention.
 
 A pre-push hook (`.githooks/pre-push`) enforces this rule at the git level.
 

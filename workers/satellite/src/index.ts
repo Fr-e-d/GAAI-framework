@@ -3,6 +3,8 @@ import type { Env } from './types/env';
 import type { SatelliteConfig } from './types/config';
 import { resolveConfig } from './middleware/config';
 import { renderLandingPage } from './pages/landing';
+import { renderPrivacyPolicy } from './pages/privacy';
+import { renderTermsOfService } from './pages/terms';
 import { renderRobotsTxt } from './pages/robots';
 import { renderSitemapXml } from './pages/sitemap';
 
@@ -34,6 +36,28 @@ app.post('/admin/cache/purge', async (c) => {
 
   await c.env.CONFIG_CACHE.delete(`satellite:config:${body.domain}`);
   return c.json({ purged: true, domain: body.domain });
+});
+
+// ── Legal pages (static — no satellite config required, served on any hostname) ──
+
+app.get('/privacy', (c) => {
+  return new Response(renderPrivacyPolicy(), {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'public, max-age=86400',
+    },
+  });
+});
+
+app.get('/terms', (c) => {
+  return new Response(renderTermsOfService(), {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'public, max-age=86400',
+    },
+  });
 });
 
 // ── Config resolution middleware (all routes below require valid config) ──────
