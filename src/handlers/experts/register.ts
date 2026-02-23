@@ -3,7 +3,11 @@ import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
 import { createSql } from '../../lib/db';
 import { checkRateLimit } from '../../lib/rateLimit';
+<<<<<<< HEAD
 import type { ExpertRow } from '../../types/db';
+=======
+import { upsertExpertEmbedding } from '../../lib/vectorize';
+>>>>>>> 902c0cd (feat(E06S21): Vectorize infrastructure + embedding pipeline)
 
 const RegisterSchema = z.object({
   display_name: z.string().min(1, 'display_name is required').max(100),
@@ -16,7 +20,8 @@ const RegisterSchema = z.object({
 export async function handleRegister(
   request: Request,
   env: Env,
-  user: AuthUser
+  user: AuthUser,
+  ctx: ExecutionContext
 ): Promise<Response> {
   // AC6: Rate limiting
   const rateCheck = await checkRateLimit(request, env);
@@ -90,6 +95,14 @@ export async function handleRegister(
     type: 'expert.registered',
     expert_id: user.id,
     email: user.email ?? '',
+  });
+
+  // AC3, AC7: Fire-and-forget embedding — failure must NOT block registration
+  upsertExpertEmbedding(env, ctx, user.id, {
+    profile: {},
+    rate_min: rate_min ?? null,
+    rate_max: rate_max ?? null,
+    availability: null,
   });
 
   // Return 201
