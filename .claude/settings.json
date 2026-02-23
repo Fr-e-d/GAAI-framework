@@ -1,1 +1,33 @@
-{}
+{
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "Bash(rm -rf /Users*)",
+      "Bash(rm -rf /System*)",
+      "Bash(rm -rf /Applications*)",
+      "Bash(rm -rf /Library*)",
+      "Bash(rm -rf /Volumes*)",
+      "Bash(sudo *)",
+      "Bash(chmod -R 777 /*)",
+      "Bash(mkfs*)",
+      "Bash(dd if=*)",
+      "Bash(shutdown*)",
+      "Bash(reboot*)",
+      "Bash(launchctl*)",
+      "Bash(defaults write*)",
+      "Bash(networksetup*)",
+      "Bash(dscl*)",
+      "Bash(git push --force origin main*)",
+      "Bash(git push --force origin production*)",
+      "Read(~/.ssh/*)",
+      "Read(~/.aws/*)",
+      "Read(~/.gnupg/*)",
+      "Read(~/.npmrc)",
+      "Read(~/.netrc)",
+      "Read(~/.claude/credentials*)",
+      "Read(/etc/shadow)",
+      "Read(/etc/passwd)"
+    ]
+  }
+}
