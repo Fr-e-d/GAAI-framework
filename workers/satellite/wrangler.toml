@@ -31,3 +31,4 @@ id = "3efd7935547146149495a9da3c2e8067"
 # SUPABASE_URL        — Supabase project URL
 # SUPABASE_ANON_KEY   — Supabase anon/public key (for satellite_configs read)
 # ADMIN_SECRET        — Secret for /admin/cache/purge endpoint
+# POSTHOG_API_KEY     — PostHog project API key (for satellite tracking)

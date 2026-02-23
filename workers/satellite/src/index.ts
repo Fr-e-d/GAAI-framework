@@ -102,7 +102,7 @@ app.get('/sitemap.xml', (c) => {
 
 app.get('/', (c) => {
   const config = c.get('config');
-  return new Response(renderLandingPage(config), {
+  return new Response(renderLandingPage(config, c.env.POSTHOG_API_KEY), {
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',

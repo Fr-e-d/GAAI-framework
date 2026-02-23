@@ -8,4 +8,7 @@ export interface Env {
 
   // Admin secret for cache purge endpoint
   ADMIN_SECRET: string;
+
+  // PostHog Project API Key — injected via wrangler secret put
+  POSTHOG_API_KEY: string;
 }

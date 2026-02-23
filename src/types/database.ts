@@ -114,6 +114,7 @@ export type Database = {
       call_experience_surveys: {
         Row: {
           booking_id: string | null
+          comment: string | null
           id: string
           prospect_id: string | null
           score: number | null
@@ -121,6 +122,7 @@ export type Database = {
         }
         Insert: {
           booking_id?: string | null
+          comment?: string | null
           id?: string
           prospect_id?: string | null
           score?: number | null
@@ -128,6 +130,7 @@ export type Database = {
         }
         Update: {
           booking_id?: string | null
+          comment?: string | null
           id?: string
           prospect_id?: string | null
           score?: number | null
@@ -270,7 +273,7 @@ export type Database = {
           {
             foreignKeyName: "lead_evaluations_lead_id_fkey"
             columns: ["lead_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "leads"
             referencedColumns: ["id"]
           },
@@ -388,6 +391,7 @@ export type Database = {
       project_satisfaction_surveys: {
         Row: {
           booking_id: string | null
+          comment: string | null
           id: string
           prospect_id: string | null
           score: number | null
@@ -395,6 +399,7 @@ export type Database = {
         }
         Insert: {
           booking_id?: string | null
+          comment?: string | null
           id?: string
           prospect_id?: string | null
           score?: number | null
@@ -402,6 +407,7 @@ export type Database = {
         }
         Update: {
           booking_id?: string | null
+          comment?: string | null
           id?: string
           prospect_id?: string | null
           score?: number | null
@@ -473,6 +479,7 @@ export type Database = {
           quiz_schema: Json
           structured_data: Json | null
           theme: Json | null
+          tracking_enabled: boolean
           updated_at: string | null
           vertical: string | null
         }
@@ -488,6 +495,7 @@ export type Database = {
           quiz_schema: Json
           structured_data?: Json | null
           theme?: Json | null
+          tracking_enabled?: boolean
           updated_at?: string | null
           vertical?: string | null
         }
@@ -503,6 +511,7 @@ export type Database = {
           quiz_schema?: Json
           structured_data?: Json | null
           theme?: Json | null
+          tracking_enabled?: boolean
           updated_at?: string | null
           vertical?: string | null
         }

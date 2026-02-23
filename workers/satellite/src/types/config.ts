@@ -33,4 +33,5 @@ export interface SatelliteConfig {
   structured_data: Record<string, unknown> | null;
   quiz_schema: unknown;
   matching_weights: unknown;
+  tracking_enabled: boolean;
 }
