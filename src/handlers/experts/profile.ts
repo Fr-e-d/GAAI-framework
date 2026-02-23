@@ -121,7 +121,7 @@ export async function handlePatchProfile(
   }
 
   // AC4, AC7: Fire-and-forget re-embedding — failure must NOT block profile update
-  const updatedExpert = data[0] as {
+  const updatedExpert = rows[0] as {
     profile?: ExpertProfile;
     rate_min?: number | null;
     rate_max?: number | null;

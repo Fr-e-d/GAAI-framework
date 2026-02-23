@@ -11,12 +11,6 @@ vi.mock('../lib/db', () => ({
 
 import { createSql } from '../lib/db';
 
-vi.mock('../lib/supabase', () => ({
-  createServiceClient: vi.fn(),
-}));
-
-import { createServiceClient } from '../lib/supabase';
-
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function makeMockMessage<T>(
