@@ -133,7 +133,11 @@ else
 fi
 
 # Claude flags (expanded into wrapper scripts at generation time)
-CLAUDE_FLAGS="--model $CLAUDE_MODEL --max-turns $MAX_TURNS"
+# --output-format stream-json: streams NDJSON events in real-time (tool calls, text)
+#   instead of buffering everything until completion. This gives:
+#   1. Real-time observability via tail -f on the log file
+#   2. Natural heartbeat (log mtime updates continuously)
+CLAUDE_FLAGS="--model $CLAUDE_MODEL --max-turns $MAX_TURNS --output-format stream-json"
 if [[ "$SKIP_PERMISSIONS" == "true" ]]; then
   CLAUDE_FLAGS="--dangerously-skip-permissions $CLAUDE_FLAGS"
 fi
@@ -638,7 +642,15 @@ EXIT_CODE=1  # Default to failure (overwritten on success)
 LOCK_FILE="$LOCK_DIR/$story_id.lock"
 echo \$\$ > "\$LOCK_FILE"
 
+# Kill all child processes (claude, tee, heartbeat) on exit
+cleanup_children() {
+  kill \$(jobs -p) 2>/dev/null || true
+  # Also kill by process group to catch any orphans
+  kill -- -\$\$ 2>/dev/null || true
+}
+
 on_exit() {
+  cleanup_children
   rm -f "\$LOCK_FILE" "$wrapper"
   if [[ \$EXIT_CODE -ne 0 ]]; then
     # Check if the delivery already marked the story as done
@@ -684,19 +696,12 @@ unset CLAUDECODE 2>/dev/null || true
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
 
-# Heartbeat: -p mode produces no output during tool calls. Touch the log
-# every 60s so the daemon heartbeat monitor knows we're still alive.
-(
-  while kill -0 \$\$ 2>/dev/null; do
-    touch "$delivery_log"
-    sleep 60
-  done
-) &
-HEARTBEAT_PID=\$!
-
 # Slash commands don't work in -p mode — expand the command file into a prompt
 DELIVERY_PROMPT=\$(cat "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
+# --output-format stream-json streams NDJSON events in real-time, so:
+#   - tee updates the log file continuously (natural heartbeat for daemon monitor)
+#   - tail -f shows progress in real-time
 if command -v timeout &>/dev/null; then
   timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
@@ -708,8 +713,6 @@ else
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 fi
-
-kill \$HEARTBEAT_PID 2>/dev/null || true
 
 echo ""
 echo "================================================================"
@@ -749,8 +752,14 @@ EXIT_CODE=1  # Default to failure (overwritten on success)
 LOCK_FILE="$LOCK_DIR/$story_id.lock"
 echo \$\$ > "\$LOCK_FILE"
 
+# Kill all child processes (claude, tee, heartbeat) on exit
+cleanup_children() {
+  kill \$(jobs -p) 2>/dev/null || true
+  kill -- -\$\$ 2>/dev/null || true
+}
+
 on_exit() {
-  set +x 2>/dev/null || true
+  cleanup_children
   rm -f "\$LOCK_FILE" "$wrapper"
   if [[ \$EXIT_CODE -ne 0 ]]; then
     # Check if the delivery already marked the story as done
@@ -788,22 +797,15 @@ unset CLAUDECODE 2>/dev/null || true
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
 
-# Heartbeat: -p mode produces no output during tool calls. Touch the log
-# every 60s so the daemon heartbeat monitor knows we're still alive.
-(
-  while kill -0 \$\$ 2>/dev/null; do
-    touch "$delivery_log"
-    sleep 60
-  done
-) &
-HEARTBEAT_PID=\$!
-
 # Slash commands don't work in -p mode — expand the command file into a prompt
 # See: https://code.claude.com/docs/en/headless
 DELIVERY_PROMPT=\$(cat "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
 # Print mode (-p): claude processes the prompt and exits, freeing the daemon slot.
 # --dangerously-skip-permissions handles tool approval (required for headless).
+# --output-format stream-json streams NDJSON events in real-time, so:
+#   - tee updates the log file continuously (natural heartbeat for daemon monitor)
+#   - tail -f shows progress in real-time
 
 if command -v gtimeout &>/dev/null; then
   gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
@@ -816,8 +818,6 @@ else
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 fi
-
-kill \$HEARTBEAT_PID 2>/dev/null || true
 
 echo ""
 echo "Delivery finished (exit \$EXIT_CODE). Closing in 10s..."
