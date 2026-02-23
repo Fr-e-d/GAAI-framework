@@ -345,10 +345,13 @@ items:
     epic: E07
     title: "PostHog MCP integration + GAAI analytics-query skill"
     priority: medium
-    status: in_progress
+    status: done
+    started_at: "2026-02-23T20:00:00+01:00"
+    completed_at: "2026-02-23T20:30:00+01:00"
+    cost_usd: 0
     artefact: contexts/artefacts/stories/E07S05.story.md
     dependencies: [E07S02, E07S03]
-    notes: "PostHog MCP server in .mcp.json + analytics-query cross skill with 5 analysis patterns (funnel-diagnosis, activation-analysis, lifecycle-check, conversion-trend, friction-scan). Includes interpretation guide + query templates + conversion optimization playbook. Human action: PostHog Personal API Key."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 13 ACs met. PostHog EU MCP server in .mcp.json (mcp-remote → mcp-eu.posthog.com, POSTHOG_PERSONAL_API_KEY auth). GAAI analytics-query skill (SKILL-CRS-020) with 5 analysis patterns, query-templates.md + interpretation-guide.md. skills-index.yaml regenerated (37 skills). discovery.agent.md updated. PR#20 open → staging. ⚠️ Human action required: (1) Set POSTHOG_PERSONAL_API_KEY='Bearer phx_xxx' in shell profile, (2) Create PostHog EU account + Personal API Key with MCP Server preset."
 
   # ── EPIC E03: Prospect Gets Qualified and Matched to the Right Expert ────
   # Layer 3.2 — satellite sites. Depends on E02 + E06.
