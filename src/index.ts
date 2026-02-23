@@ -22,6 +22,13 @@ import { handleReschedule } from './handlers/bookings/reschedule';
 import { handleGetPrep } from './handlers/bookings/prep';
 import { handleScheduled } from './handlers/bookings/cron';
 import { handleVectorizeReindex } from './handlers/admin/vectorize';
+import { handleCallExperienceSurvey } from './handlers/surveys/call-experience';
+import { handleProjectSatisfactionSurvey } from './handlers/surveys/project-satisfaction';
+import { handleLeadEvaluation } from './handlers/evaluations/lead';
+
+// CF Workflows — must be named exports so the runtime can locate the classes
+export { BookingConfirmedWorkflow } from './workflows/booking-confirmed.workflow';
+export { BookingCompletedWorkflow } from './workflows/booking-completed.workflow';
 
 const QUEUES = ['email-notifications', 'lead-billing', 'score-computation'] as const;
 
@@ -186,6 +193,31 @@ export default {
         new Response(JSON.stringify({ error: 'Not Found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }),
         corsResult.origin,
       );
+    }
+
+    // ── Survey routes (token-gated — survey JWT via SURVEY_TOKEN_SECRET) ────────
+    if (pathname.startsWith('/api/surveys/')) {
+      if (method === 'POST' && pathname === '/api/surveys/call-experience') {
+        return handleCallExperienceSurvey(request, env);
+      }
+      if (method === 'POST' && pathname === '/api/surveys/project-satisfaction') {
+        return handleProjectSatisfactionSurvey(request, env);
+      }
+      return new Response(JSON.stringify({ error: 'Not Found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ── Evaluation routes (expert JWT authenticated) ──────────────────────────
+    if (pathname.startsWith('/api/evaluations/')) {
+      if (method === 'POST' && pathname === '/api/evaluations/lead') {
+        return handleLeadEvaluation(request, env);
+      }
+      return new Response(JSON.stringify({ error: 'Not Found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     // ── Expert routes (authenticated) ───────────────────────────────────────
