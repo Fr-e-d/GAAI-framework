@@ -1,6 +1,7 @@
 import { Env } from '../../types/env';
-import { createServiceClient } from '../../lib/supabase';
+import { createSql } from '../../lib/db';
 import { getAccessToken, gcalDeleteEvent, GcalApiError } from '../../lib/gcalClient';
+import type { BookingRow } from '../../types/db';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -14,15 +15,12 @@ export async function handleCancel(
   env: Env,
   bookingId: string
 ): Promise<Response> {
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
-  const { data: booking, error } = await supabase
-    .from('bookings')
-    .select('id, expert_id, gcal_event_id, status')
-    .eq('id', bookingId)
-    .single();
+  const [booking] = await sql<Pick<BookingRow, 'id' | 'expert_id' | 'gcal_event_id' | 'status'>[]>`
+    SELECT id, expert_id, gcal_event_id, status FROM bookings WHERE id = ${bookingId}`;
 
-  if (error || !booking) return json({ error: 'Not Found' }, 404);
+  if (!booking) return json({ error: 'Not Found' }, 404);
 
   // Delete GCal event if present
   if (booking.gcal_event_id && booking.expert_id) {
@@ -38,7 +36,7 @@ export async function handleCancel(
   }
 
   // Update status
-  await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', bookingId);
+  await sql`UPDATE bookings SET status = 'cancelled' WHERE id = ${bookingId}`;
 
   // Push notification
   await env.EMAIL_NOTIFICATIONS.send({

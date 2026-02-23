@@ -1,6 +1,7 @@
 import { Env } from '../../types/env';
-import { createServiceClient } from '../../lib/supabase';
+import { createSql } from '../../lib/db';
 import { getAccessToken, gcalFreebusy, gcalInsertEvent, GcalApiError } from '../../lib/gcalClient';
+import type { BookingRow, ExpertRow, ProspectRow, SatelliteConfigRow } from '../../types/db';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -14,16 +15,14 @@ export async function handleConfirm(
   env: Env,
   bookingId: string
 ): Promise<Response> {
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
   // Fetch booking
-  const { data: booking, error: bookingError } = await supabase
-    .from('bookings')
-    .select('id, expert_id, prospect_id, start_at, end_at, status, held_until, prep_token, match_id')
-    .eq('id', bookingId)
-    .single();
+  const [booking] = await sql<Pick<BookingRow, 'id' | 'expert_id' | 'prospect_id' | 'start_at' | 'end_at' | 'status' | 'held_until' | 'prep_token' | 'match_id'>[]>`
+    SELECT id, expert_id, prospect_id, start_at, end_at, status, held_until, prep_token, match_id
+    FROM bookings WHERE id = ${bookingId}`;
 
-  if (bookingError || !booking) return json({ error: 'Not Found' }, 404);
+  if (!booking) return json({ error: 'Not Found' }, 404);
   if (booking.status !== 'held') return json({ error: 'Booking is not in held status' }, 409);
   if (!booking.held_until || new Date(booking.held_until) < new Date()) {
     return json({ error: 'Hold has expired' }, 410);
@@ -42,13 +41,10 @@ export async function handleConfirm(
   }
 
   // Fetch expert
-  const { data: expert, error: expertError } = await supabase
-    .from('experts')
-    .select('gcal_email, gcal_access_token, gcal_token_expiry_at, display_name')
-    .eq('id', booking.expert_id!)
-    .single();
+  const [expert] = await sql<Pick<ExpertRow, 'gcal_email' | 'gcal_access_token' | 'gcal_token_expiry_at' | 'display_name'>[]>`
+    SELECT gcal_email, gcal_access_token, gcal_token_expiry_at, display_name FROM experts WHERE id = ${booking.expert_id!}`;
 
-  if (expertError || !expert?.gcal_email) return json({ error: 'Expert not found or GCal not connected' }, 422);
+  if (!expert?.gcal_email) return json({ error: 'Expert not found or GCal not connected' }, 422);
 
   let accessToken: string;
   try {
@@ -74,7 +70,7 @@ export async function handleConfirm(
 
   if (slotTaken) {
     // AC6: Delete the hold and return 409
-    await supabase.from('bookings').delete().eq('id', bookingId);
+    await sql`DELETE FROM bookings WHERE id = ${bookingId}`;
     return json({ error: 'slot_taken' }, 409);
   }
 
@@ -83,11 +79,8 @@ export async function handleConfirm(
   let prepUrl = `${env.WORKER_BASE_URL}/prep/${booking.prep_token}`;
 
   try {
-    const { data: prospect } = await supabase
-      .from('prospects')
-      .select('requirements, satellite_id')
-      .eq('id', booking.prospect_id!)
-      .single();
+    const [prospect] = await sql<Pick<ProspectRow, 'requirements' | 'satellite_id'>[]>`
+      SELECT requirements, satellite_id FROM prospects WHERE id = ${booking.prospect_id!}`;
 
     if (prospect?.requirements) {
       const req = prospect.requirements as Record<string, unknown>;
@@ -99,11 +92,8 @@ export async function handleConfirm(
 
       // Try to get satellite domain for prep URL
       if (prospect.satellite_id) {
-        const { data: satellite } = await supabase
-          .from('satellite_configs')
-          .select('domain')
-          .eq('id', prospect.satellite_id)
-          .single();
+        const [satellite] = await sql<Pick<SatelliteConfigRow, 'domain'>[]>`
+          SELECT domain FROM satellite_configs WHERE id = ${prospect.satellite_id}`;
         if (satellite?.domain) {
           prepUrl = `https://${satellite.domain}/prep/${booking.prep_token}`;
         }
@@ -149,22 +139,10 @@ export async function handleConfirm(
   }
 
   // Update booking
-  const { error: updateError } = await supabase
-    .from('bookings')
-    .update({
-      status: 'confirmed',
-      gcal_event_id: gcalResult.eventId,
-      meeting_url: gcalResult.meetingUrl,
-      prospect_name: prospect_name as string,
-      prospect_email: prospect_email as string,
-      description: eventDescription,
-      confirmed_at: new Date().toISOString(),
-    })
-    .eq('id', bookingId);
-
-  if (updateError) {
-    return json({ error: 'Failed to update booking', details: updateError.message }, 500);
-  }
+  await sql`UPDATE bookings SET status = 'confirmed', gcal_event_id = ${gcalResult.eventId},
+    meeting_url = ${gcalResult.meetingUrl}, prospect_name = ${prospect_name as string},
+    prospect_email = ${prospect_email as string}, description = ${eventDescription},
+    confirmed_at = ${new Date().toISOString()} WHERE id = ${bookingId}`;
 
   // AC5: Push queue messages
   await env.LEAD_BILLING.send({
