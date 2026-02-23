@@ -1,9 +1,15 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { consumeLeadBilling } from './lead-billing';
 import type { Env } from '../types/env';
 import type { LeadBillingMessage } from '../types/queues';
 
-// ── Mock supabase ──────────────────────────────────────────────────────────────
+// ── Mock db ────────────────────────────────────────────────────────────────────
+
+vi.mock('../lib/db', () => ({
+  createSql: vi.fn(),
+}));
+
+import { createSql } from '../lib/db';
 
 vi.mock('../lib/supabase', () => ({
   createServiceClient: vi.fn(),
@@ -58,6 +64,10 @@ function makeEnv(kv: KVNamespace, overrides: Partial<Env> = {}): Env {
     EMAIL_NOTIFICATIONS: makeEmailQueue(),
     ...overrides,
   } as unknown as Env;
+}
+
+function okFetchResponse(body: unknown = {}): Response {
+  return new Response(JSON.stringify(body), { status: 200 });
 }
 
 // ── Supabase mock builder ──────────────────────────────────────────────────────

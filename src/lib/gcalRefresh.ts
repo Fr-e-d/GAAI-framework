@@ -1,6 +1,7 @@
 import { Env } from '../types/env';
-import { createServiceClient } from './supabase';
+import { createSql } from './db';
 import { decryptToken, encryptToken } from './gcalCrypto';
+import type { ExpertRow } from '../types/db';
 
 export class GcalNotConnectedError extends Error {
   constructor(expertId: string) {
@@ -27,15 +28,12 @@ export class GcalRefreshError extends Error {
  * If still 401/403 after refresh, set gcal_connected = false and return { error: "gcal_disconnected" }.
  */
 export async function refreshGcalToken(expertId: string, env: Env): Promise<string> {
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
-  const { data, error } = await supabase
-    .from('experts')
-    .select('gcal_refresh_token')
-    .eq('id', expertId)
-    .single();
+  const [data] = await sql<Pick<ExpertRow, 'gcal_refresh_token'>[]>`
+    SELECT gcal_refresh_token FROM experts WHERE id = ${expertId}`;
 
-  if (error || !data || !data.gcal_refresh_token) {
+  if (!data || !data.gcal_refresh_token) {
     throw new GcalNotConnectedError(expertId);
   }
 
@@ -64,13 +62,7 @@ export async function refreshGcalToken(expertId: string, env: Env): Promise<stri
   const encryptedAccessToken = await encryptToken(access_token, env.GCAL_TOKEN_ENCRYPTION_KEY);
 
   // Best-effort DB update — if it fails, return the fresh token anyway (in-flight use succeeds)
-  await supabase
-    .from('experts')
-    .update({
-      gcal_access_token: encryptedAccessToken,
-      gcal_token_expiry_at: newExpiryAt,
-    })
-    .eq('id', expertId);
+  await sql`UPDATE experts SET gcal_access_token = ${encryptedAccessToken}, gcal_token_expiry_at = ${newExpiryAt} WHERE id = ${expertId}`;
 
   return access_token;
 }
