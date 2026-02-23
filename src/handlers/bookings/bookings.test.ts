@@ -23,7 +23,7 @@ const mockEnv = {
   ANTHROPIC_API_KEY: '',
   CLOUDFLARE_AI_GATEWAY_URL: '',
   SESSIONS: {} as KVNamespace,
-  RATE_LIMITING: {} as KVNamespace,
+  RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: true }) } as unknown as RateLimit,
   FEATURE_FLAGS: {} as KVNamespace,
   EXPERT_POOL: {} as KVNamespace,
   PROSPECT_TOKEN_SECRET: 'secret',

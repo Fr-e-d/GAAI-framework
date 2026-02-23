@@ -26,7 +26,7 @@ const mockEnv = {
   CLOUDFLARE_AI_GATEWAY_URL: '',
   PROSPECT_TOKEN_SECRET: '',
   SESSIONS: {} as KVNamespace,
-  RATE_LIMITING: {} as KVNamespace,
+  RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: true }) } as unknown as RateLimit,
   FEATURE_FLAGS: {} as KVNamespace,
   EXPERT_POOL: {} as KVNamespace,
   EMAIL_NOTIFICATIONS: {} as Queue,

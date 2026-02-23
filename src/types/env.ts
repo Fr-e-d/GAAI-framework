@@ -12,12 +12,13 @@ export interface Env {
 
   // KV namespaces
   SESSIONS: KVNamespace;
-  RATE_LIMITING: KVNamespace;
+  RATE_LIMITER: RateLimit;
   FEATURE_FLAGS: KVNamespace;
   EXPERT_POOL: KVNamespace;
 
   // Worker secrets (bound via wrangler secret put)
   PROSPECT_TOKEN_SECRET: string;
+  TURNSTILE_SECRET_KEY: string;
   SURVEY_TOKEN_SECRET: string;
 
   // Queue producers

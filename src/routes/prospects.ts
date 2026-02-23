@@ -7,6 +7,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Json, Database } from '../types/database';
 import type { Env } from '../types/env';
+import { checkRateLimit } from '../lib/rateLimit';
 import {
   DEFAULT_WEIGHTS,
   type ExpertPreferences,
@@ -36,6 +37,25 @@ function errorResponse(error: string, status: number, details?: unknown): Respon
 // Basic email format validation (RFC-permissive, sufficient for MVP)
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function verifyTurnstile(token: string, ip: string, secretKey: string): Promise<boolean> {
+  const body = new URLSearchParams({
+    secret: secretKey,
+    response: token,
+    remoteip: ip,
+  });
+  try {
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      body,
+    });
+    if (!res.ok) return false;
+    const data = await res.json() as { success: boolean };
+    return data.success === true;
+  } catch {
+    return false;
+  }
 }
 
 // Extract required field keys from quiz_schema JSONB.
@@ -107,11 +127,37 @@ function normalizeRequirements(quizAnswers: Record<string, unknown>): ProspectRe
 
 export async function handleProspectSubmit(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const startTime = Date.now();
-  let body: { satellite_id?: unknown; quiz_answers?: unknown; utm_source?: unknown; utm_campaign?: unknown };
+
+  // AC3: Rate limit public endpoint (30 req/min per IP)
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
+  let body: {
+    satellite_id?: unknown;
+    quiz_answers?: unknown;
+    utm_source?: unknown;
+    utm_campaign?: unknown;
+    'cf-turnstile-response'?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
     return errorResponse('Invalid JSON body', 400);
+  }
+
+  // AC4: Turnstile token required
+  const turnstileToken = body['cf-turnstile-response'];
+  if (typeof turnstileToken !== 'string' || !turnstileToken) {
+    return errorResponse('Validation failed', 422, { 'cf-turnstile-response': 'required' });
+  }
+
+  // AC5: Verify Turnstile token
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+  const turnstileOk = await verifyTurnstile(turnstileToken, ip, env.TURNSTILE_SECRET_KEY);
+  if (!turnstileOk) {
+    return errorResponse('Bot verification failed', 422);
   }
 
   const { satellite_id, quiz_answers, utm_source, utm_campaign } = body;
@@ -252,6 +298,12 @@ export async function handleProspectMatches(
   prospectId: string,
   ctx: ExecutionContext,
 ): Promise<Response> {
+  // AC3: Rate limit public endpoint
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
   const url = new URL(request.url);
   const token = url.searchParams.get('token');
 
@@ -335,6 +387,12 @@ export async function handleProspectIdentify(
   prospectId: string,
   ctx: ExecutionContext,
 ): Promise<Response> {
+  // AC3: Rate limit public endpoint
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
   let body: { email?: unknown; token?: unknown };
   try {
     body = await request.json();
