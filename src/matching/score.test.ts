@@ -230,6 +230,104 @@ describe('scoreMatch — Phase 1 hardening', () => {
   });
 });
 
+// ── Semantic scoring tests (E06S22) ───────────────────────────────────────
+
+describe('scoreMatch — semantic scoring (E06S22)', () => {
+  // AC8: "machine learning" prospect matches "deep learning" expert via semanticSimilarity
+  it('AC8: "machine learning" prospect scores > 0 against "deep learning" expert via semanticSimilarity', () => {
+    const profile: ExpertProfile = { skills: ['deep learning', 'tensorflow'] };
+    const requirements: ProspectRequirements = { skills_needed: ['machine learning'] };
+
+    // Without semantic: 0 exact matches → 0 skills_overlap
+    const resultExact = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS);
+    expect(resultExact.breakdown.skills_overlap).toBe(0);
+    expect(resultExact.breakdown.semantic_similarity).toBeUndefined();
+
+    // With semantic: 0.7*(0/1) + 0.3*0.85 = 0.255 → 0.255*40 = 10.2
+    const resultSemantic = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS, 0.85);
+    expect(resultSemantic.breakdown.skills_overlap).toBeCloseTo(10.2, 1);
+    expect(resultSemantic.breakdown.semantic_similarity).toBe(0.85);
+    expect(resultSemantic.score).toBeGreaterThan(0);
+  });
+
+  // AC9: fallback path — no semanticSimilarity arg → exact-only scoring, same as undefined
+  it('AC9: fallback path (no semanticSimilarity) produces deterministic-only result', () => {
+    const profile: ExpertProfile = { skills: ['n8n'], industries: ['logistics'] };
+    const requirements: ProspectRequirements = { skills_needed: ['n8n'], industry: 'logistics' };
+
+    const resultNoArg = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS);
+    const resultUndefined = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS, undefined);
+
+    expect(resultNoArg.score).toBe(resultUndefined.score);
+    expect(resultNoArg.breakdown.semantic_similarity).toBeUndefined();
+    expect(resultUndefined.breakdown.semantic_similarity).toBeUndefined();
+    // skills_overlap: 1/1 match → 40 (no blending); industry_match: exact → 20
+    expect(resultNoArg.breakdown.skills_overlap).toBe(40);
+    expect(resultNoArg.breakdown.industry_match).toBe(20);
+  });
+
+  // AC4: blend correctness — 1/2 exact + 0.6 vector → 0.7*0.5+0.3*0.6 = 0.53 → 21.2
+  it('AC4: scoreSkillsOverlap blends 0.7×exact + 0.3×vector correctly', () => {
+    const profile: ExpertProfile = { skills: ['n8n', 'java'] };
+    const requirements: ProspectRequirements = { skills_needed: ['n8n', 'python'] };
+
+    // 1/2 exact (0.5) + vector 0.6 → blend = 0.7*0.5 + 0.3*0.6 = 0.35 + 0.18 = 0.53 → 0.53*40 = 21.2
+    const result = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS, 0.6);
+    expect(result.breakdown.skills_overlap).toBeCloseTo(21.2, 1);
+    expect(result.breakdown.semantic_similarity).toBe(0.6);
+  });
+
+  // AC4: full exact match with vector blend → blend < full exact (vector < 1.0 dilutes)
+  it('AC4: full exact match with vector < 1.0 reduces skills_overlap slightly', () => {
+    const profile: ExpertProfile = { skills: ['n8n', 'python'] };
+    const requirements: ProspectRequirements = { skills_needed: ['n8n', 'python'] };
+
+    const resultExact = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS);
+    expect(resultExact.breakdown.skills_overlap).toBe(40);
+
+    // 0.7*1.0 + 0.3*0.9 = 0.70 + 0.27 = 0.97 → 0.97*40 = 38.8
+    const resultBlended = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS, 0.9);
+    expect(resultBlended.breakdown.skills_overlap).toBeCloseTo(38.8, 1);
+    expect(resultBlended.breakdown.skills_overlap).toBeLessThan(resultExact.breakdown.skills_overlap);
+  });
+
+  // AC5: unknown industry pair → vector similarity fallback
+  it('AC5: scoreIndustryMatch uses vector similarity for unknown industry pairs', () => {
+    // 'logistics' vs 'fintech': no known proximity entry → should be 0 without vector
+    const profile: ExpertProfile = { industries: ['logistics'] };
+    const requirements: ProspectRequirements = { industry: 'fintech' };
+
+    const resultNoVector = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS);
+    expect(resultNoVector.breakdown.industry_match).toBe(0); // existing behavior preserved
+
+    // With vector: 0.7 * 20 = 14
+    const resultWithVector = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS, 0.7);
+    expect(resultWithVector.breakdown.industry_match).toBeCloseTo(14, 1);
+  });
+
+  // AC5: known proximity pair → vector does NOT override proximity
+  it('AC5: known industry proximity is not overridden by lower vector similarity', () => {
+    // fintech vs banking: known proximity 0.8 → 0.8*20 = 16
+    const profile: ExpertProfile = { industries: ['fintech'] };
+    const requirements: ProspectRequirements = { industry: 'banking' };
+
+    const resultWithVector = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS, 0.3);
+    expect(resultWithVector.breakdown.industry_match).toBe(16); // proximity 0.8 wins, not 0.3*20=6
+  });
+
+  // AC6: semantic_similarity stored in breakdown when provided
+  it('AC6: semantic_similarity field populated in ScoreBreakdown when provided', () => {
+    const result = scoreMatch(emptyProfile, emptyPrefs, emptyRequirements, DEFAULT_WEIGHTS, 0.75);
+    expect(result.breakdown.semantic_similarity).toBe(0.75);
+  });
+
+  // AC6: semantic_similarity absent when not provided
+  it('AC6: semantic_similarity absent from ScoreBreakdown in fallback path', () => {
+    const result = scoreMatch(emptyProfile, emptyPrefs, emptyRequirements, DEFAULT_WEIGHTS);
+    expect(result.breakdown.semantic_similarity).toBeUndefined();
+  });
+});
+
 // ── Reliability modifier tests (DEC-50) ────────────────────────────────────
 
 describe('applyReliabilityModifier', () => {

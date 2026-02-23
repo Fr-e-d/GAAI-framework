@@ -1,4 +1,4 @@
-import { Env } from '../types/env';
+import type { Env } from '../types/env';
 
 export interface ExpertProfile {
   skills?: string[];
@@ -60,4 +60,33 @@ export function upsertExpertEmbedding(
       }
     })()
   );
+}
+
+// ── Prospect-side semantic query helpers (E06S22) ──────────────────────────
+
+// AC1: build embedding text from prospect requirements
+export function buildProspectEmbeddingText(requirements: {
+  skills_needed?: string[];
+  industry?: string;
+  languages?: string[];
+}): string {
+  const skills = (requirements.skills_needed ?? []).join(', ');
+  const industry = requirements.industry ?? '';
+  const languages = (requirements.languages ?? []).join(', ');
+  return `Skills: ${skills}. Industries: ${industry}. Languages: ${languages}.`;
+}
+
+// AC1: query Vectorize index, returns Map<expert_id, cosine_similarity>
+// topK should be Math.max(pool.length, 100) to satisfy AC2 (no filtering loss when pool < 100)
+export async function queryVectorizeForProspect(
+  env: Env,
+  vector: number[],
+  topK: number,
+): Promise<Map<string, number>> {
+  const result = await env.VECTORIZE.query(vector, { topK });
+  const map = new Map<string, number>();
+  for (const match of result.matches) {
+    map.set(match.id, match.score);
+  }
+  return map;
 }
