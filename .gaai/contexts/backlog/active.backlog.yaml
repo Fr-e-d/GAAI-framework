@@ -83,7 +83,7 @@ items:
     epic: E06
     title: "Cal.com managed users integration + webhook endpoint"
     priority: high
-    status: superseded
+    status: cancelled
     artefact: contexts/artefacts/stories/E06S04.story.md
     dependencies: [E06S03]
     notes: "SUPERSEDED 2026-02-20 by DEC-41. Cal.com Platform fermée aux nouveaux signups depuis 15/12/2025. Remplacée par E06S10 (Google Calendar OAuth layer) + E06S11 (Booking engine). Les colonnes cal_* en DB sont conservées sans nettoyage jusqu'au post-MVP."
@@ -360,7 +360,7 @@ items:
     status: refined
     artefact: contexts/artefacts/stories/E07S06.story.md
     dependencies: [E07S05, E06S27]
-    notes: "Founder-executed. Crée le compte PostHog EU Cloud, configure POSTHOG_API_KEY correcte, run le script posthog-setup-dashboards.ts, connecte le MCP server dans Claude Code, configure ph.callibrate.io CNAME. Bloque l'observabilité analytics. Peut tourner en parallèle de E06S28."
+    notes: "Partiellement fait + agent-deliverable via PostHog MCP. AC1-AC3 DONE (compte PostHog EU créé, POSTHOG_API_KEY=phc_9MGVc1dDaNAugnSHJ692t5YuWFNy2WQ4kIHNvlEsXkr configurée). AC6 (dashboards): agent via PostHog MCP server (mcp-eu.posthog.com). AC9-AC10 (smoke tests): agent via curl. Founder reste: AC4 Personal API Key (phx_) + AC5 export ~/.zshrc + AC7 MCP restart + AC8 ph.callibrate.io CNAME. Bloque l'observabilité analytics."
 
   # ── EPIC E06 (suite): Staging readiness — Provisionnement & Smoke Test ────
 
@@ -368,10 +368,10 @@ items:
     epic: E06
     title: "Staging — Provisionnement infra CF (Hyperdrive + D1 + Vectorize + Workflows + Rate Limiter + Workers)"
     priority: critical
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S27.story.md
     dependencies: []
-    notes: "Founder-executed. Crée toutes les ressources CF manquantes (Hyperdrive, D1 expert-pool-edge, Vectorize expert-profiles, CF Workflows, Rate Limiter) + déploie workers/matching et workers/posthog-proxy en staging + étend le scope du CF API token CI/CD + met à jour wrangler.toml avec les IDs + smoke test /api/health. Bloque E06S28 et E06S29."
+    notes: "Agent-deliverable via wrangler CLI. Crée toutes les ressources CF manquantes (Hyperdrive, D1 expert-pool-edge, Vectorize expert-profiles, CF Workflows, Rate Limiter) + déploie workers/matching et workers/posthog-proxy en staging + met à jour wrangler.toml avec les IDs + smoke test /api/health. ⚠️ AC1 (Hyperdrive): connection string Supabase requise — l'agent doit la récupérer via env ou Supabase MCP. ⚠️ AC8 (CF API token scope): action Dashboard manuelle — à exclure du scope agent, founder post-delivery. Bloque E06S28 et E06S29."
 
   - id: E06S28
     epic: E06
@@ -380,7 +380,7 @@ items:
     status: refined
     artefact: contexts/artefacts/stories/E06S28.story.md
     dependencies: [E06S27]
-    notes: "Founder-executed. Sets: SURVEY_TOKEN_SECRET + TURNSTILE_SECRET_KEY sur callibrate-core-staging ; SURVEY_DELAY_7D_MS=60000 + SURVEY_DELAY_38D_MS=120000 dans wrangler.toml vars staging ; SUPABASE_URL + SUPABASE_ANON_KEY + POSTHOG_API_KEY sur callibrate-satellite-staging ; Turnstile site créé dans CF Dashboard. Vérifie que E06S16 utilise SURVEY_TOKEN_SECRET (pas PROSPECT_TOKEN_SECRET). Bloque E06S29."
+    notes: "Agent-deliverable via wrangler CLI. AC1 (SURVEY_TOKEN_SECRET) + AC2 (TURNSTILE_SECRET_KEY) déjà configurés sur core staging. Reste: AC3 delay vars dans wrangler.toml + AC4 vérif E06S16 token + AC5-AC7 secrets satellite (SUPABASE_URL via Supabase MCP, SUPABASE_ANON_KEY via Supabase MCP, POSTHOG_API_KEY=phc_9MGVc1dDaNAugnSHJ692t5YuWFNy2WQ4kIHNvlEsXkr) + AC8 Turnstile site key=0x4AAAAAAChD0LT5UgifFL-I (var satellite wrangler.toml) + AC9-AC10 smoke tests. Bloque E06S29."
 
   - id: E06S29
     epic: E06
@@ -389,7 +389,7 @@ items:
     status: refined
     artefact: contexts/artefacts/stories/E06S29.story.md
     dependencies: [E06S27, E06S28]
-    notes: "Founder-executed. Valide le happy path complet sur staging via curl : /api/health → register → extract → submit → matches → booking hold. Vérifie Analytics Engine + PostHog (si E07S06 done). Bloquant pour M1 ('Full loop working end-to-end')."
+    notes: "Agent-deliverable via curl. AC1-AC9 (happy path curl: health → register → profile → extract → submit → matches → availability) 100% automatisable. AC10-AC11 (CF Dashboard Analytics) vérification visuelle post-delivery par founder. AC12 (PostHog) optionnel. Bloquant pour M1 ('Full loop working end-to-end')."
 
   - id: E06S30
     epic: E06
@@ -422,10 +422,13 @@ items:
     epic: E06
     title: "Lead-billing consumer — credit debit + flag/restore (DEC-68)"
     priority: high
-    status: in_progress
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-23T23:30:00+01:00"
+    completed_at: "2026-02-24T00:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S32.story.md
     dependencies: [E06S31]
-    notes: "DEC-68. Rewrites E06S06 lead-billing consumer: LS checkout → credit debit at booking time. Atomic transaction (postgres.js BEGIN/COMMIT). Adds POST /api/leads/:id/flag (7-day window, credit restore) + POST /api/leads/:id/confirm. LS checkout code removed."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. lead-billing consumer rewritten: prospect fetch + calculateLeadPrice (DEC-67) + debit_lead_credit RPC (atomic PostgreSQL function). AC2: insufficient_balance → EMAIL_NOTIFICATIONS. AC3: atomicity via Supabase RPC (E06S18 not yet merged — equivalent ACID via plpgsql SECURITY DEFINER). POST /api/leads/:id/flag (7-day window, restore_lead_credit RPC) + POST /api/leads/:id/confirm. LS checkout code removed. 118/118 vitest tests. PR#23 open → staging. ⚠️ Human action required: (1) Apply migration 20260223100001_lead_credit_rpc.sql to Supabase staging, (2) Merge PR#21 (E06S31) before PR#23."
 
   - id: E06S33
     epic: E06
