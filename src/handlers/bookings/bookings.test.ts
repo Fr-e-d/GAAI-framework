@@ -152,7 +152,8 @@ describe('handleHold', () => {
     expect([200, 500]).toContain(response.status);
     if (response.status === 200) {
       const body = await response.json() as Record<string, string>;
-      expect(body.booking_id).toBeDefined();
+      expect(body.booking_id).toBe('booking-456');
+      expect(body.held_until).toBeDefined();
     }
   });
 

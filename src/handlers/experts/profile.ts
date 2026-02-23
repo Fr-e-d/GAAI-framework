@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
+import { createServiceClient } from '../../lib/supabase';
+import { Json } from '../../types/database';
+import { upsertExpertEmbedding, ExpertProfile } from '../../lib/vectorize';
 import { createSql } from '../../lib/db';
 import type { ExpertRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
@@ -116,6 +119,20 @@ export async function handlePatchProfile(
       headers: JSON_HEADERS,
     });
   }
+
+  // AC4, AC7: Fire-and-forget re-embedding — failure must NOT block profile update
+  const updatedExpert = rows[0] as {
+    profile?: ExpertProfile;
+    rate_min?: number | null;
+    rate_max?: number | null;
+    availability?: string | null;
+  };
+  upsertExpertEmbedding(env, ctx, expertId, {
+    profile: (updatedExpert.profile as ExpertProfile) ?? {},
+    rate_min: updatedExpert.rate_min ?? null,
+    rate_max: updatedExpert.rate_max ?? null,
+    availability: updatedExpert.availability ?? null,
+  });
 
   const fieldsUpdated: string[] = [];
   if (display_name !== undefined) fieldsUpdated.push('display_name');

@@ -19,6 +19,7 @@ import { scoreMatch, applyReliabilityModifier } from '../matching/score';
 import { signProspectToken, verifyProspectToken } from '../lib/jwt';
 import { loadExpertPool } from '../lib/expertPool';
 import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
+import { buildProspectEmbeddingText, queryVectorizeForProspect } from '../lib/vectorize';
 import { createSql } from '../lib/db';
 import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../types/db';
 import { captureEvent } from '../lib/posthog';
@@ -201,7 +202,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
 
   if (!prospect) return errorResponse('Database error', 500);
 
-  // AC3: load expert pool from KV (with DB fallback)
+  // AC1/AC3: load expert pool from KV (with DB fallback)
   const experts = await loadExpertPool(env);
 
   // Resolve matching weights from satellite config or fall back to defaults
@@ -210,18 +211,55 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     weights = satellite.matching_weights as unknown as MatchingWeights;
   }
 
-  // AC3: scoreMatch() synchronously for each expert
+  // AC1–AC3/AC7: Vectorize semantic pre-filter
+  // candidates = Vectorize top-K (AC2: topK ≥ pool size → no filtering loss when pool < 100)
+  // Fallback: all experts with deterministic-only scoring (AC7)
+  let candidates = experts;
+  let similarityMap = new Map<string, number>(); // expert_id → cosine similarity
+
+  if (experts.length > 0 && env.VECTORIZE && env.AI) {
+    try {
+      const embeddingText = buildProspectEmbeddingText(requirements);
+      const embeddingResult = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
+        text: [embeddingText],
+      }) as { data: number[][] };
+      const vector = embeddingResult.data[0];
+
+      if (vector && vector.length > 0) {
+        // AC2: topK ≥ pool size ensures all experts returned when pool < 100
+        const topK = Math.max(experts.length, 100);
+        similarityMap = await queryVectorizeForProspect(env, vector, topK);
+
+        if (similarityMap.size > 0) {
+          // AC3: only score Vectorize candidates
+          const candidateIds = new Set(similarityMap.keys());
+          const filtered = experts.filter((e) => candidateIds.has(e.id));
+          if (filtered.length > 0) candidates = filtered;
+          // if filtered is empty (index not yet populated): fallback to all experts
+        }
+      }
+    } catch (err) {
+      // AC7: Vectorize unavailable or error → score all experts, deterministic-only
+      console.error('prospect submit: Vectorize query failed, falling back to deterministic scoring', err);
+      candidates = experts;
+      similarityMap = new Map();
+    }
+  }
+
+  // AC3: scoreMatch() synchronously for each candidate
   // B1 fix (AC9): insert maximum 20 match rows (sorted by score DESC)
   const scoredResults: { score: number }[] = [];
-  if (experts.length > 0) {
-    const matchRows = experts.map((expert) => {
+  if (candidates.length > 0) {
+    const matchRows = candidates.map((expert) => {
       const profile: ExpertProfile = {
         ...((expert.profile ?? {}) as ExpertProfile),
         rate_min: expert.rate_min,
         rate_max: expert.rate_max,
       };
       const prefs = (expert.preferences ?? {}) as ExpertPreferences;
-      const raw = scoreMatch(profile, prefs, requirements, weights);
+      // AC4/AC5: pass per-expert cosine similarity; undefined in fallback path → deterministic-only
+      const semanticSimilarity = similarityMap.get(expert.id);
+      const raw = scoreMatch(profile, prefs, requirements, weights, semanticSimilarity);
       const { score, breakdown } = applyReliabilityModifier(raw, {
         composite_score: expert.composite_score,
         total_leads: expert.total_leads,

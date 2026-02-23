@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { consumeLeadBilling } from './lead-billing';
 import type { Env } from '../types/env';
 import type { LeadBillingMessage } from '../types/queues';

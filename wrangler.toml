@@ -72,6 +72,15 @@ binding = "EXPERT_DB"
 database_name = "expert-pool-edge"
 database_id = "PLACEHOLDER_D1_DATABASE_ID"
 
+# Workers AI binding
+[ai]
+binding = "AI"
+
+# Vectorize index binding
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
 [[rate_limiting]]
 binding = "RATE_LIMITER"
 namespace_id = 1001
@@ -160,6 +169,15 @@ binding = "EXPERT_DB"
 database_name = "expert-pool-edge"
 database_id = "PLACEHOLDER_D1_DATABASE_ID"
 
+# Workers AI binding
+[env.staging.ai]
+binding = "AI"
+
+# Vectorize index binding
+[[env.staging.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
 [[env.staging.rate_limiting]]
 binding = "RATE_LIMITER"
 namespace_id = 1002
@@ -232,6 +250,15 @@ dataset = "matching-metrics"
 binding = "EXPERT_DB"
 database_name = "expert-pool-edge"
 database_id = "PLACEHOLDER_D1_DATABASE_ID"
+
+# Workers AI binding
+[env.production.ai]
+binding = "AI"
+
+# Vectorize index binding
+[[env.production.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
 
 [[env.production.rate_limiting]]
 binding = "RATE_LIMITER"

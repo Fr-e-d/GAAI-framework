@@ -41,6 +41,7 @@ async function processLeadBilling(
   body: LeadBillingMessage,
   env: Env
 ): Promise<void> {
+  const sql = createSql(env);
   const supabase = createServiceClient(env);
 
   // Step 1: Fetch prospect requirements for lead price calculation (AC1)
