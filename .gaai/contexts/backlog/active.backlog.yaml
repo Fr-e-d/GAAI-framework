@@ -318,7 +318,7 @@ items:
     epic: E07
     title: "Core API server-side event capture (prospect + expert funnels)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E07S03.story.md
     dependencies: [E07S01]
     notes: "posthog-node SDK in callibrate-core. 15 events across prospect/booking/expert/survey funnels + LLM extraction. captureImmediate() + ctx.waitUntil(). Event naming: object.action snake_case. Internal traffic filtering. Human action: POSTHOG_API_KEY secret for core worker."
