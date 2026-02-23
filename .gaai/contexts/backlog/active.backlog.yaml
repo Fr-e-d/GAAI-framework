@@ -230,10 +230,10 @@ items:
     epic: E06
     title: "Vectorize infrastructure + embedding pipeline"
     priority: high
-    status: in_progress
+    status: done
     artefact: contexts/artefacts/stories/E06S21.story.md
     dependencies: [E06S18]
-    notes: "DEC-62. Vectorize index expert-profiles (768 dims, cosine). Workers AI @cf/baai/bge-base-en-v1.5 for embeddings. Expert registration + profile PATCH trigger embedding. Admin reindex endpoint. Vectorize failure does NOT block registration. Human action: create Vectorize index."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 9 ACs met. Workers AI @cf/baai/bge-base-en-v1.5 + Vectorize expert-profiles (768 dims, cosine). upsertExpertEmbedding fire-and-forget via ctx.waitUntil. Registration + profile PATCH trigger embedding. POST /api/admin/vectorize/reindex (service-key auth). Metadata: expert_id, rate_min, rate_max, availability (nulls omitted — VectorizeVectorMetadataValue does not accept null). 93/93 vitest tests. PR#10 open. ⚠️ Human action required: (1) npx wrangler vectorize create expert-profiles --dimensions=768 --metric=cosine, (2) deploy to prod via tag v0.6.21. Unblocks E06S22."
 
   - id: E06S22
     epic: E06
