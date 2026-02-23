@@ -116,13 +116,13 @@ fi
 # ── Platform detection ──────────────────────────────────────────────────
 PLATFORM="$(uname)"
 
-# --dangerously-skip-permissions: only on VPS (Linux) unless overridden
+# --dangerously-skip-permissions: required for -p mode (headless).
+# Without it, permission prompts hang forever since there's no interactive input.
+# Override with GAAI_SKIP_PERMISSIONS=false to force interactive (not recommended for -p).
 if [[ -n "${GAAI_SKIP_PERMISSIONS:-}" ]]; then
   SKIP_PERMISSIONS="$GAAI_SKIP_PERMISSIONS"
-elif [[ "$PLATFORM" == "Linux" ]]; then
-  SKIP_PERMISSIONS=true
 else
-  SKIP_PERMISSIONS=false
+  SKIP_PERMISSIONS=true
 fi
 
 # Launcher: Terminal.app on macOS, tmux on Linux/VPS
@@ -782,18 +782,17 @@ unset CLAUDECODE 2>/dev/null || true
 DELIVERY_PROMPT=\$(cat "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
 # Print mode (-p): claude processes the prompt and exits, freeing the daemon slot.
-# --allowedTools grants delivery tools selectively (not yolo).
-ALLOWED="Read,Write,Edit,Glob,Grep,Bash,Task,WebFetch,WebSearch,Skill,NotebookEdit"
+# --dangerously-skip-permissions handles tool approval (required for headless).
 
 if command -v gtimeout &>/dev/null; then
   gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
-Deliver story: $story_id" --allowedTools "\$ALLOWED" 2>&1 | tee -a "$delivery_log"
+Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 else
   claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
-Deliver story: $story_id" --allowedTools "\$ALLOWED" 2>&1 | tee -a "$delivery_log"
+Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 fi
 
