@@ -15,6 +15,7 @@ export interface Env {
 
   // Worker secrets (bound via wrangler secret put)
   PROSPECT_TOKEN_SECRET: string;
+  SURVEY_TOKEN_SECRET: string;
 
   // Queue producers
   EMAIL_NOTIFICATIONS: Queue;
