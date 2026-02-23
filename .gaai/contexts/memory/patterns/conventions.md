@@ -170,6 +170,13 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 | Worker | `callibrate-satellite-staging` | `callibrate-satellite-prod` |
 | KV — config cache | `callibrate-satellite-kv-config-staging` | `callibrate-satellite-kv-config-prod` |
 
+### Active Cloudflare resources (callibrate-posthog-proxy)
+
+| Resource | Staging | Production |
+|---|---|---|
+| Worker | `callibrate-posthog-proxy-staging` | `callibrate-posthog-proxy-prod` |
+| Route | `ph.staging.callibrate.io/*` | `ph.callibrate.io/*` |
+
 ---
 
 ## Multi-Worker Project Structure (E06S14)
