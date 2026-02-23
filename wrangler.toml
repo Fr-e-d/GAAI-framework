@@ -43,11 +43,6 @@ id = "eb21bf12dbd74b96928a98c866af62a1"
 preview_id = "eb21bf12dbd74b96928a98c866af62a1"
 
 [[kv_namespaces]]
-binding = "RATE_LIMITING"
-id = "a36dd2f3e3a649a3b605baf3519843ea"
-preview_id = "a36dd2f3e3a649a3b605baf3519843ea"
-
-[[kv_namespaces]]
 binding = "FEATURE_FLAGS"
 id = "24a3f09adaf34c26805ba2351d773829"
 preview_id = "24a3f09adaf34c26805ba2351d773829"
@@ -69,6 +64,11 @@ binding = "AI"
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "expert-profiles"
+
+[[rate_limiting]]
+binding = "RATE_LIMITER"
+namespace_id = 1001
+simple = { limit = 30, period = 60 }
 
 # CF Workflows (top-level only — not per-env; isolation via separate Worker scripts)
 [[workflows]]
@@ -95,6 +95,8 @@ preview_urls = true
 WORKER_BASE_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
 EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
+# Production TURNSTILE_SECRET_KEY must be set via: wrangler secret put TURNSTILE_SECRET_KEY --env production
+TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA"
 
 [[env.staging.queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-staging"
@@ -131,10 +133,6 @@ binding = "SESSIONS"
 id = "eb21bf12dbd74b96928a98c866af62a1"
 
 [[env.staging.kv_namespaces]]
-binding = "RATE_LIMITING"
-id = "a36dd2f3e3a649a3b605baf3519843ea"
-
-[[env.staging.kv_namespaces]]
 binding = "FEATURE_FLAGS"
 id = "24a3f09adaf34c26805ba2351d773829"
 
@@ -154,6 +152,11 @@ binding = "AI"
 [[env.staging.vectorize]]
 binding = "VECTORIZE"
 index_name = "expert-profiles"
+
+[[env.staging.rate_limiting]]
+binding = "RATE_LIMITER"
+namespace_id = 1002
+simple = { limit = 30, period = 60 }
 
 [env.staging.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
@@ -203,10 +206,6 @@ binding = "SESSIONS"
 id = "dc5d4d61b04d44fe827254ae8c8bade8"
 
 [[env.production.kv_namespaces]]
-binding = "RATE_LIMITING"
-id = "2305532d36024641a7ceb171dbdf98a2"
-
-[[env.production.kv_namespaces]]
 binding = "FEATURE_FLAGS"
 id = "4d5d37620fe14ddfb34aa374cbc37ffe"
 
@@ -226,6 +225,11 @@ binding = "AI"
 [[env.production.vectorize]]
 binding = "VECTORIZE"
 index_name = "expert-profiles"
+
+[[env.production.rate_limiting]]
+binding = "RATE_LIMITER"
+namespace_id = 1003
+simple = { limit = 30, period = 60 }
 
 [env.production.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]

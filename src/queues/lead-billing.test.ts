@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { consumeLeadBilling } from './lead-billing';
 import type { Env } from '../types/env';
 import type { LeadBillingMessage } from '../types/queues';
@@ -45,121 +45,71 @@ function makeKv(existingKey: string | null = null): KVNamespace {
   } as unknown as KVNamespace;
 }
 
+function makeEmailQueue(): Queue {
+  return { send: vi.fn().mockResolvedValue(undefined) } as unknown as Queue;
+}
+
 function makeEnv(kv: KVNamespace, overrides: Partial<Env> = {}): Env {
   return {
     SUPABASE_URL: 'https://test.supabase.co',
     SUPABASE_ANON_KEY: 'test-anon-key',
     SUPABASE_SERVICE_KEY: 'test-service-key',
     SESSIONS: kv,
-    RESEND_API_KEY: 'test-resend-key',
-    N8N_WEBHOOK_URL: 'https://n8n.example.com/webhook',
-    LEMON_SQUEEZY_API_KEY: 'test-ls-key',
+    EMAIL_NOTIFICATIONS: makeEmailQueue(),
     ...overrides,
   } as unknown as Env;
 }
 
-// Build a mock Supabase client that handles the lead-billing query chain:
-// insert → select('id') → single()   [leads insert]
-// select('id') → eq() → single()     [leads fetch on conflict]
-// select('gcal_email') → eq() → single()  [experts fetch]
-// update() → eq()                    [leads update]
+// ── Supabase mock builder ──────────────────────────────────────────────────────
+
 function buildMockSupabase(opts: {
-  insertResult?: { data: { id: string } | null; error: { code?: string; message: string } | null };
-  expertResult?: { data: { gcal_email: string } | null; error: { message: string } | null };
-  updateResult?: { error: { message: string } | null };
+  prospectResult?: { data: { requirements: Record<string, unknown> | null } | null; error: { message: string } | null };
+  rpcResult?: { data: Record<string, unknown> | null; error: { message: string } | null };
 }) {
   const {
-    insertResult = { data: { id: 'lead-1' }, error: null },
-    expertResult = { data: { gcal_email: 'expert@gcal.com' }, error: null },
-    updateResult = { error: null },
+    prospectResult = {
+      data: { requirements: { budget_range: { max: 15000 }, timeline: '2-4 weeks', skills_needed: ['n8n', 'python'] } },
+      error: null,
+    },
+    rpcResult = { data: { success: true, lead_id: 'lead-1', balance_after: 85100 }, error: null },
   } = opts;
 
-  // .update().eq() chain for leads
-  const mockUpdateEq = vi.fn().mockResolvedValue(updateResult);
-  const mockUpdate = vi.fn().mockReturnValue({ eq: mockUpdateEq });
+  const mockProspectSingle = vi.fn().mockResolvedValue(prospectResult);
+  const mockProspectEq = vi.fn().mockReturnValue({ single: mockProspectSingle });
+  const mockProspectSelect = vi.fn().mockReturnValue({ eq: mockProspectEq });
 
-  // .select('id').eq().single() chain for experts fetch
-  let selectCallCount = 0;
-  const mockSingle = vi.fn().mockImplementation(() => {
-    selectCallCount++;
-    if (selectCallCount === 1) return Promise.resolve(expertResult);
-    return Promise.resolve({ data: null, error: { message: 'unexpected' } });
-  });
-  const mockSelectEq = vi.fn().mockReturnValue({ single: mockSingle });
-
-  // .insert().select('id').single() chain for leads insert
-  const mockInsertSingle = vi.fn().mockResolvedValue(insertResult);
-  const mockInsertSelect = vi.fn().mockReturnValue({ single: mockInsertSingle });
-  const mockInsert = vi.fn().mockReturnValue({ select: mockInsertSelect });
+  const mockRpc = vi.fn().mockResolvedValue(rpcResult);
 
   const mockFrom = vi.fn().mockImplementation((table: string) => {
-    if (table === 'leads') {
-      return {
-        insert: mockInsert,
-        select: vi.fn().mockReturnValue({ eq: mockSelectEq }),
-        update: mockUpdate,
-      };
-    }
-    if (table === 'experts') {
-      return {
-        select: vi.fn().mockReturnValue({ eq: mockSelectEq }),
-      };
+    if (table === 'prospects') {
+      return { select: mockProspectSelect };
     }
     return {};
   });
 
   return {
     from: mockFrom,
-    _mocks: { mockInsert, mockUpdate, mockUpdateEq, mockSingle },
+    rpc: mockRpc,
+    _mocks: { mockFrom, mockRpc, mockProspectSingle },
   };
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe('consumeLeadBilling', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn());
-  });
-
   afterEach(() => {
-    vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
 
-  // ── Test 1: Happy path — booking.created ──────────────────────────────────
+  // ── Test 1: Happy path — booking.created, sufficient balance ─────────────
 
-  it('booking.created — inserts lead, calls LS API, updates to billed, acks message', async () => {
+  it('booking.created — fetches prospect, calls RPC debit, acks message', async () => {
     const kv = makeKv(null);
-    const env = makeEnv(kv);
+    const emailQueue = makeEmailQueue();
+    const env = makeEnv(kv, { EMAIL_NOTIFICATIONS: emailQueue });
 
-    // Build mock supabase
-    const mockInsertSingle = vi.fn().mockResolvedValue({ data: { id: 'lead-1' }, error: null });
-    const mockInsertSelect = vi.fn().mockReturnValue({ single: mockInsertSingle });
-    const mockInsert = vi.fn().mockReturnValue({ select: mockInsertSelect });
-
-    const mockUpdateEq = vi.fn().mockResolvedValue({ error: null });
-    const mockUpdate = vi.fn().mockReturnValue({ eq: mockUpdateEq });
-
-    const expertSingle = vi.fn().mockResolvedValue({ data: { gcal_email: 'expert@gcal.com' }, error: null });
-    const expertEq = vi.fn().mockReturnValue({ single: expertSingle });
-    const expertSelect = vi.fn().mockReturnValue({ eq: expertEq });
-
-    const mockFrom = vi.fn().mockImplementation((table: string) => {
-      if (table === 'leads') {
-        return { insert: mockInsert, update: mockUpdate };
-      }
-      if (table === 'experts') {
-        return { select: expertSelect };
-      }
-      return {};
-    });
-
-    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as unknown as ReturnType<typeof createServiceClient>);
-
-    // LS checkout API response
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ data: { id: 'ls-checkout-abc' } }), { status: 200 })
-    );
+    const mock = buildMockSupabase({});
+    vi.mocked(createServiceClient).mockReturnValue(mock as unknown as ReturnType<typeof createServiceClient>);
 
     const body: LeadBillingMessage = {
       type: 'booking.created',
@@ -168,69 +118,40 @@ describe('consumeLeadBilling', () => {
       prospect_id: 'prospect-1',
     };
     const message = makeMockMessage(body);
-    const batch = makeBatch([message]);
 
-    await consumeLeadBilling(batch, env);
+    await consumeLeadBilling(makeBatch([message]), env);
 
-    // leads INSERT called
-    expect(mockInsert).toHaveBeenCalledWith(expect.objectContaining({
-      booking_id: 'booking-1',
-      expert_id: 'expert-1',
-      prospect_id: 'prospect-1',
-      status: 'pending',
+    // Prospect fetched
+    expect(mock.from).toHaveBeenCalledWith('prospects');
+
+    // RPC called with correct ids
+    expect(mock.rpc).toHaveBeenCalledWith('debit_lead_credit', expect.objectContaining({
+      p_expert_id:   'expert-1',
+      p_booking_id:  'booking-1',
+      p_prospect_id: 'prospect-1',
     }));
 
-    // LS API called
-    expect(fetch).toHaveBeenCalledTimes(1);
-    const [lsUrl] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
-    expect(lsUrl).toBe('https://api.lemonsqueezy.com/v1/checkouts');
+    // No email notification (balance sufficient)
+    expect(emailQueue.send).not.toHaveBeenCalled();
 
-    // leads UPDATE to 'billed' with ls_checkout_id
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      ls_checkout_id: 'ls-checkout-abc',
-      status: 'billed',
-    }));
-
-    // KV marked
+    // KV marked as processed (AC7)
     expect(kv.put).toHaveBeenCalledWith('idem:lead-billing:msg-1', '1', { expirationTtl: 86400 });
 
-    // Message acked
     expect(message.ack).toHaveBeenCalledOnce();
     expect(message.retry).not.toHaveBeenCalled();
   });
 
-  // ── Test 2: Retry on LS failure (attempts=2) ──────────────────────────────
+  // ── Test 2: Insufficient balance — email notification queued (AC2) ───────
 
-  it('LS failure (attempts=2) — retries with delaySeconds=4, lead NOT updated to billed', async () => {
+  it('insufficient balance — email notification queued, message acked', async () => {
     const kv = makeKv(null);
-    const env = makeEnv(kv);
+    const emailQueue = makeEmailQueue();
+    const env = makeEnv(kv, { EMAIL_NOTIFICATIONS: emailQueue });
 
-    const mockInsertSingle = vi.fn().mockResolvedValue({ data: { id: 'lead-1' }, error: null });
-    const mockInsertSelect = vi.fn().mockReturnValue({ single: mockInsertSingle });
-    const mockInsert = vi.fn().mockReturnValue({ select: mockInsertSelect });
-
-    const mockUpdate = vi.fn();
-
-    const expertSingle = vi.fn().mockResolvedValue({ data: { gcal_email: 'expert@gcal.com' }, error: null });
-    const expertEq = vi.fn().mockReturnValue({ single: expertSingle });
-    const expertSelect = vi.fn().mockReturnValue({ eq: expertEq });
-
-    const mockFrom = vi.fn().mockImplementation((table: string) => {
-      if (table === 'leads') {
-        return { insert: mockInsert, update: mockUpdate };
-      }
-      if (table === 'experts') {
-        return { select: expertSelect };
-      }
-      return {};
+    const mock = buildMockSupabase({
+      rpcResult: { data: { success: false, reason: 'insufficient_balance', lead_id: 'lead-2' }, error: null },
     });
-
-    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as unknown as ReturnType<typeof createServiceClient>);
-
-    // LS API returns error
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response('Bad Request', { status: 400 })
-    );
+    vi.mocked(createServiceClient).mockReturnValue(mock as unknown as ReturnType<typeof createServiceClient>);
 
     const body: LeadBillingMessage = {
       type: 'booking.created',
@@ -238,30 +159,30 @@ describe('consumeLeadBilling', () => {
       expert_id: 'expert-1',
       prospect_id: 'prospect-1',
     };
-    const message = makeMockMessage(body, { attempts: 2 });
-    const batch = makeBatch([message]);
+    const message = makeMockMessage(body);
+    await consumeLeadBilling(makeBatch([message]), env);
 
-    await consumeLeadBilling(batch, env);
+    // Email notification queued for expert (AC2)
+    expect(emailQueue.send).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'expert.billing.insufficient_balance',
+      expert_id: 'expert-1',
+    }));
 
-    // retry with delay 4^(2-1) = 4
-    expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 4 });
-    expect(message.ack).not.toHaveBeenCalled();
-
-    // UPDATE never called (LS failed before update step)
-    expect(mockUpdate).not.toHaveBeenCalled();
-
-    // KV NOT marked
-    expect(kv.put).not.toHaveBeenCalled();
+    // Processing succeeded — KV marked, message acked
+    expect(kv.put).toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledOnce();
+    expect(message.retry).not.toHaveBeenCalled();
   });
 
-  // ── Test 3: Idempotency — KV returns '1' → no Supabase, no fetch, acked ──
+  // ── Test 3: Idempotency — KV hit → skip all processing (AC7) ────────────
 
-  it('idempotency — KV returns 1 → no Supabase calls, no fetch, message acked', async () => {
-    const kv = makeKv('1'); // already processed
+  it('idempotency — KV returns 1 → no Supabase calls, message acked', async () => {
+    const kv = makeKv('1');
     const env = makeEnv(kv);
 
     const mockFrom = vi.fn();
-    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as unknown as ReturnType<typeof createServiceClient>);
+    const mockRpc = vi.fn();
+    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom, rpc: mockRpc } as unknown as ReturnType<typeof createServiceClient>);
 
     const body: LeadBillingMessage = {
       type: 'booking.created',
@@ -270,45 +191,24 @@ describe('consumeLeadBilling', () => {
       prospect_id: 'prospect-1',
     };
     const message = makeMockMessage(body);
-    const batch = makeBatch([message]);
+    await consumeLeadBilling(makeBatch([message]), env);
 
-    await consumeLeadBilling(batch, env);
-
-    // No Supabase calls
     expect(mockFrom).not.toHaveBeenCalled();
-
-    // No fetch calls
-    expect(fetch).not.toHaveBeenCalled();
-
-    // KV put NOT called
+    expect(mockRpc).not.toHaveBeenCalled();
     expect(kv.put).not.toHaveBeenCalled();
-
-    // Message acked
     expect(message.ack).toHaveBeenCalledOnce();
-    expect(message.retry).not.toHaveBeenCalled();
   });
 
-  // ── Test 4: DLQ log on 3rd attempt failure (attempts=3) ──────────────────
+  // ── Test 4: RPC failure → retry (attempts=2) (AC8) ───────────────────────
 
-  it('3rd attempt failure — logs structured JSON to console.error', async () => {
+  it('RPC failure (attempts=2) — retries with delaySeconds=4', async () => {
     const kv = makeKv(null);
     const env = makeEnv(kv);
 
-    // Supabase insert fails
-    const mockInsertSingle = vi.fn().mockResolvedValue({
-      data: null,
-      error: { code: '42P01', message: 'relation does not exist' },
+    const mock = buildMockSupabase({
+      rpcResult: { data: null, error: { message: 'connection timeout' } },
     });
-    const mockInsertSelect = vi.fn().mockReturnValue({ single: mockInsertSingle });
-    const mockInsert = vi.fn().mockReturnValue({ select: mockInsertSelect });
-
-    const mockFrom = vi.fn().mockImplementation(() => ({
-      insert: mockInsert,
-    }));
-
-    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as unknown as ReturnType<typeof createServiceClient>);
-
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(createServiceClient).mockReturnValue(mock as unknown as ReturnType<typeof createServiceClient>);
 
     const body: LeadBillingMessage = {
       type: 'booking.created',
@@ -316,21 +216,49 @@ describe('consumeLeadBilling', () => {
       expert_id: 'expert-1',
       prospect_id: 'prospect-1',
     };
+    const message = makeMockMessage(body, { attempts: 2 });
+    await consumeLeadBilling(makeBatch([message]), env);
+
+    expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 4 });
+    expect(message.ack).not.toHaveBeenCalled();
+    expect(kv.put).not.toHaveBeenCalled();
+  });
+
+  // ── Test 5: Prospect fetch failure → 3rd attempt → DLQ log (AC8) ────────
+
+  it('3rd attempt failure — logs structured JSON to console.error', async () => {
+    const kv = makeKv(null);
+    const env = makeEnv(kv);
+
+    const mockProspectSingle = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: 'relation does not exist' },
+    });
+    const mockFrom = vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({ single: mockProspectSingle }),
+      }),
+    });
+    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom, rpc: vi.fn() } as unknown as ReturnType<typeof createServiceClient>);
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const body: LeadBillingMessage = {
+      type: 'booking.created',
+      booking_id: 'booking-5',
+      expert_id: 'expert-1',
+      prospect_id: 'prospect-1',
+    };
     const message = makeMockMessage(body, { attempts: 3 });
-    const batch = makeBatch([message]);
+    await consumeLeadBilling(makeBatch([message]), env);
 
-    await consumeLeadBilling(batch, env);
-
-    // retry still called (delaySeconds = 4^(3-1) = 16)
     expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 16 });
 
-    // console.error was called with structured JSON
     expect(consoleSpy).toHaveBeenCalledOnce();
     const logged = JSON.parse(consoleSpy.mock.calls[0]![0] as string) as {
       queue: string;
       message_id: string;
       type: string;
-      payload: unknown;
       error: string;
       failed_at: string;
     };
@@ -341,5 +269,81 @@ describe('consumeLeadBilling', () => {
     expect(typeof logged.failed_at).toBe('string');
 
     consoleSpy.mockRestore();
+  });
+
+  // ── Test 6: Unknown message type — ack and skip ──────────────────────────
+
+  it('unknown message type — acks without processing', async () => {
+    const kv = makeKv(null);
+    const env = makeEnv(kv);
+    const mockRpc = vi.fn();
+    vi.mocked(createServiceClient).mockReturnValue({ from: vi.fn(), rpc: mockRpc } as unknown as ReturnType<typeof createServiceClient>);
+
+    const message = makeMockMessage({ type: 'unknown.event' } as unknown as LeadBillingMessage);
+    await consumeLeadBilling(makeBatch([message]), env);
+
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledOnce();
+  });
+
+  // ── Test 7: Null requirements → micro tier price (4900) ─────────────────
+
+  it('null prospect requirements — passes p_amount=4900 (micro tier) to RPC', async () => {
+    const kv = makeKv(null);
+    const env = makeEnv(kv);
+
+    const mock = buildMockSupabase({
+      prospectResult: { data: { requirements: null }, error: null },
+      rpcResult: { data: { success: true, lead_id: 'lead-7', balance_after: 95100 }, error: null },
+    });
+    vi.mocked(createServiceClient).mockReturnValue(mock as unknown as ReturnType<typeof createServiceClient>);
+
+    const body: LeadBillingMessage = {
+      type: 'booking.created',
+      booking_id: 'booking-7',
+      expert_id: 'expert-1',
+      prospect_id: 'prospect-1',
+    };
+    await consumeLeadBilling(makeBatch([makeMockMessage(body)]), env);
+
+    // null budget → micro tier = 4900 centimes (AC1, DEC-67)
+    expect(mock.rpc).toHaveBeenCalledWith('debit_lead_credit', expect.objectContaining({
+      p_amount: 4900,
+    }));
+  });
+
+  // ── Test 8: Premium tier — budget + timeline + skills ────────────────────
+
+  it('premium qualification (budget + timeline + skills) — premium tier price passed to RPC', async () => {
+    const kv = makeKv(null);
+    const env = makeEnv(kv);
+
+    const mock = buildMockSupabase({
+      prospectResult: {
+        data: {
+          requirements: {
+            budget_range: { max: 25000 },
+            timeline: '4-6 weeks',
+            skills_needed: ['react', 'node'],
+          },
+        },
+        error: null,
+      },
+      rpcResult: { data: { success: true, lead_id: 'lead-8', balance_after: 82900 }, error: null },
+    });
+    vi.mocked(createServiceClient).mockReturnValue(mock as unknown as ReturnType<typeof createServiceClient>);
+
+    const body: LeadBillingMessage = {
+      type: 'booking.created',
+      booking_id: 'booking-8',
+      expert_id: 'expert-1',
+      prospect_id: 'prospect-1',
+    };
+    await consumeLeadBilling(makeBatch([makeMockMessage(body)]), env);
+
+    // budget=25000 (medium tier), premium: 17100 centimes
+    expect(mock.rpc).toHaveBeenCalledWith('debit_lead_credit', expect.objectContaining({
+      p_amount: 17100,
+    }));
   });
 });

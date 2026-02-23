@@ -40,3 +40,22 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: deploy --env staging
           workingDirectory: workers/satellite
+
+  deploy-posthog-proxy:
+    runs-on: ubuntu-latest
+    name: Deploy PostHog Proxy to Staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: workers/posthog-proxy/package-lock.json
+      - run: npm ci
+        working-directory: workers/posthog-proxy
+      - name: Deploy callibrate-posthog-proxy (staging)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy --env staging
+          workingDirectory: workers/posthog-proxy
