@@ -333,10 +333,13 @@ items:
     epic: E07
     title: "PostHog funnel dashboards via API"
     priority: medium
-    status: in_progress
+    status: done
+    started_at: "2026-02-23T00:00:00+01:00"
+    completed_at: "2026-02-23T00:00:00+01:00"
+    cost_usd: 0
     artefact: contexts/artefacts/stories/E07S04.story.md
     dependencies: [E07S02, E07S03]
-    notes: "One-time setup script creates 3 dashboards via PostHog API: prospect conversion funnel, expert activation funnel, business overview. Idempotent. Human action: generate PostHog Personal API Key."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 8 ACs met. scripts/posthog-setup-dashboards.ts + scripts/tsconfig.json. 3 dashboards: Prospect Conversion Funnel (5-step funnel + satellite_id breakdown), Expert Activation Funnel (4-step), Business Overview (4 TRENDS insights). Idempotent. TSC clean. PR#19 open → staging. ⚠️ Human action required: (1) generate PostHog Personal API Key at https://eu.posthog.com/settings/user-api-keys, (2) run: POSTHOG_PERSONAL_API_KEY=phx_xxx POSTHOG_PROJECT_ID=yyy npx tsx scripts/posthog-setup-dashboards.ts"
 
   - id: E07S05
     epic: E07

@@ -215,6 +215,32 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 
 ---
 
+## Standalone Setup Scripts (E07S04)
+
+- **Location:** `scripts/` at repo root — sibling to `src/`
+- **Runtime:** `npx tsx scripts/{name}.ts` — no compilation output, no wrangler bindings
+- **Env vars:** `process.env["VAR_NAME"]` (bracket notation, `noUncheckedIndexedAccess`-compatible). Fail fast with `process.exit(1)` + descriptive message if required vars missing.
+- **TypeScript config:** `scripts/tsconfig.json` — independent from root `tsconfig.json` (which only includes `src/**/*`). Same strict flags, no `@cloudflare/workers-types`, `moduleResolution: "bundler"`.
+- **Type check:** `npx tsc --project scripts/tsconfig.json --noEmit` (NOT root tsconfig)
+- **Error handling:** `main().catch((err: unknown) => { ...; process.exit(1) })`
+- **Use for:** One-time operator setup (PostHog dashboards, Resend domain, data seeds not in Supabase migrations)
+
+---
+
+## PostHog Dashboard + Insights API (E07S04)
+
+- **Base URL (EU):** `https://eu.posthog.com`
+- **Auth:** `Authorization: Bearer {POSTHOG_PERSONAL_API_KEY}` — Personal API Key required for write operations (not Project API Key)
+- **Create dashboard:** `POST /api/projects/{projectId}/dashboards/` → `{ name, description }`
+- **List dashboards:** `GET /api/projects/{projectId}/dashboards/?limit=100` → `{ results: [{ id, name }], next }`
+- **Create insight:** `POST /api/projects/{projectId}/insights/` → `{ name, filters: {...}, dashboards: [dashboardId] }`
+- **FUNNELS filter shape:** `{ insight: "FUNNELS", events: [{ id, name, order, type: "events" }], breakdown?, breakdown_type?: "event", date_from, funnel_window_interval?, funnel_window_interval_unit? }`
+- **TRENDS filter shape:** `{ insight: "TRENDS", events: [{ id, name, order, type: "events", math?: "total" }], date_from, interval: "day", formula?, display? }`
+- **Idempotency:** Check existing by exact name match before creating; operate at dashboard level for one-time setup scripts
+- **Dashboard URL:** `https://eu.posthog.com/project/{projectId}/dashboard/{dashboardId}`
+
+---
+
 ## Anti-Patterns (Avoid)
 
 - Synchronous external API calls inside CF Worker request handlers (use Queues)
