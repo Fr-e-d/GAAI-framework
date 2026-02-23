@@ -5,6 +5,9 @@
 #   - Must have a corresponding artefact with acceptance criteria
 #   - Keep under ~20 items; archive completed items to done/
 #   - Only Discovery may add items; only Delivery may update status
+#   - cost_usd: cumulative API-equivalent cost per story (Claude Code costUSD, entered post-session)
+#   - started_at: ISO 8601 datetime when delivery began (first session)
+#   - completed_at: ISO 8601 datetime when delivery ended (QA PASS, story marked done)
 
 items:
 
@@ -258,6 +261,9 @@ items:
     title: "Service Bindings — Worker split"
     priority: high
     status: in_progress
+    cost_usd: 0
+    started_at: "2026-02-23T17:05:05+01:00"
+    completed_at: null
     artefact: contexts/artefacts/stories/E06S24.story.md
     dependencies: [E06S22, E06S23, E06S18]
     notes: "Phase 4. callibrate-matching Worker with Service Binding. Core = gateway (auth, routing). Matching = compute (Vectorize, D1, scoring). Zero-network-hop RPC. Independent deployment."
@@ -266,10 +272,13 @@ items:
     epic: E06
     title: "Durable Objects — expert pool write coordinator"
     priority: high
-    status: in_progress
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-23T17:05:47+01:00"
+    completed_at: "2026-02-23T17:40:00+01:00"
     artefact: contexts/artefacts/stories/E06S25.story.md
     dependencies: [E06S23, E06S21]
-    notes: "Phase 4. ExpertPoolDO singleton — batches D1 + Vectorize writes with 5s alarm. Async via waitUntil. Cron sync (E06S23) as safety net. ~$5/month."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 7 ACs met. ExpertPoolDO singleton — batches D1 + Vectorize writes with 5s alarm window. notifyExpertPoolDO fire-and-forget via ctx.waitUntil (AC5 non-blocking). register.ts + profile.ts wired. wrangler.toml: AI + Vectorize + DO [[migrations]] for all 3 envs. DO auto-provisioned on first deploy. 114/114 vitest tests. PR#14 open. ⚠️ Merge order: E06S21 → E06S23 → E06S25. ⚠️ vectorize.ts trivial conflict with E06S21 (identical file — keep one)."
 
   - id: E06S26
     epic: E06
@@ -279,6 +288,55 @@ items:
     artefact: contexts/artefacts/stories/E06S26.story.md
     dependencies: [E06S18]
     notes: "DEC-65. Analytics Engine dataset matching-metrics. Fire-and-forget writeDataPoint(). Tracks latency, cache hits, pool size, scoring quality. No-op if binding missing. Human action: create dataset."
+
+  # ── EPIC E07: Product Analytics & Conversion Optimization ─────────────────
+  # PostHog EU Cloud + reverse proxy + client/server instrumentation + GAAI skill
+  # Runs in parallel with E06 remaining stories. No E01 dependency.
+
+  - id: E07S01
+    epic: E07
+    title: "PostHog reverse proxy CF Worker"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E07S01.story.md
+    dependencies: []
+    notes: "Foundation for all E07 stories. New callibrate-posthog-proxy Worker at workers/posthog-proxy/. Routes ph.callibrate.io → eu.i.posthog.com. Bypasses adblockers (+10-30% event capture). Human action: (1) create PostHog EU Cloud account, (2) create project, (3) DNS ph.callibrate.io CNAME."
+
+  - id: E07S02
+    epic: E07
+    title: "Satellite client-side instrumentation (prospect UX tracking)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E07S02.story.md
+    dependencies: [E07S01]
+    notes: "PostHog JS SDK injected in satellite landing.ts. Autocapture + session replay + cookieless mode. Events: page_view, cta_clicked. Rage clicks + dead clicks + heatmaps automatic. Human action: POSTHOG_API_KEY secret for satellite worker."
+
+  - id: E07S03
+    epic: E07
+    title: "Core API server-side event capture (prospect + expert funnels)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E07S03.story.md
+    dependencies: [E07S01]
+    notes: "posthog-node SDK in callibrate-core. 15 events across prospect/booking/expert/survey funnels + LLM extraction. captureImmediate() + ctx.waitUntil(). Event naming: object.action snake_case. Internal traffic filtering. Human action: POSTHOG_API_KEY secret for core worker."
+
+  - id: E07S04
+    epic: E07
+    title: "PostHog funnel dashboards via API"
+    priority: medium
+    status: refined
+    artefact: contexts/artefacts/stories/E07S04.story.md
+    dependencies: [E07S02, E07S03]
+    notes: "One-time setup script creates 3 dashboards via PostHog API: prospect conversion funnel, expert activation funnel, business overview. Idempotent. Human action: generate PostHog Personal API Key."
+
+  - id: E07S05
+    epic: E07
+    title: "PostHog MCP integration + GAAI analytics-query skill"
+    priority: medium
+    status: refined
+    artefact: contexts/artefacts/stories/E07S05.story.md
+    dependencies: [E07S02, E07S03]
+    notes: "PostHog MCP server in .mcp.json + analytics-query cross skill with 5 analysis patterns (funnel-diagnosis, activation-analysis, lifecycle-check, conversion-trend, friction-scan). Includes interpretation guide + query templates + conversion optimization playbook. Human action: PostHog Personal API Key."
 
   # ── EPIC E03: Prospect Gets Qualified and Matched to the Right Expert ────
   # Layer 3.2 — satellite sites. Depends on E02 + E06.
