@@ -65,6 +65,7 @@ crons = ["*/5 * * * *", "*/15 * * * *"]
 
 [env.staging]
 name = "callibrate-core-staging"
+preview_urls = true
 
 [env.staging.vars]
 WORKER_BASE_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"

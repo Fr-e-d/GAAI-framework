@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [[kv_namespaces]]
 binding = "CONFIG_CACHE"
-id = "PLACEHOLDER_SATELLITE_KV_CONFIG_STAGING"
+id = "f6319960eb4348d8a3a8a375f5e42d9c"
 
 # ── Staging ────────────────────────────────────────────────────────────────────
 
@@ -16,7 +16,7 @@ name = "callibrate-satellite-staging"
 
 [[env.staging.kv_namespaces]]
 binding = "CONFIG_CACHE"
-id = "PLACEHOLDER_SATELLITE_KV_CONFIG_STAGING"
+id = "f6319960eb4348d8a3a8a375f5e42d9c"
 
 # ── Production ─────────────────────────────────────────────────────────────────
 
@@ -25,7 +25,7 @@ name = "callibrate-satellite-prod"
 
 [[env.production.kv_namespaces]]
 binding = "CONFIG_CACHE"
-id = "PLACEHOLDER_SATELLITE_KV_CONFIG_PROD"
+id = "3efd7935547146149495a9da3c2e8067"
 
 # ── Secrets (set via wrangler secret put per env) ──────────────────────────────
 # SUPABASE_URL        — Supabase project URL
