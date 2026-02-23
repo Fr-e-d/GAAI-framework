@@ -13,6 +13,10 @@ export interface Env {
   FEATURE_FLAGS: KVNamespace;
   EXPERT_POOL: KVNamespace;
 
+  // Vectorize + Workers AI bindings
+  AI: Ai;
+  VECTORIZE: VectorizeIndex;
+
   // Worker secrets (bound via wrangler secret put)
   PROSPECT_TOKEN_SECRET: string;
 

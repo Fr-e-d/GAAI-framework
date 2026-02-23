@@ -21,6 +21,7 @@ import { handleCancel } from './handlers/bookings/cancel';
 import { handleReschedule } from './handlers/bookings/reschedule';
 import { handleGetPrep } from './handlers/bookings/prep';
 import { handleScheduled } from './handlers/bookings/cron';
+import { handleVectorizeReindex } from './handlers/admin/vectorize';
 
 const QUEUES = ['email-notifications', 'lead-billing', 'score-computation'] as const;
 
@@ -39,7 +40,7 @@ async function checkSupabase(env: Env): Promise<'connected' | 'error'> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const { pathname, method } = { pathname: url.pathname, method: request.method };
 
@@ -196,7 +197,7 @@ export default {
       const user = authResult.user;
 
       if (method === 'POST' && pathname === '/api/experts/register') {
-        return handleRegister(request, env, user);
+        return handleRegister(request, env, user, ctx);
       }
 
       const profileMatch = pathname.match(/^\/api\/experts\/([^/]+)\/profile$/);
@@ -205,7 +206,7 @@ export default {
           return handleGetProfile(request, env, user, profileMatch[1]!);
         }
         if (method === 'PATCH') {
-          return handlePatchProfile(request, env, user, profileMatch[1]!);
+          return handlePatchProfile(request, env, user, profileMatch[1]!, ctx);
         }
       }
 
@@ -224,6 +225,17 @@ export default {
         }
       }
 
+      return new Response(JSON.stringify({ error: 'Not Found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ── Admin routes (service-key auth) ─────────────────────────────────────────
+    if (pathname.startsWith('/api/admin/')) {
+      if (method === 'POST' && pathname === '/api/admin/vectorize/reindex') {
+        return handleVectorizeReindex(request, env, ctx);
+      }
       return new Response(JSON.stringify({ error: 'Not Found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },

@@ -61,6 +61,15 @@ preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
+# Workers AI binding
+[ai]
+binding = "AI"
+
+# Vectorize index binding
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
 # Top-level (used by wrangler dev)
 [triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
@@ -126,6 +135,15 @@ id = "68927a33fd9a46ec8b537a22a9cf2d20"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
+# Workers AI binding
+[env.staging.ai]
+binding = "AI"
+
+# Vectorize index binding
+[[env.staging.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
 [env.staging.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
 
@@ -188,6 +206,15 @@ id = "af0c9c22c77b45ffbac4215009a295d4"
 [[env.production.analytics_engine_datasets]]
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
+
+# Workers AI binding
+[env.production.ai]
+binding = "AI"
+
+# Vectorize index binding
+[[env.production.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
 
 [env.production.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *"]
