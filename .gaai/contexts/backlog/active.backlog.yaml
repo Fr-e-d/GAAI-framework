@@ -309,10 +309,13 @@ items:
     epic: E07
     title: "Satellite client-side instrumentation (prospect UX tracking)"
     priority: high
-    status: in_progress
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-23T17:05:05+01:00"
+    completed_at: "2026-02-23T18:30:00+01:00"
     artefact: contexts/artefacts/stories/E07S02.story.md
     dependencies: [E07S01]
-    notes: "PostHog JS SDK injected in satellite landing.ts. Autocapture + session replay + cookieless mode. Events: page_view, cta_clicked. Rage clicks + dead clicks + heatmaps automatic. Human action: POSTHOG_API_KEY secret for satellite worker."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. PostHog JS stub in <head> (async SDK load) + page_view + satellite.cta_clicked in <body>. Cookieless (persistence:memory), autocapture, session replay. tracking_enabled BOOLEAN NOT NULL DEFAULT true migration. XSS-safe JSON.stringify interpolation. tsc clean. PR#17 open → staging. ⚠️ Human action required: (1) wrangler secret put POSTHOG_API_KEY --env staging, (2) ensure ph.callibrate.io proxy deployed (E07S01 PR merged), (3) purge KV cache for active satellites, (4) deploy to prod via tag."
 
   - id: E07S03
     epic: E07
