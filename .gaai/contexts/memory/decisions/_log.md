@@ -200,6 +200,23 @@ Benchmarks secteur : appointment setting B2B cold 200–500€/meeting, lead qua
 
 ---
 
+### DEC-2026-02-23-02 — PR-based delivery + preview deployments + model selection
+
+**Context:** Le delivery agent mergeait directement sur staging via `git merge --squash`. Aucune revue de code avant staging. L'humain devait tout vérifier en un seul bloc lors du PR staging→production. Tous les outils majeurs d'agentic coding (Copilot, Codex, Devin) imposent un flux PR — l'IA ne merge jamais directement.
+**Decision:** 3 changements architecturaux :
+
+1. **PR-based delivery :** Le delivery agent crée une PR `story/{id}` → staging via `gh pr create`. Il ne merge jamais. L'humain review et merge sur GitHub. Le backlog passe à `done` = "PR créée, travail agent terminé".
+
+2. **Preview deployments :** GitHub Action `preview-deploy.yml` sur chaque push `story/*`. Pipeline : tsc + vitest + `wrangler versions upload --env staging --preview-alias <slug>`. Preview URL commentée sur la PR. Format : `https://story-e06s15.callibrate-core-staging.frederic-geens-consulting.workers.dev`. La preview partage les bindings staging (KV, Queues, Supabase) — aperçu code, pas environnement isolé.
+
+3. **Model selection :** `GAAI_CLAUDE_MODEL` env var (default: `sonnet`). Le daemon passe `--model $CLAUDE_MODEL` à Claude Code. Sonnet pour les deliveries (coût-efficace), Opus réservé à Discovery/décisions complexes.
+
+**Rationale:** Industry standard unanime — l'IA crée des PRs, pas des merges. Deux niveaux de preview (story isolée + staging complet) permettent une validation progressive. Sonnet réduit le coût des sessions de delivery (~5× moins cher qu'Opus) sans impact qualité sur l'implémentation.
+**Impact:** `delivery-loop.workflow.md` Step 8 réécrit (PR au lieu de merge). `delivery.agent.md` git workflow mis à jour. `delivery-daemon.sh` : `--model` flag ajouté. `deploy-staging.yml` : trigger corrigé (staging au lieu de production). `wrangler.toml` : `preview_urls = true`. Nouveau workflow : `.github/workflows/preview-deploy.yml`.
+**Date:** 2026-02-23
+
+---
+
 ### DEC-2026-02-23-01 — OpenAI integration pattern: function calling for structured extraction (E06S12 impl)
 
 **Context:** E06S12 completed the Anthropic→OpenAI migration for `POST /api/extract`. DEC-48 (archived) decided the provider swap. This entry captures the implementation pattern established.
