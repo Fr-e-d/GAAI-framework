@@ -395,7 +395,7 @@ items:
     epic: E06
     title: "Google OAuth — Sensitive scope review (calendar.events)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S30.story.md
     dependencies: []
     notes: "Founder-executed. Bloquer go-live. Délai 4–6 semaines minimum. À initier immédiatement en parallèle. Requis : Privacy Policy + Terms publiés sur callibrate.io/privacy + callibrate.io/terms, domaine vérifié Google Search Console, formulaire de vérification OAuth soumis avec démo vidéo. Sans ça : seuls les 100 test users listés dans Google Cloud Console peuvent connecter leur Calendar."
