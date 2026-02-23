@@ -407,10 +407,13 @@ items:
     epic: E06
     title: "Credit billing schema + lead pricing function (DEC-67/68)"
     priority: high
-    status: in_progress
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-23T22:55:00+01:00"
+    completed_at: "2026-02-23T23:15:00+01:00"
     artefact: contexts/artefacts/stories/E06S31.story.md
     dependencies: []
-    notes: "DEC-67/68. Foundation for credit billing. Schema: experts billing columns (credit_balance, spending_limit, max_lead_price, ls_subscription_id, ls_subscription_status) + credit_transactions table + leads status extension (flagged, confirmed, usage_reported). Pure function: calculateLeadPrice (DEC-67 grid, 8 cells, centimes). Unblocks E06S32, E06S33, E06S34."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. DB migration: experts billing cols + credit_transactions table (RLS + index) + leads lifecycle cols + extended status CHECK + leads(status,created_at) index. calculateLeadPrice pure fn (DEC-67, 8 cells, centimes). 104/104 vitest tests. PR#21 open → staging. Unblocks E06S32, E06S33, E06S34."
 
   - id: E06S32
     epic: E06
