@@ -200,6 +200,21 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 
 ---
 
+## PostHog Analytics Patterns (E07S01–E07S02)
+
+- **PostHog reverse proxy:** `ph.callibrate.io` (CF Worker, E07S01) — all SDK calls routed through first-party domain. SDK `api_host: "https://ph.callibrate.io"`, `ui_host: "https://eu.posthog.com"` (EU region). Never use PostHog direct endpoints.
+- **PostHog injection pattern (satellite Worker — E07S02):** Inline stub in `<head>` via template string (no `defer`/`src` on outer tag — stub creates async script element internally with `p.async=!0`). `capture_pageview: false` prevents blocking network call at init. Manual `page_view` fired in separate `<body>` script with `{ satellite_id, referrer, utm_source, utm_campaign, utm_medium }`. CTA click fires `satellite.cta_clicked` with `{ satellite_id, cta_text }`. Config: `persistence:"memory"` (cookieless, GDPR), `autocapture:true`, `disable_session_recording:false`.
+- **PostHog API key:** `POSTHOG_API_KEY` Cloudflare secret (per-worker). Public write-only key — safe to embed in HTML. Interpolated via `JSON.stringify(posthogApiKey)` in inline scripts (XSS-safe). Both head+body snippets guarded by `posthogApiKey` truthiness.
+- **Per-satellite tracking toggle:** `satellite_configs.tracking_enabled BOOLEAN NOT NULL DEFAULT true`. Guard in renderer: `config.tracking_enabled !== false && posthogApiKey` — strict false check (not falsy) to handle `undefined` from stale KV cache during column migration transitions.
+- **Satellite analytics event schema:**
+  | Event | Properties | Trigger |
+  |---|---|---|
+  | `page_view` | `satellite_id`, `referrer`, `utm_source`, `utm_campaign`, `utm_medium` | On page load (body script) |
+  | `satellite.cta_clicked` | `satellite_id`, `cta_text` | On `.cta` element click |
+  UTM params → `null` (not `undefined`) when absent. `referrer`: `document.referrer || null`.
+
+---
+
 ## Anti-Patterns (Avoid)
 
 - Synchronous external API calls inside CF Worker request handlers (use Queues)
