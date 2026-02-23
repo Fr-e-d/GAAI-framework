@@ -1,6 +1,6 @@
 import { PostHog } from 'posthog-node';
 
-const POSTHOG_HOST = 'https://ph.callibrate.io';
+const POSTHOG_HOST = 'https://eu.i.posthog.com';
 
 export interface CapturePayload {
   distinctId: string;
