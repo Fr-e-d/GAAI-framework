@@ -221,10 +221,10 @@ items:
     epic: E06
     title: "Security hardening — Rate Limiting binding + Turnstile"
     priority: high
-    status: in_progress
+    status: done
     artefact: contexts/artefacts/stories/E06S20.story.md
     dependencies: [E06S18]
-    notes: "DEC-63 + DEC-64. Replace manual KV rate limiter with CF Rate Limiting binding (free). Add Turnstile invisible CAPTCHA on POST /api/prospects/submit. Human action: create Turnstile site key in CF Dashboard."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 8 ACs met. RATE_LIMITER binding (30 req/60s). verifyTurnstile() on POST /api/prospects/submit. Rate limiting on all 3 public prospect endpoints. 88/88 vitest tests. PR#9 open. ⚠️ Human action required: (1) wrangler rate-limit create for each env + update namespace_id in wrangler.toml, (2) wrangler secret put TURNSTILE_SECRET_KEY --env production, (3) Create Turnstile site key in CF Dashboard, (4) deploy to prod via tag v0.6.20."
 
   - id: E06S21
     epic: E06
