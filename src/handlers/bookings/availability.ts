@@ -1,7 +1,8 @@
 import { Env } from '../../types/env';
-import { createServiceClient } from '../../lib/supabase';
+import { createSql } from '../../lib/db';
 import { getAccessToken, gcalFreebusy, GcalApiError } from '../../lib/gcalClient';
 import { mergeRules, computeFreeSlots } from '../../lib/availability';
+import type { ExpertRow, BookingRow } from '../../types/db';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -18,14 +19,12 @@ export async function handleGetAvailability(
   const url = new URL(request.url);
   const tz = url.searchParams.get('tz') ?? 'UTC';
 
-  const supabase = createServiceClient(env);
-  const { data: expert, error } = await supabase
-    .from('experts')
-    .select('gcal_email, gcal_access_token, gcal_token_expiry_at, gcal_connected, availability_rules')
-    .eq('id', expertId)
-    .single();
+  const sql = createSql(env);
+  const [expert] = await sql<Pick<ExpertRow, 'gcal_email' | 'gcal_access_token' | 'gcal_token_expiry_at' | 'gcal_connected' | 'availability_rules'>[]>`
+    SELECT gcal_email, gcal_access_token, gcal_token_expiry_at, gcal_connected, availability_rules
+    FROM experts WHERE id = ${expertId}`;
 
-  if (error || !expert) return json({ error: 'Not Found' }, 404);
+  if (!expert) return json({ error: 'Not Found' }, 404);
   if (!expert.gcal_connected) return json({ error: 'gcal_not_connected' }, 422);
   if (!expert.gcal_email) return json({ error: 'gcal_not_connected' }, 422);
 
@@ -53,17 +52,14 @@ export async function handleGetAvailability(
   }
 
   // Fetch held/confirmed bookings from DB
-  const { data: heldBookings } = await supabase
-    .from('bookings')
-    .select('start_at, end_at')
-    .eq('expert_id', expertId)
-    .in('status', ['held', 'confirmed'])
-    .lt('start_at', timeMax)
-    .gt('end_at', timeMin);
+  const heldBookings = await sql<Pick<BookingRow, 'start_at' | 'end_at'>[]>`
+    SELECT start_at, end_at FROM bookings
+    WHERE expert_id = ${expertId} AND status = ANY(ARRAY['held', 'confirmed'])
+    AND start_at < ${timeMax} AND end_at > ${timeMin}`;
 
   const slots = computeFreeSlots({
     busyIntervals,
-    heldBookings: (heldBookings ?? []).filter(b => b.start_at && b.end_at) as Array<{ start_at: string; end_at: string }>,
+    heldBookings: heldBookings.filter(b => b.start_at && b.end_at) as Array<{ start_at: string; end_at: string }>,
     rules,
     now,
   });

@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
-import { createServiceClient } from '../../lib/supabase';
-import { Json } from '../../types/database';
+import { createSql } from '../../lib/db';
+import type { ExpertRow } from '../../types/db';
 
 const VALID_AVAILABILITY = ['available', 'limited', 'unavailable'] as const;
 
@@ -17,10 +17,12 @@ const PatchProfileSchema = z.object({
   preferences: z.record(z.string(), z.unknown()).optional(),
 });
 
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
 function forbidden(): Response {
   return new Response(JSON.stringify({ error: 'Forbidden' }), {
     status: 403,
-    headers: { 'Content-Type': 'application/json' },
+    headers: JSON_HEADERS,
   });
 }
 
@@ -35,32 +37,19 @@ export async function handleGetProfile(
     return forbidden();
   }
 
-  const supabase = createServiceClient(env);
-  const { data, error } = await supabase
-    .from('experts')
-    .select('*')
-    .eq('id', expertId)
-    .single();
+  const sql = createSql(env);
+  const [data] = await sql<ExpertRow[]>`SELECT * FROM experts WHERE id = ${expertId}`;
 
-  if (error || !data) {
-    if (error?.code === 'PGRST116') {
-      return new Response(JSON.stringify({ error: 'Expert not found' }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-    return new Response(
-      JSON.stringify({ error: 'Failed to fetch profile', details: { message: error?.message } }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
+  if (!data) {
+    return new Response(JSON.stringify({ error: 'Expert not found' }), {
+      status: 404,
+      headers: JSON_HEADERS,
+    });
   }
 
   return new Response(JSON.stringify(data), {
     status: 200,
-    headers: { 'Content-Type': 'application/json' },
+    headers: JSON_HEADERS,
   });
 }
 
@@ -81,7 +70,7 @@ export async function handlePatchProfile(
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
       status: 400,
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
     });
   }
 
@@ -95,7 +84,7 @@ export async function handlePatchProfile(
       }),
       {
         status: 422,
-        headers: { 'Content-Type': 'application/json' },
+        headers: JSON_HEADERS,
       }
     );
   }
@@ -103,40 +92,31 @@ export async function handlePatchProfile(
   const { display_name, headline, bio, rate_min, rate_max, availability, profile, preferences } =
     parsed.data;
 
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
-  // AC8: JSONB merge via RPC
-  const { data, error } = await supabase.rpc('merge_expert_profile', {
-    p_id: expertId,
-    ...(display_name !== undefined && { p_display_name: display_name }),
-    ...(headline !== undefined && { p_headline: headline }),
-    ...(bio !== undefined && { p_bio: bio }),
-    ...(rate_min !== undefined && { p_rate_min: rate_min }),
-    ...(rate_max !== undefined && { p_rate_max: rate_max }),
-    ...(availability !== undefined && { p_availability: availability }),
-    ...(profile !== undefined && { p_profile: profile as Json }),
-    ...(preferences !== undefined && { p_preferences: preferences as Json }),
-  } as { p_id: string });
+  // AC8: JSONB merge via RPC (postgres.js named-param call)
+  const rows = await sql<ExpertRow[]>`
+    SELECT * FROM merge_expert_profile(
+      p_id := ${expertId},
+      p_display_name := ${display_name ?? null},
+      p_headline := ${headline ?? null},
+      p_bio := ${bio ?? null},
+      p_rate_min := ${rate_min ?? null},
+      p_rate_max := ${rate_max ?? null},
+      p_availability := ${availability ?? null},
+      p_profile := ${profile ? JSON.stringify(profile) : null}::jsonb,
+      p_preferences := ${preferences ? JSON.stringify(preferences) : null}::jsonb
+    )`;
 
-  if (error) {
-    return new Response(
-      JSON.stringify({ error: 'Failed to update profile', details: { message: error.message } }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-  }
-
-  if (!data || data.length === 0) {
+  if (!rows || rows.length === 0) {
     return new Response(JSON.stringify({ error: 'Expert not found' }), {
       status: 404,
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
     });
   }
 
-  return new Response(JSON.stringify(data[0]), {
+  return new Response(JSON.stringify(rows[0]), {
     status: 200,
-    headers: { 'Content-Type': 'application/json' },
+    headers: JSON_HEADERS,
   });
 }
