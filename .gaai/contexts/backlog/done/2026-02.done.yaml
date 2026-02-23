@@ -42,3 +42,13 @@ items:
     artefact: contexts/artefacts/stories/E06S10.story.md
     dependencies: [E06S03]
     notes: "QA PASS (1 remediation — AC4: connected derived from gcal_refresh_token IS NOT NULL, not stored boolean). All 10 ACs met. GET auth-url (scopes, offline, consent, state), GET callback (AES-256-GCM encrypted storage, AC3 preservation), GET status, DELETE disconnect (Google revocation + DB clear), refreshGcalToken utility (E06S11 prereq), schema migration (6 gcal_* columns), 8 vitest tests 28/28. PR #4. Smoke tests PASS. Post-delivery fixes (commit f985712): (1) gcal_token_expiry_at was null — Google returns expires_in not expiry_date; (2) gcal_email was null — openid+email scope missing from auth URL. Both fixed, all smoke tests PASS including ST7 disconnect. ⚠️ Google sensitive scope review (calendar.events) = pre-go-live blocker — must be initiated by founder."
+
+  - id: E06S12
+    epic: E06
+    title: "Migrate /api/extract from Anthropic to GPT-4o-mini"
+    priority: high
+    status: done
+    completed_at: 2026-02-23
+    artefact: contexts/artefacts/stories/E06S12.story.md
+    dependencies: [E06S08]
+    notes: "QA PASS (first cycle). All 8 ACs met. gpt-4o-mini via OpenAI Chat Completions + function calling. ANTHROPIC_API_KEY + CLOUDFLARE_AI_GATEWAY_URL removed from Env interface. OPENAI_API_KEY added. Same external contract (AC1 preserved). extractOpenAIToolCall() parses choices[0].message.tool_calls[0].function.arguments. 79/79 vitest tests PASS. Staging smoke tests PASS. ⚠️ Human action required: (1) set OPENAI_API_KEY staging secret via wrangler secret put; (2) deploy to prod via tag v0.6.12."

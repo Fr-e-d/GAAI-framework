@@ -200,4 +200,15 @@ Benchmarks secteur : appointment setting B2B cold 200–500€/meeting, lead qua
 
 ---
 
+### DEC-2026-02-23-01 — OpenAI integration pattern: function calling for structured extraction (E06S12 impl)
+
+**Context:** E06S12 completed the Anthropic→OpenAI migration for `POST /api/extract`. DEC-48 (archived) decided the provider swap. This entry captures the implementation pattern established.
+**Decision:** OpenAI Chat Completions with `tools` + `tool_choice: { type: "function", function: { name: "..." } }` is the canonical pattern for structured AI extraction in this codebase. Response parsed from `choices[0].message.tool_calls[0].function.arguments` (JSON string). Direct `fetch` to `https://api.openai.com/v1/chat/completions` — no CF AI Gateway for OpenAI calls at this stage.
+**Error surface:** `'OpenAI API error'` (non-200), `'Invalid response from OpenAI API'` (JSON parse fail), `'AI service unreachable'` (network failure).
+**Rationale:** Forced function calling guarantees structured output. The named `tool_choice` form ensures `tool_calls` is always populated. Direct fetch avoids CF AI Gateway complexity for a single endpoint.
+**Impact:** Pattern to follow for any future AI extraction or structured-output endpoint using OpenAI. CF AI Gateway re-addition is a separate story if observability is needed.
+**Date:** 2026-02-23
+
+---
+
 <!-- Add decisions above this line, newest first -->
