@@ -631,28 +631,32 @@ echo \$\$ > "\$LOCK_FILE"
 
 on_exit() {
   rm -f "\$LOCK_FILE" "$wrapper"
-  # If delivery failed, attempt to mark story as failed on staging
-  # so the daemon (or human) knows it needs attention.
   if [[ \$EXIT_CODE -ne 0 ]]; then
-    echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
-    (
-      cd "$PROJECT_DIR"
-      if command -v flock &>/dev/null; then
-        flock "$STAGING_LOCK" bash -c "
-          git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || git fetch origin '$TARGET_BRANCH' --quiet
+    # Check if the delivery already marked the story as done
+    cd "$PROJECT_DIR"
+    git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
+    local current_status
+    current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
+    if [[ "\$current_status" == "done" ]]; then
+      echo "[WRAPPER] Story $story_id already done — ignoring non-zero exit code (\$EXIT_CODE)."
+    else
+      echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
+      (
+        if command -v flock &>/dev/null; then
+          flock "$STAGING_LOCK" bash -c "
+            '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
+            git add '$BACKLOG_REL' 2>/dev/null
+            git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
+            git push origin '$TARGET_BRANCH' --quiet 2>&1
+          "
+        else
           '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
           git add '$BACKLOG_REL' 2>/dev/null
           git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
-          git push origin '$TARGET_BRANCH' --quiet 2>&1
-        "
-      else
-        git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
-        '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
-        git add '$BACKLOG_REL' 2>/dev/null
-        git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
-        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
-      fi
-    ) || echo "[WRAPPER] Warning: could not mark $story_id as failed (will be caught by staleness detection)"
+          git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+        fi
+      ) || echo "[WRAPPER] Warning: could not mark $story_id as failed (will be caught by staleness detection)"
+    fi
   fi
 }
 trap on_exit EXIT INT TERM
@@ -717,26 +721,34 @@ echo \$\$ > "\$LOCK_FILE"
 on_exit() {
   rm -f "\$LOCK_FILE" "$wrapper"
   if [[ \$EXIT_CODE -ne 0 ]]; then
-    echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
-    (
-      cd "$PROJECT_DIR"
-      git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
-      '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
-      git add '$BACKLOG_REL' 2>/dev/null
-      git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
-      git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
-    ) || echo "[WRAPPER] Warning: could not mark $story_id as failed"
+    # Check if the delivery already marked the story as done
+    # (interactive mode: user closes terminal after successful delivery → non-zero exit)
+    cd "$PROJECT_DIR"
+    git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
+    local current_status
+    current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
+    if [[ "\$current_status" == "done" ]]; then
+      echo "[WRAPPER] Story $story_id already done — ignoring non-zero exit code (\$EXIT_CODE)."
+    else
+      echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
+      (
+        '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
+        git add '$BACKLOG_REL' 2>/dev/null
+        git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
+        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+      ) || echo "[WRAPPER] Warning: could not mark $story_id as failed"
+    fi
   fi
 }
 trap on_exit EXIT INT TERM
 
-printf '\n\033[1;36m'
+echo ""
 echo "================================================================"
 echo "  GAAI Delivery — $story_id"
 echo "  Started: \$(date '+%Y-%m-%d %H:%M:%S')"
 echo "  Timeout: ${DELIVERY_TIMEOUT}s / Max turns: ${MAX_TURNS}"
 echo "================================================================"
-printf '\033[0m\n'
+echo ""
 
 cd "$PROJECT_DIR"
 unset CLAUDECODE 2>/dev/null || true
