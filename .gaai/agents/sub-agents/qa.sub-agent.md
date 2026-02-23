@@ -20,7 +20,7 @@ Spawned by the Delivery Orchestrator. Validates the implementation against accep
 SPAWN   ← Orchestrator provides context bundle (Story + acceptance criteria + impl-report)
 EXECUTE ← Reviews implementation against each acceptance criterion
 PASS?   → Run memory-alignment-check → write {id}.memory-delta.md
-HANDOFF ← Writes contexts/artefacts/reports/{id}.qa-report.md with verdict
+HANDOFF ← Writes contexts/artefacts/qa-reports/{id}.qa-report.md with verdict
 DIE     ← Terminates; context window released
 ```
 
@@ -32,7 +32,7 @@ DIE     ← Terminates; context window released
 
 - `contexts/artefacts/stories/{id}.story.md` — acceptance criteria are the test spec
 - `contexts/artefacts/plans/{id}.execution-plan.md` — test checkpoints defined here
-- `contexts/artefacts/reports/{id}.impl-report.md` — the Implementation Sub-Agent's output
+- `contexts/artefacts/impl-reports/{id}.impl-report.md` — the Implementation Sub-Agent's output
 - `contexts/rules/orchestration.rules.md`
 - `contexts/rules/artefacts.rules.md`
 
@@ -75,14 +75,14 @@ The remediation loop is contained within the QA Sub-Agent's context window. This
 
 ## Handoff Artefacts
 
-Always writes: `contexts/artefacts/reports/{id}.qa-report.md`
+Always writes: `contexts/artefacts/qa-reports/{id}.qa-report.md`
 - Verdict: PASS / FAIL / ESCALATE
 - Per-criterion result (pass/fail with evidence)
 - Rule violations (if any)
 - Remediation attempts log (if applicable)
 - Escalation reason (if ESCALATE)
 
-On PASS only: `contexts/artefacts/reports/{id}.memory-delta.md`
+On PASS only: `contexts/artefacts/memory-deltas/{id}.memory-delta.md`
 - Output of `memory-alignment-check`
 - Read by the Delivery Orchestrator to flag Discovery if needed
 
