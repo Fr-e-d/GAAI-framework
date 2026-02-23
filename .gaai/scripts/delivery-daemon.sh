@@ -684,6 +684,16 @@ unset CLAUDECODE 2>/dev/null || true
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
 
+# Heartbeat: -p mode produces no output during tool calls. Touch the log
+# every 60s so the daemon heartbeat monitor knows we're still alive.
+(
+  while kill -0 \$\$ 2>/dev/null; do
+    touch "$delivery_log"
+    sleep 60
+  done
+) &
+HEARTBEAT_PID=\$!
+
 # Slash commands don't work in -p mode — expand the command file into a prompt
 DELIVERY_PROMPT=\$(cat "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
@@ -698,6 +708,8 @@ else
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 fi
+
+kill \$HEARTBEAT_PID 2>/dev/null || true
 
 echo ""
 echo "================================================================"
@@ -776,6 +788,16 @@ unset CLAUDECODE 2>/dev/null || true
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
 
+# Heartbeat: -p mode produces no output during tool calls. Touch the log
+# every 60s so the daemon heartbeat monitor knows we're still alive.
+(
+  while kill -0 \$\$ 2>/dev/null; do
+    touch "$delivery_log"
+    sleep 60
+  done
+) &
+HEARTBEAT_PID=\$!
+
 # Slash commands don't work in -p mode — expand the command file into a prompt
 # See: https://code.claude.com/docs/en/headless
 DELIVERY_PROMPT=\$(cat "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
@@ -794,6 +816,8 @@ else
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 fi
+
+kill \$HEARTBEAT_PID 2>/dev/null || true
 
 echo ""
 echo "Delivery finished (exit \$EXIT_CODE). Closing in 10s..."
