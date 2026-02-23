@@ -239,7 +239,7 @@ items:
     epic: E06
     title: "Semantic scoring integration"
     priority: high
-    status: in_progress
+    status: done
     artefact: contexts/artefacts/stories/E06S22.story.md
     dependencies: [E06S21, E06S18]
     notes: "DEC-62. Vectorize pre-filter (top-100 candidates) + blend: 0.7×exact + 0.3×vector. Graceful fallback to deterministic-only if Vectorize unavailable. 'machine learning' matches 'deep learning'."
