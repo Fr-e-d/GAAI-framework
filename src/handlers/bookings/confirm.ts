@@ -2,6 +2,7 @@ import { Env } from '../../types/env';
 import { createSql } from '../../lib/db';
 import { getAccessToken, gcalFreebusy, gcalInsertEvent, GcalApiError } from '../../lib/gcalClient';
 import type { BookingRow, ExpertRow, ProspectRow, SatelliteConfigRow } from '../../types/db';
+import { captureEvent } from '../../lib/posthog';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -13,13 +14,14 @@ function json(data: unknown, status = 200): Response {
 export async function handleConfirm(
   request: Request,
   env: Env,
-  bookingId: string
+  bookingId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   const sql = createSql(env);
 
   // Fetch booking
-  const [booking] = await sql<Pick<BookingRow, 'id' | 'expert_id' | 'prospect_id' | 'start_at' | 'end_at' | 'status' | 'held_until' | 'prep_token' | 'match_id'>[]>`
-    SELECT id, expert_id, prospect_id, start_at, end_at, status, held_until, prep_token, match_id
+  const [booking] = await sql<Pick<BookingRow, 'id' | 'expert_id' | 'prospect_id' | 'start_at' | 'end_at' | 'status' | 'held_until' | 'prep_token' | 'match_id' | 'duration_min'>[]>`
+    SELECT id, expert_id, prospect_id, start_at, end_at, status, held_until, prep_token, match_id, duration_min
     FROM bookings WHERE id = ${bookingId}`;
 
   if (!booking) return json({ error: 'Not Found' }, 404);
@@ -160,6 +162,16 @@ export async function handleConfirm(
     meeting_url: gcalResult.meetingUrl ?? '',
     scheduled_at: booking.start_at!,
   });
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${booking.expert_id!}`,
+    event: 'booking.confirmed',
+    properties: {
+      expert_id: booking.expert_id!,
+      prospect_id: booking.prospect_id!,
+      duration_min: booking.duration_min ?? 20,
+    },
+  }));
 
   return json({
     booking_id: bookingId,
