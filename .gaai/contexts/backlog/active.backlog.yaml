@@ -152,10 +152,10 @@ items:
     epic: E06
     title: "Migrate /api/extract from Anthropic to GPT-4o-mini"
     priority: high
-    status: refined
+    status: done
     artefact: contexts/artefacts/stories/E06S12.story.md
     dependencies: [E06S08]
-    notes: "DEC-48. Provider swap: claude-haiku-4-5 → gpt-4o-mini. Remove ANTHROPIC_API_KEY + CLOUDFLARE_AI_GATEWAY_URL. Add OPENAI_API_KEY. Same external contract. No CF AI Gateway at this stage (direct OpenAI call). Unblocks removal of Anthropic billing."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 8 ACs met. gpt-4o-mini via OpenAI Chat Completions + function calling. ANTHROPIC_API_KEY + CLOUDFLARE_AI_GATEWAY_URL removed. OPENAI_API_KEY added. Same external contract. 79/79 vitest tests. Staging smoke tests PASS. ⚠️ Human action required: deploy to prod via tag v0.6.12. ⚠️ Set OPENAI_API_KEY staging secret: npx wrangler secret put OPENAI_API_KEY --env staging"
 
   - id: E06S13
     epic: E06
