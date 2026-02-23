@@ -40,7 +40,7 @@ set -euo pipefail
 #   GAAI_DELIVERY_TIMEOUT=14400      hard kill timeout in seconds (default: 4h, last resort)
 #   GAAI_MAX_TURNS=200               max claude tool-call turns per delivery (primary safety)
 #   GAAI_HEARTBEAT_STALE=900         seconds without log output before killing (default: 15min)
-#   GAAI_CLAUDE_MODEL=sonnet          claude model to use (default: sonnet)
+#   GAAI_CLAUDE_MODEL=sonnet         claude model to use (default: sonnet)
 #   GAAI_STALENESS_THRESHOLD=15000   seconds before orphan in_progress is stale (default: timeout+10min)
 #   GAAI_SKIP_PERMISSIONS=true       force --dangerously-skip-permissions
 #   GAAI_SKIP_PERMISSIONS=false      force interactive mode (even on VPS)
@@ -859,9 +859,20 @@ launch_delivery() {
   fi
 }
 
+# ── Prevent macOS sleep ───────────────────────────────────────────────────
+CAFFEINATE_PID=""
+if [[ "$PLATFORM" == "Darwin" ]]; then
+  caffeinate -dims &
+  CAFFEINATE_PID=$!
+  log "${GREEN}caffeinate started (PID $CAFFEINATE_PID) — Mac will stay awake${NC}"
+fi
+
 # ── Graceful shutdown ─────────────────────────────────────────────────────
 shutdown() {
   echo ""
+  if [[ -n "$CAFFEINATE_PID" ]]; then
+    kill "$CAFFEINATE_PID" 2>/dev/null || true
+  fi
   log "${YELLOW}Daemon stopped. Active delivery sessions continue independently.${NC}"
   exit 0
 }
