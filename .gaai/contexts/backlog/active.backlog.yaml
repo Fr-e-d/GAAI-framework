@@ -380,10 +380,13 @@ items:
     epic: E06
     title: "Staging — Secrets manquants (Core + Satellite + Turnstile)"
     priority: critical
-    status: in_progress
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-24T00:00:00+01:00"
+    completed_at: "2026-02-24T00:30:00+01:00"
     artefact: contexts/artefacts/stories/E06S28.story.md
     dependencies: [E06S27]
-    notes: "Agent-deliverable via wrangler CLI. AC1 (SURVEY_TOKEN_SECRET) + AC2 (TURNSTILE_SECRET_KEY) déjà configurés sur core staging. Reste: AC3 delay vars dans wrangler.toml + AC4 vérif E06S16 token + AC5-AC7 secrets satellite (SUPABASE_URL via Supabase MCP, SUPABASE_ANON_KEY via Supabase MCP, POSTHOG_API_KEY=phc_9MGVc1dDaNAugnSHJ692t5YuWFNy2WQ4kIHNvlEsXkr) + AC8 Turnstile site key=0x4AAAAAAChD0LT5UgifFL-I (var satellite wrangler.toml) + AC9-AC10 smoke tests. Bloque E06S29."
+    notes: "DONE 2026-02-24. QA PASS. All 10 ACs met. AC3: SURVEY_DELAY_7D_MS=60000 + SURVEY_DELAY_38D_MS=120000 in wrangler.toml [env.staging.vars]. AC4: Fixed survey token bug — email-notifications.ts used PROSPECT_TOKEN_SECRET to sign survey JWTs; changed to SURVEY_TOKEN_SECRET. Also fixed pre-existing jwt.ts duplicate signSurveyToken export (E06S16/E06S17 merge artifact). AC5-AC7: Satellite staging now has SUPABASE_URL + SUPABASE_ANON_KEY + POSTHOG_API_KEY. AC8: No change needed (no Turnstile form in satellite HTML). AC9: 13 secrets on core staging. AC10: 4 secrets on satellite staging. 111/111 vitest PASS. PR#25 open → staging."
 
   - id: E06S29
     epic: E06
