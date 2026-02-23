@@ -153,6 +153,54 @@ export type Database = {
           },
         ]
       }
+      credit_transactions: {
+        Row: {
+          amount: number
+          balance_after: number
+          created_at: string | null
+          description: string | null
+          expert_id: string
+          id: string
+          lead_id: string | null
+          type: string
+        }
+        Insert: {
+          amount: number
+          balance_after: number
+          created_at?: string | null
+          description?: string | null
+          expert_id: string
+          id?: string
+          lead_id?: string | null
+          type: string
+        }
+        Update: {
+          amount?: number
+          balance_after?: number
+          created_at?: string | null
+          description?: string | null
+          expert_id?: string
+          id?: string
+          lead_id?: string | null
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_transactions_expert_id_fkey"
+            columns: ["expert_id"]
+            isOneToOne: false
+            referencedRelation: "experts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_transactions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       experts: {
         Row: {
           availability: string | null
@@ -162,6 +210,7 @@ export type Database = {
           cal_username: string | null
           composite_score: number | null
           created_at: string | null
+          credit_balance: number
           display_name: string | null
           gcal_access_token: string | null
           gcal_connected: boolean | null
@@ -171,12 +220,16 @@ export type Database = {
           gcal_token_expiry_at: string | null
           headline: string | null
           id: string
+          ls_subscription_id: string | null
+          ls_subscription_status: string | null
+          max_lead_price: number | null
           preferences: Json | null
           profile: Json | null
           rate_max: number | null
           rate_min: number | null
           reminder_settings: Json | null
           score_updated_at: string | null
+          spending_limit: number | null
           verified_at: string | null
         }
         Insert: {
@@ -187,6 +240,7 @@ export type Database = {
           cal_username?: string | null
           composite_score?: number | null
           created_at?: string | null
+          credit_balance?: number
           display_name?: string | null
           gcal_access_token?: string | null
           gcal_connected?: boolean | null
@@ -196,12 +250,16 @@ export type Database = {
           gcal_token_expiry_at?: string | null
           headline?: string | null
           id: string
+          ls_subscription_id?: string | null
+          ls_subscription_status?: string | null
+          max_lead_price?: number | null
           preferences?: Json | null
           profile?: Json | null
           rate_max?: number | null
           rate_min?: number | null
           reminder_settings?: Json | null
           score_updated_at?: string | null
+          spending_limit?: number | null
           verified_at?: string | null
         }
         Update: {
@@ -212,6 +270,7 @@ export type Database = {
           cal_username?: string | null
           composite_score?: number | null
           created_at?: string | null
+          credit_balance?: number
           display_name?: string | null
           gcal_access_token?: string | null
           gcal_connected?: boolean | null
@@ -221,12 +280,16 @@ export type Database = {
           gcal_token_expiry_at?: string | null
           headline?: string | null
           id?: string
+          ls_subscription_id?: string | null
+          ls_subscription_status?: string | null
+          max_lead_price?: number | null
           preferences?: Json | null
           profile?: Json | null
           rate_max?: number | null
           rate_min?: number | null
           reminder_settings?: Json | null
           score_updated_at?: string | null
+          spending_limit?: number | null
           verified_at?: string | null
         }
         Relationships: []
@@ -284,37 +347,49 @@ export type Database = {
           amount: number | null
           billed_at: string | null
           booking_id: string | null
+          confirmed_at: string | null
           created_at: string | null
           expert_id: string | null
+          flag_reason: string | null
+          flagged_at: string | null
           id: string
           ls_checkout_id: string | null
           ls_order_id: string | null
           prospect_id: string | null
           status: string | null
+          usage_reported_at: string | null
         }
         Insert: {
           amount?: number | null
           billed_at?: string | null
           booking_id?: string | null
+          confirmed_at?: string | null
           created_at?: string | null
           expert_id?: string | null
+          flag_reason?: string | null
+          flagged_at?: string | null
           id?: string
           ls_checkout_id?: string | null
           ls_order_id?: string | null
           prospect_id?: string | null
           status?: string | null
+          usage_reported_at?: string | null
         }
         Update: {
           amount?: number | null
           billed_at?: string | null
           booking_id?: string | null
+          confirmed_at?: string | null
           created_at?: string | null
           expert_id?: string | null
+          flag_reason?: string | null
+          flagged_at?: string | null
           id?: string
           ls_checkout_id?: string | null
           ls_order_id?: string | null
           prospect_id?: string | null
           status?: string | null
+          usage_reported_at?: string | null
         }
         Relationships: [
           {
@@ -542,6 +617,7 @@ export type Database = {
           cal_username: string | null
           composite_score: number | null
           created_at: string | null
+          credit_balance: number
           display_name: string | null
           gcal_access_token: string | null
           gcal_connected: boolean | null
@@ -551,12 +627,16 @@ export type Database = {
           gcal_token_expiry_at: string | null
           headline: string | null
           id: string
+          ls_subscription_id: string | null
+          ls_subscription_status: string | null
+          max_lead_price: number | null
           preferences: Json | null
           profile: Json | null
           rate_max: number | null
           rate_min: number | null
           reminder_settings: Json | null
           score_updated_at: string | null
+          spending_limit: number | null
           verified_at: string | null
         }[]
         SetofOptions: {

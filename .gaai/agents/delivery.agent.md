@@ -134,7 +134,8 @@ BEFORE execution  → flock: git pull origin staging
 AFTER impl PASS   → atomic commit inside ../{id}-workspace
 
 AFTER QA PASS     → push story/{id} to origin
-                    gh pr create --base staging --head story/{id} (human reviews + merges)
+                    gh pr create --base staging --head story/{id}
+                    gh pr merge --auto --squash story/{id}   ← enable GitHub auto-merge (merges when CI passes)
                     flock: commit artefacts + mark done + push staging (governance)
                     cleanup: worktree remove (keep branch for PR — GitHub auto-deletes after merge)
 
@@ -181,6 +182,7 @@ Tier 2 or 3? → assemble context bundle
                   → if verdict DRIFT_DETECTED or NEW_KNOWLEDGE_FOUND or DRIFT_AND_NEW_KNOWLEDGE:
                       flag Discovery with delta report before marking done
                   → push story/{id} → gh pr create --base staging
+                                   → gh pr merge --auto --squash story/{id}
                   → flock: commit artefacts + mark done → push staging
                   → cleanup worktree (keep branch for PR)
            FAIL → re-spawn Implementation Sub-Agent with qa-report (max 2 re-spawns)
