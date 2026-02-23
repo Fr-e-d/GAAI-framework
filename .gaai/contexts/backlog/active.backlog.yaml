@@ -287,7 +287,7 @@ items:
     epic: E03
     title: "Crawler access policy — SEO/GEO protection for satellite sites"
     priority: medium
-    status: in_progress
+    status: failed
     artefact: contexts/artefacts/stories/E03S05.story.md
     dependencies: [E06S14]
     notes: "DEC-53. robots.txt and sitemap.xml generated dynamically by the satellite Worker (E06S14), CF-edge-cached 24h — functionally equivalent to static. AC2 (Astro build-time) superseded by E06S14 AC6. SEO bots: full access. AI training bots blocked. AI answer/search bots: platform pages allowed, /experts/ blocked. Manual founder action: Cloudflare AI Training Bots → Block on all pages."
