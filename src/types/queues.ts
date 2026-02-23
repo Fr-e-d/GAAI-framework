@@ -6,7 +6,8 @@ export type EmailNotificationMessage =
   | { type: 'booking.cancelled'; booking_id: string }
   | { type: 'booking.rescheduled'; booking_id: string }
   | { type: 'booking.reminder_prospect'; booking_id: string }
-  | { type: 'booking.reminder_expert'; booking_id: string };
+  | { type: 'booking.reminder_expert'; booking_id: string }
+  | { type: 'expert.billing.insufficient_balance'; expert_id: string };
 
 // lead-billing queue
 export type LeadBillingMessage = {

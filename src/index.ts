@@ -21,6 +21,8 @@ import { handleCancel } from './handlers/bookings/cancel';
 import { handleReschedule } from './handlers/bookings/reschedule';
 import { handleGetPrep } from './handlers/bookings/prep';
 import { handleScheduled } from './handlers/bookings/cron';
+import { handleFlagLead } from './handlers/leads/flag';
+import { handleConfirmLead } from './handlers/leads/confirm';
 
 const QUEUES = ['email-notifications', 'lead-billing', 'score-computation'] as const;
 
@@ -185,6 +187,33 @@ export default {
         new Response(JSON.stringify({ error: 'Not Found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }),
         corsResult.origin,
       );
+    }
+
+    // ── Lead routes (authenticated) ─────────────────────────────────────────
+    if (pathname.startsWith('/api/leads/')) {
+      const authResult = await authenticate(request, env);
+      if (authResult.response) {
+        return authResult.response;
+      }
+      const user = authResult.user;
+
+      const leadIdMatch = pathname.match(/^\/api\/leads\/([^/]+)\/(flag|confirm)$/);
+      if (leadIdMatch && leadIdMatch[1] && leadIdMatch[2]) {
+        const leadId = leadIdMatch[1];
+        const action = leadIdMatch[2];
+
+        if (method === 'POST' && action === 'flag') {
+          return handleFlagLead(request, env, user, leadId);
+        }
+        if (method === 'POST' && action === 'confirm') {
+          return handleConfirmLead(request, env, user, leadId);
+        }
+      }
+
+      return new Response(JSON.stringify({ error: 'Not Found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     // ── Expert routes (authenticated) ───────────────────────────────────────
