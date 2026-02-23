@@ -22,9 +22,9 @@ set -euo pipefail
 #   PID-based lock files are a local-only backup for same-machine dedup.
 #
 # Permissions:
-#   --dangerously-skip-permissions is auto-enabled on Linux (VPS) only.
-#   On macOS (local dev), Claude runs without skip — interactive approval.
-#   Override with GAAI_SKIP_PERMISSIONS=true|false.
+#   --dangerously-skip-permissions is always enabled (required for -p mode).
+#   Without it, permission prompts hang forever in headless mode.
+#   Override with GAAI_SKIP_PERMISSIONS=false to force interactive (not recommended).
 #
 # Usage:
 #   .gaai/scripts/delivery-daemon.sh                     # defaults: 30s, 1 slot
@@ -739,8 +739,7 @@ echo \$\$ > "\$LOCK_FILE"
 
 on_exit() {
   set +x 2>/dev/null || true
-  rm -f "\$LOCK_FILE"
-  # DEBUG: keep wrapper for inspection (normally: rm -f "$wrapper")
+  rm -f "\$LOCK_FILE" "$wrapper"
   if [[ \$EXIT_CODE -ne 0 ]]; then
     # Check if the delivery already marked the story as done
     # (interactive mode: user closes terminal after successful delivery → non-zero exit)
@@ -801,9 +800,6 @@ echo "Delivery finished (exit \$EXIT_CODE). Closing in 10s..."
 echo "Full output saved to: $delivery_log"
 sleep 10
 WRAPPER_EOF
-
-  # DEBUG: save a copy of the generated wrapper for inspection
-  cp "$wrapper" "$LOG_DIR/${story_id}_wrapper_debug.sh" 2>/dev/null || true
 
   chmod +x "$wrapper"
 
