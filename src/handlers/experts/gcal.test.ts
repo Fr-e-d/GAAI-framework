@@ -1,6 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleGcalAuthUrl, handleGcalStatus, handleGcalCallback, handleGcalDisconnect } from './gcal';
 
+vi.mock('posthog-node', () => ({
+  PostHog: vi.fn().mockImplementation(() => ({
+    captureImmediate: vi.fn().mockResolvedValue(undefined),
+  })),
+}));
+
+const mockCtx = {
+  waitUntil: vi.fn(),
+  passThroughOnException: vi.fn(),
+} as unknown as ExecutionContext;
+
 // Minimal mock Env
 const mockEnv = {
   SUPABASE_URL: 'https://test.supabase.co',
@@ -15,7 +26,7 @@ const mockEnv = {
   CLOUDFLARE_AI_GATEWAY_URL: '',
   PROSPECT_TOKEN_SECRET: '',
   SESSIONS: {} as KVNamespace,
-  RATE_LIMITING: {} as KVNamespace,
+  RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: true }) } as unknown as RateLimit,
   FEATURE_FLAGS: {} as KVNamespace,
   EXPERT_POOL: {} as KVNamespace,
   EMAIL_NOTIFICATIONS: {} as Queue,
@@ -97,7 +108,7 @@ describe('handleGcalCallback', () => {
     const request = new Request(
       `https://example.com/api/gcal/callback?code=authcode&state=${expertId}`
     );
-    const response = await handleGcalCallback(request, mockEnv as any);
+    const response = await handleGcalCallback(request, mockEnv as any, mockCtx);
 
     expect(response.status).toBe(302);
     expect(response.headers.get('Location')).toBe('/onboarding/gcal-connected');
@@ -128,7 +139,7 @@ describe('handleGcalCallback', () => {
     const request = new Request(
       `https://example.com/api/gcal/callback?code=authcode&state=${expertId}`
     );
-    await handleGcalCallback(request, mockEnv as any);
+    await handleGcalCallback(request, mockEnv as any, mockCtx);
 
     // The update payload should NOT contain gcal_refresh_token
     expect(updateBody).not.toContain('gcal_refresh_token');
@@ -136,7 +147,7 @@ describe('handleGcalCallback', () => {
 
   it('redirects to gcal-error when state is missing', async () => {
     const request = new Request('https://example.com/api/gcal/callback?code=authcode');
-    const response = await handleGcalCallback(request, mockEnv as any);
+    const response = await handleGcalCallback(request, mockEnv as any, mockCtx);
     expect(response.status).toBe(302);
     expect(response.headers.get('Location')).toContain('/onboarding/gcal-error');
   });
