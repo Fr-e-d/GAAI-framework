@@ -859,9 +859,20 @@ launch_delivery() {
   fi
 }
 
+# ── Prevent macOS sleep ───────────────────────────────────────────────────
+CAFFEINATE_PID=""
+if [[ "$PLATFORM" == "Darwin" ]]; then
+  caffeinate -dims &
+  CAFFEINATE_PID=$!
+  log "${GREEN}caffeinate started (PID $CAFFEINATE_PID) — Mac will stay awake${NC}"
+fi
+
 # ── Graceful shutdown ─────────────────────────────────────────────────────
 shutdown() {
   echo ""
+  if [[ -n "$CAFFEINATE_PID" ]]; then
+    kill "$CAFFEINATE_PID" 2>/dev/null || true
+  fi
   log "${YELLOW}Daemon stopped. Active delivery sessions continue independently.${NC}"
   exit 0
 }
