@@ -559,6 +559,95 @@ Cache API L1 (60s TTL) requires a **custom domain** — it is silently a no-op o
 
 On a miss, D1 serves the request in <5ms. Cache API misses are expected on first hit per datacenter.
 
+## PostHog Proxy Worker — `callibrate-posthog-proxy` (E07S01)
+
+The PostHog proxy routes analytics events through a first-party subdomain (`ph.callibrate.io`),
+bypassing ad blockers that block direct calls to `eu.i.posthog.com`. The Worker is a
+transparent pass-through — no PostHog API keys are stored in the Worker.
+
+### Workers Table Update
+
+| Name | Scope | Environment | Deployed via |
+|---|---|---|---|
+| `callibrate-posthog-proxy-staging` | PostHog reverse proxy | staging | push to `staging` branch |
+| `callibrate-posthog-proxy-prod` | PostHog reverse proxy | production | push of a `v*` tag |
+
+### DNS Setup
+
+Configure two DNS records in Cloudflare (or your DNS provider) pointing the subdomains to the
+Worker. Since the Worker uses Cloudflare zone routes, a proxied (orange-cloud) DNS record is
+sufficient.
+
+| Subdomain | Type | Value | Env |
+|---|---|---|---|
+| `ph.callibrate.io` | CNAME | `callibrate-posthog-proxy-prod.{account}.workers.dev` | Production |
+| `ph.staging.callibrate.io` | CNAME | `callibrate-posthog-proxy-staging.{account}.workers.dev` | Staging |
+
+> **Tip:** Once the Worker route `ph.callibrate.io/*` is configured in wrangler.toml, Cloudflare
+> intercepts all matching requests at the edge — you can also use a proxied A record pointing to
+> `192.0.2.1` (a dummy IP) if a CNAME conflicts with an existing record.
+
+### Cloudflare API Token Scope
+
+Extend the `CLOUDFLARE_API_TOKEN` GitHub secret to include `callibrate-posthog-proxy*` Worker names:
+
+1. Cloudflare Dashboard > Profile > API Tokens > Edit existing token (or create a new one)
+2. Ensure the token has **Workers Scripts:Edit** permission scoped to include `callibrate-posthog-proxy*`
+3. Update the GitHub secret if the token was changed
+
+### Deploy
+
+No pre-provisioning required (no KV, no Queues, no secrets). Install and deploy:
+
+```bash
+cd workers/posthog-proxy
+npm install
+npx wrangler deploy --env staging    # staging
+npx wrangler deploy --env production  # production
+```
+
+### Local Dev
+
+```bash
+cd workers/posthog-proxy
+npm install
+npx wrangler dev
+# -> http://localhost:8787
+```
+
+Test proxy routing locally:
+```bash
+# Should proxy to eu.i.posthog.com/ingest/batch
+curl -X POST http://localhost:8787/ingest/batch \
+  -H "Content-Type: application/json" \
+  -d '{"batch":[]}'
+
+# Should return PostHog JS SDK
+curl http://localhost:8787/static/array.js | head -5
+```
+
+### PostHog Account Setup (founder action)
+
+1. Create a PostHog EU Cloud account at [posthog.com](https://posthog.com)
+2. Create a new project — select **EU region**
+3. Note the **Project API Key** (format: `phc_...`) — needed for E07S02/E07S03
+4. In PostHog project settings, set the **API host** to `https://ph.callibrate.io`
+   (or `https://ph.staging.callibrate.io` for staging testing)
+
+### Smoke Test (post-deploy)
+
+After deploying to staging and configuring DNS:
+
+```bash
+# Should return 200 from PostHog EU assets
+curl -I https://ph.staging.callibrate.io/static/array.js
+
+# Should return PostHog's response (1 for accepted)
+curl -X POST https://ph.staging.callibrate.io/ingest/batch \
+  -H "Content-Type: application/json" \
+  -d '{"api_key":"phc_test","batch":[]}'
+```
+
 ---
 
 ## PostHog Dashboards Setup (E07S04)
@@ -592,4 +681,3 @@ The script is **idempotent** — running it multiple times is safe. If a dashboa
 | Prospect Conversion Funnel | FUNNELS | 5 steps, breakdown: `satellite_id`, 14-day window, 30d range |
 | Expert Activation Funnel | FUNNELS | 4 steps, 30-day window, 30d range |
 | Business Overview | TRENDS (×4) | Daily counts + formula-based conversion rate |
-

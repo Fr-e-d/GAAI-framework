@@ -2,12 +2,9 @@ import { Env } from '../types/env';
 import { LeadBillingMessage } from '../types/queues';
 import { isAlreadyProcessed, markProcessed } from '../lib/idempotency';
 import { handleMessageFailure } from '../lib/retryQueue';
-import { createSql } from '../lib/db';
-import type { LeadRow, ExpertRow } from '../types/db';
-
-// TODO: move to env secrets once Lemon Squeezy account is configured
-const LS_STORE_ID = 'YOUR_LS_STORE_ID';
-const LS_VARIANT_ID = 'YOUR_LS_VARIANT_ID';
+import { createServiceClient } from '../lib/supabase';
+import { calculateLeadPrice } from '../lib/pricing';
+import { ProspectRequirements } from '../types/matching';
 
 export async function consumeLeadBilling(
   batch: MessageBatch<LeadBillingMessage>,
@@ -42,80 +39,57 @@ async function processLeadBilling(
   body: LeadBillingMessage,
   env: Env
 ): Promise<void> {
-  const sql = createSql(env);
+  const supabase = createServiceClient(env);
 
-  // Step 1: Insert lead with status 'pending', handle partial-failure retries
-  let leadId: string;
+  // Step 1: Fetch prospect requirements for lead price calculation (AC1)
+  const { data: prospect, error: prospectErr } = await supabase
+    .from('prospects')
+    .select('requirements')
+    .eq('id', body.prospect_id)
+    .single();
 
-  try {
-    const [inserted] = await sql<Pick<LeadRow, 'id'>[]>`
-      INSERT INTO leads (booking_id, expert_id, prospect_id, status)
-      VALUES (${body.booking_id}, ${body.expert_id}, ${body.prospect_id}, 'pending')
-      RETURNING id`;
-    if (!inserted) throw new Error('Insert failed');
-    leadId = inserted.id;
-  } catch (err) {
-    if ((err as { code?: string }).code === '23505') {
-      // Unique constraint violation — lead already exists from a previous partial attempt
-      const [existing] = await sql<Pick<LeadRow, 'id'>[]>`
-        SELECT id FROM leads WHERE booking_id = ${body.booking_id}`;
-      if (!existing) {
-        throw new Error(`Failed to fetch existing lead for booking ${body.booking_id}`);
-      }
-      leadId = existing.id;
-    } else {
-      throw new Error(`Failed to insert lead: ${String(err)}`);
-    }
+  if (prospectErr || !prospect) {
+    throw new Error(`Failed to fetch prospect ${body.prospect_id}: ${prospectErr?.message ?? 'not found'}`);
   }
 
-  // Step 2: Fetch expert gcal_email for Lemon Squeezy checkout attribution
-  const [expert] = await sql<Pick<ExpertRow, 'gcal_email'>[]>`
-    SELECT gcal_email FROM experts WHERE id = ${body.expert_id}`;
-
-  if (!expert) {
-    throw new Error(`Failed to fetch expert ${body.expert_id}`);
-  }
-
-  const expertEmail = expert.gcal_email ?? '';
-
-  // Step 3: Create Lemon Squeezy checkout
-  const lsRes = await fetch('https://api.lemonsqueezy.com/v1/checkouts', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.LEMON_SQUEEZY_API_KEY}`,
-      'Content-Type': 'application/vnd.api+json',
-      Accept: 'application/vnd.api+json',
-    },
-    body: JSON.stringify({
-      data: {
-        type: 'checkouts',
-        attributes: {
-          checkout_data: {
-            email: expertEmail,
-            custom: {
-              lead_id: leadId,
-              booking_id: body.booking_id,
-              expert_id: body.expert_id,
-            },
-          },
-        },
-        relationships: {
-          store: { data: { type: 'stores', id: LS_STORE_ID } },
-          variant: { data: { type: 'variants', id: LS_VARIANT_ID } },
-        },
-      },
-    }),
+  // Step 2: Calculate lead price via DEC-67 grid (AC1)
+  const requirements = prospect.requirements as ProspectRequirements | null;
+  const budgetMax = requirements?.budget_range?.max ?? null;
+  const price = calculateLeadPrice(budgetMax, {
+    budget_max: budgetMax,
+    // Any non-null timeline string signals the prospect provided a timeline (premium eligibility)
+    timeline_days: requirements?.timeline != null ? 30 : null,
+    ...(requirements?.skills_needed ? { skills: requirements.skills_needed } : {}),
   });
 
-  if (!lsRes.ok) {
-    const text = await lsRes.text();
-    throw new Error(`Lemon Squeezy checkout error ${lsRes.status}: ${text}`);
+  // Step 3: Atomic credit debit via PostgreSQL RPC function (AC1, AC3)
+  // debit_lead_credit locks the expert row (FOR UPDATE), inserts the lead, and
+  // debits credit_balance + inserts credit_transactions — all in one SQL transaction.
+  const { data: result, error: rpcErr } = await supabase
+    .rpc('debit_lead_credit', {
+      p_expert_id:   body.expert_id,
+      p_booking_id:  body.booking_id,
+      p_prospect_id: body.prospect_id,
+      p_amount:      price.amount,
+    });
+
+  if (rpcErr) {
+    throw new Error(`debit_lead_credit RPC failed: ${rpcErr.message}`);
   }
 
-  const lsData = await lsRes.json() as { data: { id: string } };
-  const lsCheckoutId = lsData.data.id;
+  const rpcResult = result as { success: boolean; reason?: string; lead_id: string };
 
-  // Step 4: Update lead with checkout ID and 'billed' status
-  // 'billed' at MVP = checkout link created (payment is manual via expert clicking the link)
-  await sql`UPDATE leads SET ls_checkout_id = ${lsCheckoutId}, status = 'billed' WHERE id = ${leadId}`;
+  // Step 4: AC2 — insufficient balance path
+  // Lead inserted with status='insufficient_balance'; notify expert to top up
+  if (!rpcResult.success && rpcResult.reason === 'insufficient_balance') {
+    await env.EMAIL_NOTIFICATIONS.send({
+      type: 'expert.billing.insufficient_balance',
+      expert_id: body.expert_id,
+    });
+    return;
+  }
+
+  if (!rpcResult.success) {
+    throw new Error(`debit_lead_credit failed: ${JSON.stringify(rpcResult)}`);
+  }
 }

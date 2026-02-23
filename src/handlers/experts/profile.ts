@@ -3,6 +3,7 @@ import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
 import { createSql } from '../../lib/db';
 import type { ExpertRow } from '../../types/db';
+import { captureEvent } from '../../lib/posthog';
 
 const VALID_AVAILABILITY = ['available', 'limited', 'unavailable'] as const;
 
@@ -58,7 +59,7 @@ export async function handlePatchProfile(
   env: Env,
   user: AuthUser,
   expertId: string,
-  ctx: ExecutionContext
+  ctx: ExecutionContext,
 ): Promise<Response> {
   // AC7 / AC8: Own profile only
   if (user.id !== expertId) {
@@ -133,6 +134,22 @@ export async function handlePatchProfile(
       })).catch((err) => console.error('profile: MATCHING_SERVICE embed failed', err))
     );
   }
+
+  const fieldsUpdated: string[] = [];
+  if (display_name !== undefined) fieldsUpdated.push('display_name');
+  if (headline !== undefined) fieldsUpdated.push('headline');
+  if (bio !== undefined) fieldsUpdated.push('bio');
+  if (rate_min !== undefined) fieldsUpdated.push('rate_min');
+  if (rate_max !== undefined) fieldsUpdated.push('rate_max');
+  if (availability !== undefined) fieldsUpdated.push('availability');
+  if (profile !== undefined) fieldsUpdated.push('profile');
+  if (preferences !== undefined) fieldsUpdated.push('preferences');
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${expertId}`,
+    event: 'expert.profile_updated',
+    properties: { fields_updated: fieldsUpdated },
+  }));
 
   return new Response(JSON.stringify(rows[0]), {
     status: 200,

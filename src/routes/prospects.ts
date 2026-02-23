@@ -6,6 +6,7 @@
 
 import type { Json } from '../types/database';
 import type { Env } from '../types/env';
+import { checkRateLimit } from '../lib/rateLimit';
 import {
   DEFAULT_WEIGHTS,
   type ExpertPreferences,
@@ -20,6 +21,7 @@ import { loadExpertPool } from '../lib/expertPool';
 import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
 import { createSql } from '../lib/db';
 import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../types/db';
+import { captureEvent } from '../lib/posthog';
 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -37,6 +39,25 @@ function errorResponse(error: string, status: number, details?: unknown): Respon
 // Basic email format validation (RFC-permissive, sufficient for MVP)
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function verifyTurnstile(token: string, ip: string, secretKey: string): Promise<boolean> {
+  const body = new URLSearchParams({
+    secret: secretKey,
+    response: token,
+    remoteip: ip,
+  });
+  try {
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      body,
+    });
+    if (!res.ok) return false;
+    const data = await res.json() as { success: boolean };
+    return data.success === true;
+  } catch {
+    return false;
+  }
 }
 
 // Extract required field keys from quiz_schema JSONB.
@@ -106,13 +127,39 @@ function normalizeRequirements(quizAnswers: Record<string, unknown>): ProspectRe
 
 // ── POST /api/prospects/submit ─────────────────────────────────────────────────
 
-export async function handleProspectSubmit(request: Request, env: Env): Promise<Response> {
+export async function handleProspectSubmit(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const startTime = Date.now();
-  let body: { satellite_id?: unknown; quiz_answers?: unknown; utm_source?: unknown; utm_campaign?: unknown };
+
+  // AC3: Rate limit public endpoint (30 req/min per IP)
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
+  let body: {
+    satellite_id?: unknown;
+    quiz_answers?: unknown;
+    utm_source?: unknown;
+    utm_campaign?: unknown;
+    'cf-turnstile-response'?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
     return errorResponse('Invalid JSON body', 400);
+  }
+
+  // AC4: Turnstile token required
+  const turnstileToken = body['cf-turnstile-response'];
+  if (typeof turnstileToken !== 'string' || !turnstileToken) {
+    return errorResponse('Validation failed', 422, { 'cf-turnstile-response': 'required' });
+  }
+
+  // AC5: Verify Turnstile token
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+  const turnstileOk = await verifyTurnstile(turnstileToken, ip, env.TURNSTILE_SECRET_KEY);
+  if (!turnstileOk) {
+    return errorResponse('Bot verification failed', 422);
   }
 
   const { satellite_id, quiz_answers, utm_source, utm_campaign } = body;
@@ -242,6 +289,17 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
   // Sign JWT token (24h TTL)
   const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
 
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospect.id}`,
+    event: 'prospect.form_submitted',
+    properties: {
+      satellite_id,
+      utm_source: typeof utm_source === 'string' ? utm_source : null,
+      utm_campaign: typeof utm_campaign === 'string' ? utm_campaign : null,
+      quiz_field_count: Object.keys(answers).length,
+    },
+  }));
+
   return jsonResponse({
     prospect_id: prospect.id,
     token,
@@ -255,7 +313,14 @@ export async function handleProspectMatches(
   request: Request,
   env: Env,
   prospectId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
+  // AC3: Rate limit public endpoint
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
   const url = new URL(request.url);
   const token = url.searchParams.get('token');
 
@@ -309,6 +374,15 @@ export async function handleProspectMatches(
     };
   });
 
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospectId}`,
+    event: 'prospect.matches_viewed',
+    properties: {
+      match_count: anonymizedMatches.length,
+      top_score: anonymizedMatches[0]?.score ?? 0,
+    },
+  }));
+
   return jsonResponse({ matches: anonymizedMatches });
 }
 
@@ -318,7 +392,14 @@ export async function handleProspectIdentify(
   request: Request,
   env: Env,
   prospectId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
+  // AC3: Rate limit public endpoint
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
   let body: { email?: unknown; token?: unknown };
   try {
     body = await request.json();
@@ -402,6 +483,13 @@ export async function handleProspectIdentify(
       };
     })
     .filter(Boolean);
+
+  const emailDomain = email.split('@')[1] ?? 'unknown';
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospectId}`,
+    event: 'prospect.identified',
+    properties: { email_domain: emailDomain },
+  }));
 
   return jsonResponse({ experts: expertProfiles });
 }

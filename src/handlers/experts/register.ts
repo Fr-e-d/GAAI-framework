@@ -4,6 +4,7 @@ import { AuthUser } from '../../middleware/auth';
 import { createSql } from '../../lib/db';
 import { checkRateLimit } from '../../lib/rateLimit';
 import type { ExpertRow } from '../../types/db';
+import { captureEvent } from '../../lib/posthog';
 
 const RegisterSchema = z.object({
   display_name: z.string().min(1, 'display_name is required').max(100),
@@ -17,7 +18,7 @@ export async function handleRegister(
   request: Request,
   env: Env,
   user: AuthUser,
-  ctx: ExecutionContext
+  ctx: ExecutionContext,
 ): Promise<Response> {
   // AC6: Rate limiting
   const rateCheck = await checkRateLimit(request, env);
@@ -109,6 +110,17 @@ export async function handleRegister(
       })).catch((err) => console.error('register: MATCHING_SERVICE embed failed', err))
     );
   }
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${user.id}`,
+    event: 'expert.registered',
+    properties: {
+      has_headline: headline !== undefined && headline !== null,
+      has_bio: bio !== undefined && bio !== null,
+      rate_min: rate_min ?? null,
+      rate_max: rate_max ?? null,
+    },
+  }));
 
   // Return 201
   return new Response(
