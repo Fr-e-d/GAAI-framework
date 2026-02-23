@@ -1,0 +1,33 @@
+name = "callibrate-satellite-dev"
+main = "src/index.ts"
+compatibility_date = "2024-10-22"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Dev / local (binds to staging KV) ──────────────────────────────────────────
+
+[[kv_namespaces]]
+binding = "CONFIG_CACHE"
+id = "PLACEHOLDER_SATELLITE_KV_CONFIG_STAGING"
+
+# ── Staging ────────────────────────────────────────────────────────────────────
+
+[env.staging]
+name = "callibrate-satellite-staging"
+
+[[env.staging.kv_namespaces]]
+binding = "CONFIG_CACHE"
+id = "PLACEHOLDER_SATELLITE_KV_CONFIG_STAGING"
+
+# ── Production ─────────────────────────────────────────────────────────────────
+
+[env.production]
+name = "callibrate-satellite-prod"
+
+[[env.production.kv_namespaces]]
+binding = "CONFIG_CACHE"
+id = "PLACEHOLDER_SATELLITE_KV_CONFIG_PROD"
+
+# ── Secrets (set via wrangler secret put per env) ──────────────────────────────
+# SUPABASE_URL        — Supabase project URL
+# SUPABASE_ANON_KEY   — Supabase anon/public key (for satellite_configs read)
+# ADMIN_SECRET        — Secret for /admin/cache/purge endpoint

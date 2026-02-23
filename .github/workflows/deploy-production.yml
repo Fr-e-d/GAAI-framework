@@ -6,9 +6,9 @@ on:
       - 'v*'
 
 jobs:
-  deploy:
+  deploy-core:
     runs-on: ubuntu-latest
-    name: Deploy to Production
+    name: Deploy Core to Production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,8 +16,27 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - name: Deploy to Cloudflare Workers (production)
+      - name: Deploy callibrate-core (production)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: deploy --env production
+
+  deploy-satellite:
+    runs-on: ubuntu-latest
+    name: Deploy Satellite to Production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: workers/satellite/package-lock.json
+      - run: npm ci
+        working-directory: workers/satellite
+      - name: Deploy callibrate-satellite (production)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy --env production
+          workingDirectory: workers/satellite
