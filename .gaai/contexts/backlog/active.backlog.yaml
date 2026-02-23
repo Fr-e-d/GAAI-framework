@@ -297,10 +297,13 @@ items:
     epic: E07
     title: "PostHog reverse proxy CF Worker"
     priority: high
-    status: in_progress
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-23T17:05:05+01:00"
+    completed_at: "2026-02-23T17:45:00+01:00"
     artefact: contexts/artefacts/stories/E07S01.story.md
     dependencies: []
-    notes: "Foundation for all E07 stories. New callibrate-posthog-proxy Worker at workers/posthog-proxy/. Routes ph.callibrate.io → eu.i.posthog.com. Bypasses adblockers (+10-30% event capture). Human action: (1) create PostHog EU Cloud account, (2) create project, (3) DNS ph.callibrate.io CNAME."
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 10 ACs met. callibrate-posthog-proxy Worker at workers/posthog-proxy/ (Hono + TypeScript). POST /ingest/* → eu.i.posthog.com. GET /static/* → eu-assets.i.posthog.com. POST /decide/* → eu.i.posthog.com. Host header rewritten. CORS *.callibrate.io. No API keys stored. 16/16 vitest tests. PR#15 open → staging. ⚠️ Human action required: (1) create PostHog EU Cloud account + project (EU region), (2) DNS ph.callibrate.io CNAME → Worker, (3) extend CLOUDFLARE_API_TOKEN scope to include callibrate-posthog-proxy*, (4) deploy to staging: cd workers/posthog-proxy && npx wrangler deploy --env staging. Unblocks E07S02, E07S03."
 
   - id: E07S02
     epic: E07
