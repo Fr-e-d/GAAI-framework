@@ -35,4 +35,7 @@ export interface Env {
   // Email deliverability (non-secret vars in wrangler.toml)
   EMAIL_FROM_DOMAIN: string;
   EMAIL_REPLY_TO: string;
+
+  // Analytics Engine (optional — no-op if binding missing)
+  MATCHING_ANALYTICS?: AnalyticsEngineDataset;
 }
