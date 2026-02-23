@@ -2,6 +2,7 @@ import { Env } from '../../types/env';
 import { createServiceClient } from '../../lib/supabase';
 import { getAccessToken, gcalFreebusy, GcalApiError } from '../../lib/gcalClient';
 import { mergeRules, computeFreeSlots } from '../../lib/availability';
+import { captureEvent } from '../../lib/posthog';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -13,7 +14,8 @@ function json(data: unknown, status = 200): Response {
 export async function handleGetAvailability(
   request: Request,
   env: Env,
-  expertId: string
+  expertId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   const url = new URL(request.url);
   const tz = url.searchParams.get('tz') ?? 'UTC';
@@ -67,6 +69,12 @@ export async function handleGetAvailability(
     rules,
     now,
   });
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${expertId}`,
+    event: 'expert.availability_checked',
+    properties: { expert_id: expertId, slots_available: slots.length },
+  }));
 
   return json({
     slots,

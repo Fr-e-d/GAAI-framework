@@ -2,6 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleExtract } from './extract';
 import type { Env } from '../types/env';
 
+vi.mock('posthog-node', () => ({
+  PostHog: vi.fn().mockImplementation(() => ({
+    captureImmediate: vi.fn().mockResolvedValue(undefined),
+  })),
+}));
+
+const mockCtx = {
+  waitUntil: vi.fn(),
+  passThroughOnException: vi.fn(),
+} as unknown as ExecutionContext;
+
 // ── Mock Env ──────────────────────────────────────────────────────────────────
 
 const mockEnv = {
@@ -150,7 +161,7 @@ describe('handleExtract — POST /api/extract', () => {
       headers: { 'Content-Type': 'application/json' },
       body: 'not-json',
     });
-    const res = await handleExtract(req, mockEnv);
+    const res = await handleExtract(req, mockEnv, mockCtx);
     expect(res.status).toBe(400);
   });
 
@@ -160,7 +171,7 @@ describe('handleExtract — POST /api/extract', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ satellite_id: 'sat_123' }),
     });
-    const res = await handleExtract(req, mockEnv);
+    const res = await handleExtract(req, mockEnv, mockCtx);
     expect(res.status).toBe(422);
     const body = await res.json() as { error: string; details: Record<string, string> };
     expect(body.details.text).toBeDefined();
@@ -172,7 +183,7 @@ describe('handleExtract — POST /api/extract', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: 'a'.repeat(2001) }),
     });
-    const res = await handleExtract(req, mockEnv);
+    const res = await handleExtract(req, mockEnv, mockCtx);
     expect(res.status).toBe(422);
     const body = await res.json() as { error: string; details: Record<string, string> };
     expect(body.details.text).toMatch(/2000/);
@@ -194,7 +205,7 @@ describe('handleExtract — POST /api/extract', () => {
       body: JSON.stringify({ text: REALISTIC_FREETEXT }),
     });
 
-    const res = await handleExtract(req, mockEnv);
+    const res = await handleExtract(req, mockEnv, mockCtx);
     expect(res.status).toBe(200);
 
     const body = await res.json() as {
@@ -238,7 +249,7 @@ describe('handleExtract — POST /api/extract', () => {
       body: JSON.stringify({ text: REALISTIC_FREETEXT }),
     });
 
-    const res = await handleExtract(req, mockEnv);
+    const res = await handleExtract(req, mockEnv, mockCtx);
     const body = await res.json() as {
       ready_to_match: boolean;
       needs_confirmation: string[];
@@ -266,7 +277,7 @@ describe('handleExtract — POST /api/extract', () => {
       body: JSON.stringify({ text: 'I want to build a chatbot.' }),
     });
 
-    const res = await handleExtract(req, mockEnv);
+    const res = await handleExtract(req, mockEnv, mockCtx);
     expect(res.status).toBe(200);
     const body = await res.json() as {
       ready_to_match: boolean;
@@ -301,7 +312,7 @@ describe('handleExtract — POST /api/extract', () => {
       body: JSON.stringify({ text: 'I want AI automation for my company.' }),
     });
 
-    const res = await handleExtract(req, mockEnv);
+    const res = await handleExtract(req, mockEnv, mockCtx);
     expect(res.status).toBe(502);
   });
 
@@ -327,7 +338,7 @@ describe('handleExtract — POST /api/extract', () => {
       body: JSON.stringify({ text: 'Build me an AI.' }),
     });
 
-    const res = await handleExtract(req, mockEnv);
+    const res = await handleExtract(req, mockEnv, mockCtx);
     expect(res.status).toBe(500);
   });
 });

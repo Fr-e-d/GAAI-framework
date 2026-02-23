@@ -7,6 +7,9 @@ export interface Env {
   // OpenAI API (bound via wrangler secret put)
   OPENAI_API_KEY: string;
 
+  // PostHog analytics (optional — silent no-op if absent)
+  POSTHOG_API_KEY?: string;
+
   // KV namespaces
   SESSIONS: KVNamespace;
   RATE_LIMITING: KVNamespace;
