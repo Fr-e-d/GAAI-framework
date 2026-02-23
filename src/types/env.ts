@@ -30,7 +30,14 @@ export interface Env {
   // Queue worker secrets
   RESEND_API_KEY: string;
   LEMON_SQUEEZY_API_KEY: string;
-  N8N_WEBHOOK_URL: string;
+
+  // CF Workflow bindings
+  BOOKING_CONFIRMED_WORKFLOW: Workflow;
+  BOOKING_COMPLETED_WORKFLOW: Workflow;
+
+  // Survey delay acceleration (staging only — absent in production → real durations)
+  SURVEY_DELAY_7D_MS?: string;
+  SURVEY_DELAY_38D_MS?: string;
 
   // Email deliverability (non-secret vars in wrangler.toml)
   EMAIL_FROM_DOMAIN: string;
