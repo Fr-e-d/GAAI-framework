@@ -182,6 +182,15 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 - **Cache purge endpoint:** `POST /admin/cache/purge` with `x-admin-secret` header validation. Deletes KV key. Returns `{ purged: true, domain }`.
 - **Regle operationnelle (non-negotiable) :** Tout INSERT, UPDATE ou DELETE sur `satellite_configs` en DB DOIT etre suivi d'un purge du cache KV config pour le domaine concerne. Sans purge, l'ancienne config reste servie jusqu'a expiration du TTL (1h). Purge : `curl -X POST https://[domain]/admin/cache/purge -H "x-admin-secret: ..." -H "Content-Type: application/json" -d '{"domain":"[domain]"}'`. Le deploiement de code n'invalide PAS le cache KV (seulement le cache edge CDN). Pas de skill GAAI — action manuelle du founder.
 
+## CF Workflows (first use: E06S16)
+
+- **Class exports required:** Workflow classes MUST be named exports from `src/index.ts` — the CF runtime discovers them by class name matching `[[workflows]]` entries
+- **`[[workflows]]` top-level only** — `[[env.staging.workflows]]` does not exist in wrangler.toml. Isolation staging/prod is via separate Worker scripts (`callibrate-core-staging` vs `callibrate-core-prod`)
+- **`this.env` accessible** in `WorkflowEntrypoint` (same pattern as DurableObject)
+- **`step.sleep(label, duration)`** — `label` is a string step name; `duration` is `string | number`. String: `'7 days'`; number: milliseconds
+- **Sleep acceleration pattern** (staging-only): `parseInt(this.env.DELAY_MS ?? String(realMs))` — always produces a number. Set `DELAY_MS` as a staging secret for smoke tests (absent in prod → real duration)
+- **Workflow → Queue dispatch loop:** Workflows dispatch new message types back to EMAIL_NOTIFICATIONS queue rather than calling Resend directly. This preserves retry/idempotency of the queue consumer. New types: `booking.confirmed.enriched`, `survey.call_experience`, `survey.project_satisfaction`
+
 ---
 
 ## Anti-Patterns (Avoid)
