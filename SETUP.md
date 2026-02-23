@@ -211,11 +211,11 @@ npx wrangler secret put SUPABASE_ANON_KEY --env staging
 npx wrangler secret put SUPABASE_SERVICE_KEY --env staging
 # Paste: (service_role key from Supabase dashboard — keep this private)
 
-npx wrangler secret put ANTHROPIC_API_KEY --env staging
-# Paste: (API key from https://console.anthropic.com)
+npx wrangler secret put OPENAI_API_KEY --env staging
+# Paste: (API key from https://platform.openai.com/api-keys)
 
-npx wrangler secret put CLOUDFLARE_AI_GATEWAY_URL --env staging
-# Paste: (AI Gateway URL from Cloudflare dashboard → AI Gateway)
+
+
 
 npx wrangler secret put PROSPECT_TOKEN_SECRET --env staging
 # Already set — skip if already done
@@ -232,8 +232,8 @@ npx wrangler secret put PROSPECT_TOKEN_SECRET --env staging
 # npx wrangler secret put SUPABASE_URL --env production            # (deferred to launch)
 # npx wrangler secret put SUPABASE_ANON_KEY --env production       # (deferred to launch)
 # npx wrangler secret put SUPABASE_SERVICE_KEY --env production    # (deferred to launch)
-# npx wrangler secret put ANTHROPIC_API_KEY --env production       # (deferred to launch)
-# npx wrangler secret put CLOUDFLARE_AI_GATEWAY_URL --env production # (deferred to launch)
+# npx wrangler secret put OPENAI_API_KEY --env production              # (deferred to launch)
+
 ```
 
 ---
