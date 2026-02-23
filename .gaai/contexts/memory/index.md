@@ -31,9 +31,9 @@ updated_at: 2026-02-23
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-22 (updated: pricing DEC-67, billing DEC-68, scalable matching DEC-60–69) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-23 (10 active entries — DEC-60 to DEC-69. Older entries compacted.) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-23 (11 active entries — DEC-60 to DEC-2026-02-23-02. Older entries compacted.) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-23 (OpenAI function calling pattern replaces Anthropic — E06S12/DEC-2026-02-23-01) |
-| `ops/platform.md` | ops | OPS-001 | 2026-02-22 |
+| `ops/platform.md` | ops | OPS-001 | 2026-02-23 (CI/CD & preview deployments — DEC-2026-02-23-02) |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
 | `summaries/decisions-01-59.summary.md` | summaries | SUMMARY-DECISIONS-01-59 | 2026-02-23 |
 | `archive/decisions-01-59.archive.md` | archive | ARCHIVE-DECISIONS-01-59 | 2026-02-23 |

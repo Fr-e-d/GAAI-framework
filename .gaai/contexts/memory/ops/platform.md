@@ -9,7 +9,7 @@ tags:
   - email
   - providers
 created_at: 2026-02-21
-updated_at: 2026-02-22
+updated_at: 2026-02-23
 ---
 
 # Platform Operations
@@ -121,6 +121,92 @@ Le détail technique (robots.txt, sitemap) est implémenté dans chaque satellit
 | **Google Cloud** | OAuth2 Google Calendar (booking layer) | ops@callibrate.io |
 | ~~**n8n**~~ | SUPPRIMÉ (DEC-59) — remplacé par Cloudflare Workflows | — |
 | **OpenAI** | Extraction freetext prospect via GPT-4o-mini (`/api/extract`) | ops@callibrate.io |
+
+---
+
+## CI/CD & Preview Deployments
+
+### Architecture de déploiement
+
+```
+story/{id}  →  PR → staging  →  PR → production
+     ↓              ↓                   ↓
+  preview        deploy staging      deploy prod (tag v*)
+```
+
+| Trigger | Workflow | Action |
+|---|---|---|
+| Push sur `story/*` | `preview-deploy.yml` | tsc + vitest + `wrangler versions upload --preview-alias` → commente preview URL sur la PR |
+| Push sur `staging` | `deploy-staging.yml` | `wrangler deploy --env staging` (core + satellite) |
+| Tag `v*` | `deploy-production.yml` | `wrangler deploy --env production` (core + satellite) |
+
+### Workers Preview URLs
+
+**Mécanisme :** `wrangler versions upload --preview-alias <slug>` (PAS `--branch` qui est un concept Pages).
+
+Upload une nouvelle version du Worker avec un alias de preview, **sans affecter le trafic staging**. Le Worker staging continue de servir sa version actuelle.
+
+**Format URL :** `https://<slug>.callibrate-core-staging.frederic-geens-consulting.workers.dev`
+- Exemple : `https://story-e06s15.callibrate-core-staging.frederic-geens-consulting.workers.dev`
+
+**Slug :** nom de branche transformé (`story/E06S15` → `story-e06s15` : `/` → `-`, lowercase).
+
+**Pré-requis :**
+- Wrangler v4.21.0+ (l'action `cloudflare/wrangler-action@v3` installe la dernière version)
+- `preview_urls = true` dans `wrangler.toml` section `[env.staging]`
+- Secret `CLOUDFLARE_API_TOKEN` dans les secrets GitHub du repo
+
+**Limitations (beta) :**
+- Uniquement sur le sous-domaine `workers.dev` (pas de custom domains)
+- Non supporté pour les Workers avec Durable Objects
+- Non supporté pour Workers for Platforms
+
+**Bindings :** la preview partage les mêmes bindings que staging (KV, Queues, Supabase). Pas d'isolation des données — c'est un aperçu du code, pas un environnement séparé.
+
+### Comment accéder à la preview URL
+
+**Depuis la PR GitHub :**
+1. Le delivery agent crée la PR `story/{id}` → staging
+2. Le push déclenche `preview-deploy.yml`
+3. Un commentaire automatique apparaît sur la PR avec l'URL de preview
+4. Cliquer sur l'URL → teste directement le Worker de la story
+
+**Depuis le Cloudflare Dashboard :**
+1. Dashboard → Workers & Pages → `callibrate-core-staging`
+2. Onglet "Deployments" → voir les versions uploadées avec leur preview alias
+3. Cliquer sur le lien preview de la version souhaitée
+
+**Manuellement (si on connaît le slug) :**
+```
+https://story-e06s15.callibrate-core-staging.frederic-geens-consulting.workers.dev
+```
+Le slug = nom de branche avec `/` → `-` et en lowercase.
+
+**Tester un endpoint spécifique :**
+```bash
+curl https://story-e06s15.callibrate-core-staging.frederic-geens-consulting.workers.dev/api/health
+```
+
+Les previews utilisent les mêmes secrets que staging (configurés via `wrangler secret put --env staging`). Pas besoin de configurer des secrets séparés.
+
+---
+
+### Deux niveaux de preview
+
+1. **Preview story** (branche `story/*`) — teste une story isolée avant de la merger sur staging
+2. **Staging** (branche `staging`) — teste l'ensemble des stories mergées avant de promouvoir en production
+
+L'IA ne merge jamais. Elle crée des PRs. Le humain review et merge sur GitHub.
+
+### Pipeline preview-deploy.yml (détail)
+
+1. `npm ci` — install dependencies
+2. `tsc --noEmit` — type check
+3. `vitest run` — unit tests
+4. `wrangler versions upload --env staging --preview-alias $SLUG` — upload preview
+5. `actions/github-script` — commente (ou met à jour) la preview URL sur la PR associée
+
+Le commentaire contient un marker HTML `<!-- preview-deploy -->` pour identifier et mettre à jour le commentaire sur les pushes suivants (pas de doublons).
 
 ---
 
