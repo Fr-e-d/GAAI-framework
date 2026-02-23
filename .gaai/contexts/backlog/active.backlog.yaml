@@ -83,7 +83,7 @@ items:
     epic: E06
     title: "Cal.com managed users integration + webhook endpoint"
     priority: high
-    status: superseded
+    status: cancelled
     artefact: contexts/artefacts/stories/E06S04.story.md
     dependencies: [E06S03]
     notes: "SUPERSEDED 2026-02-20 by DEC-41. Cal.com Platform fermée aux nouveaux signups depuis 15/12/2025. Remplacée par E06S10 (Google Calendar OAuth layer) + E06S11 (Booking engine). Les colonnes cal_* en DB sont conservées sans nettoyage jusqu'au post-MVP."
@@ -104,7 +104,7 @@ items:
     status: done
     artefact: contexts/artefacts/stories/E06S06.story.md
     dependencies: [E06S03, E06S10, E06S05]
-    notes: "DONE 2026-02-21. QA PASS. All 9 ACs met. email-notifications consumer (expert.registered → Resend, booking.confirmed → Resend×2 + n8n, booking.completed → n8n) + lead-billing consumer (booking.created → leads INSERT + LS checkout + leads UPDATE). Idempotency via SESSIONS KV. Exponential backoff retry (1s/4s/16s). DB migration: leads.booking_id UNIQUE. 49/49 vitest tests PASS. ⚠️ DEC-59: n8n webhooks (AC7/AC10) à remplacer par CF Workflows via E06S16. ⚠️ DEC-68: lead-billing consumer sera révisé — modèle passe de checkout LS par lead à credit debit interne + usage-based LS reporting (story E05 à générer). Unblocks E06S09, E06S11, E06S16."
+    notes: "DONE 2026-02-21. QA PASS. All 9 ACs met. email-notifications consumer (expert.registered → Resend, booking.confirmed → Resend×2 + n8n, booking.completed → n8n) + lead-billing consumer (booking.created → leads INSERT + LS checkout + leads UPDATE). Idempotency via SESSIONS KV. Exponential backoff retry (1s/4s/16s). DB migration: leads.booking_id UNIQUE. 49/49 vitest tests PASS. ⚠️ DEC-59: n8n webhooks (AC7/AC10) à remplacer par CF Workflows via E06S16. ⚠️ DEC-68: lead-billing consumer révisé via E06S31 (schema) + E06S32 (credit debit) + E06S33 (LS subscription + cron) + E06S34 (matching enforcement). Unblocks E06S09, E06S11, E06S16."
 
   - id: E06S07
     epic: E06
@@ -352,6 +352,104 @@ items:
     artefact: contexts/artefacts/stories/E07S05.story.md
     dependencies: [E07S02, E07S03]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 13 ACs met. PostHog EU MCP server in .mcp.json (mcp-remote → mcp-eu.posthog.com, POSTHOG_PERSONAL_API_KEY auth). GAAI analytics-query skill (SKILL-CRS-020) with 5 analysis patterns, query-templates.md + interpretation-guide.md. skills-index.yaml regenerated (37 skills). discovery.agent.md updated. PR#20 open → staging. ⚠️ Human action required: (1) Set POSTHOG_PERSONAL_API_KEY='Bearer phx_xxx' in shell profile, (2) Create PostHog EU account + Personal API Key with MCP Server preset."
+
+  - id: E07S06
+    epic: E07
+    title: "PostHog EU — compte + dashboards + MCP (founder setup)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E07S06.story.md
+    dependencies: [E07S05, E06S27]
+    notes: "Partiellement fait + agent-deliverable via PostHog MCP. AC1-AC3 DONE (compte PostHog EU créé, POSTHOG_API_KEY=phc_9MGVc1dDaNAugnSHJ692t5YuWFNy2WQ4kIHNvlEsXkr configurée). AC6 (dashboards): agent via PostHog MCP server (mcp-eu.posthog.com). AC9-AC10 (smoke tests): agent via curl. Founder reste: AC4 Personal API Key (phx_) + AC5 export ~/.zshrc + AC7 MCP restart + AC8 ph.callibrate.io CNAME. Bloque l'observabilité analytics."
+
+  # ── EPIC E06 (suite): Staging readiness — Provisionnement & Smoke Test ────
+
+  - id: E06S27
+    epic: E06
+    title: "Staging — Provisionnement infra CF (Hyperdrive + D1 + Vectorize + Workflows + Rate Limiter + Workers)"
+    priority: critical
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-23T22:00:00+01:00"
+    completed_at: "2026-02-23T23:59:00+01:00"
+    artefact: contexts/artefacts/stories/E06S27.story.md
+    dependencies: []
+    notes: "DONE 2026-02-23. QA PASS (partial delivery). AC2/AC3/AC5/AC7/AC9/AC10 delivered. D1 staging+prod created + schema applied. Vectorize expert-profiles created. posthog-proxy deployed to staging. wrangler.toml fully updated (core + matching + posthog-proxy) with real IDs. Smoke test HTTP 200. PR#24 open → staging. ⚠️ Founder actions required post-merge: AC1 (Hyperdrive — DB password needed, see PLACEHOLDER comments), AC4 (CF Workflows dashboard), AC6 (workers/matching deploy after AC1), AC8 (CF API token scope). ⚠️ wrangler.toml merge conflict expected when code PRs (E06S18-E06S25) are merged — keep real D1 IDs from this PR."
+
+  - id: E06S28
+    epic: E06
+    title: "Staging — Secrets manquants (Core + Satellite + Turnstile)"
+    priority: critical
+    status: in_progress
+    artefact: contexts/artefacts/stories/E06S28.story.md
+    dependencies: [E06S27]
+    notes: "Agent-deliverable via wrangler CLI. AC1 (SURVEY_TOKEN_SECRET) + AC2 (TURNSTILE_SECRET_KEY) déjà configurés sur core staging. Reste: AC3 delay vars dans wrangler.toml + AC4 vérif E06S16 token + AC5-AC7 secrets satellite (SUPABASE_URL via Supabase MCP, SUPABASE_ANON_KEY via Supabase MCP, POSTHOG_API_KEY=phc_9MGVc1dDaNAugnSHJ692t5YuWFNy2WQ4kIHNvlEsXkr) + AC8 Turnstile site key=0x4AAAAAAChD0LT5UgifFL-I (var satellite wrangler.toml) + AC9-AC10 smoke tests. Bloque E06S29."
+
+  - id: E06S29
+    epic: E06
+    title: "Staging — Smoke test end-to-end"
+    priority: critical
+    status: refined
+    artefact: contexts/artefacts/stories/E06S29.story.md
+    dependencies: [E06S27, E06S28]
+    notes: "Agent-deliverable via curl. AC1-AC9 (happy path curl: health → register → profile → extract → submit → matches → availability) 100% automatisable. AC10-AC11 (CF Dashboard Analytics) vérification visuelle post-delivery par founder. AC12 (PostHog) optionnel. Bloquant pour M1 ('Full loop working end-to-end')."
+
+  - id: E06S30
+    epic: E06
+    title: "Google OAuth — Sensitive scope review (calendar.events)"
+    priority: high
+    status: done
+    started_at: "2026-02-23T22:00:00+01:00"
+    completed_at: "2026-02-23T23:59:00+01:00"
+    cost_usd: 0
+    artefact: contexts/artefacts/stories/E06S30.story.md
+    dependencies: []
+    notes: "DONE 2026-02-23. QA PASS. AC1 + AC2 delivered: /privacy (GDPR Privacy Policy) and /terms (Terms of Service) added as static routes in satellite worker, before config middleware. tsc clean. PR#22 open → staging. ⚠️ Founder action required: (1) Add CF routes callibrate.io/privacy* + callibrate.io/terms* → callibrate-satellite-{staging,prod}, (2) Complete AC3–AC9: Google Search Console domain verification + OAuth consent screen + verification form submission. AC10–AC11 await Google approval (4–6 weeks)."
+
+  # ── EPIC E06 (suite): Credit Billing Foundation — DEC-67/68 ─────────────
+  # Layer 2 billing backend. Critical path: E06S31 → { E06S32, E06S33, E06S34 }
+
+  - id: E06S31
+    epic: E06
+    title: "Credit billing schema + lead pricing function (DEC-67/68)"
+    priority: high
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-23T22:55:00+01:00"
+    completed_at: "2026-02-23T23:15:00+01:00"
+    artefact: contexts/artefacts/stories/E06S31.story.md
+    dependencies: []
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. DB migration: experts billing cols + credit_transactions table (RLS + index) + leads lifecycle cols + extended status CHECK + leads(status,created_at) index. calculateLeadPrice pure fn (DEC-67, 8 cells, centimes). 104/104 vitest tests. PR#21 open → staging. Unblocks E06S32, E06S33, E06S34."
+
+  - id: E06S32
+    epic: E06
+    title: "Lead-billing consumer — credit debit + flag/restore (DEC-68)"
+    priority: high
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-23T23:30:00+01:00"
+    completed_at: "2026-02-24T00:00:00+01:00"
+    artefact: contexts/artefacts/stories/E06S32.story.md
+    dependencies: [E06S31]
+    notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. lead-billing consumer rewritten: prospect fetch + calculateLeadPrice (DEC-67) + debit_lead_credit RPC (atomic PostgreSQL function). AC2: insufficient_balance → EMAIL_NOTIFICATIONS. AC3: atomicity via Supabase RPC (E06S18 not yet merged — equivalent ACID via plpgsql SECURITY DEFINER). POST /api/leads/:id/flag (7-day window, restore_lead_credit RPC) + POST /api/leads/:id/confirm. LS checkout code removed. 118/118 vitest tests. PR#23 open → staging. ⚠️ Human action required: (1) Apply migration 20260223100001_lead_credit_rpc.sql to Supabase staging, (2) Merge PR#21 (E06S31) before PR#23."
+
+  - id: E06S33
+    epic: E06
+    title: "LS usage-based subscription + welcome credit + usage reporting cron (DEC-68)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S33.story.md
+    dependencies: [E06S31]
+    notes: "DEC-68. LS webhook (HMAC verified) for subscription lifecycle. 100€ welcome credit on activation. Hourly cron: auto-confirm leads past 7-day flag window + report usage to LS API. Founder action: create LS product + webhook + secret."
+
+  - id: E06S34
+    epic: E06
+    title: "Balance / max_lead_price / spending_limit enforcement at matching (DEC-67/68)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S34.story.md
+    dependencies: [E06S31]
+    notes: "DEC-67/68. Adds 3 billing filters to matching engine (pre-scoring): balance >= leadPrice, max_lead_price deal-breaker, spending_limit monthly cap. Fire-and-forget notification on exclusion. Applies to both POST /api/matches/compute and POST /api/prospects/submit."
 
   # ── EPIC E03: Prospect Gets Qualified and Matched to the Right Expert ────
   # Layer 3.2 — satellite sites. Depends on E02 + E06.
