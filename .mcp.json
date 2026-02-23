@@ -3,6 +3,16 @@
     "supabase": {
       "type": "http",
       "url": "https://mcp.supabase.com/mcp?project_ref=xiilmuuafyapkhflupqx"
+    },
+    "posthog": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@latest",
+        "https://mcp-eu.posthog.com/mcp",
+        "--header",
+        "Authorization:${POSTHOG_PERSONAL_API_KEY}"
+      ]
     }
   }
 }

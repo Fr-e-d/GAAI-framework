@@ -67,6 +67,7 @@ Only Epics and Stories are valid inputs for Delivery. Marketing and Strategy art
 
 ### Cross Skills (Used Selectively)
 
+- `analytics-query` — query PostHog funnels, activation rates, lifecycle health, conversion trends, and friction signals via the PostHog MCP server. Use when product decisions require data-backed diagnosis (e.g., "where are prospects dropping off?", "what predicts expert retention?"). Requires PostHog MCP server connected in Claude Code (see SETUP.md). Produces inline findings + recommended next action — does NOT make decisions or modify feature flags.
 - `approach-evaluation` — research industry standards and compare viable approaches when a product or architectural decision requires objective comparison before committing to a Story definition (e.g., choosing between booking services, payment processors, matching paradigms). Produces a factual comparison matrix — Discovery reads and decides (or escalates to human for strategic choices).
 - `risk-analysis` — surface user, scope, value, and delivery risks before decisions lock in
 - `consistency-check` — detect incoherence between PRD, Epics, Stories, and rules

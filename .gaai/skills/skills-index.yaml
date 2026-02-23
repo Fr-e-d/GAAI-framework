@@ -4,7 +4,7 @@
 # Regenerate: invoke build-skills-index skill
 
 generated_at: 2026-02-23
-total: 36
+total: 37
 
 # ─────────────────────────────────────────────
 # DISCOVERY — skills that produce artefacts
@@ -156,6 +156,16 @@ delivery:
 # CROSS — shared utilities, usable by any agent
 # ─────────────────────────────────────────────
 cross:
+
+  - id: SKILL-CRS-020
+    name: analytics-query
+    description: "Query PostHog analytics data and surface data-driven growth insights for Callibrate funnels using the PostHog MCP server. Activate when a Discovery Agent session requires funnel diagnosis, activation analysis, lifecycle check, conversion trend analysis, or friction scanning."
+    category: cross
+    track: cross-cutting
+    tags: [analytics, posthog, growth, funnel]
+    status: stable
+    updated_at: 2026-02-23
+    path: cross/analytics-query/SKILL.md
 
   - id: SKILL-APPROACH-EVALUATION-001
     name: approach-evaluation

@@ -457,3 +457,64 @@ SUPABASE_ANON_KEY=<your-anon-key>
 ADMIN_SECRET=local-dev-secret
 ```
 
+---
+
+## PostHog MCP Server — AI Analytics Access (E07S05)
+
+Enables Claude Code to query PostHog funnels, dashboards, and experiments directly via the GAAI `analytics-query` skill.
+
+### Prerequisites
+
+- PostHog EU Cloud account with a project created (Settings → Organizations & projects)
+- A Personal API Key with **MCP Server preset** (Settings → Personal API Keys → New key → Preset: MCP Server)
+
+### Step 1 — Set environment variable
+
+Add to your shell profile (`~/.zshrc` or `~/.bashrc`):
+
+```bash
+export POSTHOG_PERSONAL_API_KEY="Bearer phx_YOURPERSONALAPIKEY"
+```
+
+> **Important:** Include the `Bearer ` prefix. The value must be the full Authorization header content.
+
+Reload your shell:
+
+```bash
+source ~/.zshrc
+```
+
+### Step 2 — Verify MCP server is available
+
+Restart Claude Code. The PostHog MCP server (`posthog`) should appear in your MCP tools list. You can verify with:
+
+```
+/mcp
+```
+
+### Step 3 — Confirm EU connectivity
+
+The MCP server connects to `https://mcp-eu.posthog.com/mcp` (EU region). Verify your PostHog project is on EU Cloud (Settings → Organization → Region should show "EU").
+
+### Available MCP Tools
+
+Once connected, the following PostHog tools are available to Claude Code:
+
+| Tool | Description |
+|------|-------------|
+| Query insights | Run HogQL queries and structured insight queries |
+| Read dashboards | Retrieve dashboard definitions and data |
+| Manage feature flags | Read and update feature flags |
+| Read experiments | View A/B test configurations and results |
+
+### Rate Limits
+
+- HogQL queries: 120/hour
+- Structured queries: 2400/hour
+
+Plan query frequency accordingly when using the `analytics-query` skill for long analysis sessions.
+
+### Local Dev
+
+The MCP server runs via `npx mcp-remote@latest` — no local installation required. The `npx` call fetches and caches the package on first use.
+
