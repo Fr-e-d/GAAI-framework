@@ -297,7 +297,7 @@ items:
     epic: E07
     title: "PostHog reverse proxy CF Worker"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E07S01.story.md
     dependencies: []
     notes: "Foundation for all E07 stories. New callibrate-posthog-proxy Worker at workers/posthog-proxy/. Routes ph.callibrate.io → eu.i.posthog.com. Bypasses adblockers (+10-30% event capture). Human action: (1) create PostHog EU Cloud account, (2) create project, (3) DNS ph.callibrate.io CNAME."
