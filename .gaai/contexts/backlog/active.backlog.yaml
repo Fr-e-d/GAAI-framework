@@ -333,7 +333,7 @@ items:
     epic: E07
     title: "PostHog funnel dashboards via API"
     priority: medium
-    status: in_progress
+    status: failed
     artefact: contexts/artefacts/stories/E07S04.story.md
     dependencies: [E07S02, E07S03]
     notes: "One-time setup script creates 3 dashboards via PostHog API: prospect conversion funnel, expert activation funnel, business overview. Idempotent. Human action: generate PostHog Personal API Key."
