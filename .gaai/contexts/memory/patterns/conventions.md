@@ -243,6 +243,7 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 
 ## Anti-Patterns (Avoid)
 
+- **Invalid backlog status values:** The only valid statuses are `draft → refined → in_progress → done | failed` (plus `deferred` / `superseded` for exceptional cases). Never use `ready` — the correct term is `refined`. Fixed 2026-02-23: 5 stories (E06S27–S30, E07S06) were created with `status: ready` instead of `refined`, invisible to the Delivery Daemon which polls `refined` only.
 - Synchronous external API calls inside CF Worker request handlers (use Queues)
 - Hardcoded matching criteria or domain-specific fields in Layer 2 code (use JSONB + satellite_configs)
 - Email gate before match reveal (DEC-15 — kills conversion)
