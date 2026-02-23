@@ -3,14 +3,7 @@ import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
 import { createSql } from '../../lib/db';
 import { checkRateLimit } from '../../lib/rateLimit';
-<<<<<<< HEAD
 import type { ExpertRow } from '../../types/db';
-<<<<<<< HEAD
-=======
-import { upsertExpertEmbedding } from '../../lib/vectorize';
->>>>>>> 902c0cd (feat(E06S21): Vectorize infrastructure + embedding pipeline)
-=======
->>>>>>> 25fd870 (feat(E06S24): callibrate-matching Worker + Service Binding split)
 
 const RegisterSchema = z.object({
   display_name: z.string().min(1, 'display_name is required').max(100),

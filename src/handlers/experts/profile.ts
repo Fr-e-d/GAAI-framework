@@ -1,17 +1,8 @@
 import { z } from 'zod';
 import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
-<<<<<<< HEAD
 import { createSql } from '../../lib/db';
 import type { ExpertRow } from '../../types/db';
-<<<<<<< HEAD
-=======
-import { createServiceClient } from '../../lib/supabase';
-import { Json } from '../../types/database';
-import { upsertExpertEmbedding, ExpertProfile } from '../../lib/vectorize';
->>>>>>> 902c0cd (feat(E06S21): Vectorize infrastructure + embedding pipeline)
-=======
->>>>>>> 25fd870 (feat(E06S24): callibrate-matching Worker + Service Binding split)
 
 const VALID_AVAILABILITY = ['available', 'limited', 'unavailable'] as const;
 
@@ -125,24 +116,6 @@ export async function handlePatchProfile(
     });
   }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-  return new Response(JSON.stringify(rows[0]), {
-=======
-  // AC4, AC7: Fire-and-forget re-embedding — failure must NOT block profile update
-  const updatedExpert = data[0] as {
-    profile?: ExpertProfile;
-    rate_min?: number | null;
-    rate_max?: number | null;
-    availability?: string | null;
-  };
-  upsertExpertEmbedding(env, ctx, expertId, {
-    profile: (updatedExpert.profile as ExpertProfile) ?? {},
-    rate_min: updatedExpert.rate_min ?? null,
-    rate_max: updatedExpert.rate_max ?? null,
-    availability: updatedExpert.availability ?? null,
-  });
-=======
   // AC4 (E06S24): Fire-and-forget re-embedding via MATCHING_SERVICE — failure must NOT block profile update
   const updatedExpert = rows[0] as ExpertRow;
   if (env.MATCHING_SERVICE) {
@@ -160,10 +133,8 @@ export async function handlePatchProfile(
       })).catch((err) => console.error('profile: MATCHING_SERVICE embed failed', err))
     );
   }
->>>>>>> 25fd870 (feat(E06S24): callibrate-matching Worker + Service Binding split)
 
-  return new Response(JSON.stringify(data[0]), {
->>>>>>> 902c0cd (feat(E06S21): Vectorize infrastructure + embedding pipeline)
+  return new Response(JSON.stringify(rows[0]), {
     status: 200,
     headers: JSON_HEADERS,
   });

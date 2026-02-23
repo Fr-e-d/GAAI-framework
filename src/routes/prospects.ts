@@ -20,11 +20,7 @@ import { loadExpertPool } from '../lib/expertPool';
 import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
 import { createSql } from '../lib/db';
 import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../types/db';
-<<<<<<< HEAD
-import { buildProspectEmbeddingText, queryVectorizeForProspect } from '../lib/vectorize';
-=======
-import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
->>>>>>> 25fd870 (feat(E06S24): callibrate-matching Worker + Service Binding split)
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -189,17 +185,10 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
     }
   }
 
-<<<<<<< HEAD
-  // AC3: scoreMatch() synchronously for each candidate
-  const scoredResults: { score: number }[] = [];
-  if (candidates.length > 0) {
-    const matchRows: Database['public']['Tables']['matches']['Insert'][] = candidates.map((expert) => {
-=======
   // AC6 Fallback: local deterministic scoring (no Vectorize/AI — those bindings live in Matching Worker)
   const scoredResults: { score: number }[] = [];
   if (experts.length > 0) {
     const matchRows = experts.map((expert) => {
->>>>>>> 25fd870 (feat(E06S24): callibrate-matching Worker + Service Binding split)
       const profile: ExpertProfile = {
         ...((expert.profile ?? {}) as ExpertProfile),
         rate_min: expert.rate_min,
