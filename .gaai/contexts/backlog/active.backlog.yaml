@@ -342,7 +342,7 @@ items:
     epic: E07
     title: "PostHog MCP integration + GAAI analytics-query skill"
     priority: medium
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E07S05.story.md
     dependencies: [E07S02, E07S03]
     notes: "PostHog MCP server in .mcp.json + analytics-query cross skill with 5 analysis patterns (funnel-diagnosis, activation-analysis, lifecycle-check, conversion-trend, friction-scan). Includes interpretation guide + query templates + conversion optimization playbook. Human action: PostHog Personal API Key."
