@@ -221,7 +221,7 @@ items:
     epic: E06
     title: "Security hardening — Rate Limiting binding + Turnstile"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S20.story.md
     dependencies: [E06S18]
     notes: "DEC-63 + DEC-64. Replace manual KV rate limiter with CF Rate Limiting binding (free). Add Turnstile invisible CAPTCHA on POST /api/prospects/submit. Human action: create Turnstile site key in CF Dashboard."
