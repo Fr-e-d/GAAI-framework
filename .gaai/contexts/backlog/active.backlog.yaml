@@ -179,7 +179,7 @@ items:
     epic: E06
     title: "Email deliverability hardening — subdomain, DMARC, reply-to, plain text"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S15.story.md
     dependencies: [E06S06]
     notes: "DEC-55. Sending subdomain send.callibrate.io (reputation isolation transactional/marketing). DMARC p=none → p=reject. reply_to support@callibrate.io. Plain text fallback. ✅ AC1-AC3 DONE (founder 2026-02-21): Resend domain verified (DKIM+SPF), DMARC p=none via CF, support@ forwarded. Delivery ready for code changes AC4-AC10."
