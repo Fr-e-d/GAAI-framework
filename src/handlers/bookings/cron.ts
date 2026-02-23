@@ -1,11 +1,15 @@
 import { Env } from '../../types/env';
 import { createSql } from '../../lib/db';
+import { syncExpertPoolToD1 } from '../../cron/syncExpertPool';
 import type { BookingRow, ExpertRow } from '../../types/db';
 
+// AC13: scheduled() handler dispatches to sync function (AC4)
 export async function handleScheduled(controller: ScheduledController, env: Env): Promise<void> {
   const cron = controller.cron;
 
   if (cron === '*/5 * * * *') {
+    // AC4: sync expert pool to D1 every 5 minutes
+    await syncExpertPoolToD1(env);
     await cleanupExpiredHolds(env);
   } else if (cron === '*/15 * * * *') {
     await dispatchReminders(env);

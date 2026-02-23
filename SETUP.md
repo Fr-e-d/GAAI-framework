@@ -518,3 +518,44 @@ Plan query frequency accordingly when using the `analytics-query` skill for long
 
 The MCP server runs via `npx mcp-remote@latest` — no local installation required. The `npx` call fetches and caches the package on first use.
 
+---
+
+## D1 — Expert Pool Edge Cache (E06S23)
+
+`expert-pool-edge` is a D1 database that caches the expert pool at the edge for <5ms reads.
+It is synced from Supabase every 5 minutes via the `*/5 * * * *` cron trigger.
+
+### Create and provision (run from repo root)
+
+```bash
+# 1. Create the D1 database (staging)
+npx wrangler d1 create expert-pool-edge --env staging
+# Copy the returned database_id into wrangler.toml [[env.staging.d1_databases]] database_id=
+
+# 2. Apply the schema (staging)
+npx wrangler d1 execute expert-pool-edge --file=d1/expert-pool-edge.schema.sql --env staging
+
+# 3. Create the D1 database (production)
+npx wrangler d1 create expert-pool-edge --env production
+# Copy the returned database_id into wrangler.toml [[env.production.d1_databases]] database_id=
+# Also update top-level [[d1_databases]] database_id= for wrangler dev
+
+# 4. Apply the schema (production)
+npx wrangler d1 execute expert-pool-edge --file=d1/expert-pool-edge.schema.sql --env production
+```
+
+After updating the database IDs in `wrangler.toml`, deploy to staging:
+```bash
+npx wrangler deploy --env staging
+```
+
+The first cron run (`*/5 * * * *`) will trigger a full load of the expert pool into D1.
+
+### Cache API note
+
+Cache API L1 (60s TTL) requires a **custom domain** — it is silently a no-op on `*.workers.dev`.
+- Staging: needs a custom domain or route configured in the Cloudflare Dashboard
+- Production: `api.callibrate.io` — Cache API is active
+
+On a miss, D1 serves the request in <5ms. Cache API misses are expected on first hit per datacenter.
+
