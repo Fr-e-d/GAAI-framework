@@ -422,7 +422,7 @@ items:
     epic: E06
     title: "Lead-billing consumer — credit debit + flag/restore (DEC-68)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S32.story.md
     dependencies: [E06S31]
     notes: "DEC-68. Rewrites E06S06 lead-billing consumer: LS checkout → credit debit at booking time. Atomic transaction (postgres.js BEGIN/COMMIT). Adds POST /api/leads/:id/flag (7-day window, credit restore) + POST /api/leads/:id/confirm. LS checkout code removed."
