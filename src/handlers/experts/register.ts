@@ -3,6 +3,7 @@ import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
 import { createServiceClient } from '../../lib/supabase';
 import { checkRateLimit } from '../../lib/rateLimit';
+import { captureEvent } from '../../lib/posthog';
 
 const RegisterSchema = z.object({
   display_name: z.string().min(1, 'display_name is required').max(100),
@@ -15,7 +16,8 @@ const RegisterSchema = z.object({
 export async function handleRegister(
   request: Request,
   env: Env,
-  user: AuthUser
+  user: AuthUser,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   // AC6: Rate limiting
   const rateCheck = await checkRateLimit(request, env);
@@ -95,6 +97,17 @@ export async function handleRegister(
     expert_id: user.id,
     email: user.email ?? '',
   });
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${user.id}`,
+    event: 'expert.registered',
+    properties: {
+      has_headline: headline !== undefined && headline !== null,
+      has_bio: bio !== undefined && bio !== null,
+      rate_min: rate_min ?? null,
+      rate_max: rate_max ?? null,
+    },
+  }));
 
   // Return 201
   return new Response(

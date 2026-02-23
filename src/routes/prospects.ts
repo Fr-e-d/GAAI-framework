@@ -19,6 +19,7 @@ import { scoreMatch, applyReliabilityModifier } from '../matching/score';
 import { signProspectToken, verifyProspectToken } from '../lib/jwt';
 import { loadExpertPool } from '../lib/expertPool';
 import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
+import { captureEvent } from '../lib/posthog';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -104,7 +105,7 @@ function normalizeRequirements(quizAnswers: Record<string, unknown>): ProspectRe
 
 // ── POST /api/prospects/submit ─────────────────────────────────────────────────
 
-export async function handleProspectSubmit(request: Request, env: Env): Promise<Response> {
+export async function handleProspectSubmit(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const startTime = Date.now();
   let body: { satellite_id?: unknown; quiz_answers?: unknown; utm_source?: unknown; utm_campaign?: unknown };
   try {
@@ -225,6 +226,17 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
   // AC3: sign JWT token (24h TTL)
   const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
 
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospect.id}`,
+    event: 'prospect.form_submitted',
+    properties: {
+      satellite_id,
+      utm_source: typeof utm_source === 'string' ? utm_source : null,
+      utm_campaign: typeof utm_campaign === 'string' ? utm_campaign : null,
+      quiz_field_count: Object.keys(answers).length,
+    },
+  }));
+
   return jsonResponse({
     prospect_id: prospect.id,
     token,
@@ -238,6 +250,7 @@ export async function handleProspectMatches(
   request: Request,
   env: Env,
   prospectId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   const url = new URL(request.url);
   const token = url.searchParams.get('token');
@@ -302,6 +315,15 @@ export async function handleProspectMatches(
     };
   });
 
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospectId}`,
+    event: 'prospect.matches_viewed',
+    properties: {
+      match_count: anonymizedMatches.length,
+      top_score: anonymizedMatches[0]?.score ?? 0,
+    },
+  }));
+
   return jsonResponse({ matches: anonymizedMatches });
 }
 
@@ -311,6 +333,7 @@ export async function handleProspectIdentify(
   request: Request,
   env: Env,
   prospectId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   let body: { email?: unknown; token?: unknown };
   try {
@@ -414,6 +437,13 @@ export async function handleProspectIdentify(
       };
     })
     .filter(Boolean);
+
+  const emailDomain = email.split('@')[1] ?? 'unknown';
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospectId}`,
+    event: 'prospect.identified',
+    properties: { email_domain: emailDomain },
+  }));
 
   return jsonResponse({ experts: expertProfiles });
 }

@@ -3,6 +3,7 @@ import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
 import { createServiceClient } from '../../lib/supabase';
 import { Json } from '../../types/database';
+import { captureEvent } from '../../lib/posthog';
 
 const VALID_AVAILABILITY = ['available', 'limited', 'unavailable'] as const;
 
@@ -68,7 +69,8 @@ export async function handlePatchProfile(
   request: Request,
   env: Env,
   user: AuthUser,
-  expertId: string
+  expertId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   // AC7 / AC8: Own profile only
   if (user.id !== expertId) {
@@ -134,6 +136,22 @@ export async function handlePatchProfile(
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  const fieldsUpdated: string[] = [];
+  if (display_name !== undefined) fieldsUpdated.push('display_name');
+  if (headline !== undefined) fieldsUpdated.push('headline');
+  if (bio !== undefined) fieldsUpdated.push('bio');
+  if (rate_min !== undefined) fieldsUpdated.push('rate_min');
+  if (rate_max !== undefined) fieldsUpdated.push('rate_max');
+  if (availability !== undefined) fieldsUpdated.push('availability');
+  if (profile !== undefined) fieldsUpdated.push('profile');
+  if (preferences !== undefined) fieldsUpdated.push('preferences');
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${expertId}`,
+    event: 'expert.profile_updated',
+    properties: { fields_updated: fieldsUpdated },
+  }));
 
   return new Response(JSON.stringify(data[0]), {
     status: 200,

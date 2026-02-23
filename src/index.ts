@@ -48,7 +48,7 @@ async function checkSupabase(env: Env): Promise<'connected' | 'error'> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const { pathname, method } = { pathname: url.pathname, method: request.method };
 
@@ -79,12 +79,12 @@ export default {
     // ── AI Extraction ────────────────────────────────────────────────────────
     // POST /api/extract
     if (method === 'POST' && pathname === '/api/extract') {
-      return handleExtract(request, env);
+      return handleExtract(request, env, ctx);
     }
 
     // ── GCal OAuth callback (unauthenticated — Google redirects here) ─────────
     if (method === 'GET' && pathname === '/api/gcal/callback') {
-      return handleGcalCallback(request, env);
+      return handleGcalCallback(request, env, ctx);
     }
 
     // ── Satellite routes (AC9: CORS enforced) ───────────────────────────────
@@ -114,7 +114,7 @@ export default {
 
       // POST /api/prospects/submit
       if (method === 'POST' && pathname === '/api/prospects/submit') {
-        const response = await handleProspectSubmit(request, env);
+        const response = await handleProspectSubmit(request, env, ctx);
         return addCorsHeaders(response, corsResult.origin);
       }
 
@@ -123,13 +123,13 @@ export default {
       if (prospectId) {
         // GET /api/prospects/:id/matches?token=xxx
         if (method === 'GET' && pathname === `/api/prospects/${prospectId}/matches`) {
-          const response = await handleProspectMatches(request, env, prospectId);
+          const response = await handleProspectMatches(request, env, prospectId, ctx);
           return addCorsHeaders(response, corsResult.origin);
         }
 
         // POST /api/prospects/:id/identify
         if (method === 'POST' && pathname === `/api/prospects/${prospectId}/identify`) {
-          const response = await handleProspectIdentify(request, env, prospectId);
+          const response = await handleProspectIdentify(request, env, prospectId, ctx);
           return addCorsHeaders(response, corsResult.origin);
         }
       }
@@ -146,7 +146,7 @@ export default {
       const corsResult = await handleCors(request, env);
       if (corsResult.preflight) return corsResult.preflight;
       if (!corsResult.allowed) return corsForbidden(corsResult.origin);
-      const response = await handleGetAvailability(request, env, expertAvailMatch[1]);
+      const response = await handleGetAvailability(request, env, expertAvailMatch[1], ctx);
       return addCorsHeaders(response, corsResult.origin);
     }
 
@@ -164,7 +164,7 @@ export default {
 
       // POST /api/bookings/hold
       if (method === 'POST' && pathname === '/api/bookings/hold') {
-        const response = await handleHold(request, env);
+        const response = await handleHold(request, env, ctx);
         return addCorsHeaders(response, corsResult.origin);
       }
 
@@ -174,7 +174,7 @@ export default {
         const action = bookingIdMatch[2];
 
         if (method === 'POST' && action === 'confirm') {
-          const response = await handleConfirm(request, env, bookingId);
+          const response = await handleConfirm(request, env, bookingId, ctx);
           return addCorsHeaders(response, corsResult.origin);
         }
         if (method === 'POST' && action === 'reschedule') {
@@ -186,7 +186,7 @@ export default {
       // DELETE /api/bookings/:id
       const bookingDeleteMatch = pathname.match(/^\/api\/bookings\/([^/]+)$/);
       if (method === 'DELETE' && bookingDeleteMatch && bookingDeleteMatch[1]) {
-        const response = await handleCancel(request, env, bookingDeleteMatch[1]);
+        const response = await handleCancel(request, env, bookingDeleteMatch[1], ctx);
         return addCorsHeaders(response, corsResult.origin);
       }
 
@@ -226,7 +226,7 @@ export default {
     // ── Survey routes (token-gated — survey JWT via SURVEY_TOKEN_SECRET) ────────
     if (pathname.startsWith('/api/surveys/')) {
       if (method === 'POST' && pathname === '/api/surveys/call-experience') {
-        return handleCallExperienceSurvey(request, env);
+        return handleCallExperienceSurvey(request, env, ctx);
       }
       if (method === 'POST' && pathname === '/api/surveys/project-satisfaction') {
         return handleProjectSatisfactionSurvey(request, env);
@@ -240,7 +240,7 @@ export default {
     // ── Evaluation routes (expert JWT authenticated) ──────────────────────────
     if (pathname.startsWith('/api/evaluations/')) {
       if (method === 'POST' && pathname === '/api/evaluations/lead') {
-        return handleLeadEvaluation(request, env);
+        return handleLeadEvaluation(request, env, ctx);
       }
       return new Response(JSON.stringify({ error: 'Not Found' }), {
         status: 404,
@@ -257,7 +257,7 @@ export default {
       const user = authResult.user;
 
       if (method === 'POST' && pathname === '/api/experts/register') {
-        return handleRegister(request, env, user);
+        return handleRegister(request, env, user, ctx);
       }
 
       const profileMatch = pathname.match(/^\/api\/experts\/([^/]+)\/profile$/);
@@ -266,7 +266,7 @@ export default {
           return handleGetProfile(request, env, user, profileMatch[1]!);
         }
         if (method === 'PATCH') {
-          return handlePatchProfile(request, env, user, profileMatch[1]!);
+          return handlePatchProfile(request, env, user, profileMatch[1]!, ctx);
         }
       }
 
@@ -281,7 +281,7 @@ export default {
           return handleGcalStatus(request, env, user, gcalExpertId);
         }
         if (method === 'DELETE' && pathname === `/api/experts/${gcalExpertId}/gcal/disconnect`) {
-          return handleGcalDisconnect(request, env, user, gcalExpertId);
+          return handleGcalDisconnect(request, env, user, gcalExpertId, ctx);
         }
       }
 
