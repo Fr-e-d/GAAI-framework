@@ -7,7 +7,7 @@ tags:
   - conventions
   - procedural
 created_at: 2026-02-19
-updated_at: 2026-02-22
+updated_at: 2026-02-23
 ---
 
 # Patterns & Conventions
@@ -61,8 +61,7 @@ updated_at: 2026-02-22
 - **Zod validation pattern (E06S03):** Always use `safeParse()` (never `.parse()` — throws). On failure: 422 + `{ error: "Validation failed", details: parsed.error.flatten().fieldErrors }`. Use `z.record(z.string(), z.unknown())` for flexible JSONB object fields (Zod v3 — two-argument form required; single-arg is Zod v4+ only).
 - **Rate limiter pattern (E06S03):** `src/lib/rateLimit.ts` — KV key `rate_limit:{action}:{ip}` where ip = `CF-Connecting-IP` (fallback `'unknown'` in dev). Sliding window via `expirationTtl`. Enforced after auth, before DB operations.
 - **Ownership guard pattern (E06S03):** `user.id !== resourceId` check at handler entry — returns 403 before any DB query. `resourceId` extracted from URL in the router, passed as handler arg.
-- **Anthropic tool_use pattern (E06S08):** Use `tool_choice: { type: 'tool', name }` to force structured JSON output from Claude without prompt engineering. Tool schema enforces field types + required fields. Raw `fetch` only — no Anthropic SDK.
-- **CF AI Gateway routing (E06S08):** `const apiUrl = \`${env.CLOUDFLARE_AI_GATEWAY_URL}/v1/messages\`` where `CLOUDFLARE_AI_GATEWAY_URL = https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/anthropic`. Header: `x-api-key: env.ANTHROPIC_API_KEY` (NOT `Authorization: Bearer`). `anthropic-version: 2023-06-01`.
+- **OpenAI function calling pattern (E06S12, DEC-2026-02-23-01):** OpenAI Chat Completions with `tools` + `tool_choice: { type: "function", function: { name: "..." } }` is the canonical pattern for structured AI extraction. Response parsed from `choices[0].message.tool_calls[0].function.arguments` (JSON string). Direct `fetch` to `https://api.openai.com/v1/chat/completions` — no CF AI Gateway for OpenAI calls at this stage. Error surface: `'OpenAI API error'` (non-200), `'Invalid response from OpenAI API'` (JSON parse fail), `'AI service unreachable'` (network failure). Supersedes Anthropic tool_use + CF AI Gateway patterns (E06S08 — removed by E06S12).
 - **Non-blocking optional enrichment pattern (E06S08):** Wrap optional DB reads in `try/catch`, use null-check after. Core logic proceeds regardless. Example: `satellite_configs.vertical` lookup for extraction context.
 - **JWT pattern — Web Crypto API (E06S07):** `signProspectToken()` / `verifyProspectToken()` in `src/lib/jwt.ts`. No external library — CF Workers provides `crypto.subtle` natively. HMAC-SHA256, base64url encoding, claims `{ prospect_id, exp }`.
 - **KV cache-aside pattern (E06S07):** `src/lib/expertPool.ts` — `get(key, { type: 'json' })` → DB fallback on null → `put(key, json, { expirationTtl: 300 })` write-back. Non-blocking write failure (try/catch). Expert pool TTL: 300s.
