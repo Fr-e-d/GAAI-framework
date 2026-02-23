@@ -31,11 +31,14 @@ after the initial `wrangler login`. Run these commands from the repo root.
 |---|---|---|---|
 | `callibrate-core-staging` | core API + queue consumers | staging | push to `production` branch |
 | `callibrate-core-prod` | core API + queue consumers | production | push of a `v*` tag |
+| `callibrate-satellite-staging` | satellite landing pages (multi-tenant) | staging | push to `production` branch |
+| `callibrate-satellite-prod` | satellite landing pages (multi-tenant) | production | push of a `v*` tag |
 | `callibrate-io-staging` | expert UI (Next.js) | staging | *(separate repo)* |
 | `callibrate-io-prod` | expert UI (Next.js) | production | *(separate repo)* |
 | `callibrate-ai-staging` | prospect UI (Next.js) | staging | *(separate repo)* |
 | `callibrate-ai-prod` | prospect UI (Next.js) | production | *(separate repo)* |
 | `callibrate-core-dev` | local dev | never deployed | `wrangler dev` |
+| `callibrate-satellite-dev` | satellite local dev | never deployed | `cd workers/satellite && wrangler dev` |
 
 ---
 
@@ -64,6 +67,8 @@ Created manually with explicit names (see Step 3). Binding names in code are upp
 | `callibrate-core-kv-rate-limiting-prod` | `RATE_LIMITING` | production |
 | `callibrate-core-kv-feature-flags-prod` | `FEATURE_FLAGS` | production |
 | `callibrate-core-kv-expert-pool-prod` | `EXPERT_POOL` | production |
+| `callibrate-satellite-kv-config-staging` | `CONFIG_CACHE` | satellite staging + local dev |
+| `callibrate-satellite-kv-config-prod` | `CONFIG_CACHE` | satellite production |
 
 ---
 
@@ -367,4 +372,88 @@ SUPABASE_SERVICE_KEY=<your-service-key>
 ```
 
 Wrangler automatically loads `.dev.vars` during `wrangler dev`.
+
+---
+
+## Satellite Worker — `callibrate-satellite` (E06S14)
+
+The satellite Worker serves all satellite landing pages from a single deployed codebase.
+Each satellite domain is configured via a row in the `satellite_configs` Supabase table.
+
+### Satellite KV Namespaces
+
+Create one KV namespace per environment for satellite config caching.
+Copy the returned ID into `workers/satellite/wrangler.toml` replacing `PLACEHOLDER_*` strings.
+
+```bash
+npx wrangler kv namespace create "callibrate-satellite-kv-config-staging"
+# -> id into: [[kv_namespaces]] id= AND [[env.staging.kv_namespaces]] binding="CONFIG_CACHE" id=
+
+npx wrangler kv namespace create "callibrate-satellite-kv-config-prod"
+# -> id into: [[env.production.kv_namespaces]] binding="CONFIG_CACHE" id=
+```
+
+### Satellite Secrets
+
+```bash
+# Staging (run from workers/satellite/)
+cd workers/satellite
+npx wrangler secret put SUPABASE_URL --env staging
+# Paste: https://xiilmuuafyapkhflupqx.supabase.co
+
+npx wrangler secret put SUPABASE_ANON_KEY --env staging
+# Paste: (anon/public key from Supabase dashboard)
+
+npx wrangler secret put ADMIN_SECRET --env staging
+# Paste: (generate a strong random secret)
+# openssl rand -base64 32
+```
+
+### Custom Domain Setup (per satellite)
+
+For each new satellite domain:
+
+1. **Cloudflare Dashboard** > Workers & Pages > `callibrate-satellite-staging` (or `-prod`)
+   > Settings > Domains & Routes > Add Custom Domain > enter the satellite domain
+2. Cloudflare will automatically provision SSL and configure DNS
+
+### Satellite Onboarding Checklist
+
+For each new satellite:
+
+- [ ] INSERT row in `satellite_configs` with `active: false` (set all JSONB fields: theme, brand, content, structured_data)
+- [ ] Configure DNS: satellite domain points to Cloudflare (NS or CNAME)
+- [ ] Add Custom Domain in Cloudflare Dashboard for the satellite Worker
+- [ ] Smoke test: `curl https://[satellite_domain]/health` (should 302 to callibrate.io while inactive)
+- [ ] Flip `active: true` in `satellite_configs`
+- [ ] Smoke test: `curl https://[satellite_domain]/health` (should return `200 { ok: true, ... }`)
+- [ ] Verify: `curl https://[satellite_domain]/` returns branded landing page
+- [ ] Cloudflare Dashboard > [satellite domain zone] > Security > Bots > AI Training Bots: select "Block on all pages"
+
+### Cache Purge
+
+Force-refresh a satellite's config (without waiting for KV TTL expiry):
+
+```bash
+curl -X POST https://[satellite_domain]/admin/cache/purge \
+  -H "x-admin-secret: YOUR_ADMIN_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"domain":"[satellite_domain]"}'
+```
+
+### Satellite Local Dev
+
+```bash
+cd workers/satellite
+npm install
+npx wrangler dev
+# -> http://localhost:8787
+```
+
+Create `workers/satellite/.dev.vars` for local development:
+```
+SUPABASE_URL=https://xiilmuuafyapkhflupqx.supabase.co
+SUPABASE_ANON_KEY=<your-anon-key>
+ADMIN_SECRET=local-dev-secret
+```
 
