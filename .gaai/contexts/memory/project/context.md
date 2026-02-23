@@ -7,7 +7,7 @@ tags:
   - vision
   - scope
 created_at: 2026-02-19
-updated_at: 2026-02-22
+updated_at: 2026-02-23
 ---
 
 # Project Memory
@@ -122,6 +122,7 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 - **Semantic search:** Vectorize index (`expert-profiles`, 768 dims, cosine) + Workers AI `@cf/baai/bge-base-en-v1.5` embeddings. Blended scoring: 0.7×exact + 0.3×vector. Graceful fallback to deterministic-only (DEC-62)
 - **Security:** CF Rate Limiting binding (replaces manual KV limiter, DEC-64) + Turnstile invisible CAPTCHA on public endpoints (DEC-63)
 - **Observability:** Analytics Engine dataset `matching-metrics` — fire-and-forget, no-op if binding missing (DEC-65)
+- **Product analytics:** PostHog EU Cloud — client-side (satellite Worker: `page_view` + `satellite.cta_clicked`, cookieless, session replay) + server-side (posthog-node in core Worker: 15 events across prospect/booking/expert/survey funnels). Reverse proxy at `ph.callibrate.io` via `workers/posthog-proxy/` CF Worker (E07S01–E07S05). Per-satellite toggle: `satellite_configs.tracking_enabled`. MCP server: `mcp-eu.posthog.com`.
 - **Email transactionnel:** Resend via `send.callibrate.io` (Cloudflare Queues) — DKIM/SPF/DMARC configurés, tracking OFF (DEC-55). Marketing futur sur sous-domaine séparé.
 - **Calendar / Booking:** Google Calendar API directe (OAuth2 — DEC-41). Cal.com supprimé (Platform fermée aux nouveaux signups 15/12/2025). Token storage : chiffrement AES-256-GCM via Workers Web Crypto (`GCAL_TOKEN_ENCRYPTION_KEY`). Visio : Google Meet auto-généré par booking (`conferenceDataVersion=1`). Teams/Outlook : post-MVP.
 - **Payment / MoR:** Lemon Squeezy (Merchant of Record — gestion taxes internationales)
