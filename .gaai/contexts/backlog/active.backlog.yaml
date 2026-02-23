@@ -407,7 +407,7 @@ items:
     epic: E06
     title: "Credit billing schema + lead pricing function (DEC-67/68)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S31.story.md
     dependencies: []
     notes: "DEC-67/68. Foundation for credit billing. Schema: experts billing columns (credit_balance, spending_limit, max_lead_price, ls_subscription_id, ls_subscription_status) + credit_transactions table + leads status extension (flagged, confirmed, usage_reported). Pure function: calculateLeadPrice (DEC-67 grid, 8 cells, centimes). Unblocks E06S32, E06S33, E06S34."
