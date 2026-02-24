@@ -53,7 +53,7 @@ items:
     epic: E01
     title: "Launch Build in Public — flagship post + ongoing content cadence"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E01S05.story.md
     dependencies: []
     notes: "Discovery first (content plan, angle, data extraction, visual plan, distribution). Then Delivery writes + publishes. Target: 2000-2500 words, English, dev.to + HN + r/ClaudeAI. Prerequisite soft: Gate 1 near-PASS for real data. DEC-2026-02-24-72 to DEC-75 context. Career strategy: first public artefact, precedes .gaai OSS publication."
