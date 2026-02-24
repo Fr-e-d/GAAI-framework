@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify } from './prospects';
 import type { Env } from '../types/env';
 
+vi.mock('../lib/db', () => ({
+  createSql: vi.fn(() => Object.assign((() => []) as unknown as ReturnType<typeof import('../lib/db').createSql>, { begin: vi.fn() })),
+}));
+
+const mockCtx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
+
 // ── Mock Env ──────────────────────────────────────────────────────────────────
 
 const baseMockEnv = {
@@ -18,6 +24,7 @@ const baseMockEnv = {
   EMAIL_NOTIFICATIONS: { send: vi.fn().mockResolvedValue(undefined) } as unknown as Queue,
   LEAD_BILLING: { send: vi.fn().mockResolvedValue(undefined) } as unknown as Queue,
   SCORE_COMPUTATION: {} as unknown as Queue,
+  HYPERDRIVE: { connectionString: 'postgresql://test:test@localhost:5432/test' },
   GOOGLE_CLIENT_ID: '',
   GOOGLE_CLIENT_SECRET: '',
   GCAL_TOKEN_ENCRYPTION_KEY: '',
@@ -78,7 +85,7 @@ describe('handleProspectSubmit — Turnstile validation', () => {
       satellite_id: 'sat-1',
       quiz_answers: {},
     });
-    const response = await handleProspectSubmit(request, makeMockEnv());
+    const response = await handleProspectSubmit(request, makeMockEnv(), mockCtx);
     expect(response.status).toBe(422);
     const body = await response.json() as Record<string, unknown>;
     expect(body['error']).toBe('Validation failed');
@@ -91,7 +98,7 @@ describe('handleProspectSubmit — Turnstile validation', () => {
       quiz_answers: {},
       'cf-turnstile-response': '',
     });
-    const response = await handleProspectSubmit(request, makeMockEnv());
+    const response = await handleProspectSubmit(request, makeMockEnv(), mockCtx);
     expect(response.status).toBe(422);
     const body = await response.json() as Record<string, unknown>;
     expect(body['error']).toBe('Validation failed');
@@ -114,7 +121,7 @@ describe('handleProspectSubmit — Turnstile validation', () => {
       quiz_answers: {},
       'cf-turnstile-response': 'invalid-token',
     });
-    const response = await handleProspectSubmit(request, makeMockEnv());
+    const response = await handleProspectSubmit(request, makeMockEnv(), mockCtx);
     expect(response.status).toBe(422);
     const body = await response.json() as Record<string, unknown>;
     expect(body['error']).toBe('Bot verification failed');
@@ -134,7 +141,7 @@ describe('handleProspectSubmit — Turnstile validation', () => {
       quiz_answers: {},
       'cf-turnstile-response': 'some-token',
     });
-    const response = await handleProspectSubmit(request, makeMockEnv());
+    const response = await handleProspectSubmit(request, makeMockEnv(), mockCtx);
     expect(response.status).toBe(422);
     const body = await response.json() as Record<string, unknown>;
     expect(body['error']).toBe('Bot verification failed');
@@ -157,7 +164,7 @@ describe('handleProspectSubmit — Turnstile validation', () => {
       quiz_answers: {},
       'cf-turnstile-response': '1x0000000000000000000000000000000AA',
     });
-    const response = await handleProspectSubmit(request, makeMockEnv());
+    const response = await handleProspectSubmit(request, makeMockEnv(), mockCtx);
     // Must NOT be a Turnstile 422
     if (response.status === 422) {
       const body = await response.json() as Record<string, unknown>;
@@ -185,7 +192,7 @@ describe('handleProspectSubmit — Rate Limiting', () => {
       quiz_answers: {},
       'cf-turnstile-response': 'some-token',
     });
-    const response = await handleProspectSubmit(request, env);
+    const response = await handleProspectSubmit(request, env, mockCtx);
     expect(response.status).toBe(429);
     const body = await response.json() as Record<string, unknown>;
     expect(body['error']).toBe('Too Many Requests');
@@ -212,7 +219,7 @@ describe('handleProspectSubmit — Rate Limiting', () => {
       quiz_answers: {},
       'cf-turnstile-response': 'valid-token',
     });
-    const response = await handleProspectSubmit(request, env);
+    const response = await handleProspectSubmit(request, env, mockCtx);
     expect(response.status).not.toBe(429);
   });
 });
@@ -233,7 +240,7 @@ describe('handleProspectMatches — Rate Limiting', () => {
       'https://test.workers.dev/api/prospects/prospect-1/matches?token=sometoken',
       { headers: { 'CF-Connecting-IP': '1.2.3.4' } }
     );
-    const response = await handleProspectMatches(request, env, 'prospect-1');
+    const response = await handleProspectMatches(request, env, 'prospect-1', mockCtx);
     expect(response.status).toBe(429);
   });
 });
@@ -258,7 +265,7 @@ describe('handleProspectIdentify — Rate Limiting', () => {
         body: JSON.stringify({ email: 'test@test.com', token: 'tok' }),
       }
     );
-    const response = await handleProspectIdentify(request, env, 'prospect-1');
+    const response = await handleProspectIdentify(request, env, 'prospect-1', mockCtx);
     expect(response.status).toBe(429);
   });
 });

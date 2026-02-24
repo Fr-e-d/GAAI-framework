@@ -9,7 +9,12 @@ vi.mock('../lib/db', () => ({
   createSql: vi.fn(),
 }));
 
+vi.mock('../lib/supabase', () => ({
+  createServiceClient: vi.fn(),
+}));
+
 import { createSql } from '../lib/db';
+import { createServiceClient } from '../lib/supabase';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
