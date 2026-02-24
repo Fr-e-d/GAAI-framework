@@ -71,7 +71,7 @@ dataset = "matching-metrics"
 [[d1_databases]]
 binding = "EXPERT_DB"
 database_name = "expert-pool-edge"
-database_id = "PLACEHOLDER_D1_DATABASE_ID"
+database_id = "7d8ce9de-71ac-482f-8e3e-5c023729fe8f"
 
 # Workers AI binding
 [ai]
@@ -182,7 +182,7 @@ dataset = "matching-metrics"
 [[env.staging.d1_databases]]
 binding = "EXPERT_DB"
 database_name = "expert-pool-edge"
-database_id = "PLACEHOLDER_D1_DATABASE_ID"
+database_id = "7d8ce9de-71ac-482f-8e3e-5c023729fe8f"
 
 # Workers AI binding
 [env.staging.ai]
@@ -274,7 +274,7 @@ dataset = "matching-metrics"
 [[env.production.d1_databases]]
 binding = "EXPERT_DB"
 database_name = "expert-pool-edge"
-database_id = "PLACEHOLDER_D1_DATABASE_ID"
+database_id = "ab015247-cecc-4f0f-a56a-474f73055a78"
 
 # Workers AI binding
 [env.production.ai]
