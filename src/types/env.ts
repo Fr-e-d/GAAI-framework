@@ -59,6 +59,12 @@ export interface Env {
   BOOKING_CONFIRMED_WORKFLOW: Workflow;
   BOOKING_COMPLETED_WORKFLOW: Workflow;
 
+  // LemonSqueezy webhook secret (AC1, E06S33)
+  LEMON_SQUEEZY_WEBHOOK_SECRET: string;
+
+  // Flag window acceleration (staging only — absent in production → real 7d duration)
+  FLAG_WINDOW_MS?: string;
+
   // Survey delay acceleration (staging only — absent in production → real durations)
   SURVEY_DELAY_7D_MS?: string;
   SURVEY_DELAY_38D_MS?: string;

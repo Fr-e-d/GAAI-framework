@@ -112,7 +112,7 @@ class_name = "BookingCompletedWorkflow"
 
 # Top-level (used by wrangler dev)
 [triggers]
-crons = ["*/5 * * * *", "*/15 * * * *"]
+crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *"]
 
 # ── Staging environment ───────────────────────────────────────────────────────
 
@@ -126,6 +126,8 @@ EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
 # Production TURNSTILE_SECRET_KEY must be set via: wrangler secret put TURNSTILE_SECRET_KEY --env production
 TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA"
+# Staging acceleration: lead flag window = 1 minute (production default: 7 days)
+FLAG_WINDOW_MS = "60000"
 
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
@@ -207,7 +209,7 @@ namespace_id = 1002
 simple = { limit = 30, period = 60 }
 
 [env.staging.triggers]
-crons = ["*/5 * * * *", "*/15 * * * *"]
+crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *"]
 
 # ── Production environment ────────────────────────────────────────────────────
 
@@ -299,4 +301,4 @@ namespace_id = 1003
 simple = { limit = 30, period = 60 }
 
 [env.production.triggers]
-crons = ["*/5 * * * *", "*/15 * * * *"]
+crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *"]

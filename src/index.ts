@@ -9,6 +9,7 @@ import { handleSatelliteConfig } from './routes/satellites';
 import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify } from './routes/prospects';
 import { handleCors, addCorsHeaders, corsForbidden } from './lib/cors';
 import { handleGcalAuthUrl, handleGcalStatus, handleGcalDisconnect, handleGcalCallback } from './handlers/experts/gcal';
+import { handleLsWebhook } from './handlers/webhooks/lemonsqueezy';
 import { consumeEmailNotifications } from './queues/email-notifications';
 import { consumeLeadBilling } from './queues/lead-billing';
 import { consumeScoreComputation } from './queues/score-computation';
@@ -87,6 +88,11 @@ export default {
     // ── GCal OAuth callback (unauthenticated — Google redirects here) ─────────
     if (method === 'GET' && pathname === '/api/gcal/callback') {
       return handleGcalCallback(request, env, ctx);
+    }
+
+    // ── LemonSqueezy webhook (unauthenticated — LS sends HMAC-signed requests) ──
+    if (method === 'POST' && pathname === '/api/webhooks/lemonsqueezy') {
+      return handleLsWebhook(request, env);
     }
 
     // ── Satellite routes (AC9: CORS enforced) ───────────────────────────────
