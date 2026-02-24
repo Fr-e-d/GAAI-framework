@@ -550,7 +550,7 @@ items:
     epic: E08
     title: "Booking hold authentication + rate limiting (SEC-02)"
     priority: critical
-    status: in_progress
+    status: failed
     artefact: contexts/artefacts/stories/E08S03.story.md
     dependencies: []
     notes: "SEC-AUDIT-001: SEC-02 (CRITICAL). /api/bookings/hold = 0 auth, 0 rate limit. Prospect token required + 5 holds/h/IP + max 3 active holds/prospect. DoS vector sur calendriers experts."
