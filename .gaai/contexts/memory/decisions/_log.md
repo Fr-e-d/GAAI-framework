@@ -20,6 +20,26 @@ updated_at: 2026-02-24
 
 ---
 
+### DEC-2026-02-24-85 — Scope strategy: stay AI-pure at launch, niche-down by domain data-driven post-Gate 2
+
+**Context:** After selecting Tier 1 verticals (DEC-84), question arose: should Callibrate limit to AI expertise domains, niche-down (AI × industry domain), niche-up (broad IT consulting), or expand to non-AI expertise? Four approaches evaluated across 6 coherence dimensions.
+**Decision:** (1) **Phase 2 (launch): Approach B — AI-pure.** 3 satellites (V3 AI Chatbot, V1 Workflow Auto, V8 AI Integration). Positionnement: "la marketplace des experts en IA et automatisation". No dilution. (2) **Phase 3 (post Gate 2 PASS): B→A — Niche-down data-driven.** When conversion data reveals which prospect domains convert best (e.g., 60% V3 prospects are healthcare → launch "AI Chatbot for Healthcare"). Niche-down is a consequence of data, not an a priori hypothesis. (3) **Post M3 (vision): B→A→eventually C.** Domain expansion only if Matching OS is proven as defensive asset (data flywheel, composite scores). (4) **Explicit exclusions:** No Salesforce/CRM/Shopify satellites (gap compétitif = 0, matching engine not valorized). No 30 micro-satellites IA×Domain at launch (combinatorial chicken-and-egg). No broad IT consulting (no differentiation vs Upwork/Toptal/Clutch).
+**Rationale:** Coherence test across 6 dimensions: Matching OS valorization (prospect doesn't know which tool), supply availability, competitive gap, positioning coherence, solo founder scalability, hype cycle resilience. AI-pure scores 5/6. AI×Domain scores 4/6 (fails on supply granularity + scalability). Broad domains scores 1/6 (fails on 5 dimensions). Non-AI domains scores 1/6. The Matching OS's structural advantage — tool-agnostic matching for confused prospects — only works in verticals where the prospect genuinely doesn't know which tool they need. CRM/Shopify/data prospects already know their tool → matching engine is overqualified for a directory problem. AI vulnerability to hype cycle is real but mitigated by phased expansion: prove the engine on AI, then deploy it where the same structural advantage exists in non-AI domains.
+**Impact:** MARKET-001 updated with Section 10 (Scope Strategy). GTM-001 Phase 2 vertical references unchanged (already correct). project/context.md satellite section unchanged (already scoped to Tier 1). This decision constrains all satellite development until Gate 2 data is available.
+**Date:** 2026-02-24
+
+---
+
+### DEC-2026-02-24-84 — Satellite vertical selection: V3 (AI Chatbot) + V1 (Workflow Auto) + V8 (AI Integration) as Tier 1 launch verticals
+
+**Context:** Callibrate needs to choose which business verticals to address first via satellite sites. The marketplace is two-sided: experts (supply) and prospects (demand). Selection must satisfy both sides simultaneously — enough expert pain to attract supply, enough prospect search volume to generate demand, and a competitive gap wide enough for a new entrant.
+**Decision:** (1) Evaluated 8 candidate verticals across 3 axes: expert pain scoring (7 parameters, /35), prospect-side keyword volumes (US + FR), and competitive gap analysis. (2) **Tier 1 (launch):** V3 AI Chatbot (27/35), V1 Workflow Automation (26/35), V8 AI Integration for SaaS (26/35). (3) **Tier 2 (post-traction):** V2 CRM, V5 Marketing Automation. (4) **Skip:** V4 E-commerce, V6 Data Pipeline, V7 RPA. (5) Common winning trait: prospect doesn't know which tool they need → Callibrate's tool-agnostic matching is the killer feature. (6) Supply overlap: one expert can serve all 3 Tier 1 verticals (e.g., Caio = n8n + Python + Claude + React). (7) French market = blue ocean for all 3 (quasi-zero competition on transactional keywords).
+**Rationale:** Tier 1 verticals score highest on expert pain AND competitive gap AND Callibrate model fit. V2 CRM has highest prospect volume but vendor ecosystems (HubSpot/Salesforce) are impenetrable. V4 E-commerce is served by Storetasker. V6/V7 are enterprise-oriented (wrong model for consultation calls). The 3 Tier 1 verticals share one structural advantage: prospects don't know which tool they need, which is precisely where matching engines beat vendor directories. Expert supply overlap means launch investment is efficient.
+**Impact:** New strategy artifact `MARKET-001.md` created with full analysis. GTM-001 updated with vertical selection reference. Memory index updated. Open decisions: URL architecture, content phasage, prospect empathy maps + funnels for V1/V3/V8.
+**Date:** 2026-02-24
+
+---
+
 ### DEC-2026-02-24-83 — Cost analysis skill + delivery cost baseline established
 
 **Context:** Need to estimate theoretical API pay-per-use cost of GAAI-governed development. 25 delivery logs available (JSONL with per-turn usage data). Claude Code `result` events contain `total_cost_usd` and `modelUsage` breakdowns computed from Anthropic API pricing.

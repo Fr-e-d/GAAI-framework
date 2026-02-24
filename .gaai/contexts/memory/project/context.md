@@ -7,7 +7,7 @@ tags:
   - vision
   - scope
 created_at: 2026-02-19
-updated_at: 2026-02-23
+updated_at: 2026-02-24
 ---
 
 # Project Memory
@@ -195,6 +195,14 @@ Two tracks. Each track can host as many platforms as needed. All platforms in La
 *Track 3.2 — Prospect dedicated UIs*
 - **Satellite sites** (N domains, généraliste ou par vertical/domaine): seul canal prospect — directory, funnel quiz, matching engine, embedded booking widget, content — data centralized in Layer 2 via api.callibrate.io
 - ~~callibrate.ai supprimé~~ (DEC-39)
+
+**Satellite Tier 1 — Verticals de lancement (DEC-84, MARKET-001) :**
+- **V3 — AI Chatbot / Conversational AI** (expert pain 27/35, gap 5/5) — custom GPT, Voiceflow, Botpress, chatbots business
+- **V1 — Workflow Automation** (26/35, gap 5/5) — n8n, Make.com, Zapier consultants
+- **V8 — AI Integration for SaaS** (26/35, gap 5/5) — LLM integration, RAG, fine-tuning, AI agents
+- **Trait commun :** le prospect ne sait pas quel outil il lui faut → matching tool-agnostic = killer feature
+- **Supply overlap :** un expert peut couvrir les 3 verticals (ex: Caio = n8n + Python + Claude + React)
+- Tier 2 (post-traction) : V2 CRM, V5 Marketing Automation. Skip : V4 E-commerce, V6 Data, V7 RPA.
 
 ## Architectural Boundaries
 
