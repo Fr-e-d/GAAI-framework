@@ -33,9 +33,10 @@ export function renderLandingPage(config: SatelliteConfig, posthogApiKey: string
       ? `<ul class="value-props">${content.value_props.map((vp) => `<li>${escapeHtml(vp)}</li>`).join('')}</ul>`
       : '';
 
+  // AC5: Escape </script> breakout in JSON-LD by replacing < with \u003c.
   const jsonLdScript =
     config.structured_data
-      ? `<script type="application/ld+json">${JSON.stringify(config.structured_data)}</script>`
+      ? `<script type="application/ld+json">${JSON.stringify(config.structured_data).replace(/</g, '\\u003c')}</script>`
       : '';
 
   const posthogHeadSnippet = (config.tracking_enabled !== false && posthogApiKey)
