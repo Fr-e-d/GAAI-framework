@@ -467,13 +467,14 @@ items:
 
   - id: E06S35
     epic: E06
-    title: "Monorepo restructure — move Core API into workers/api/"
+    title: "Monorepo restructure — move Core API into workers/backend/api/"
     priority: medium
-    status: in_progress
+    status: done
     started_at: "2026-02-24T14:00:00+01:00"
+    completed_at: "2026-02-24T03:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S35.story.md
     dependencies: []
-    notes: "Structural refactoring. Move src/ + wrangler.toml + package.json + tsconfig.json + d1/ into workers/api/. Root becomes npm workspaces orchestrator. Update GH Actions. Preserve git history via git mv. Best delivered when staging is clean (no pending merges on src/).Recommandation : à délivrer quand staging est propre — ce refactoring conflictera avec tout PR qui touche src/ ou les configs racine."
+    notes: "DONE 2026-02-24. QA PASS (first cycle). All 15 ACs met. Monorepo restructure: Core API → workers/backend/api/, matching → workers/backend/matching-engine/, posthog-proxy → workers/backend/posthog-proxy/, satellite → workers/frontend/satellites/. npm workspaces orchestrator at root. Single package-lock.json. All 3 GH Actions workflows updated. SETUP.md + GAAI memory updated. 260/260 vitest + tsc clean (all 4 workers). git mv preserves history. PR#29 squash-merged → staging."
 
   # ── EPIC E03: Prospect Gets Qualified and Matched to the Right Expert ────
   # Layer 3.2 — satellite sites. Depends on E02 + E06.
