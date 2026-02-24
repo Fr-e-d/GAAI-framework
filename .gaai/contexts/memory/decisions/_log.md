@@ -20,6 +20,17 @@ updated_at: 2026-02-24
 
 ---
 
+### DEC-2026-02-25-89 — Staging infra audit: 5 missing migrations applied + ADMIN_API_KEY provisioned
+
+**Context:** Comprehensive audit of all human-required actions across the backlog revealed 5 Supabase migrations present in the repo but never applied to staging (`xiilmuuafyapkhflupqx`). Also identified ADMIN_API_KEY (E08S04) not set as a secret post-E06S28.
+**Decision:** Applied all 5 migrations via Supabase MCP and set ADMIN_API_KEY via `wrangler secret put --env staging`.
+**Applied migrations:** (1) `lead_credit_rpc` (E06S32 — debit/restore RPC functions), (2) `admissibility_criteria` (E06S36 — JSONB column + merge_expert_profile update), (3) `satellite_configs_anon_select` (E08S05 — anon RLS policy), (4) `webhook_events` (E08S05 — L2 idempotency table), (5) `lead_credit_rpc_ownership` (E08S05 — ownership assertions in RPCs). Total staging migrations: 18 (fully synchronized with repo).
+**Remaining human actions (prioritized):** (1) D1-D2: Turnstile site key + secret, (2) B3-B5: PostHog Personal API Key + ph.callibrate.io CNAME + dashboards, (3) E1-E3: Google OAuth sensitive scope verification (4-6 week lead time — blocker go-live), (4) C1-C3: Lemon Squeezy setup (Phase 3 only), (5) H1: E08S02 backlog status anomaly (PR merged, status still in_progress), (6) H2: E08S03 failed — booking hold auth needs re-delivery, (7) F1-F3: Build in Public publication status unknown.
+**Impact:** Staging DB now fully operational for billing (E06S32-S34), admissibility filters (E06S36), satellite RLS (E08S05), webhook idempotency (E08S05), and admin endpoints (E08S04). No code changes — infrastructure-only session.
+**Date:** 2026-02-25
+
+---
+
 ### DEC-2026-02-25-88 — Niche-down candidates evaluated: Real Estate #1, trigger = ≥30% domain concentration post-Gate 2
 
 **Context:** After deciding on AI-pure launch (DEC-85) with data-driven niche-down post-Gate 2, needed to pre-identify which IA×Domain combinations are viable candidates so the team knows what to look for in conversion data. 13 industry domains evaluated across 39 combinations (3 AI expertise × 13 domains). Scoring: 6 parameters (/30) — search volume, Reddit/community signals, market size, SMB accessibility, expert supply niche, Callibrate fit.
