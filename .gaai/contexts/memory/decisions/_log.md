@@ -20,6 +20,72 @@ updated_at: 2026-02-23
 
 ---
 
+### DEC-2026-02-24-77 — Build-in-public comme stratégie de lancement orchestré + protection copycats
+
+**Context:** Le build-in-public initialement conçu comme contenu de visibilité (DEC-76, E01S05) peut servir un rôle plus stratégique : orchestrer le pré-lancement de TOUS les produits simultanément (Callibrate, .gaai OSS, plugin Cowork, .gaai Cloud). Chaque thread X, chaque blog post tease naturellement les lancements à venir, chauffant l'audience progressivement. Question soulevée sur les copycats : faut-il protéger le framework en restant stealth ?
+**Decision:** Le build-in-public devient le **funnel d'acquisition transversal** à toutes les phases du GTM. Même contenu, 3 audiences chauffées en parallèle : (1) tease Callibrate (le produit), (2) tease .gaai (le framework), (3) tease le builder (personal brand). Chaque lancement arrive devant une audience déjà chaude qui a suivi la construction. Sur les copycats : l'obscurité est un risque plus grand. Protections naturelles suffisantes : auteur original (git history), vitesse d'itération, communauté, marque personnelle. Contenu auto-généré par le skill SKILL-CRS-021 (0 effort supplémentaire — sous-produit de la delivery). Le founder review en batch 15 min/semaine.
+**Rationale:** Tu ne lances pas un produit à une audience froide. Le build-in-public crée de la traction jour 1 au lieu de jour 90. Le skill d'auto-génération élimine le coût en temps (le contenu est un sous-produit, pas une distraction). Les teasers sont honnêtes et organiques (montrer le travail en cours), pas du marketing forcé. L'audience déduit qu'il y a un produit derrière — plus puissant car authentique.
+**Impact:** GTM-001 restructuré — nouvelle section "Build in Public — stratégie de lancement orchestré" avec timeline Phase 1 → Gate 1 → Phase 2 → Gate 2 → Phase 3 → Gate 3. E01S05 mis à jour (AC25 orchestrated teasers, AC26 content auto-generated). Skill SKILL-CRS-021 déjà en place. Aucun effort additionnel requis — le système est auto-alimenté.
+**Date:** 2026-02-24
+
+---
+
+### DEC-2026-02-24-76 — Flagship blog post : premier artefact public + career strategy
+
+**Context:** Le founder a zéro visibilité publique dans l'écosystème AI malgré des assets réels (75+ décisions documentées, 35+ stories livrées, framework .gaai fonctionnel, architecture Callibrate complète). Objectifs déclarés : se faire un nom dans l'AI, générer du revenu, ouvrir des opportunités chez les big players (Anthropic en cible naturelle — leur marque est la safety, .gaai est la governance). Contrainte : 30h/semaine disponibles (emploi 30h à côté).
+**Decision:** Créer E01S05 — story flagship blog post. Discovery d'abord (valider l'angle, extraire les données réelles, planifier les visuels et la distribution), puis Delivery écrit et publie. Angle principal : expérience réelle + chiffres concrets + Dual-Track expliqué en pratique. Visuels via Google NotebookLM. Distribution : blog perso + dev.to + Show HN + r/ClaudeAI + X/Twitter thread. Langue : anglais (reach international). Timing : quand Gate 1 est atteint ou quasi-atteint.
+**Rationale:** Meilleur ROI heure-pour-heure pour la visibilité. 5h d'écriture peuvent générer des milliers de vues. Précède et prépare la publication OSS de .gaai. Sert de portfolio technique et de signal pour les recruteurs AI. La plupart des devs ne savent pas écrire — la capacité d'analyse du founder est un différentiateur.
+**Impact:** E01S05 ajouté au backlog (status: refined, priority: high). Dépendance soft sur Gate 1. Prochaine étape : lancer Discovery sur E01S05 pour valider l'angle et le plan de contenu.
+**Date:** 2026-02-24
+
+---
+
+### DEC-2026-02-24-75 — Architecture technique .gaai Cloud : 3 couches progressives
+
+**Context:** Question concrète : quelle stack technique et quel runtime pour .gaai Cloud ? Claude Code en background ? Recherche sur l'état de l'art : Claude Agent SDK (TS + Python, c'est le moteur sous Claude Code exposé comme librairie), Cowork Plugins (file-based, cross-compatible Code/Cowork, marketplace), hosted MCP platforms (UCL "Vercel for MCP", Composio, Microsoft Foundry).
+**Decision:** Architecture en 3 couches progressives, chaque couche valide la suivante :
+
+- **Couche 1 — Plugin Cowork (MVP, 0 infra).** .gaai est déjà structurellement un plugin Cowork (skills + agents + slash commands = même format fichier). Packager et publier sur le marketplace. Valide si des non-devs adoptent le Dual-Track. Faisable en jours. Limites : locké Anthropic, pas multi-tenant, pas de dashboard web.
+- **Couche 2 — Agent SDK Backend (SaaS multi-tenant).** .gaai Core (TS library open-source) = protocole de gouvernance. Agent Runtime = Claude Agent SDK + OpenAI Agents API (tool-agnostic). Hosted MCP (UCL/Composio) pour les connexions outils. Web app Next.js pour dashboard/approvals/observabilité. Storage Supabase. L'Agent SDK donne les capacités de Claude Code sans le CLI — l'utilisateur interagit via web app, pas terminal.
+- **Couche 3 — .gaai Protocol (standard ouvert).** .gaai Core publié comme spec. D'autres runtimes l'adoptent. Même dynamique que MCP.
+
+**Pas de Claude Code en background.** Le Claude Agent SDK est le bon runtime — c'est le moteur de Claude Code sans l'interface CLI. Pour les non-devs, on construit une UX web par-dessus.
+**Rationale:** Toutes les briques d'infra existent maintenant (Agent SDK, Cowork plugins, hosted MCP, multi-tenant MCP gateways). Ce qui manque = la couche de gouvernance. Le plugin Cowork est le quick win (jours, pas mois) qui valide l'hypothèse marché avant d'investir dans le SaaS. La séquence progressive minimise le risque à chaque étape.
+**Impact:** VISION-GAAI-CLOUD.md mis à jour avec architecture technique 3 couches, composants, stack, et séquence technique révisée. Aucun changement au backlog actif.
+**Date:** 2026-02-24
+
+---
+
+### DEC-2026-02-24-74 — Vision .gaai Cloud : SaaS universel de gouvernance d'agents AI
+
+**Context:** Convergence de 3 signaux : (1) Claude Cowork existe publiquement depuis janvier 2026 avec support plugins — c'est le runtime agent grand public. (2) Le framework .gaai est tool-agnostic par design — il peut gouverner n'importe quel agent sur n'importe quel provider via MCP. (3) OpenAI a acqui-hiré le créateur d'OpenClaw pour "the next generation of personal agents" — les grands investissent dans les agents structurés. Insight clé : MCP résout "comment l'agent parle aux outils", mais personne ne résout "comment l'agent structure le travail, retient le contexte, et sépare réflexion/exécution" de manière tool-agnostic. Les deux piliers identifiés : sécurité (permissions progressives par outil et par action) et observabilité (flux d'activité lisible par un non-technique, decision trail, memory inspector, audit trail).
+**Decision:** Loguer comme vision stratégique long-terme. Artefact dédié créé : `VISION-GAAI-CLOUD.md`. Callibrate reste le véhicule principal — c'est le proof of concept, le revenu runway, et le case study de .gaai Cloud. La séquence ne change pas : Callibrate lancé → OSS .gaai → case study → formation → .gaai Cloud MVP. Ne PAS pivoter. Ne PAS abandonner Callibrate. La fenêtre de tir est "être le premier protocole de gouvernance tool-agnostic pendant que les grands construisent leurs runtimes propriétaires" — Callibrate donne 3-6 mois pour maturer .gaai gratuitement.
+**Rationale:** Le produit d'infrastructure (.gaai Cloud) a un cycle de vente long et nécessite un proof of concept vivant. Callibrate fournit les deux : revenu immédiat + démonstration du framework en production. Sauter directement à .gaai Cloud = 6-12 mois sans revenu, pas de proof of concept, course contre Anthropic/OpenAI sans munitions. L'adaptation par métier se fait via des "Playbooks" (skills + MCPs + rules + memory template) — un runtime unique, marketplace de playbooks.
+**Impact:** Nouvel artefact `artefacts/strategy/VISION-GAAI-CLOUD.md`. Aucun changement au backlog actif. Aucun changement à la priorité Callibrate. Vision à revisiter après Gate 3 PASS.
+**Date:** 2026-02-24
+
+---
+
+### DEC-2026-02-24-73 — Formation payante .gaai : prématuré, revisiter après Gate 3
+
+**Context:** Idée de créer une formation payante à l'utilisation du framework .gaai, basée sur l'expérience terrain avec Callibrate. Persona cible : devs solo / petites équipes utilisant Claude Code sans gouvernance structurée.
+**Decision:** Ne PAS créer de formation maintenant. Revisiter après Gate 3 PASS. La formation est le 3e étage de la fusée — la séquence logique est : (1) Gate 2 → open-source .gaai gratuit (acquisition), (2) Gate 3 → case study Callibrate publié (crédibilité avec chiffres réels), (3) adoption OSS visible → formation payante (monétisation du framework).
+**Rationale:** 4 raisons de reporter : (1) Callibrate n'est pas lancé — la crédibilité d'une formation vient du résultat, pas de la théorie. (2) Distraction fatale — créer une formation = un second produit avec son propre GTM, sa propre audience, son propre support, en pleine Phase 1. (3) Le framework bouge encore (DEC-70, DEC-71) — former sur un framework instable = dette de support. (4) Le contenu gratuit (README + blog + vidéo) fait le même travail d'acquisition sans le coût de production. La formation a du potentiel *quand* : des chiffres réels existent (X stories livrées, Y décisions tracées), l'OSS a de l'adoption, et le case study est publié. Bonus : les devs formés à .gaai sont exactement le profil d'experts potentiels pour Callibrate (funnel croisé).
+**Impact:** GTM-001 mis à jour — séquence de monétisation .gaai ajoutée après la section OSS. Aucune action immédiate.
+**Date:** 2026-02-24
+
+---
+
+### DEC-2026-02-24-72 — Open-sourcing .gaai: defer to post-launch, use as marketing lever
+
+**Context:** Question stratégique : open-sourcer le framework .gaai (gouvernance agents AI, backlog, skills, mémoire) ou le garder comme avantage concurrentiel. Analyse de la valeur défensive vs offensive du framework.
+**Decision:** Ne PAS open-sourcer maintenant. Open-sourcer après le lancement quand le framework est stable et validé par l'usage réel. Séquence : (1) Maintenant → itérer librement, lancer la plateforme. (2) Post-lancement → publier .gaai quand stable. (3) Utiliser comme levier marketing → blog post, Show HN, r/ClaudeAI pour acquisition organique.
+**Rationale:** .gaai n'est PAS un avantage concurrentiel : c'est un framework de process (pas un produit), la valeur est dans l'exécution (pas le playbook), et c'est reproductible par quelqu'un de motivé en quelques jours. Le vrai moat de Callibrate est le réseau d'experts et la marketplace. En revanche, .gaai a une forte valeur comme outil de visibilité : crédibilité technique, acquisition organique (devs qui adoptent .gaai découvrent Callibrate), positionnement thought-leader. Arguments pour attendre : maintenir un OSS demande du temps (distraction en phase lancement), le framework n'est pas encore assez mature (risque de figer des choix de design prématurément).
+**Impact:** GTM-001 mis à jour — nouvelle section "Post-lancement : .gaai open-source comme levier d'acquisition". Pas d'action immédiate sur le code. À revisiter après Gate 2 PASS.
+**Date:** 2026-02-24
+
+---
+
 ### DEC-2026-02-24-71 — Mandatory PR merge to staging at end of delivery cycle
 
 **Context:** 19 PRs accumulated unmerged on staging over multiple delivery cycles. When batch-merged, cascading conflicts required 3 full rounds of resolution across all branches. Root causes: (1) delivery agent created PRs but never merged them, (2) story branches were stacked on previous stories instead of branching from staging, (3) hotspot files (`index.ts`, `wrangler.toml`, `env.ts`) modified by nearly every story guaranteed conflicts. Total remediation: ~60 conflict files resolved, 3 test fixes, 2+ hours of agent work.

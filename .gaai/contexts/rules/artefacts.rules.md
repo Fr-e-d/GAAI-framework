@@ -122,6 +122,9 @@ Every artefact type has **one and only one** target directory. This table is the
 | `{id}.micro-delivery-report.md` | `contexts/artefacts/delivery/` | MicroDelivery Sub-Agent |
 | `{id}.story.md` | `contexts/artefacts/stories/` | Discovery Agent |
 | `{id}.epic.md` | `contexts/artefacts/epics/` | Discovery Agent |
+| `{id}-thread.md` | `contexts/artefacts/content/drafts/` | Delivery Orchestrator (via `generate-build-in-public-content`) |
+| `{id}-blog.md` | `contexts/artefacts/content/drafts/` | Delivery Orchestrator (milestone stories only) |
+| `week-{N}-metrics.md` | `contexts/artefacts/content/drafts/` | Delivery Orchestrator (weekly cadence) |
 
 **R7 — No artefact may be written to the root of `contexts/artefacts/`.** Every artefact must be placed in its designated subdirectory.
 
