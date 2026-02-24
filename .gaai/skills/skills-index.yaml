@@ -4,7 +4,7 @@
 # Regenerate: invoke build-skills-index skill
 
 generated_at: 2026-02-24
-total: 38
+total: 39
 
 # ─────────────────────────────────────────────
 # DISCOVERY — skills that produce artefacts
@@ -202,6 +202,16 @@ cross:
     tags: [governance, index, discoverability]
     updated_at: 2026-02-21
     path: cross/build-skills-index/SKILL.md
+
+  - id: SKILL-CRS-022
+    name: cost-analysis
+    description: "Analyze API usage costs from delivery logs and produce a per-story and per-period cost report. Activate when estimating theoretical pay-per-use costs, evaluating value produced, or tracking project spend."
+    category: cross
+    track: cross-cutting
+    tags: [cost, analytics, billing, reporting]
+    status: stable
+    updated_at: 2026-02-24
+    path: cross/cost-analysis/SKILL.md
 
   - id: SKILL-CODEBASE-SCAN-001
     name: codebase-scan
