@@ -570,7 +570,7 @@ items:
     epic: E08
     title: "JWT claims hardening + secrets hygiene + defense-in-depth (SEC-08→SEC-16)"
     priority: medium
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E08S05.story.md
     dependencies: [E08S01]
     notes: "SEC-AUDIT-001: 9 MEDIUM/LOW findings. JWT aud/iss, survey TTL 30d→7d, Turnstile secret removal from vars, localConnectionString cleanup, CORS anon key, prompt injection allowlist, webhook persistent idempotency, RPC ownership assert."
