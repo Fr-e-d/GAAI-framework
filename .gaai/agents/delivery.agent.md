@@ -133,10 +133,18 @@ BEFORE execution  → flock: git pull origin staging
 
 AFTER impl PASS   → atomic commit inside ../{id}-workspace
 
-AFTER QA PASS     → push story/{id} to origin
+AFTER QA PASS     → git merge staging into story branch (in worktree — catch staleness BEFORE push)
+                    npx tsc --noEmit + npx vitest run (in worktree — verify integration)
+                    if story-introduced failures → fix and re-commit
+                    if pre-existing failures only → proceed
+                    push story/{id} to origin
                     gh pr create --base staging --head story/{id}
+                    gh run watch → wait for PR CI green (if red: same triage — fix or ESCALATE)
                     gh pr merge --squash story/{id}           ← immediate merge (DEC-71: never leave PRs open)
                     if merge fails (conflict) → merge staging into story branch, resolve, push, retry merge
+                    if merge rejected (checks/review) → wait for checks, retry
+                    verify staging deploy CI (gh run list --branch staging --limit 1)
+                    if staging deploy fails → ESCALATE with logs (do not attempt infra fixes)
                     flock: commit artefacts + mark done + push staging (governance)
                     cleanup: worktree remove + delete remote branch
 
@@ -184,9 +192,15 @@ Tier 2 or 3? → assemble context bundle
            PASS → collect memory-deltas/{id}.memory-delta.md
                   → if verdict DRIFT_DETECTED or NEW_KNOWLEDGE_FOUND or DRIFT_AND_NEW_KNOWLEDGE:
                       flag Discovery with delta report before marking done
+                  → git merge staging into story branch (in worktree)
+                  → tsc --noEmit + vitest run (in worktree — verify integration)
+                  → if story-introduced failures → fix; pre-existing → proceed; unclear → ESCALATE
                   → push story/{id} → gh pr create --base staging
-                                   → gh pr merge --squash story/{id}  (immediate — DEC-71)
-                                   → if merge fails: merge staging into branch, resolve, push, retry
+                  → gh run watch (wait for PR CI green; if red: triage or ESCALATE)
+                  → gh pr merge --squash story/{id}  (immediate — DEC-71)
+                  → if merge fails: merge staging into branch, resolve, push, retry
+                  → if merge rejected (checks): wait, retry
+                  → verify staging deploy CI; if fails → ESCALATE with logs
                   → flock: commit artefacts + mark done → push staging
                   → cleanup worktree + delete remote branch
            FAIL → re-spawn Implementation Sub-Agent with qa-report (max 2 re-spawns)

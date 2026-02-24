@@ -56,13 +56,26 @@ The Orchestrator cannot proceed to the next phase until it has validated the cur
 ### After QA Sub-Agent terminates
 
 1. Read verdict from `{id}.qa-report.md`:
-   - **PASS**: → **MERGE & COMPLETE Story**:
-     1. Push story branch to origin
-     2. `gh pr create --base staging --head story/{id}`
-     3. `gh pr merge --squash` — immediate merge to staging (DEC-71)
-     4. If merge fails (conflict): merge staging into branch, resolve, push, retry merge
-     5. If merge still fails after 2 attempts: **ESCALATE** with conflict details
-     6. After successful merge: update backlog, commit artefacts, cleanup worktree + remote branch
+   - **PASS**: → **INTEGRATE, MERGE & COMPLETE Story**:
+     1. **Rebase on staging** (in worktree): `git merge staging` into story branch
+     2. **Verify build**: `npx tsc --noEmit` in worktree
+        - If fails with errors **introduced by this story** → fix and re-commit
+        - If fails with **pre-existing errors only** → proceed (not this story's problem)
+        - If unclear → **ESCALATE** with error list
+     3. **Verify tests**: `npx vitest run` in worktree
+        - Same triage: story-introduced failures → fix; pre-existing → proceed; unclear → **ESCALATE**
+     4. Push story branch to origin
+     5. `gh pr create --base staging --head story/{id}`
+     6. Wait for PR CI check to reach a terminal state (`gh run watch`)
+        - If CI fails → diagnose: same triage as steps 2–3 (fix story issues, ignore pre-existing)
+        - If CI fails on infra (missing secrets, missing bindings) → **ESCALATE** with logs
+     7. `gh pr merge --squash` — immediate merge to staging (DEC-71)
+        - If merge fails (conflict): merge staging into branch, resolve, push, retry merge
+        - If merge still fails after 2 attempts: **ESCALATE** with conflict details
+        - If merge rejected (branch protection / checks required): wait for checks, then retry
+     8. After successful merge: verify staging deploy CI (`gh run list --branch staging --limit 1`)
+        - If staging deploy fails → **ESCALATE** with deploy logs (do not attempt infra fixes)
+     9. Update backlog, commit artefacts, cleanup worktree + delete remote branch
      **NEVER leave a PR open. NEVER merge to production (staging only).**
    - **FAIL**: spawn count < 2? → **RE-SPAWN** Implementation Sub-Agent with qa-report, then re-spawn QA Sub-Agent
    - **FAIL** after 2 cycles: → **ESCALATE**
