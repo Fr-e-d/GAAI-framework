@@ -503,7 +503,7 @@ items:
     epic: E06
     title: "Outcome-based expert profiles + extraction enhancement (DEC-81)"
     priority: medium
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S37.story.md
     dependencies: [E06S22, E06S12, E06S02]
     notes: "Discovery-informed. outcome_tags TEXT[] on experts + desired_outcomes in extraction + scoreOutcomeAlignment() scoring dimension (Workers AI semantic, weight 0.10). Field data: 'stopped selling workflows, started selling found time' (Littlecutsie)."
