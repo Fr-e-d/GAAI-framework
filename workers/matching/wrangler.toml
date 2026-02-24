@@ -42,8 +42,7 @@ name = "callibrate-matching-staging"
 
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
-# ⚠️ REPLACE after creating Hyperdrive config (E06S27 AC1)
-id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+id = "cc93b8f0e9554e4f8c1dbd9ad83688f5"
 
 [[env.staging.kv_namespaces]]
 binding = "EXPERT_POOL"
