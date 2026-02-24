@@ -494,7 +494,7 @@ items:
     epic: E06
     title: "Expert admissibility criteria — non-budget matching filters (DEC-80)"
     priority: medium
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S36.story.md
     dependencies: [E06S34, E06S02]
     notes: "Discovery-informed. admissibility_criteria JSONB (methodology, verticals, stack overlap, duration). applyAdmissibilityFilters() after billing, before scoring. Follows E06S34 architecture. Field data: 'modular or nothing' (heyiamnickk), 'card on file' (MachadoEsq)."
