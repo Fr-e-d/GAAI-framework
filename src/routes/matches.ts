@@ -15,6 +15,9 @@ import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
 import { createSql } from '../lib/db';
 import { loadExpertPool } from '../lib/expertPool';
 import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../types/db';
+import { calculateLeadPrice } from '../lib/pricing';
+import { loadBillingData, applyBillingFilters } from '../lib/billingFilter';
+import type { ProspectRequirements as _PR } from '../types/matching';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -39,7 +42,7 @@ function deriveQualityTier(compositeScore: number | null): QualityTier {
 // AC7: loads prospect + available experts, scores, stores top-20, returns results
 // AC10 (B2 fix): uses loadExpertPool(env) instead of direct DB query for experts
 
-export async function handleMatchCompute(request: Request, env: Env): Promise<Response> {
+export async function handleMatchCompute(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   let body: { prospect_id?: unknown; satellite_id?: unknown };
   try {
     body = await request.json();
@@ -53,30 +56,57 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
     return errorResponse('prospect_id is required', 422, { prospect_id: 'must be a non-empty string' });
   }
 
+  const sql = createSql(env);
+
+  // Load prospect (needed for effectiveSatelliteId in notifications)
+  const [prospect] = await sql<Pick<ProspectRow, 'id' | 'requirements' | 'satellite_id'>[]>`
+    SELECT id, requirements, satellite_id FROM prospects WHERE id = ${prospect_id}`;
+  if (!prospect) return errorResponse('Prospect not found', 404);
+
+  const effectiveSatelliteId = satellite_id ?? prospect.satellite_id;
+
   // AC4 (E06S24): Delegate to callibrate-matching via Service Binding (zero network hop)
   // AC6: Fallback to local deterministic scoring when MATCHING_SERVICE not bound
   if (env.MATCHING_SERVICE) {
-    return env.MATCHING_SERVICE.fetch(
+    const matchResp = await env.MATCHING_SERVICE.fetch(
       new Request('https://matching/match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prospect_id, satellite_id }),
       })
     );
+    if (!matchResp.ok) return matchResp;
+    const matchBody = await matchResp.json() as {
+      computed: number;
+      top_matches: unknown[];
+      billing_excluded?: { expert_id: string; reason: string }[];
+    };
+    const billingExcluded = matchBody.billing_excluded ?? [];
+    if (billingExcluded.length > 0) {
+      const reqs = (prospect.requirements ?? {}) as { budget_range?: { max?: number } };
+      const lpResult = calculateLeadPrice(reqs.budget_range?.max ?? null, { budget_max: reqs.budget_range?.max ?? null });
+      for (const ex of billingExcluded) {
+        ctx.waitUntil(
+          env.EMAIL_NOTIFICATIONS.send({
+            type: 'expert.billing.lead_missed',
+            expert_id: ex.expert_id,
+            reason: ex.reason as 'insufficient_balance' | 'max_lead_price_exceeded' | 'spending_limit_reached',
+            prospect_vertical: typeof effectiveSatelliteId === 'string' ? effectiveSatelliteId : '',
+            budget_tier: lpResult.tier,
+          })
+        );
+      }
+    }
+    return new Response(
+      JSON.stringify({ computed: matchBody.computed, top_matches: matchBody.top_matches }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   // AC6 Fallback: local scoring without Vectorize (MATCHING_SERVICE not available in dev/test)
   const startTime = Date.now();
-  const sql = createSql(env);
-
-  // Load prospect requirements
-  const [prospect] = await sql<Pick<ProspectRow, 'id' | 'requirements' | 'satellite_id'>[]>`
-    SELECT id, requirements, satellite_id FROM prospects WHERE id = ${prospect_id}`;
-
-  if (!prospect) return errorResponse('Prospect not found', 404);
 
   // Resolve matching weights (satellite override or default)
-  const effectiveSatelliteId = satellite_id ?? prospect.satellite_id;
   let weights: MatchingWeights = DEFAULT_WEIGHTS;
 
   if (typeof effectiveSatelliteId === 'string' && effectiveSatelliteId) {
@@ -97,7 +127,34 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
   // Score each expert using the pool (includes pre-computed total_leads)
   const requirements = (prospect.requirements ?? {}) as ProspectRequirements;
 
-  const scored = expertPool.map((expert) => {
+  // AC1: calculate leadPrice once
+  const budgetMax = requirements.budget_range?.max ?? null;
+  const lpResult = calculateLeadPrice(budgetMax, { budget_max: budgetMax });
+  const leadPrice = lpResult.amount;
+
+  // AC2–AC4: apply billing filter
+  const billingMap = await loadBillingData(env, expertPool.map((e) => e.id));
+  const { eligible, excluded: billingExcluded } = applyBillingFilters(expertPool, billingMap, leadPrice);
+
+  // AC6: fire-and-forget notifications
+  for (const ex of billingExcluded) {
+    ctx.waitUntil(
+      env.EMAIL_NOTIFICATIONS.send({
+        type: 'expert.billing.lead_missed',
+        expert_id: ex.expert_id,
+        reason: ex.reason,
+        prospect_vertical: typeof effectiveSatelliteId === 'string' ? effectiveSatelliteId : '',
+        budget_tier: lpResult.tier,
+      })
+    );
+  }
+
+  // AC7: all excluded → empty results
+  if (eligible.length === 0) {
+    return jsonResponse({ computed: 0, top_matches: [] });
+  }
+
+  const scored = eligible.map((expert) => {
     const profile: ExpertProfile = {
       ...((expert.profile ?? {}) as ExpertProfile),
       rate_min: expert.rate_min,
@@ -156,7 +213,7 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
     endpoint: '/api/matches/compute',
     satelliteId: typeof effectiveSatelliteId === 'string' ? effectiveSatelliteId : '',
     latencyMs: Date.now() - startTime,
-    poolSize: expertPool.length,
+    poolSize: eligible.length,
     topScore: top20[0]?.matchScore.score ?? 0,
     meanScore,
   });

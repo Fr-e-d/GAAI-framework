@@ -28,7 +28,9 @@ import {
   type ProspectRow,
   type SatelliteConfigRow,
   type ExpertRow,
+  type BillingExclusion,
 } from './types';
+import { calculateLeadPrice } from './pricing';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -65,7 +67,7 @@ function writeDataPoint(
 // Full scoring pipeline: load prospect → load weights → load pool →
 // Vectorize pre-filter → score candidates → write top-20 matches → return results
 
-async function handleMatch(request: Request, env: MatchingEnv): Promise<Response> {
+async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionContext): Promise<Response> {
   const startTime = Date.now();
 
   let body: { prospect_id?: unknown; satellite_id?: unknown };
@@ -109,8 +111,68 @@ async function handleMatch(request: Request, env: MatchingEnv): Promise<Response
 
   const requirements = (prospect.requirements ?? {}) as ProspectRequirements;
 
+  // AC1: calculate leadPrice once for this match request
+  const budgetMax = (requirements.budget_range as { max?: number } | undefined)?.max ?? null;
+  const leadPriceResult = calculateLeadPrice(budgetMax, {
+    budget_max: budgetMax,
+    timeline_days: null,
+    skills: requirements.skills_needed ?? [],
+  });
+  const leadPrice = leadPriceResult.amount;
+
+  // AC2–AC4: load billing data and apply filter (live Hyperdrive queries)
+  const poolExpertIds = expertPool.map((e) => e.id);
+  const billingRows = await sql<
+    { id: string; credit_balance: number; max_lead_price: number | null; spending_limit: number | null }[]
+  >`SELECT id, credit_balance, max_lead_price, spending_limit FROM experts WHERE id = ANY(${poolExpertIds})`;
+
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const spendRows = await sql<{ expert_id: string; monthly_spend: number }[]>`
+    SELECT expert_id, COALESCE(SUM(ABS(amount)), 0)::integer AS monthly_spend
+    FROM credit_transactions
+    WHERE type = 'lead_debit'
+      AND expert_id = ANY(${poolExpertIds})
+      AND created_at >= ${monthStart.toISOString()}
+    GROUP BY expert_id`;
+
+  // Build billing map
+  const billingMap = new Map<string, { credit_balance: number; max_lead_price: number | null; spending_limit: number | null; monthly_spend: number }>();
+  for (const row of billingRows) {
+    billingMap.set(row.id, { credit_balance: row.credit_balance, max_lead_price: row.max_lead_price, spending_limit: row.spending_limit, monthly_spend: 0 });
+  }
+  for (const row of spendRows) {
+    const existing = billingMap.get(row.expert_id);
+    if (existing) existing.monthly_spend = row.monthly_spend;
+  }
+
+  // Apply billing filter
+  const billingExcluded: BillingExclusion[] = [];
+  const eligible = expertPool.filter((expert) => {
+    const billing = billingMap.get(expert.id) ?? { credit_balance: 0, max_lead_price: null, spending_limit: null, monthly_spend: 0 };
+    if (billing.credit_balance < leadPrice) {
+      billingExcluded.push({ expert_id: expert.id, reason: 'insufficient_balance' });
+      return false;
+    }
+    if (billing.max_lead_price !== null && leadPrice > billing.max_lead_price) {
+      billingExcluded.push({ expert_id: expert.id, reason: 'max_lead_price_exceeded' });
+      return false;
+    }
+    if (billing.spending_limit !== null && billing.monthly_spend + leadPrice > billing.spending_limit) {
+      billingExcluded.push({ expert_id: expert.id, reason: 'spending_limit_reached' });
+      return false;
+    }
+    return true;
+  });
+
+  // AC7: all experts excluded → return empty results (HTTP 200)
+  if (eligible.length === 0) {
+    return jsonResponse({ computed: 0, top_matches: [], billing_excluded: billingExcluded });
+  }
+
   // Vectorize semantic pre-filter
-  let candidates = expertPool;
+  let candidates = eligible;
   let similarityMap = new Map<string, number>();
 
   try {
@@ -121,18 +183,18 @@ async function handleMatch(request: Request, env: MatchingEnv): Promise<Response
     const vector = embeddingResult.data[0];
 
     if (vector && vector.length > 0) {
-      const topK = Math.max(expertPool.length, 100);
+      const topK = Math.max(eligible.length, 100);
       similarityMap = await queryVectorize(env, vector, topK);
       if (similarityMap.size > 0) {
         const candidateIds = new Set(similarityMap.keys());
-        const filtered = expertPool.filter((e) => candidateIds.has(e.id));
+        const filtered = eligible.filter((e) => candidateIds.has(e.id));
         if (filtered.length > 0) candidates = filtered;
       }
     }
   } catch (err) {
-    // Vectorize unavailable — fall back to deterministic scoring over full pool
+    // Vectorize unavailable — fall back to deterministic scoring over full eligible pool
     console.error('matching: Vectorize query failed, falling back to deterministic scoring', err);
-    candidates = expertPool;
+    candidates = eligible;
     similarityMap = new Map();
   }
 
@@ -175,7 +237,7 @@ async function handleMatch(request: Request, env: MatchingEnv): Promise<Response
     endpoint: '/match',
     satelliteId: effectiveSatelliteId ?? '',
     latencyMs: Date.now() - startTime,
-    poolSize: expertPool.length,
+    poolSize: eligible.length,
     topScore,
     meanScore,
   });
@@ -198,7 +260,7 @@ async function handleMatch(request: Request, env: MatchingEnv): Promise<Response
     };
   });
 
-  return jsonResponse({ computed: top20.length, top_matches: topMatches });
+  return jsonResponse({ computed: top20.length, top_matches: topMatches, billing_excluded: billingExcluded });
 }
 
 // ── POST /embed ───────────────────────────────────────────────────────────────
@@ -281,7 +343,7 @@ export default {
     const { method } = request;
 
     if (method === 'POST' && pathname === '/match') {
-      return handleMatch(request, env);
+      return handleMatch(request, env, ctx);
     }
 
     if (method === 'POST' && pathname === '/embed') {
