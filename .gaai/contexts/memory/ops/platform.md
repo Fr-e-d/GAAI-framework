@@ -127,20 +127,47 @@ Le détail technique (robots.txt, sitemap) est implémenté dans chaque satellit
 
 ## Coûts de développement
 
-### Claude API (Claude Sonnet — 25 stories livrées, 24/02/2026)
+### Claude API — Delivery (24 stories mesurées + 1 estimée, 24/02/2026)
 
-| Catégorie | Tokens | Coût |
+**Source :** `.gaai/.delivery-logs/*.log` (JSONL) — champ `result.total_cost_usd` par story.
+**Outil :** `.gaai/skills/cross/cost-analysis/references/extract-costs.sh` (SKILL-CRS-022).
+
+| Métrique | Valeur |
+|---|---|
+| Stories mesurées | 24 (+ E07S03 estimée ~$5.50, session interrompue) |
+| **Coût total Delivery** | **$149.90** |
+| Coût moyen / story | $6.02 |
+| Story la moins chère | E07S06 — $1.29 (32 turns, 3.8 min) |
+| Story la plus chère | E06S24 — $14.08 (214 turns, 37.7 min) |
+| Durée totale | 8h45 (524.9 min) |
+| API turns totaux | 1,943 |
+
+**Répartition par modèle :**
+
+| Modèle | Coût | % |
 |---|---|---|
-| Input (non-caché) | 19,956 | $0.06 |
-| Output | 1,064,025 | $15.96 |
-| Cache creation | 13,113,983 | $49.18 |
-| Cache read | 443,624,786 | $133.09 |
-| **TOTAL** | **~458M tokens** | **$198.29** |
+| Claude Sonnet 4.6 | $142.96 | 99.0% |
+| Claude Haiku 4.5 | $1.43 | 1.0% |
 
-96.9% = cache reads. Story la plus coûteuse : E06S24 (Service Bindings Worker split) — 49.4M cache reads.
-Données extraites des delivery logs : `.gaai/.delivery-logs/*.log` (format JSONL).
+**Structure du coût Sonnet 4.6 :**
+- Cache read (173M tokens) : ~$52 (36%)
+- Thinking tokens (non séparés dans usage) : ~$57 (40%)
+- Output (1.27M tokens) : ~$19 (13%)
+- Cache write (3.9M tokens) : ~$15 (10%)
+- Input non-caché (<10K tokens) : ~$0.03 (<1%)
 
-**Note :** ce coût s'applique en facturation API directe. Si l'on est sur un abonnement Claude Max ($100/$200/mois), le coût est le forfait mensuel.
+**Estimation coût total projet :**
+
+| Phase | Mesuré | Estimé | Total |
+|---|---|---|---|
+| Delivery (25 stories trackées) | $149.90 | — | $149.90 |
+| Delivery (15 stories non trackées, E06S01-S15) | — | ~$105 | ~$105 |
+| Discovery (toutes sessions) | — | ~$40 | ~$40 |
+| Annexe (debugging, merges, admin) | — | ~$30 | ~$30 |
+| **Total** | **$149.90** | **~$175** | **~$325** |
+
+**Lacunes :** E06S01-E06S15 (pas de delivery logs), Discovery sessions (non capturées), sessions annexes.
+**Note :** coût théorique API pay-per-use. Avec Claude Max ($100-200/mois), le coût est le forfait mensuel.
 
 ### Accès Reddit API
 

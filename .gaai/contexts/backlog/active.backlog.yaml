@@ -270,7 +270,7 @@ items:
     title: "Service Bindings — Worker split"
     priority: high
     status: done
-    cost_usd: 0
+    cost_usd: 14.08
     started_at: "2026-02-23T17:05:05+01:00"
     completed_at: "2026-02-23T20:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S24.story.md
@@ -282,7 +282,7 @@ items:
     title: "Durable Objects — expert pool write coordinator"
     priority: high
     status: done
-    cost_usd: 0
+    cost_usd: 7.60
     started_at: "2026-02-23T17:05:47+01:00"
     completed_at: "2026-02-23T17:40:00+01:00"
     artefact: contexts/artefacts/stories/E06S25.story.md
@@ -307,7 +307,7 @@ items:
     title: "PostHog reverse proxy CF Worker"
     priority: high
     status: done
-    cost_usd: 0
+    cost_usd: 4.02
     started_at: "2026-02-23T17:05:05+01:00"
     completed_at: "2026-02-23T17:45:00+01:00"
     artefact: contexts/artefacts/stories/E07S01.story.md
@@ -319,7 +319,7 @@ items:
     title: "Satellite client-side instrumentation (prospect UX tracking)"
     priority: high
     status: done
-    cost_usd: 0
+    cost_usd: 6.25
     started_at: "2026-02-23T17:05:05+01:00"
     completed_at: "2026-02-23T18:30:00+01:00"
     artefact: contexts/artefacts/stories/E07S02.story.md
@@ -331,7 +331,7 @@ items:
     title: "Core API server-side event capture (prospect + expert funnels)"
     priority: high
     status: done
-    cost_usd: 0
+    cost_usd: 5.50
     started_at: "2026-02-23T19:12:00+01:00"
     completed_at: "2026-02-23T19:22:00+01:00"
     artefact: contexts/artefacts/stories/E07S03.story.md
@@ -345,7 +345,7 @@ items:
     status: done
     started_at: "2026-02-23T00:00:00+01:00"
     completed_at: "2026-02-23T00:00:00+01:00"
-    cost_usd: 0
+    cost_usd: 7.69
     artefact: contexts/artefacts/stories/E07S04.story.md
     dependencies: [E07S02, E07S03]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 8 ACs met. scripts/posthog-setup-dashboards.ts + scripts/tsconfig.json. 3 dashboards: Prospect Conversion Funnel (5-step funnel + satellite_id breakdown), Expert Activation Funnel (4-step), Business Overview (4 TRENDS insights). Idempotent. TSC clean. PR#19 open → staging. ⚠️ Human action required: (1) generate PostHog Personal API Key at https://eu.posthog.com/settings/user-api-keys, (2) run: POSTHOG_PERSONAL_API_KEY=phx_xxx POSTHOG_PROJECT_ID=yyy npx tsx scripts/posthog-setup-dashboards.ts"
@@ -357,7 +357,7 @@ items:
     status: done
     started_at: "2026-02-23T20:00:00+01:00"
     completed_at: "2026-02-23T20:30:00+01:00"
-    cost_usd: 0
+    cost_usd: 4.00
     artefact: contexts/artefacts/stories/E07S05.story.md
     dependencies: [E07S02, E07S03]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 13 ACs met. PostHog EU MCP server in .mcp.json (mcp-remote → mcp-eu.posthog.com, POSTHOG_PERSONAL_API_KEY auth). GAAI analytics-query skill (SKILL-CRS-020) with 5 analysis patterns, query-templates.md + interpretation-guide.md. skills-index.yaml regenerated (37 skills). discovery.agent.md updated. PR#20 open → staging. ⚠️ Human action required: (1) Set POSTHOG_PERSONAL_API_KEY='Bearer phx_xxx' in shell profile, (2) Create PostHog EU account + Personal API Key with MCP Server preset."
@@ -378,7 +378,7 @@ items:
     title: "Staging — Provisionnement infra CF (Hyperdrive + D1 + Vectorize + Workflows + Rate Limiter + Workers)"
     priority: critical
     status: done
-    cost_usd: 0
+    cost_usd: 6.93
     started_at: "2026-02-23T22:00:00+01:00"
     completed_at: "2026-02-23T23:59:00+01:00"
     artefact: contexts/artefacts/stories/E06S27.story.md
@@ -390,7 +390,7 @@ items:
     title: "Staging — Secrets manquants (Core + Satellite + Turnstile)"
     priority: critical
     status: done
-    cost_usd: 0
+    cost_usd: 3.81
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T00:30:00+01:00"
     artefact: contexts/artefacts/stories/E06S28.story.md
@@ -402,7 +402,7 @@ items:
     title: "Staging — Smoke test end-to-end"
     priority: critical
     status: done
-    cost_usd: 0
+    cost_usd: 7.57
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T10:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S29.story.md
@@ -416,7 +416,7 @@ items:
     status: done
     started_at: "2026-02-23T22:00:00+01:00"
     completed_at: "2026-02-23T23:59:00+01:00"
-    cost_usd: 0
+    cost_usd: 2.76
     artefact: contexts/artefacts/stories/E06S30.story.md
     dependencies: []
     notes: "DONE 2026-02-23. QA PASS. AC1 + AC2 delivered: /privacy (GDPR Privacy Policy) and /terms (Terms of Service) added as static routes in satellite worker, before config middleware. tsc clean. PR#22 open → staging. ⚠️ Founder action required: (1) Add CF routes callibrate.io/privacy* + callibrate.io/terms* → callibrate-satellite-{staging,prod}, (2) Complete AC3–AC9: Google Search Console domain verification + OAuth consent screen + verification form submission. AC10–AC11 await Google approval (4–6 weeks)."
@@ -429,7 +429,7 @@ items:
     title: "Credit billing schema + lead pricing function (DEC-67/68)"
     priority: high
     status: done
-    cost_usd: 0
+    cost_usd: 2.70
     started_at: "2026-02-23T22:55:00+01:00"
     completed_at: "2026-02-23T23:15:00+01:00"
     artefact: contexts/artefacts/stories/E06S31.story.md
@@ -441,7 +441,7 @@ items:
     title: "Lead-billing consumer — credit debit + flag/restore (DEC-68)"
     priority: high
     status: done
-    cost_usd: 0
+    cost_usd: 7.87
     started_at: "2026-02-23T23:30:00+01:00"
     completed_at: "2026-02-24T00:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S32.story.md
@@ -453,7 +453,7 @@ items:
     title: "LS usage-based subscription + welcome credit + usage reporting cron (DEC-68)"
     priority: high
     status: done
-    cost_usd: 0
+    cost_usd: 11.29
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T00:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S33.story.md
@@ -465,7 +465,7 @@ items:
     title: "Balance / max_lead_price / spending_limit enforcement at matching (DEC-67/68)"
     priority: high
     status: done
-    cost_usd: 0
+    cost_usd: 10.31
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T00:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S34.story.md

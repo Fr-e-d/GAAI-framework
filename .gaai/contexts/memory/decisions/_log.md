@@ -20,6 +20,16 @@ updated_at: 2026-02-24
 
 ---
 
+### DEC-2026-02-24-83 — Cost analysis skill + delivery cost baseline established
+
+**Context:** Need to estimate theoretical API pay-per-use cost of GAAI-governed development. 25 delivery logs available (JSONL with per-turn usage data). Claude Code `result` events contain `total_cost_usd` and `modelUsage` breakdowns computed from Anthropic API pricing.
+**Decision:** (1) Created SKILL-CRS-022 `cost-analysis` — reusable cross skill with `extract-costs.sh` script (jq-based, supports `--json`). (2) Established delivery cost baseline: $149.90 measured across 24 stories (+ 1 estimated). Average $6.02/story. 99% Sonnet 4.6. Estimated total project cost ~$325 (incl. non-tracked stories + Discovery). (3) Updated 15 backlog entries with actual `cost_usd` values (were all 0). (4) Updated `ops/platform.md` with complete cost breakdown.
+**Rationale:** Enables ongoing cost tracking and value-per-dollar evaluation. Script approach chosen over manual calculation — reusable and auditable. Delivery logs are the only reliable cost source (session files don't contain result events, Discovery sessions aren't captured).
+**Impact:** New skill `cost-analysis` in `.gaai/skills/cross/cost-analysis/`. Skills index updated (39 total). Backlog `cost_usd` fields populated. `ops/platform.md` cost section rewritten with measured data.
+**Date:** 2026-02-24
+
+---
+
 ### DEC-2026-02-24-82 — Phase 2 proof of quality visibility required before payment activation
 
 **Context:** Discovery field data (E01S01 rounds 1-3) reveals structural skepticism toward paid platforms among AI automation experts. Key signals: Rich-Emu-1561 (r/Upwork) — "serious leads come from niche communities or partnerships, not open marketplaces". SilkLoverX — "vague AI automation claims are a red flag" (prefers niche communities). Own_Constant_2331 (Top 1% Upwork) — 3 weeks to find ONE good client. No explicit "I paid for leads and it failed" but strong implicit reluctance toward paid generalist platforms. The counter-pattern: experts tolerate paid platforms only when they can SEE quality before paying.
