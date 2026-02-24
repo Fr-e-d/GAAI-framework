@@ -6,6 +6,7 @@ import type {
   ProspectRequirements,
   ScoreBreakdown,
 } from '../types/matching';
+import { OUTCOME_WEIGHT } from '../types/matching';
 import { normalizeSkill, getIndustryProximity, parseTimelineDays } from './normalize';
 
 // ── scoreMatch — pure function, no side effects ───────────────────────────────
@@ -18,6 +19,7 @@ export function scoreMatch(
   prospectRequirements: ProspectRequirements,
   weights: MatchingWeights,
   semanticSimilarity?: number, // AC4/AC5/AC6: cosine similarity from Vectorize (0.0–1.0), undefined in fallback path
+  outcomeAlignment?: number | null, // AC11/E06S37: pre-computed outcome alignment (0.0–1.0), null/undefined = no data
 ): MatchScore {
   // AC6: bi-directional deal-breaker check (short-circuit)
   // Fix DEC-49: case-insensitive comparison
@@ -39,13 +41,21 @@ export function scoreMatch(
     };
   }
 
+  // AC11/E06S37: when outcome alignment is available, take OUTCOME_WEIGHT from skills_overlap
+  // This keeps the total score ceiling at 100 (skills_overlap reduced + outcome_alignment added)
+  const hasOutcomeData = outcomeAlignment != null;
+  const effectiveSkillsWeight = hasOutcomeData
+    ? weights.skills_overlap - OUTCOME_WEIGHT
+    : weights.skills_overlap;
+
   const breakdown: ScoreBreakdown = {
-    skills_overlap: scoreSkillsOverlap(expertProfile, prospectRequirements, weights.skills_overlap, semanticSimilarity),
+    skills_overlap: scoreSkillsOverlap(expertProfile, prospectRequirements, effectiveSkillsWeight, semanticSimilarity),
     industry_match: scoreIndustryMatch(expertProfile, prospectRequirements, weights.industry_match, semanticSimilarity),
     budget_compatibility: scoreBudgetCompatibility(expertProfile, prospectRequirements, weights),
     timeline_match: scoreTimelineMatch(expertPreferences, prospectRequirements, weights.timeline_match),
     language_match: scoreLanguageMatch(expertProfile, expertPreferences, prospectRequirements, weights.language_match),
     ...(semanticSimilarity !== undefined ? { semantic_similarity: semanticSimilarity } : {}),
+    ...(hasOutcomeData ? { outcome_alignment: outcomeAlignment * OUTCOME_WEIGHT } : {}),
   };
 
   const score =
@@ -53,9 +63,33 @@ export function scoreMatch(
     breakdown.industry_match +
     breakdown.budget_compatibility +
     breakdown.timeline_match +
-    breakdown.language_match;
+    breakdown.language_match +
+    (hasOutcomeData ? (breakdown.outcome_alignment ?? 0) : 0);
 
   return { score, breakdown };
+}
+
+// ── scoreOutcomeAlignment — pure scoring function (AC8/E06S37) ────────────────
+// Takes pre-computed pairwise cosine similarities (rows=desired_outcomes, cols=expert_outcome_tags).
+// Returns max-pairwise similarity averaged across desired outcomes (0.0–1.0).
+// Returns null when either side has no data (AC10: does not penalize).
+
+export function scoreOutcomeAlignment(
+  expertOutcomeTags: string[],
+  prospectDesiredOutcomes: string[],
+  pairwiseSimilarities: number[][], // [desired_idx][expert_tag_idx] = cosine similarity (0.0–1.0)
+): number | null {
+  if (expertOutcomeTags.length === 0 || prospectDesiredOutcomes.length === 0) return null;
+  if (pairwiseSimilarities.length === 0) return null;
+
+  let totalMaxSim = 0;
+  for (let d = 0; d < prospectDesiredOutcomes.length; d++) {
+    const sims = pairwiseSimilarities[d] ?? [];
+    const maxSim = sims.length > 0 ? Math.max(...sims) : 0;
+    totalMaxSim += maxSim;
+  }
+
+  return Math.min(1.0, totalMaxSim / prospectDesiredOutcomes.length);
 }
 
 // ── Reliability modifier (DEC-50) ───────────────────────────────────────────

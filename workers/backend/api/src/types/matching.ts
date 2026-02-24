@@ -13,6 +13,7 @@ export interface ExpertProfile {
   languages?: string[];
   rate_min?: number | null;
   rate_max?: number | null;
+  outcome_tags?: string[]; // AC1/E06S37: outcome-based profile tags
 }
 
 export interface ExpertPreferences {
@@ -34,6 +35,7 @@ export interface ProspectRequirements {
   timeline?: string;
   company_size?: string;
   languages?: string[];
+  desired_outcomes?: string[]; // AC4/E06S37: outcome-based matching
 }
 
 // ── AI Extraction types (E06S08) ───────────────────────────────────────────────
@@ -74,6 +76,9 @@ export const DEFAULT_WEIGHTS: MatchingWeights = {
   budget_conversion_factor: 20,
 };
 
+// AC11/E06S37: Outcome alignment weight (points taken from skills_overlap when both sides have data)
+export const OUTCOME_WEIGHT = 10;
+
 export interface ScoreBreakdown {
   skills_overlap: number;
   industry_match: number;
@@ -83,6 +88,7 @@ export interface ScoreBreakdown {
   deal_breaker?: boolean;
   reliability_modifier?: number;
   semantic_similarity?: number; // AC6: raw cosine similarity from Vectorize (0.0–1.0)
+  outcome_alignment?: number | null; // AC12/E06S37: outcome alignment score (0.0–OUTCOME_WEIGHT), null = no data
 }
 
 export interface MatchScore {

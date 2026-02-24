@@ -28,6 +28,8 @@ const PatchProfileSchema = z.object({
   profile: z.record(z.string(), z.unknown()).optional(),
   preferences: z.record(z.string(), z.unknown()).optional(),
   admissibility_criteria: AdmissibilityCriteriaSchema,
+  // AC3/E06S37: outcome_tags — max 10 items, max 200 chars each
+  outcome_tags: z.array(z.string().max(200)).max(10).optional(),
 });
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -103,13 +105,14 @@ export async function handlePatchProfile(
     );
   }
 
-  const { display_name, headline, bio, rate_min, rate_max, availability, profile, preferences, admissibility_criteria } =
+  const { display_name, headline, bio, rate_min, rate_max, availability, profile, preferences, admissibility_criteria, outcome_tags } =
     parsed.data;
 
   const sql = createSql(env);
 
   // AC8: JSONB merge via RPC (postgres.js named-param call)
   // AC3 (E06S36): p_admissibility_criteria replaces existing value when provided (non-null = full replace, not merge)
+  // AC3 (E06S37): p_outcome_tags replaces existing value when provided (full replace)
   const rows = await sql<ExpertRow[]>`
     SELECT * FROM merge_expert_profile(
       p_id := ${expertId},
@@ -121,7 +124,8 @@ export async function handlePatchProfile(
       p_availability := ${availability ?? null},
       p_profile := ${profile ? JSON.stringify(profile) : null}::jsonb,
       p_preferences := ${preferences ? JSON.stringify(preferences) : null}::jsonb,
-      p_admissibility_criteria := ${admissibility_criteria !== undefined ? JSON.stringify(admissibility_criteria) : null}::jsonb
+      p_admissibility_criteria := ${admissibility_criteria !== undefined ? JSON.stringify(admissibility_criteria) : null}::jsonb,
+      p_outcome_tags := ${outcome_tags !== undefined ? outcome_tags : null}
     )`;
 
   if (!rows || rows.length === 0) {
@@ -172,6 +176,7 @@ export async function handlePatchProfile(
   if (profile !== undefined) fieldsUpdated.push('profile');
   if (preferences !== undefined) fieldsUpdated.push('preferences');
   if (admissibility_criteria !== undefined) fieldsUpdated.push('admissibility_criteria');
+  if (outcome_tags !== undefined) fieldsUpdated.push('outcome_tags');
 
   ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
     distinctId: `expert:${expertId}`,

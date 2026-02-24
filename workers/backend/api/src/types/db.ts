@@ -32,6 +32,7 @@ export interface ExpertRow {
   reminder_settings: Json | null;
   score_updated_at: string | null;
   verified_at: string | null;
+  outcome_tags: string[] | null; // E06S37: outcome-based profile tags
 }
 
 export interface BookingRow {

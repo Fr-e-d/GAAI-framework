@@ -86,6 +86,11 @@ const EXTRACT_TOOL = {
               items: { type: 'string' },
               description: 'Working languages for the project (e.g. ["French", "English"])',
             },
+            desired_outcomes: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Concrete outcomes the prospect wants to achieve (e.g. ["save time on invoicing", "reduce manual data entry", "automate lead qualification"]). Extract from phrases like "I need to...", "I want to...", "so that...", "in order to...". Maximum 5 items.',
+            },
           },
         },
         confidence: {
@@ -175,8 +180,8 @@ export async function handleExtract(request: Request, env: Env, ctx: ExecutionCo
 
   // ── Build system prompt (AC6: inject vertical context when available) ─────────
   const systemPrompt = verticalContext
-    ? `You extract structured AI project requirements from prospect descriptions. This extraction is for the "${verticalContext}" industry vertical — pay special attention to terminology and requirements specific to this domain. Be precise with confidence scores.`
-    : 'You extract structured AI project requirements from prospect descriptions. Be precise with confidence scores.';
+    ? `You extract structured AI project requirements from prospect descriptions. This extraction is for the "${verticalContext}" industry vertical — pay special attention to terminology and requirements specific to this domain. Also extract desired_outcomes: concrete results the prospect wants to achieve (e.g. "save time on invoicing", "reduce manual errors"). Be precise with confidence scores.`
+    : 'You extract structured AI project requirements from prospect descriptions. Also extract desired_outcomes: concrete results the prospect wants to achieve (e.g. "save time on invoicing", "automate lead qualification"). Be precise with confidence scores.';
 
   // ── Call OpenAI Chat Completions API (AC2) ────────────────────────────────────
   const openaiBody = {

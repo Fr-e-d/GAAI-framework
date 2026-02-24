@@ -112,6 +112,9 @@ function normalizeRequirements(quizAnswers: Record<string, unknown>): ProspectRe
   if (Array.isArray(quizAnswers['languages'])) {
     r.languages = (quizAnswers['languages'] as unknown[]).filter((l): l is string => typeof l === 'string');
   }
+  if (Array.isArray(quizAnswers['desired_outcomes'])) {
+    r.desired_outcomes = (quizAnswers['desired_outcomes'] as unknown[]).filter((o): o is string => typeof o === 'string').slice(0, 5);
+  }
   if (
     quizAnswers['budget_range'] &&
     typeof quizAnswers['budget_range'] === 'object' &&

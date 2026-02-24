@@ -82,3 +82,75 @@ export async function queryVectorize(
   }
   return map;
 }
+
+// ── Outcome alignment helpers (AC9/E06S37) ────────────────────────────────────
+
+// Dot-product cosine similarity for unit-normalized vectors (BGE model outputs L2-normalized vectors)
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += (a[i] ?? 0) * (b[i] ?? 0);
+  return Math.max(0, Math.min(1, dot));
+}
+
+// Compute outcome alignment scores for a batch of experts in one Workers AI call.
+// Returns Map<expert_id, alignment_score (0.0–1.0)> for experts with non-empty outcome_tags.
+// Experts without outcome_tags are not included in the returned map (treated as null by caller).
+export async function computeBatchOutcomeAlignments(
+  ai: Ai,
+  expertOutcomeTagsMap: Map<string, string[]>, // expert_id → outcome_tags
+  desiredOutcomes: string[], // prospect's desired_outcomes
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+
+  if (desiredOutcomes.length === 0) return result;
+
+  // Collect all unique outcome strings across all experts
+  const allExpertTagStrings = [...new Set(
+    [...expertOutcomeTagsMap.values()].flat()
+  )];
+
+  if (allExpertTagStrings.length === 0) return result;
+
+  // One batch embedding call: desired_outcomes first, then all expert tags
+  const allStrings = [...desiredOutcomes, ...allExpertTagStrings];
+  let embedData: number[][];
+
+  try {
+    const embeddingResult = await ai.run('@cf/baai/bge-base-en-v1.5', {
+      text: allStrings,
+    }) as { data: number[][] };
+    embedData = embeddingResult.data;
+  } catch (err) {
+    console.error('matching: outcome alignment embedding failed', err);
+    return result;
+  }
+
+  const desiredEmbeddings = embedData.slice(0, desiredOutcomes.length);
+  const expertTagEmbeddings = embedData.slice(desiredOutcomes.length);
+
+  // Build lookup: tag string → embedding
+  const tagEmbeddingMap = new Map<string, number[]>(
+    allExpertTagStrings.map((tag, i) => [tag, expertTagEmbeddings[i] as number[]])
+  );
+
+  // For each expert, compute max-pairwise alignment averaged over desired_outcomes
+  for (const [expertId, tags] of expertOutcomeTagsMap) {
+    if (tags.length === 0) continue;
+
+    const tagEmbs = tags
+      .map((t) => tagEmbeddingMap.get(t))
+      .filter((e): e is number[] => e != null);
+
+    if (tagEmbs.length === 0) continue;
+
+    let totalMaxSim = 0;
+    for (const dEmb of desiredEmbeddings) {
+      const maxSim = Math.max(...tagEmbs.map((eEmb) => cosineSimilarity(dEmb, eEmb)));
+      totalMaxSim += maxSim;
+    }
+
+    result.set(expertId, Math.min(1.0, totalMaxSim / desiredOutcomes.length));
+  }
+
+  return result;
+}

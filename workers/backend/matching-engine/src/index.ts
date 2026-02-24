@@ -15,6 +15,7 @@ import {
   buildProspectEmbeddingText,
   upsertExpertEmbedding,
   queryVectorize,
+  computeBatchOutcomeAlignments,
 } from './vectorize';
 import { scoreMatch, applyReliabilityModifier } from './score';
 import {
@@ -198,6 +199,30 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     similarityMap = new Map();
   }
 
+  // AC9/E06S37: Compute outcome alignment scores in batch when desired_outcomes present
+  let outcomeAlignmentMap = new Map<string, number>();
+  const desiredOutcomes = (requirements.desired_outcomes ?? []).filter((s): s is string => typeof s === 'string');
+  if (desiredOutcomes.length > 0 && candidates.length > 0) {
+    try {
+      // Load outcome_tags for all candidates from DB (separate from the pool cache)
+      const candidateIds = candidates.map((c) => c.id);
+      const outcomeRows = await sql<{ id: string; outcome_tags: string[] | null }[]>`
+        SELECT id, outcome_tags FROM experts WHERE id = ANY(${candidateIds})`;
+
+      const expertTagsMap = new Map<string, string[]>();
+      for (const row of outcomeRows) {
+        const tags = row.outcome_tags ?? [];
+        if (tags.length > 0) expertTagsMap.set(row.id, tags);
+      }
+
+      if (expertTagsMap.size > 0) {
+        outcomeAlignmentMap = await computeBatchOutcomeAlignments(env.AI, expertTagsMap, desiredOutcomes);
+      }
+    } catch (err) {
+      console.error('matching: outcome alignment computation failed, skipping', err);
+    }
+  }
+
   // Score each candidate
   const scored = candidates.map((expert) => {
     const profile: ExpertProfile = {
@@ -207,7 +232,11 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     };
     const prefs = (expert.preferences ?? {}) as ExpertPreferences;
     const semanticSimilarity = similarityMap.get(expert.id);
-    const raw = scoreMatch(profile, prefs, requirements, weights, semanticSimilarity);
+    // AC11/E06S37: pass pre-computed outcome alignment (null if no data for this expert)
+    const outcomeAlignment = outcomeAlignmentMap.has(expert.id)
+      ? (outcomeAlignmentMap.get(expert.id) ?? null)
+      : null;
+    const raw = scoreMatch(profile, prefs, requirements, weights, semanticSimilarity, outcomeAlignment);
     const matchScore = applyReliabilityModifier(raw, {
       composite_score: expert.composite_score,
       total_leads: expert.total_leads,

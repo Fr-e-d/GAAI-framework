@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_WEIGHTS, type ExpertPreferences, type ExpertProfile, type MatchingWeights, type ProspectRequirements } from '../types/matching';
-import { scoreMatch, applyReliabilityModifier } from './score';
+import { DEFAULT_WEIGHTS, OUTCOME_WEIGHT, type ExpertPreferences, type ExpertProfile, type MatchingWeights, type ProspectRequirements } from '../types/matching';
+import { scoreMatch, applyReliabilityModifier, scoreOutcomeAlignment } from './score';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -363,5 +363,137 @@ describe('applyReliabilityModifier', () => {
 
     expect(result.score).toBe(80);
     expect(result.breakdown.reliability_modifier).toBe(1.0);
+  });
+});
+
+// ── scoreOutcomeAlignment tests (AC8/AC9/AC10 — E06S37) ──────────────────────
+
+describe('scoreOutcomeAlignment (E06S37)', () => {
+  // AC10: empty expert tags → null (no penalty)
+  it('AC10: returns null when expertOutcomeTags is empty', () => {
+    const result = scoreOutcomeAlignment(
+      [],
+      ['save time on invoicing'],
+      [[0.9]],
+    );
+    expect(result).toBeNull();
+  });
+
+  // AC10: empty desired outcomes → null (no penalty)
+  it('AC10: returns null when prospectDesiredOutcomes is empty', () => {
+    const result = scoreOutcomeAlignment(
+      ['25h/week saved on RFP'],
+      [],
+      [],
+    );
+    expect(result).toBeNull();
+  });
+
+  // AC10: empty similarities → null
+  it('AC10: returns null when pairwiseSimilarities is empty', () => {
+    const result = scoreOutcomeAlignment(
+      ['25h/week saved on RFP'],
+      ['save time on RFP processing'],
+      [],
+    );
+    expect(result).toBeNull();
+  });
+
+  // AC9: high pairwise similarity → high score
+  it('AC9: returns high score when pairwise similarities are high', () => {
+    const result = scoreOutcomeAlignment(
+      ['25h/week saved on RFP processing', 'automated lead qualification pipeline'],
+      ['save time on RFP', 'automate lead qualification'],
+      [[0.92, 0.30], [0.25, 0.95]], // each desired outcome's max is 0.92 and 0.95
+    );
+    // avg max = (0.92 + 0.95) / 2 = 0.935
+    expect(result).not.toBeNull();
+    expect(result!).toBeCloseTo(0.935, 2);
+    expect(result!).toBeGreaterThan(0.8);
+  });
+
+  // AC9: single desired outcome, multiple expert tags → picks max
+  it('AC9: picks max similarity across expert tags for each desired outcome', () => {
+    const result = scoreOutcomeAlignment(
+      ['invoicing automation', 'lead gen', 'data entry reduction'],
+      ['reduce invoicing time'],
+      [[0.3, 0.2, 0.85]], // max is 0.85
+    );
+    expect(result).toBeCloseTo(0.85, 2);
+  });
+
+  // AC9: caps at 1.0
+  it('AC9: caps return value at 1.0', () => {
+    const result = scoreOutcomeAlignment(
+      ['save time'],
+      ['save time'],
+      [[1.1]], // slightly above 1.0 due to floating point
+    );
+    expect(result).toBe(1.0);
+  });
+});
+
+// ── scoreMatch + outcome alignment integration tests (AC11/AC12 — E06S37) ──────
+
+describe('scoreMatch — outcome alignment integration (E06S37)', () => {
+  // AC11: when outcomeAlignment provided, OUTCOME_WEIGHT taken from skills_overlap
+  it('AC11: outcome alignment present — skills_overlap reduced by OUTCOME_WEIGHT, outcome_alignment added', () => {
+    const profile: ExpertProfile = { skills: ['n8n', 'python'] };
+    const requirements: ProspectRequirements = {
+      skills_needed: ['n8n', 'python'],
+      desired_outcomes: ['save time on invoicing'],
+    };
+
+    // Without outcome: skills_overlap = 2/2 * 40 = 40; total = 40 + 10 + 10 = 60
+    const resultNoOutcome = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS);
+    expect(resultNoOutcome.breakdown.skills_overlap).toBe(40);
+    expect(resultNoOutcome.breakdown.outcome_alignment).toBeUndefined();
+    expect(resultNoOutcome.score).toBe(60);
+
+    // With outcome (1.0 alignment): skills_overlap = 2/2 * (40 - OUTCOME_WEIGHT) = 30
+    //                                outcome_alignment = 1.0 * OUTCOME_WEIGHT = 10
+    //                                total = 30 + 10 + 10 + 10 = 60 → same total
+    const resultWithOutcome = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS, undefined, 1.0);
+    expect(resultWithOutcome.breakdown.skills_overlap).toBe(30);
+    expect(resultWithOutcome.breakdown.outcome_alignment).toBe(OUTCOME_WEIGHT);
+    expect(resultWithOutcome.score).toBe(60);
+  });
+
+  // AC12: ScoreBreakdown includes outcome_alignment when data present
+  it('AC12: outcome_alignment in ScoreBreakdown when data provided', () => {
+    const result = scoreMatch(emptyProfile, emptyPrefs, emptyRequirements, DEFAULT_WEIGHTS, undefined, 0.8);
+    expect(result.breakdown.outcome_alignment).toBeCloseTo(0.8 * OUTCOME_WEIGHT, 5);
+  });
+
+  // AC10: null outcomeAlignment → no outcome_alignment in breakdown, no penalty
+  it('AC10: null outcomeAlignment — outcome_alignment absent from breakdown, score unchanged', () => {
+    const profile: ExpertProfile = { skills: ['n8n'] };
+    const requirements: ProspectRequirements = { skills_needed: ['n8n'] };
+
+    const resultNull = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS, undefined, null);
+    const resultUndefined = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS, undefined, undefined);
+
+    // Both should produce identical results — no penalty
+    expect(resultNull.score).toBe(resultUndefined.score);
+    expect(resultNull.breakdown.outcome_alignment).toBeUndefined();
+    expect(resultNull.breakdown.skills_overlap).toBe(40); // full skills weight, no reduction
+  });
+
+  // AC11: partial outcomes (0.5 alignment) → outcome_alignment = 0.5 * OUTCOME_WEIGHT = 5
+  it('AC11: partial outcome alignment contributes proportionally', () => {
+    const result = scoreMatch(emptyProfile, emptyPrefs, emptyRequirements, DEFAULT_WEIGHTS, undefined, 0.5);
+    expect(result.breakdown.outcome_alignment).toBeCloseTo(5, 5); // 0.5 * 10
+  });
+
+  // AC11: score with full outcome alignment equals score without outcomes (for skills-only matches)
+  it('AC11: full outcome match preserves total score vs. no-outcome baseline', () => {
+    const profile: ExpertProfile = { skills: ['n8n', 'python', 'openai'] };
+    const requirements: ProspectRequirements = { skills_needed: ['n8n', 'python', 'openai'] };
+
+    const baseScore = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS).score;
+    const withOutcome = scoreMatch(profile, emptyPrefs, requirements, DEFAULT_WEIGHTS, undefined, 1.0).score;
+
+    // With perfect outcome alignment: skills 30 + outcome 10 = 40 → same as without outcome (40)
+    expect(withOutcome).toBe(baseScore);
   });
 });

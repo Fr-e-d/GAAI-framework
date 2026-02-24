@@ -341,4 +341,89 @@ describe('handleExtract — POST /api/extract', () => {
     const res = await handleExtract(req, mockEnv, mockCtx);
     expect(res.status).toBe(500);
   });
+
+  // ── AC5/AC6/AC7 (E06S37): desired_outcomes extraction ──────────────────────
+
+  it('AC5 (E06S37) — extracts desired_outcomes when present in LLM response', async () => {
+    const responseWithOutcomes = {
+      ...MOCK_HIGH_CONFIDENCE_RESPONSE,
+      choices: [
+        {
+          ...MOCK_HIGH_CONFIDENCE_RESPONSE.choices[0],
+          message: {
+            ...MOCK_HIGH_CONFIDENCE_RESPONSE.choices[0]!.message,
+            tool_calls: [
+              {
+                ...MOCK_HIGH_CONFIDENCE_RESPONSE.choices[0]!.message.tool_calls[0],
+                function: {
+                  name: 'extract_requirements',
+                  arguments: JSON.stringify({
+                    requirements: {
+                      ...JSON.parse(MOCK_HIGH_CONFIDENCE_RESPONSE.choices[0]!.message.tool_calls[0]!.function.arguments).requirements,
+                      desired_outcomes: ['save time on customer support', 'reduce ticket handling to < 2min'],
+                    },
+                    confidence: JSON.parse(MOCK_HIGH_CONFIDENCE_RESPONSE.choices[0]!.message.tool_calls[0]!.function.arguments).confidence,
+                    confirmation_questions: [],
+                  }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(responseWithOutcomes), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: REALISTIC_FREETEXT }),
+    });
+
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(200);
+
+    const body = await res.json() as {
+      requirements: { desired_outcomes?: string[] };
+      ready_to_match: boolean;
+    };
+
+    // AC5: desired_outcomes extracted and present in requirements
+    expect(Array.isArray(body.requirements.desired_outcomes)).toBe(true);
+    expect(body.requirements.desired_outcomes).toHaveLength(2);
+    expect(body.requirements.desired_outcomes![0]).toBe('save time on customer support');
+  });
+
+  it('AC7 (E06S37) — backward compat: extractions without desired_outcomes remain valid', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(MOCK_HIGH_CONFIDENCE_RESPONSE), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: REALISTIC_FREETEXT }),
+    });
+
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(200);
+
+    const body = await res.json() as {
+      requirements: { desired_outcomes?: string[] };
+      ready_to_match: boolean;
+    };
+
+    // AC7: existing extractions without desired_outcomes are valid — no error, ready_to_match still works
+    expect(body.requirements.desired_outcomes).toBeUndefined();
+    expect(typeof body.ready_to_match).toBe('boolean');
+  });
 });
