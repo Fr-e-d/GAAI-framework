@@ -521,3 +521,52 @@ items:
     artefact: contexts/artefacts/stories/E03S05.story.md
     dependencies: [E06S14]
     notes: "DEC-53. robots.txt and sitemap.xml generated dynamically by the satellite Worker (E06S14), CF-edge-cached 24h — functionally equivalent to static. AC2 (Astro build-time) superseded by E06S14 AC6. SEO bots: full access. AI training bots blocked. AI answer/search bots: platform pages allowed, /experts/ blocked. Manual founder action: Cloudflare AI Training Bots → Block on all pages."
+
+  # ── EPIC E08: Security Hardening — Production Readiness ─────────────────────
+  # SEC-AUDIT-001: 17 findings (2 CRITICAL, 5 HIGH, 7 MEDIUM, 3 LOW)
+  # Critical path: E08S01 + E08S03 (CRITICAL) → E08S02 + E08S04 (HIGH) → E08S05 (MEDIUM/LOW batch)
+
+  - id: E08S01
+    epic: E08
+    title: "OAuth security — CSRF state token + PKCE (SEC-01, SEC-03)"
+    priority: critical
+    status: refined
+    artefact: contexts/artefacts/stories/E08S01.story.md
+    dependencies: []
+    notes: "SEC-AUDIT-001: SEC-01 (CRITICAL) + SEC-03 (HIGH). OAuth state = plain expertId → CSRF. No PKCE. Random state token in SESSIONS KV + code_verifier/code_challenge. Blocks go-live."
+
+  - id: E08S02
+    epic: E08
+    title: "Security headers middleware + XSS fix (SEC-04, SEC-05, SEC-17)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E08S02.story.md
+    dependencies: []
+    notes: "SEC-AUDIT-001: SEC-04 (HIGH XSS JSON-LD) + SEC-05 (HIGH missing headers) + SEC-17 (LOW Content-Type). Middleware global sur les 4 workers. CSP sur satellite."
+
+  - id: E08S03
+    epic: E08
+    title: "Booking hold authentication + rate limiting (SEC-02)"
+    priority: critical
+    status: refined
+    artefact: contexts/artefacts/stories/E08S03.story.md
+    dependencies: []
+    notes: "SEC-AUDIT-001: SEC-02 (CRITICAL). /api/bookings/hold = 0 auth, 0 rate limit. Prospect token required + 5 holds/h/IP + max 3 active holds/prospect. DoS vector sur calendriers experts."
+
+  - id: E08S04
+    epic: E08
+    title: "Admin auth hardening + booking input validation (SEC-06, SEC-07)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E08S04.story.md
+    dependencies: []
+    notes: "SEC-AUDIT-001: SEC-06 (HIGH admin key) + SEC-07 (HIGH input validation). ADMIN_API_KEY dédié + timing-safe comparison. Zod validation sur confirm/reschedule."
+
+  - id: E08S05
+    epic: E08
+    title: "JWT claims hardening + secrets hygiene + defense-in-depth (SEC-08→SEC-16)"
+    priority: medium
+    status: refined
+    artefact: contexts/artefacts/stories/E08S05.story.md
+    dependencies: [E08S01]
+    notes: "SEC-AUDIT-001: 9 MEDIUM/LOW findings. JWT aud/iss, survey TTL 30d→7d, Turnstile secret removal from vars, localConnectionString cleanup, CORS anon key, prompt injection allowlist, webhook persistent idempotency, RPC ownership assert."
