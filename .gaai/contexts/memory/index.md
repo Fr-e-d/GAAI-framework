@@ -31,9 +31,9 @@ updated_at: 2026-02-23
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-23 (updated: E07 PostHog analytics stack — DEC-65 complement) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-24 (19 active entries — DEC-60 to DEC-2026-02-24-79. Older entries compacted.) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-24 (22 active entries — DEC-60 to DEC-2026-02-24-82. Older entries compacted.) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-23 (OpenAI function calling pattern replaces Anthropic — E06S12/DEC-2026-02-23-01) |
-| `ops/platform.md` | ops | OPS-001 | 2026-02-23 (CI/CD & preview deployments — DEC-2026-02-23-02) |
+| `ops/platform.md` | ops | OPS-001 | 2026-02-24 (API costs Claude Sonnet $198.29/25 stories + Reddit API pattern) |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
 | `summaries/decisions-01-59.summary.md` | summaries | SUMMARY-DECISIONS-01-59 | 2026-02-23 |
 | `archive/decisions-01-59.archive.md` | archive | ARCHIVE-DECISIONS-01-59 | 2026-02-23 |
@@ -85,6 +85,8 @@ updated_at: 2026-02-23
 | `artefacts/stories/E06S32.story.md` | Story | Refined — lead-billing consumer credit debit + flag/restore (DEC-68) |
 | `artefacts/stories/E06S33.story.md` | Story | Refined — LS subscription + welcome credit + usage reporting cron (DEC-68) |
 | `artefacts/stories/E06S34.story.md` | Story | Refined — balance/max_lead_price/spending_limit at matching (DEC-67/68) |
+| `artefacts/stories/E06S36.story.md` | Story | Refined — expert admissibility criteria non-budget filters (DEC-80) |
+| `artefacts/stories/E06S37.story.md` | Story | Refined — outcome-based expert profiles + extraction enhancement (DEC-81) |
 | `artefacts/stories/E03S05.story.md` | Story | Refined — crawler access policy |
 | `artefacts/strategy/GTM-001.md` | Strategy | GTM plan — 4 phases, binary PASS/FAIL gates, J0–J90 — Phase 0 restructurée (DEC-31) — build-in-public orchestrated launch (DEC-77) — .gaai OSS (DEC-72) + formation (DEC-73) |
 | `artefacts/strategy/COMMS-001.strategy.md` | Strategy | Communication & publication strategic plan — empathy maps, channel strategy, personal branding, launch orchestration, comment response, content pipeline (DEC-78) |

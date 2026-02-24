@@ -121,6 +121,30 @@ Le détail technique (robots.txt, sitemap) est implémenté dans chaque satellit
 | **Google Cloud** | OAuth2 Google Calendar (booking layer) | ops@callibrate.io |
 | ~~**n8n**~~ | SUPPRIMÉ (DEC-59) — remplacé par Cloudflare Workflows | — |
 | **OpenAI** | Extraction freetext prospect via GPT-4o-mini (`/api/extract`) | ops@callibrate.io |
+| **Anthropic** | Claude Code (Delivery Agent via Claude Sonnet) — développement assisté par .gaai | Compte perso founder |
+
+---
+
+## Coûts de développement
+
+### Claude API (Claude Sonnet — 25 stories livrées, 24/02/2026)
+
+| Catégorie | Tokens | Coût |
+|---|---|---|
+| Input (non-caché) | 19,956 | $0.06 |
+| Output | 1,064,025 | $15.96 |
+| Cache creation | 13,113,983 | $49.18 |
+| Cache read | 443,624,786 | $133.09 |
+| **TOTAL** | **~458M tokens** | **$198.29** |
+
+96.9% = cache reads. Story la plus coûteuse : E06S24 (Service Bindings Worker split) — 49.4M cache reads.
+Données extraites des delivery logs : `.gaai/.delivery-logs/*.log` (format JSONL).
+
+**Note :** ce coût s'applique en facturation API directe. Si l'on est sur un abonnement Claude Max ($100/$200/mois), le coût est le forfait mensuel.
+
+### Accès Reddit API
+
+Pattern validé : `curl -s -A "Mozilla/5.0..." "https://www.reddit.com/user/{username}/submitted.json"` fonctionne pour l'extraction de posts et commentaires. WebFetch bloqué sur reddit.com. Pas besoin de credentials pour le contenu public.
 
 ---
 

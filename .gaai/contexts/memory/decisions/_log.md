@@ -6,7 +6,7 @@ tags:
   - decisions
   - governance
 created_at: 2026-02-19
-updated_at: 2026-02-23
+updated_at: 2026-02-24
 ---
 
 # Decision Log
@@ -17,6 +17,36 @@ updated_at: 2026-02-23
 >
 > **Compacted 2026-02-23:** DEC-01 to DEC-59 (59 entries) archived.
 > Full text → `archive/decisions-01-59.archive.md` | Summary → `summaries/decisions-01-59.summary.md`
+
+---
+
+### DEC-2026-02-24-82 — Phase 2 proof of quality visibility required before payment activation
+
+**Context:** Discovery field data (E01S01 rounds 1-3) reveals structural skepticism toward paid platforms among AI automation experts. Key signals: Rich-Emu-1561 (r/Upwork) — "serious leads come from niche communities or partnerships, not open marketplaces". SilkLoverX — "vague AI automation claims are a red flag" (prefers niche communities). Own_Constant_2331 (Top 1% Upwork) — 3 weeks to find ONE good client. No explicit "I paid for leads and it failed" but strong implicit reluctance toward paid generalist platforms. The counter-pattern: experts tolerate paid platforms only when they can SEE quality before paying.
+**Decision:** Phase 2 (J21-J45) must demonstrate matching quality BEFORE activating credit billing (Phase 3). Concrete requirement: the first expert cohort (10 experts, Gate 2) operates in "proof of quality" mode — they receive matched leads for free, see the matching rationale, and rate lead quality. Only when average lead rating >= 4/5 (Gate 2 criterion) does Phase 3 activate billing. GTM-001 Phase 2 updated with explicit proof-of-quality prerequisite. This is NOT a free tier — it's a time-limited proof phase for the first cohort only.
+**Rationale:** The field data shows that the barrier to adoption is not price — it's trust. Experts have been burned by platforms that charge for low-quality leads. Starting with free + visible quality metrics addresses the trust deficit before asking for payment. The credit billing infrastructure (E06S31-S34) is ready — the activation timing is what matters.
+**Impact:** GTM-001 Phase 2 updated (proof-of-quality mode for first cohort). No code change. No schema change. Affects go-to-market sequencing only.
+**Date:** 2026-02-24
+
+---
+
+### DEC-2026-02-24-81 — Outcome-based framing validated — expert profiles must be outcome-oriented
+
+**Context:** Discovery field data reveals a critical framing insight. Littlecutsie (r/n8n_ai_agents): "stopped selling n8n workflows, started selling found time" — outcome-based framing converts better than tool-based framing. r/AiForSmallBusiness: "prompt engineers with a Zapier account" — tool lists are a negative signal. "Good consultants interrogate requirements" — brief quality = matching quality. Current expert profiles are tool-oriented (skills TEXT[]) without mechanism to express or match on outcomes delivered.
+**Decision:** Create E06S37 — add `outcome_tags TEXT[]` to expert profiles (short outcome phrases: "25h/week saved on RFP processing", "automated lead qualification pipeline"). Extend AI extraction (ProspectRequirements) with `desired_outcomes`. Add `scoreOutcomeAlignment()` scoring dimension using Workers AI semantic similarity. Initial weight: 0.10 (conservative, taken from skill_weight). Weight tuning post-Gate 2 with real data.
+**Rationale:** The matching engine currently scores on what experts KNOW (skills, industry) but not what they DELIVER (outcomes). Field data proves that outcomes are the real differentiator for qualified prospects. Adding this dimension makes matching more relevant without changing the existing scoring architecture — it's an additive scoring dimension with graceful degradation (null when data missing).
+**Impact:** E06S37 created (refined, E06 backlog). Schema: `outcome_tags TEXT[]` on experts. Extraction: `desired_outcomes` in ProspectRequirements. Matching: `scoreOutcomeAlignment()` new dimension. Dependencies: E06S22, E06S08/E06S12, E06S02.
+**Date:** 2026-02-24
+
+---
+
+### DEC-2026-02-24-80 — Expert admissibility criteria extended beyond budget based on field data
+
+**Context:** Discovery field data (E01S01 rounds 1-3) reveals that expert filtering criteria are more sophisticated than initially modeled in DEC-67/68. Budget is filter #1 (implemented via E06S34 `applyBillingFilters`), but field data shows two additional critical filters: (1) Methodology alignment — heyiamnickk (r/gohighlevel): "modular or nothing", experts reject projects without structured scoping phases. (2) Architecture/stack preferences — experts refuse projects on incompatible stacks. (3) Payment security — "card on file" (MachadoEsq) — already covered by credit billing. Current matching filters on billing only (budget/balance/spending limit), missing the methodology and architecture dimensions.
+**Decision:** Create E06S36 — add `admissibility_criteria JSONB` to expert profiles with structured fields: `required_methodology`, `excluded_verticals`, `min_project_duration_days`, `min_budget`, `required_stack_overlap_min`, `custom_rules`. New `applyAdmissibilityFilters()` function runs after billing filters, before scoring. Same fire-and-forget notification pattern as billing exclusions. Follows E06S34 architecture exactly.
+**Rationale:** Matching quality depends on filtering out not just financially incompatible experts but also methodologically incompatible ones. The field data shows experts self-select harder on methodology than on price — "modular or nothing" is a deal-breaker, not a preference. Adding these filters reduces wasted leads and improves expert trust in the platform (DEC-82).
+**Impact:** E06S36 created (refined, E06 backlog). Schema: `admissibility_criteria JSONB` on experts. Matching: `applyAdmissibilityFilters()` new filter stage. Dependencies: E06S34 (pattern), E06S02 (schema).
+**Date:** 2026-02-24
 
 ---
 
