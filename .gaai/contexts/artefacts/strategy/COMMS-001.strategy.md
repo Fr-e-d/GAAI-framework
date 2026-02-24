@@ -45,8 +45,11 @@ GitHub                P3 + P4                     Post Gate 2 PASS (DEC-72)
 **Beat 1 — Who is this person?** (credibility, not CV)
 Frédéric Geens. 10+ years autodidact developer. Hundreds (thousands) of hours coding solo, mostly at night. Co-founded a transport company in 2015, built one of Wallonia's first online booking platforms — coding between rides, laptop on knees. Led a non-profit helping founders. Started with SEO, fell in love with SaaS. Devoured Rob Walling's "The SaaS Playbook" — bootstrap philosophy, start small stay small, no VC needed. By day: IT Program Manager (30h/week). By night: builder, explorer of ideas, obsessive thinker about approaches. Key trait: perseverance, curiosity, "painkillers not vitamins." NOT someone who just discovered vibe coding.
 
+**Beat 1b — The human element** (what makes the story stick)
+Years of building projects at night. Most never saw the light of day. But his partner has been there through all of it — watching him stubbornly code, try, fail, start again. She's the unsung enabler. And she's the one who said "no laptop in Vietnam." The same person who supports the obsession is the one who forced the pause. That tension — between relentless building and forced stillness — is what made .gaai possible. This detail is gold: it's authentic, it's emotional, and it makes the reader root for the founder.
+
 **Beat 2 — The digital detox (the constraint that made everything possible)**
-6 weeks in Vietnam. Girlfriend banned the laptop. But the AI world was exploding: OpenClaw security crisis, Claude Cowork launch, B-Mad, Ralph Wiggum, new models every week. The itch was unbearable. So instead of coding... the founder started *thinking*.
+6 weeks in Vietnam. His partner banned the laptop — after years of watching him disappear behind the keyboard every night. But the AI world was exploding: OpenClaw security crisis, Claude Cowork launch, B-Mad, Ralph Wiggum, new models every week. The itch was unbearable. So instead of coding... the founder started *thinking*.
 
 **Beat 3 — The research phase (iPhone 8, scientific papers, state-of-the-art)**
 From a painfully slow iPhone 8:
