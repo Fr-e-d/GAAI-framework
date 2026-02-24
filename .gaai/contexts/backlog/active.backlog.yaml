@@ -570,7 +570,9 @@ items:
     epic: E08
     title: "JWT claims hardening + secrets hygiene + defense-in-depth (SEC-08→SEC-16)"
     priority: medium
-    status: in_progress
+    status: done
+    started_at: "2026-02-24T20:06:00+01:00"
+    completed_at: "2026-02-24T21:35:00+01:00"
     artefact: contexts/artefacts/stories/E08S05.story.md
     dependencies: [E08S01]
-    notes: "SEC-AUDIT-001: 9 MEDIUM/LOW findings. JWT aud/iss, survey TTL 30d→7d, Turnstile secret removal from vars, localConnectionString cleanup, CORS anon key, prompt injection allowlist, webhook persistent idempotency, RPC ownership assert."
+    notes: "DONE 2026-02-24. QA PASS (first cycle). All 12 ACs met. 354/354 vitest. tsc clean (4 workers). JWT iss/aud claims + audience validation + survey TTL 30d→7d. TURNSTILE_SECRET_KEY removed from staging vars. localConnectionString removed from both wrangler.toml files. CORS uses ANON_KEY. KNOWN_VERTICALS allowlist in extract.ts. DB-backed L2 webhook idempotency (webhook_events). Ownership assertions in debit/restore RPCs. 3 new Supabase migrations. PR#36 squash-merged → staging. SEC-AUDIT-001 SEC-08→SEC-16 remediated. ⚠️ Human action required: (1) wrangler secret put TURNSTILE_SECRET_KEY --env staging, (2) apply 3 migrations to Supabase staging, (3) deploy to prod via tag."
