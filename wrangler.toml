@@ -136,11 +136,6 @@ FLAG_WINDOW_MS = "60000"
 binding = "HYPERDRIVE"
 id = "cc93b8f0e9554e4f8c1dbd9ad83688f5"
 
-[[env.staging.hyperdrive]]
-binding = "HYPERDRIVE"
-# ⚠️ REPLACE after creating Hyperdrive config (E06S27 AC1)
-id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
-
 [[env.staging.queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-staging"
 dead_letter_queue = "callibrate-core-queue-email-notifications-staging-dlq"
