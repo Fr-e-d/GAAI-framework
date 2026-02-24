@@ -530,10 +530,12 @@ items:
     epic: E08
     title: "OAuth security — CSRF state token + PKCE (SEC-01, SEC-03)"
     priority: critical
-    status: in_progress
+    status: done
+    started_at: "2026-02-24T19:15:00+01:00"
+    completed_at: "2026-02-24T19:30:00+01:00"
     artefact: contexts/artefacts/stories/E08S01.story.md
     dependencies: []
-    notes: "SEC-AUDIT-001: SEC-01 (CRITICAL) + SEC-03 (HIGH). OAuth state = plain expertId → CSRF. No PKCE. Random state token in SESSIONS KV + code_verifier/code_challenge. Blocks go-live."
+    notes: "DONE 2026-02-24. QA PASS (first cycle). All 8 ACs met. 320/320 vitest. tsc clean. Random 32-byte hex state token in SESSIONS KV (oauth-state:{token} → {expert_id, code_verifier}, TTL 600s). PKCE: code_verifier (RFC 7636, 43 chars base64url) + code_challenge (BASE64URL(SHA-256)). Callback: KV lookup + immediate delete + code_verifier in token exchange. PR#33 squash-merged → staging. SEC-AUDIT-001 SEC-01 (CRITICAL) + SEC-03 (HIGH) remediated."
 
   - id: E08S02
     epic: E08
