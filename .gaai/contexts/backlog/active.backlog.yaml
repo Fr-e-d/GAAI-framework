@@ -53,10 +53,12 @@ items:
     epic: E01
     title: "Launch Build in Public — flagship post + ongoing content cadence"
     priority: high
-    status: in_progress
+    status: done
+    started_at: "2026-02-24T17:00:00+01:00"
+    completed_at: "2026-02-24T18:00:00+01:00"
     artefact: contexts/artefacts/stories/E01S05.story.md
     dependencies: []
-    notes: "Discovery first (content plan, angle, data extraction, visual plan, distribution). Then Delivery writes + publishes. Target: 2000-2500 words, English, dev.to + HN + r/ClaudeAI. Prerequisite soft: Gate 1 near-PASS for real data. DEC-2026-02-24-72 to DEC-75 context. Career strategy: first public artefact, precedes .gaai OSS publication."
+    notes: "DONE 2026-02-24. QA PASS. Content ACs met: flagship post (~2,190 words EN), distribution assets (HN+Reddit+X thread), cadence framework. Visual creation + publication are human-executed. PR#30 squash-merged → staging. Human actions required: create 3 visuals (NotebookLM), set up Substack, publish sequence J1-J2."
 
   # ── EPIC E06: Platform Foundation — Infrastructure & Technical Plumbing ────
   # Runs in parallel with E01. Blocks E02, E03, E04, E05.
