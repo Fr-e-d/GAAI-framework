@@ -43,7 +43,7 @@ GitHub                P3 + P4                     Post Gate 2 PASS (DEC-72)
 ### The narrative in 7 beats
 
 **Beat 1 — Who is this person?** (credibility, not CV)
-Frédéric Geens. 10+ years autodidact developer. Hundreds (thousands) of hours coding solo, mostly at night. Co-founded a transport company in 2015, built one of Wallonia's first online booking platforms — coding between rides, laptop on knees. Led a non-profit helping founders. By day: IT Program Manager (30h/week). By night: builder. Key trait: perseverance, curiosity, "painkillers not vitamins." NOT someone who just discovered vibe coding.
+Frédéric Geens. 10+ years autodidact developer. Hundreds (thousands) of hours coding solo, mostly at night. Co-founded a transport company in 2015, built one of Wallonia's first online booking platforms — coding between rides, laptop on knees. Led a non-profit helping founders. Started with SEO, fell in love with SaaS. Devoured Rob Walling's "The SaaS Playbook" — bootstrap philosophy, start small stay small, no VC needed. By day: IT Program Manager (30h/week). By night: builder, explorer of ideas, obsessive thinker about approaches. Key trait: perseverance, curiosity, "painkillers not vitamins." NOT someone who just discovered vibe coding.
 
 **Beat 2 — The digital detox (the constraint that made everything possible)**
 6 weeks in Vietnam. Girlfriend banned the laptop. But the AI world was exploding: OpenClaw security crisis, Claude Cowork launch, B-Mad, Ralph Wiggum, new models every week. The itch was unbearable. So instead of coding... the founder started *thinking*.
