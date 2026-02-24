@@ -257,5 +257,6 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 - Any config change without explicit expert approval — Suggest + Approve model, never auto-apply (DEC-29)
 - Artificial top-N limit on match results — ranked list complet, top 3 highlighted visuellement (DEC-24)
 - Async batch re-matching of anonymous prospects — matching is synchronous at search time, no persistent prospect profile to re-match (DEC-33)
+- **`gh pr merge --auto` requires branch protection rules** — without required status checks configured on the target branch, `--auto` silently does nothing (no error, no merge). This was the technical root cause of the 19-PR incident (DEC-71): the delivery agent ran `--auto --squash` which appeared to succeed but never merged. Fix: use `gh pr merge --squash` (immediate) instead. Branch protection is not configured on this repo (solo founder MVP).
 - Cloudflare resource names without `{scope}-{entity}-{resource}-{env}` pattern (DEC-32)
 - Using `production` or `dev` as env suffix — use `staging` and `prod` only (DEC-32)
