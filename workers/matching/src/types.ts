@@ -114,3 +114,9 @@ export interface ExpertRow {
   rate_max: number | null;
   availability: string | null;
 }
+
+// Billing exclusion result (returned in handleMatch response)
+export interface BillingExclusion {
+  expert_id: string;
+  reason: 'insufficient_balance' | 'max_lead_price_exceeded' | 'spending_limit_reached';
+}

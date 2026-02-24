@@ -69,7 +69,7 @@ export default {
     // ── Matching ────────────────────────────────────────────────────────────
     // POST /api/matches/compute
     if (method === 'POST' && pathname === '/api/matches/compute') {
-      return handleMatchCompute(request, env);
+      return handleMatchCompute(request, env, ctx);
     }
 
     // GET /api/matches/:prospect_id
