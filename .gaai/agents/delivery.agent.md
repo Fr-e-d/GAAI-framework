@@ -135,11 +135,14 @@ AFTER impl PASS   → atomic commit inside ../{id}-workspace
 
 AFTER QA PASS     → push story/{id} to origin
                     gh pr create --base staging --head story/{id}
-                    gh pr merge --auto --squash story/{id}   ← enable GitHub auto-merge (merges when CI passes)
+                    gh pr merge --squash story/{id}           ← immediate merge (DEC-71: never leave PRs open)
+                    if merge fails (conflict) → merge staging into story branch, resolve, push, retry merge
                     flock: commit artefacts + mark done + push staging (governance)
-                    cleanup: worktree remove (keep branch for PR — GitHub auto-deletes after merge)
+                    cleanup: worktree remove + delete remote branch
 
 NEVER             → interact with the production branch
+                    merge to production (staging → production is HUMAN ONLY via GitHub PR)
+                    leave PRs open — every PR is merged immediately after QA PASS (DEC-71)
                     git checkout away from staging in the main working tree
                     implement without a branch
                     leave stale worktrees or branches
@@ -182,9 +185,10 @@ Tier 2 or 3? → assemble context bundle
                   → if verdict DRIFT_DETECTED or NEW_KNOWLEDGE_FOUND or DRIFT_AND_NEW_KNOWLEDGE:
                       flag Discovery with delta report before marking done
                   → push story/{id} → gh pr create --base staging
-                                   → gh pr merge --auto --squash story/{id}
+                                   → gh pr merge --squash story/{id}  (immediate — DEC-71)
+                                   → if merge fails: merge staging into branch, resolve, push, retry
                   → flock: commit artefacts + mark done → push staging
-                  → cleanup worktree (keep branch for PR)
+                  → cleanup worktree + delete remote branch
            FAIL → re-spawn Implementation Sub-Agent with qa-report (max 2 re-spawns)
                   → re-spawn QA Sub-Agent
                   → if still FAIL after 2 cycles → ESCALATE

@@ -47,8 +47,16 @@ When in doubt: pass the story ID as argument to avoid ambiguity.
 
 Follow the delivery loop exactly. Do not skip QA. If QA fails, invoke `remediate-failures`. If a fix requires changing product scope, STOP and escalate to the human.
 
-### PR-Based Delivery (Non-Negotiable)
+### PR-Based Delivery with Immediate Merge (Non-Negotiable — DEC-71)
 
-After QA PASS, the delivery agent **creates a PR** to staging via `gh pr create`. The agent does NOT merge directly to staging. The human reviews the PR on GitHub and merges when satisfied.
+After QA PASS, the delivery agent:
+1. Creates a PR to staging via `gh pr create --base staging --head story/{id}`
+2. **Immediately merges** the PR via `gh pr merge --squash`
+3. If merge fails due to conflicts: merges staging into the story branch, resolves conflicts, pushes, and retries the merge
+4. Cleans up: removes worktree + deletes remote branch
 
-Report PASS or FAIL at completion. Include the PR URL in the STOP report.
+**PRs must NEVER be left open.** Accumulated unmerged PRs cause cascading merge conflicts across all pending branches (19-PR incident, 2026-02-24). The QA gate is the quality safeguard — once QA passes, merge is immediate.
+
+Promotion staging → production remains a human action via GitHub PR.
+
+Report PASS or FAIL at completion. Include the merged PR URL in the STOP report.
