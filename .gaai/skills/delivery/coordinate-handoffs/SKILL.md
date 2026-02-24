@@ -56,7 +56,14 @@ The Orchestrator cannot proceed to the next phase until it has validated the cur
 ### After QA Sub-Agent terminates
 
 1. Read verdict from `{id}.qa-report.md`:
-   - **PASS**: → **COMPLETE Story** (update backlog, archive artefacts)
+   - **PASS**: → **MERGE & COMPLETE Story**:
+     1. Push story branch to origin
+     2. `gh pr create --base staging --head story/{id}`
+     3. `gh pr merge --squash` — immediate merge to staging (DEC-71)
+     4. If merge fails (conflict): merge staging into branch, resolve, push, retry merge
+     5. If merge still fails after 2 attempts: **ESCALATE** with conflict details
+     6. After successful merge: update backlog, commit artefacts, cleanup worktree + remote branch
+     **NEVER leave a PR open. NEVER merge to production (staging only).**
    - **FAIL**: spawn count < 2? → **RE-SPAWN** Implementation Sub-Agent with qa-report, then re-spawn QA Sub-Agent
    - **FAIL** after 2 cycles: → **ESCALATE**
    - **ESCALATE**: → **ESCALATE** (pass QA's escalation reason to human)

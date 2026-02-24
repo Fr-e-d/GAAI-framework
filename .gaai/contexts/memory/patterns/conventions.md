@@ -43,6 +43,11 @@ updated_at: 2026-02-23
 - **PR optional for:** Tier 1/2 routine Stories (squash merge directly — solo founder MVP context)
 - **Cleanup after merge:** `git worktree remove ../{id}-workspace && git branch -d story/{id} && git push origin --delete story/{id}`
 - **Never:** force push · commit to `production` directly · leave stale worktrees or branches
+- **PR merge timing (DEC-2026-02-24-71):** PRs MUST be merged to staging as the final step of delivery — never left open to accumulate. 19 unmerged PRs caused cascading conflicts that required 3 rounds of resolution (2026-02-24 incident). Each merge changed staging, invalidating all other pending branches.
+- **Branch base rule:** Story branches MUST be created from `staging` (or `production` for hotfixes) — NEVER from another story branch. Stacking branches (E06S22 on E06S21 on E06S18) creates an implicit dependency chain that cascades conflicts.
+- **Conflict-minimizing merge order:** When multiple PRs must be merged, process sequentially in dependency order (oldest/leaf first). For each PR: (1) merge staging into branch, (2) push immediately, (3) merge PR immediately. Do NOT batch-resolve then batch-merge — each merge changes staging and invalidates subsequent resolutions.
+- **Shared hotspot files:** `src/index.ts`, `wrangler.toml`, `src/types/env.ts` are modified by nearly every story and are guaranteed conflict zones when PRs accumulate. This reinforces the merge-immediately rule.
+- **Worktree cleanup:** Always `git worktree remove` after use. Stale worktrees under `.claude/worktrees/` are picked up by vitest test discovery, causing phantom test failures.
 - **Ignored files:** `.DS_Store`, `temp/`, `.env`, `node_modules/`, `.wrangler/` — `.gitignore` in root
 
 ---
@@ -252,5 +257,6 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 - Any config change without explicit expert approval — Suggest + Approve model, never auto-apply (DEC-29)
 - Artificial top-N limit on match results — ranked list complet, top 3 highlighted visuellement (DEC-24)
 - Async batch re-matching of anonymous prospects — matching is synchronous at search time, no persistent prospect profile to re-match (DEC-33)
+- **`gh pr merge --auto` requires branch protection rules** — without required status checks configured on the target branch, `--auto` silently does nothing (no error, no merge). This was the technical root cause of the 19-PR incident (DEC-71): the delivery agent ran `--auto --squash` which appeared to succeed but never merged. Fix: use `gh pr merge --squash` (immediate) instead. Branch protection is not configured on this repo (solo founder MVP).
 - Cloudflare resource names without `{scope}-{entity}-{resource}-{env}` pattern (DEC-32)
 - Using `production` or `dev` as env suffix — use `staging` and `prod` only (DEC-32)

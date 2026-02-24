@@ -455,10 +455,13 @@ items:
     epic: E06
     title: "Balance / max_lead_price / spending_limit enforcement at matching (DEC-67/68)"
     priority: high
-    status: in_progress
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-24T00:00:00+01:00"
+    completed_at: "2026-02-24T00:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S34.story.md
     dependencies: [E06S31]
-    notes: "DEC-67/68. Adds 3 billing filters to matching engine (pre-scoring): balance >= leadPrice, max_lead_price deal-breaker, spending_limit monthly cap. Fire-and-forget notification on exclusion. Applies to both POST /api/matches/compute and POST /api/prospects/submit."
+    notes: "DONE 2026-02-24. QA PASS (first cycle). All 11 ACs met. applyBillingFilters pure fn + loadBillingData Hyperdrive helper (src/lib/billingFilter.ts). Live billing queries (credit_balance, max_lead_price, spending_limit from experts + monthly spend from credit_transactions). Applied in both matching paths (MATCHING_SERVICE + Core fallback) for both POST /api/matches/compute and POST /api/prospects/submit (AC8). Matching Worker returns billing_excluded in response; Core queues expert.billing.lead_missed notifications via ctx.waitUntil(). 19 new billingFilter tests + 255/260 vitest pass. PR#28 open → staging. ⚠️ Human action required: deploy to prod via tag."
 
   # ── EPIC E06 (suite): Monorepo Restructure ──────────────────────────────
 
