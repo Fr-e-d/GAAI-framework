@@ -469,7 +469,8 @@ items:
     epic: E06
     title: "Monorepo restructure — move Core API into workers/api/"
     priority: medium
-    status: blocked
+    status: in_progress
+    started_at: "2026-02-24T14:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S35.story.md
     dependencies: []
     notes: "Structural refactoring. Move src/ + wrangler.toml + package.json + tsconfig.json + d1/ into workers/api/. Root becomes npm workspaces orchestrator. Update GH Actions. Preserve git history via git mv. Best delivered when staging is clean (no pending merges on src/).Recommandation : à délivrer quand staging est propre — ce refactoring conflictera avec tout PR qui touche src/ ou les configs racine."
