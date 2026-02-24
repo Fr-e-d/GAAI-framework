@@ -156,7 +156,7 @@ export async function handleMatchCompute(request: Request, env: Env): Promise<Re
     endpoint: '/api/matches/compute',
     satelliteId: typeof effectiveSatelliteId === 'string' ? effectiveSatelliteId : '',
     latencyMs: Date.now() - startTime,
-    poolSize: experts.length,
+    poolSize: expertPool.length,
     topScore: top20[0]?.matchScore.score ?? 0,
     meanScore,
   });

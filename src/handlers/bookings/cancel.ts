@@ -3,7 +3,6 @@ import { createSql } from '../../lib/db';
 import { getAccessToken, gcalDeleteEvent, GcalApiError } from '../../lib/gcalClient';
 import type { BookingRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
-
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,

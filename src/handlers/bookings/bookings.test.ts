@@ -25,7 +25,6 @@ const mockCtx = {
 
 // ── Mock Env ───────────────────────────────────────────────────────────────────
 
-
 const mockEnv = {
   SUPABASE_URL: 'https://test.supabase.co',
   SUPABASE_ANON_KEY: 'anon-key',
@@ -148,11 +147,13 @@ describe('handleHold', () => {
       }),
     });
 
+
     const response = await handleHold(request, mockEnv as unknown as Parameters<typeof handleHold>[1], mockCtx);
     expect([200, 500]).toContain(response.status);
     if (response.status === 200) {
       const body = await response.json() as Record<string, string>;
-      expect(body.booking_id).toBeDefined();
+      expect(body.booking_id).toBe('booking-456');
+      expect(body.held_until).toBeDefined();
     }
   });
 
@@ -380,7 +381,7 @@ describe('handleCancel', () => {
 
     const request = new Request('https://test.workers.dev/api/bookings/booking-1', { method: 'DELETE' });
     const response = await handleCancel(request, mockEnv as unknown as Parameters<typeof handleCancel>[1], 'booking-1', mockCtx);
-    // 200 if crypto.subtle succeeds; crypto path may vary
+    // 200 if crypto.subtle succeeds in test env; 502 if token decryption fails
     expect([200, 502]).toContain(response.status);
   });
 });
