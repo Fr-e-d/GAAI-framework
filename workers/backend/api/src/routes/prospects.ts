@@ -265,7 +265,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
             })
           );
         }
-        const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
+        const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
         return jsonResponse({ prospect_id: prospect.id, token, token_expires_at: expiresAt });
       }
       console.error('prospect submit: MATCHING_SERVICE returned', matchResp.status, '— falling back to local scoring');
@@ -328,7 +328,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
 
   // AC7: all excluded → still return token (prospect was submitted successfully)
   if (eligible.length === 0) {
-    const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
+    const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
     return jsonResponse({ prospect_id: prospect.id, token, token_expires_at: expiresAt });
   }
 
@@ -391,7 +391,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
   });
 
   // Sign JWT token (24h TTL)
-  const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
+  const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
 
   ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
     distinctId: `prospect:${prospect.id}`,
@@ -434,7 +434,7 @@ export async function handleProspectMatches(
   }
 
   // AC4: validate token
-  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET);
+  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:matches');
   if (!tokenValid) {
     return errorResponse('Forbidden', 403);
   }
@@ -518,7 +518,7 @@ export async function handleProspectIdentify(
     return errorResponse('Forbidden', 403);
   }
 
-  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET);
+  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:identify');
   if (!tokenValid) {
     return errorResponse('Forbidden', 403);
   }

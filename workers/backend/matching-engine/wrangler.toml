@@ -11,7 +11,7 @@ binding = "HYPERDRIVE"
 #   npx wrangler hyperdrive create callibrate-core-hyperdrive-staging \
 #     --connection-string "postgresql://postgres:[PASSWORD]@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
 id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
-localConnectionString = "postgresql://postgres:postgres@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
+# localConnectionString: set in workers/backend/matching-engine/.dev.vars (gitignored) — see SETUP.md
 
 [[kv_namespaces]]
 binding = "EXPERT_POOL"

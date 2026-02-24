@@ -100,6 +100,18 @@ export async function handleLsWebhook(request: Request, env: Env): Promise<Respo
     });
   }
 
+  const sql = createSql(env);
+
+  // L2: DB idempotency — persistent across KV evictions
+  const existingEvent = await sql<{ event_id: string }[]>`
+    SELECT event_id FROM webhook_events WHERE event_id = ${eventId}`;
+  if (existingEvent.length > 0) {
+    return new Response(JSON.stringify({ ok: true, deduplicated: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
     switch (eventName) {
       case 'subscription_created':
@@ -115,6 +127,12 @@ export async function handleLsWebhook(request: Request, env: Env): Promise<Respo
         // Unhandled event — ack silently
         console.log('handleLsWebhook: unhandled event_name', eventName);
     }
+
+    // L2: persist event to DB (ON CONFLICT DO NOTHING — safe for concurrent retries)
+    await sql`
+      INSERT INTO webhook_events (event_id, event_name)
+      VALUES (${eventId}, ${eventName})
+      ON CONFLICT DO NOTHING`;
 
     // Mark as processed (AC5)
     await env.SESSIONS.put(idemKey, '1', { expirationTtl: 86400 });

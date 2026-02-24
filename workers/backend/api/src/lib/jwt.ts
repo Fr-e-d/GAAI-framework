@@ -5,7 +5,7 @@
 //
 // Also used for survey token sign/verify (E06S17):
 //   signSurveyToken / verifySurveyToken — uses SURVEY_TOKEN_SECRET (distinct from
-//   PROSPECT_TOKEN_SECRET). Payload: { booking_id, prospect_id, exp } (30d TTL).
+//   PROSPECT_TOKEN_SECRET). Payload: { booking_id, prospect_id, exp, iss, aud } (7d TTL).
 
 function toBase64Url(data: Uint8Array | ArrayBuffer): string {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
@@ -43,12 +43,13 @@ async function importHmacKey(secret: string, usage: 'sign' | 'verify'): Promise<
 export async function signProspectToken(
   prospectId: string,
   secret: string,
+  aud: 'prospect:submit' | 'prospect:matches' | 'prospect:identify',
 ): Promise<{ token: string; expiresAt: string }> {
   const encoder = new TextEncoder();
   const exp = Math.floor(Date.now() / 1000) + 86400; // 24h
 
   const header = toBase64Url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
-  const payload = toBase64Url(encoder.encode(JSON.stringify({ prospect_id: prospectId, exp })));
+  const payload = toBase64Url(encoder.encode(JSON.stringify({ prospect_id: prospectId, exp, iss: 'callibrate', aud })));
   const signingInput = `${header}.${payload}`;
 
   const key = await importHmacKey(secret, 'sign');
@@ -62,12 +63,13 @@ export async function signProspectToken(
 }
 
 // ── verifyProspectToken ────────────────────────────────────────────────────────
-// Returns true only if: signature valid + not expired + prospect_id matches.
+// Returns true only if: signature valid + not expired + prospect_id matches + aud matches.
 
 export async function verifyProspectToken(
   token: string,
   prospectId: string,
   secret: string,
+  expectedAud: string,
 ): Promise<boolean> {
   const parts = token.split('.');
   if (parts.length !== 3) return false;
@@ -88,7 +90,7 @@ export async function verifyProspectToken(
   const valid = await crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(signingInput));
   if (!valid) return false;
 
-  let claims: { prospect_id?: string; exp?: number };
+  let claims: { prospect_id?: string; exp?: number; aud?: string; iss?: string };
   try {
     claims = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
   } catch {
@@ -96,6 +98,7 @@ export async function verifyProspectToken(
   }
 
   if (claims.exp === undefined || claims.exp < Math.floor(Date.now() / 1000)) return false;
+  if (claims.aud !== expectedAud) return false;
   if (claims.prospect_id !== prospectId) return false;
 
   return true;
@@ -104,7 +107,7 @@ export async function verifyProspectToken(
 // ── Survey JWT — sign / verify (E06S17) ───────────────────────────────────────
 // Used by E06S16 (sign — in survey emails) and E06S17 (verify — in survey endpoints).
 // Secret: SURVEY_TOKEN_SECRET (separate from PROSPECT_TOKEN_SECRET).
-// Payload: { booking_id, prospect_id, exp }. TTL: 30 days.
+// Payload: { booking_id, prospect_id, exp, iss, aud }. TTL: 7 days (reduced from 30 in E08S05).
 
 export type SurveyTokenClaims = {
   booking_id: string;
@@ -112,7 +115,7 @@ export type SurveyTokenClaims = {
 };
 
 // ── signSurveyToken ──────────────────────────────────────────────────────────
-// Returns a signed JWT with 30-day TTL for survey links.
+// Returns a signed JWT with 7-day TTL for survey links.
 
 export async function signSurveyToken(
   bookingId: string,
@@ -120,11 +123,11 @@ export async function signSurveyToken(
   secret: string,
 ): Promise<string> {
   const encoder = new TextEncoder();
-  const exp = Math.floor(Date.now() / 1000) + 30 * 86400; // 30 days
+  const exp = Math.floor(Date.now() / 1000) + 7 * 86400; // 7 days
 
   const header = toBase64Url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
   const payload = toBase64Url(
-    encoder.encode(JSON.stringify({ booking_id: bookingId, prospect_id: prospectId, exp })),
+    encoder.encode(JSON.stringify({ booking_id: bookingId, prospect_id: prospectId, exp, iss: 'callibrate', aud: 'survey' })),
   );
   const signingInput = `${header}.${payload}`;
 

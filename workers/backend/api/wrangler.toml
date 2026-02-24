@@ -12,7 +12,7 @@ binding = "HYPERDRIVE"
 #   npx wrangler hyperdrive create callibrate-core-hyperdrive-staging \
 #     --connection-string "postgresql://postgres:[PASSWORD]@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
 id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
-localConnectionString = "postgresql://postgres:postgres@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
+# localConnectionString: set in workers/backend/api/.dev.vars (gitignored) — see SETUP.md
 
 # ── Default (dev) environment — local only, never deployed ───────────────────
 # Binds to staging remote resources (queues, KV, Supabase).
@@ -127,8 +127,7 @@ EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
 SURVEY_DELAY_7D_MS = "60000"
 SURVEY_DELAY_38D_MS = "120000"
-# Production TURNSTILE_SECRET_KEY must be set via: wrangler secret put TURNSTILE_SECRET_KEY --env production
-TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA"
+# TURNSTILE_SECRET_KEY: set via: wrangler secret put TURNSTILE_SECRET_KEY --env staging
 # Staging acceleration: lead flag window = 1 minute (production default: 7 days)
 FLAG_WINDOW_MS = "60000"
 

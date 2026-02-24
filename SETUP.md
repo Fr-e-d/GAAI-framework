@@ -255,6 +255,40 @@ npx wrangler secret put ADMIN_API_KEY --env staging
 
 ---
 
+## Local DB Connection String (Hyperdrive dev override)
+
+`wrangler dev` requires a `localConnectionString` for Hyperdrive to connect to a real Postgres DB.
+This is NOT in `wrangler.toml` to avoid exposing the DB password in version control.
+
+**wrangler does NOT support overriding `localConnectionString` from `.dev.vars`.** The correct
+approach is to temporarily add the `localConnectionString` directly to `wrangler.toml` locally
+while developing, then remove it before committing.
+
+Edit the top-level `[[hyperdrive]]` block in each worker that uses Hyperdrive:
+
+**`workers/backend/api/wrangler.toml`:**
+```toml
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+localConnectionString = "postgresql://postgres:[PASSWORD]@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
+```
+
+**`workers/backend/matching-engine/wrangler.toml`:**
+```toml
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+localConnectionString = "postgresql://postgres:[PASSWORD]@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
+```
+
+Replace `[PASSWORD]` with the Supabase DB password from: Settings → Database → Connection string.
+
+> **Important:** Remove `localConnectionString` from `wrangler.toml` before committing. The `.gitignore`
+> does NOT exclude `wrangler.toml` — only `.dev.vars` is excluded. This is a manual step.
+
+---
+
 ## Step 5 — GitHub Actions Secrets
 
 The CI/CD workflows authenticate to Cloudflare via an API token stored as a GitHub secret.

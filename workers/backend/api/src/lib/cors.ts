@@ -48,7 +48,7 @@ async function validateOrigin(origin: string, env: Env): Promise<boolean> {
 
   // Check satellite_configs.domain
   try {
-    const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
+    const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
       auth: { persistSession: false },
     });
     const { data } = await supabase

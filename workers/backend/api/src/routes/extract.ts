@@ -13,6 +13,7 @@ import type {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
+const KNOWN_VERTICALS = ['ai-consulting', 'automation', 'data-science', 'general'] as const;
 const EXTRACTION_FIELDS: ExtractionField[] = [
   'challenge',
   'skills_needed',
@@ -171,7 +172,9 @@ export async function handleExtract(request: Request, env: Env, ctx: ExecutionCo
         .maybeSingle();
 
       if (satConfig?.vertical && typeof satConfig.vertical === 'string') {
-        verticalContext = satConfig.vertical;
+        if ((KNOWN_VERTICALS as readonly string[]).includes(satConfig.vertical)) {
+          verticalContext = satConfig.vertical;
+        }
       }
     } catch {
       // Non-blocking: proceed without vertical context

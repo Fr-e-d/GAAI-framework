@@ -277,8 +277,8 @@ async function sendSurveyEmail(
     ? 'How was your call? (quick survey)'
     : 'How did the project go? (quick survey)';
   const textBody = isCallExperience
-    ? `Hi,\n\nWe hope your call went well!\n\nWe'd love to hear how it went. It takes less than a minute:\n\n${surveyUrl}\n\nThank you for your feedback.`
-    : `Hi,\n\nWe hope your project is progressing well!\n\nWe'd love to hear how things went with the expert. It takes less than a minute:\n\n${surveyUrl}\n\nThank you for your feedback.`;
+    ? `Hi,\n\nWe hope your call went well!\n\nWe'd love to hear how it went. It takes less than a minute:\n\n${surveyUrl}\n\nCe lien expire dans 7 jours.\n\nThank you for your feedback.`
+    : `Hi,\n\nWe hope your project is progressing well!\n\nWe'd love to hear how things went with the expert. It takes less than a minute:\n\n${surveyUrl}\n\nCe lien expire dans 7 jours.\n\nThank you for your feedback.`;
 
   await sendResendEmail(
     env.RESEND_API_KEY,

@@ -80,7 +80,9 @@ describe('handleLsWebhook — signature verification (AC1)', () => {
   it('valid HMAC signature — returns 200', async () => {
     const env = makeEnv();
     const event = makeLsEvent('subscription_updated');
-    const mockSql = vi.fn().mockResolvedValue([]);
+    const mockSql = vi.fn()
+      .mockResolvedValueOnce([])   // L2: SELECT webhook_events → not found
+      .mockResolvedValue([]);      // subsequent calls
     (createSql as Mock).mockReturnValue(mockSql);
 
     const req = await makeSignedRequest(event, 'test-secret', 'subscription_updated');
@@ -150,7 +152,9 @@ describe('handleLsWebhook — idempotency (AC5)', () => {
     const env = makeEnv();
     const putSpy = env.SESSIONS.put as ReturnType<typeof vi.fn>;
     const event = makeLsEvent('subscription_updated');
-    const mockSql = vi.fn().mockResolvedValue([]);
+    const mockSql = vi.fn()
+      .mockResolvedValueOnce([])   // L2: SELECT webhook_events → not found
+      .mockResolvedValue([]);      // subsequent calls (UPDATE experts, INSERT webhook_events)
     (createSql as Mock).mockReturnValue(mockSql);
 
     const req = await makeSignedRequest(event, 'test-secret', 'subscription_updated');
@@ -181,11 +185,13 @@ describe('handleLsWebhook — subscription_created (AC2)', () => {
       new Response(JSON.stringify({ data: [{ id: 'si-456' }] }), { status: 200 })
     );
 
-    // sql mock: 1) SELECT expert by id → found, 2) UPDATE experts RETURNING, 3) INSERT credit_transactions
+    // sql mock: 0) L2 webhook_events check, 1) SELECT expert by id → found, 2) UPDATE experts RETURNING, 3) INSERT credit_transactions, 4) INSERT webhook_events
     const mockSql = vi.fn()
+      .mockResolvedValueOnce([])                             // L2: SELECT webhook_events → not found
       .mockResolvedValueOnce([{ id: 'expert-uuid-1' }])     // SELECT id FROM experts WHERE id
       .mockResolvedValueOnce([{ credit_balance: 10000 }])   // UPDATE experts RETURNING credit_balance
-      .mockResolvedValueOnce([]);                             // INSERT credit_transactions
+      .mockResolvedValueOnce([])                             // INSERT credit_transactions
+      .mockResolvedValueOnce([]);                            // INSERT webhook_events
     (createSql as Mock).mockReturnValue(mockSql);
 
     const req = await makeSignedRequest(event, 'test-secret', 'subscription_created');
@@ -199,8 +205,8 @@ describe('handleLsWebhook — subscription_created (AC2)', () => {
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-ls-api-key' }) })
     );
 
-    // SQL called 3 times (SELECT, UPDATE, INSERT)
-    expect(mockSql).toHaveBeenCalledTimes(3);
+    // SQL called 5 times (L2 check, SELECT, UPDATE, INSERT credit_transactions, INSERT webhook_events)
+    expect(mockSql).toHaveBeenCalledTimes(5);
 
     globalFetchSpy.mockRestore();
   });
@@ -214,17 +220,19 @@ describe('handleLsWebhook — subscription_created (AC2)', () => {
     );
 
     const mockSql = vi.fn()
+      .mockResolvedValueOnce([])                              // L2: SELECT webhook_events → not found
       .mockResolvedValueOnce([])                              // SELECT id WHERE id → not found
       .mockResolvedValueOnce([{ id: 'expert-uuid-2' }])      // SELECT id WHERE gcal_email → found
       .mockResolvedValueOnce([{ credit_balance: 10000 }])    // UPDATE experts
-      .mockResolvedValueOnce([]);                             // INSERT credit_transactions
+      .mockResolvedValueOnce([])                              // INSERT credit_transactions
+      .mockResolvedValueOnce([]);                             // INSERT webhook_events
     (createSql as Mock).mockReturnValue(mockSql);
 
     const req = await makeSignedRequest(event, 'test-secret', 'subscription_created');
     const res = await handleLsWebhook(req, env);
 
     expect(res.status).toBe(200);
-    expect(mockSql).toHaveBeenCalledTimes(4);
+    expect(mockSql).toHaveBeenCalledTimes(6);
 
     vi.restoreAllMocks();
   });
@@ -238,7 +246,9 @@ describe('handleLsWebhook — subscription_created (AC2)', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const mockSql = vi.fn()
-      .mockResolvedValueOnce([]);   // gcal_email fallback → not found
+      .mockResolvedValueOnce([])   // L2: SELECT webhook_events → not found
+      .mockResolvedValueOnce([])   // gcal_email fallback → not found
+      .mockResolvedValueOnce([]);  // INSERT webhook_events (after switch handles the no-expert path)
     (createSql as Mock).mockReturnValue(mockSql);
 
     const req = await makeSignedRequest(event, 'test-secret', 'subscription_created');
@@ -263,7 +273,9 @@ describe('handleLsWebhook — subscription_payment_failed (AC4)', () => {
     const event = makeLsEvent('subscription_payment_failed');
 
     const mockSql = vi.fn()
-      .mockResolvedValueOnce([{ id: 'expert-uuid-1' }]);  // UPDATE experts RETURNING id
+      .mockResolvedValueOnce([])                           // L2: SELECT webhook_events → not found
+      .mockResolvedValueOnce([{ id: 'expert-uuid-1' }])   // UPDATE experts RETURNING id
+      .mockResolvedValueOnce([]);                          // INSERT webhook_events
     (createSql as Mock).mockReturnValue(mockSql);
 
     const req = await makeSignedRequest(event, 'test-secret', 'subscription_payment_failed');
@@ -271,8 +283,8 @@ describe('handleLsWebhook — subscription_payment_failed (AC4)', () => {
 
     expect(res.status).toBe(200);
 
-    // UPDATE called — check first SQL call contains past_due
-    expect(mockSql).toHaveBeenCalledTimes(1);
+    // UPDATE called — check SQL calls: L2 check + UPDATE + INSERT webhook_events = 3
+    expect(mockSql).toHaveBeenCalledTimes(3);
 
     // EMAIL_NOTIFICATIONS.send called with payment_failed type
     expect(sendSpy).toHaveBeenCalledWith({
@@ -289,7 +301,9 @@ describe('handleLsWebhook — subscription_payment_failed (AC4)', () => {
     const event = makeLsEvent('subscription_payment_failed');
 
     const mockSql = vi.fn()
-      .mockResolvedValueOnce([]);  // UPDATE experts → no rows (subscription not found)
+      .mockResolvedValueOnce([])   // L2: SELECT webhook_events → not found
+      .mockResolvedValueOnce([])   // UPDATE experts → no rows (subscription not found)
+      .mockResolvedValueOnce([]);  // INSERT webhook_events
     (createSql as Mock).mockReturnValue(mockSql);
 
     const req = await makeSignedRequest(event, 'test-secret', 'subscription_payment_failed');
@@ -327,12 +341,14 @@ describe('handleLsWebhook — subscription_updated (AC3)', () => {
         },
       });
 
-      // Capture the SQL template tag arguments
+      // Capture the SQL template tag arguments — skip first call (L2 webhook_events check)
       let capturedStatus: unknown;
+      let callCount = 0;
       const mockSql = vi.fn().mockImplementation((...args: unknown[]) => {
-        // The sql tagged template: first call captures the status argument
-        if (Array.isArray(args[0])) {
-          capturedStatus = args[1]; // second arg = first interpolation
+        callCount++;
+        // Second call is UPDATE experts SET ls_subscription_status = ${mappedStatus}
+        if (callCount === 2 && Array.isArray(args[0])) {
+          capturedStatus = args[1]; // second arg = first interpolation = mappedStatus
         }
         return Promise.resolve([]);
       });
