@@ -155,10 +155,54 @@ you start searching.
 
 ## Observation Log — Round 2
 
-| Subreddit | Post publié le | Upvotes | Commentaires | Phrases clés | Hypothèse confirmée ? |
+| Subreddit | Post publié le | Score | Comments | Phrases clés | Hypothèse confirmée ? |
 |---|---|---|---|---|---|
-| r/gohighlevel | ✅ 19/02/2026 | 2 upvotes | 2 commentaires | "money upfront", "card on file / auto billing / credit position", "modular or nothing" | H4 ✅ — critères non-négociables existent mais filtre #1 = paiement, filtre #2 = alignement méthodologique |
-| r/freelancing | | | | | |
-| r/Upwork | ✅ 19/02/2026 | 1 upvote | thread actif | "Upwork is still the default and everyone just deals with it", "anything and everywhere", "3 weeks finding one good client in January", "marketing and sales is part of the job" | H12 ✅ aucune alternative nommée. H6 ✅ canaux fragmentés. H10 🟡 3 semaines confirmé. ⚠️ Audience "accept the grind" = pas clients cibles |
-| r/ClaudeAI | | | | | |
-| r/ArtificialNtelligence | | | | | |
+| **r/gohighlevel** | ✅ 19/02/2026 | **8** | **12** | "money upfront", "card on file / auto billing / credit position", "modular or nothing", **"found time" > "automation"**, platform lock-in awareness, architecture acceptance avant engagement | H4 ✅ critères sophistiqués : paiement + alignement méthodo + stack acceptée |
+| r/freelancing | ✅ 19/02/2026 | 1 | 0 | — (aucun commentaire reçu) | ⬜ |
+| **r/Upwork** | ✅ 19/02/2026 | 1 | **16** | "Upwork brings volume but not qualified AI buyers", **"vague postings"**, "niche communities or partnerships > marketplaces", "right clients couldn't find me" (SilkLoverX) | H12 ✅ aucune alternative nommée. H1 ✅ vague postings = leads non qualifiés |
+| r/ClaudeAI | ✅ 19/02/2026 | 1 | 2 | Removed by moderator (insuffisamment lié à Claude/Anthropic) | ❌ removed |
+| **r/ArtificialNtelligence** | ✅ 19/02/2026 | 1 | **3** | HotNeon : "No one needs an AI consultant", "speed to hire isn't top 5 considerations" | H10 ⚠️ enterprise perspective — ne s'applique pas aux PME/SMB |
+
+---
+
+### r/gohighlevel — Détail commentaires (API extraction 24/02/2026)
+
+**Thread :** "What are your non-negotiables before taking on a new AI automation client?"
+
+**heyiamnickk** (score: 4) — Expert response clé
+- Non-négociable #1 : client doit accepter d'externaliser la logique hors GHL (n8n ou custom code)
+- "If they can't handle that... it's a hard no"
+- Protection réputation : "I know the system won't fail"
+- **Signal H4 :** critères allant bien au-delà du budget — architecture et méthodologie
+- Fred reply : question sur comment ce filtre apparaît avant le scoping call
+
+**greekhop** (score: 3) — Prospect-side curiosity
+- "What is it that n8n solves or does better?" → question genuine d'un GHL user
+
+**Maxazillion1** (score: 2)
+- "Money upfront" — baseline
+
+**MachadoEsq** (score: 1)
+- "Card on file. Auto billing enabled. Credit position."
+
+### r/Upwork (v2) — Détail commentaires (API extraction 24/02/2026)
+
+**Thread :** "Is there a better platform than Upwork specifically for AI automation work?"
+
+**Own_Constant_2331** (score: 2)
+- "Upwork is still the default and everyone just deals with it"
+- Fred reply : "the calibration problem feels real — a $200 Zapier job and a $5k custom workflow build look identical"
+
+**Rich-Emu-1561** (score: 2)
+- "Upwork still brings volume but not always qualified AI buyers"
+- "Most serious AI consulting leads come from niche communities or partnerships"
+
+**SilkLoverX** (score: 1) × 2 commentaires
+- "The problem wasn't only budget — the right clients couldn't find me"
+- "The 'AI automation' label on Upwork means anything and everything"
+- "I found more qualified clients in AI builder communities on Discord and Slack"
+
+**hustler108** (score: 1)
+- "How to build that custom $5K workflow?" — prospect-side curiosity
+
+**Signal clé :** Aucun concurrent direct nommé. "Niche communities" confirmé comme canal alternatif — mais fragmenté et non scalable. Exactement le gap que Callibrate comble.

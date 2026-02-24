@@ -243,12 +243,54 @@ to see what resonates with decision-makers.
 
 ## Observation Log — Round 3
 
-| Subreddit | Post publié le | Upvotes | Commentaires | Phrases clés | Hypothèse confirmée ? |
+| Subreddit | Post publié le | Score | Comments | Phrases clés | Hypothèse confirmée ? |
 |---|---|---|---|---|---|
-| r/digitalnomad | ✅ 19/02/2026 | | 1 commentaire | "Do you use AI to write your posts or are you a bot?" | ⚠️ Post perçu trop propre/AI-generated — rougher le style pour les prochains |
-| r/EntreprendreenFrance | | | | | |
-| r/IOT | ✅ 19/02/2026 | 2 upvotes | 2 commentaires | "still a bit early, only 3 customers", "demand there if affordable solution", "biggest roadblock: data standardisation", article LinkedIn = manufacturing enterprise C-suite Inde | H13 🟡 — segment IoT+AI nascent, enterprise, hors scope MVP. Marché AI automation large confirmé en croissance |
-| ~~r/automation~~ → r/Automate | | | | | |
-| r/jobs | | | | | |
-| r/RemoteJobs | | | | | |
-| r/jobsearchhacks | | | | | |
+| **r/IOT** | ✅ 19/02/2026 | **10** | **14** | "still early but demand growing", "startups > legacy", "data standardization blocker", "affordable solution that minimizes work", "show clients what's possible" | H13 ✅ marché IoT+AI croissant. Clients pas encore éduqués mais demand genuine |
+| r/digitalnomad | ✅ 19/02/2026 | 0 | 4 | **HOSTILE** : "Do you use AI to write your posts?", "I scam people just like you" | ❌ anti-signal — community hostile, post perçu AI-generated |
+| r/EntreprendreenFrance | — | — | — | Non retrouvé via API (non posté ou supprimé) | — |
+| r/Automate | ✅ 19/02/2026 | 1 | 0 | — | ⬜ |
+| r/jobs | — | — | — | Non retrouvé via API (non posté ou supprimé) | — |
+| r/RemoteJobs | — | — | — | Non retrouvé via API (non posté ou supprimé) | — |
+| r/jobsearchhacks | ✅ 19/02/2026 | 1 | 0 | — | ⬜ |
+
+---
+
+### r/IOT — Détail commentaires (API extraction 24/02/2026)
+
+**Thread :** "For those doing IoT + AI automation work — are clients actually ready for this, or still too early?"
+**Score: 10** — meilleur score de tous les Discovery posts
+
+**Alternative-Radish-3** (score: 4) — Startup founder IoT+AI
+- "If it's not a startup, they still want to do things the old way"
+- "They will add AI as hype over their products through internal efforts"
+- "I only have 3 customers so far" → marché réel mais nascent
+
+**RuleGuilty493** (score: 1) — Builder IoT+AI
+- "genuine interest to try it out and figure out the potential from the fluff"
+- "legacy systems = blocker to adoption"
+- "not-so-latent fear that it would replace people → any AI solution has to address both the technical AND the mental blockades"
+
+**Proper-Actuary7131** (score: 1)
+- "demand is definitely getting real, but clients want to solve actual problems now, not just sprinkle 'AI' on things"
+- "most clients still need you to show them what's possible"
+- Budgets: "a small pilot to see if an idea works..."
+
+**saket_sn** (score: 1)
+- "organisation shop floors don't usually respond to new tech for efficiency"
+- "Client demand is there if you provide affordable solution that minimises their work"
+- "biggest roadblock: data standardisation & reliability"
+
+**Ecsta** (score: 1)
+- "long term reliability is the main requirement of most IOT projects, which doesn't play well with vibe coding"
+
+**Signal clé :** IoT+AI = marché adjacent, demand réelle mais immature. Pas ICP Callibrate MVP — mais confirme que le marché AI automation au sens large est en croissance (H13). Le post a le meilleur score (10) de tous les Discovery posts → sujet résonant.
+
+### r/digitalnomad — Anti-signal documenté
+
+**Thread :** "Digital nomads doing AI automation work — how stable is your client pipeline actually?"
+**Score: 0** — hostile
+
+- **mycall** (score: 7) : "Do you use AI to write all of your posts or are you a bot?"
+- **New_Scientist_1689** (score: 1) : "super stable, and huge income. i scam people, just like you do"
+
+**Leçon :** Format trop structuré/propre pour r/digitalnomad. Post perçu comme spam ou AI-generated. Importante leçon pour la rédaction future : adapter le tone au subreddit (voir COMMS-001 Part 0 AI Kill List). Ne pas poster de format "corporate survey" dans des communautés qui valorisent l'authenticité brute.

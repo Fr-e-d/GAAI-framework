@@ -485,6 +485,27 @@ items:
     dependencies: []
     notes: "DONE 2026-02-24. QA PASS (first cycle). All 15 ACs met. Monorepo restructure: Core API → workers/backend/api/, matching → workers/backend/matching-engine/, posthog-proxy → workers/backend/posthog-proxy/, satellite → workers/frontend/satellites/. npm workspaces orchestrator at root. Single package-lock.json. All 3 GH Actions workflows updated. SETUP.md + GAAI memory updated. 260/260 vitest + tsc clean (all 4 workers). git mv preserves history. PR#29 squash-merged → staging."
 
+  # ── EPIC E06 (suite): Discovery-Informed Matching Enhancements ──────────
+  # Based on E01S01 field data analysis (DEC-80, DEC-81, DEC-82)
+
+  - id: E06S36
+    epic: E06
+    title: "Expert admissibility criteria — non-budget matching filters (DEC-80)"
+    priority: medium
+    status: refined
+    artefact: contexts/artefacts/stories/E06S36.story.md
+    dependencies: [E06S34, E06S02]
+    notes: "Discovery-informed. admissibility_criteria JSONB (methodology, verticals, stack overlap, duration). applyAdmissibilityFilters() after billing, before scoring. Follows E06S34 architecture. Field data: 'modular or nothing' (heyiamnickk), 'card on file' (MachadoEsq)."
+
+  - id: E06S37
+    epic: E06
+    title: "Outcome-based expert profiles + extraction enhancement (DEC-81)"
+    priority: medium
+    status: refined
+    artefact: contexts/artefacts/stories/E06S37.story.md
+    dependencies: [E06S22, E06S12, E06S02]
+    notes: "Discovery-informed. outcome_tags TEXT[] on experts + desired_outcomes in extraction + scoreOutcomeAlignment() scoring dimension (Workers AI semantic, weight 0.10). Field data: 'stopped selling workflows, started selling found time' (Littlecutsie)."
+
   # ── EPIC E03: Prospect Gets Qualified and Matched to the Right Expert ────
   # Layer 3.2 — satellite sites. Depends on E02 + E06.
 

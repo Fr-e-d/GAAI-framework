@@ -365,23 +365,53 @@ Drop a short note about relevant experience and availability. No agencies — lo
 
 ## Observation Log
 
-> Remplir au fur et à mesure des réponses. Alimente les promise drafts.
+> Données complètes extraites via Reddit JSON API le 24/02/2026 (u/Fred-AnIndieCreator).
+> 27 posts au total : 18 Discovery (E01S01) + 9 .gaai framework (antérieurs).
 
-| Subreddit | Post publié le | Upvotes | Commentaires | Phrases clés notées | Hypothèse confirmée ? |
-|---|---|---|---|---|---|
-| r/n8n | ❌ BLOQUÉ (Règle 2) | — | — | Subreddit purement technique | H1/H2/H6 → rediriger vers r/AiAutomations |
-| r/AiSolopreneurs | ✅ 19/02/2026 06:00 | | | | |
-| r/AiAutomations | ✅ 19/02/2026 06:00 | | | | |
-| r/aisolobusinesses | ✅ 19/02/2026 06:00 | 3 upvotes | 5 commentaires | "6-7h/week", "half my week finding decent leads", "difficult to get on a call", "thinking of changing my niche" | H2 ✅ H1 ✅ H6 ✅ |
-| r/gohighlevel | ✅ 19/02/2026 06:00 | | | | |
-| r/automation | ✅ 19/02/2026 06:00 | | | | |
-| r/AiForSmallBusiness | ✅ 19/02/2026 06:00 | — | 5+ commentaires | "workflow architects who understand business logic", "10-15% of Upwork pool are real", "paid audit $100-200", "3 months to find someone", "n8n vs Zapier/ChatGPT = quality proxy", "prototype not a demo before payment", "asks a ton of questions before mentioning a solution" | H1 ✅ H7 ✅ H8 ✅ H9 ✅ H10 ✅ H11 ✅ H12 ✅ — **2 expert hand-raiser potentiels identifiés** |
-| r/buhaydigital | ✅ 19/02/2026 06:00 | | | | |
-| r/ArtificialNtelligence | ✅ 19/02/2026 06:00 | — | 3+ commentaires | HotNeon : "No one needs an AI consultant" — corporations internalize (BAs/ops), won't hire outsiders without domain knowledge → confond enterprise et SMB. Fred reply : "what about 10-50 employees?" | H12 ⚠️ signal négatif enterprise → ICP = SMB confirmé ✅ |
-| r/Upwork | ✅ 19/02/2026 06:00 | — | 1 commentaire | "Upwork brings volume but not qualified AI buyers. Most serious leads come from niche communities or partnerships, not open marketplaces." | H1 ✅ H5 ✅ — nouveau signal : distribution insight |
-| r/ClaudeAI | ✅ 19/02/2026 06:00 | | | | |
-| r/freelancing | ✅ 19/02/2026 06:00 | | | | |
-| r/freelance_forhire | ✅ 19/02/2026 06:00 | — | 2 commentaires | "I can deliver in 10 hours... start immediately" (aucun portfolio, aucune question) | H1 ✅ confirmé — expert typique non qualifié qui répond sans scoper |
+### Discovery Posts (E01S01) — Données complètes
+
+| Subreddit | Score | Comments | Signal clé | Hypothèses |
+|---|---|---|---|---|
+| **r/AiForSmallBusiness** | 2 | **19** | "3 months to find someone", "10-15% real", "paid audit", "asks tons of questions" | H1 ✅ H7 ✅ H8 ✅ H9 ✅ H10 ✅ H11 ✅ H12 ✅ |
+| **r/aisolobusinesses** | 5 | **16** | "30-40% lead gen early on", "5-7h/week", "half my week finding decent leads", "16h+" | H1 ✅ H2 ✅ H5 ✅ H6 ✅ |
+| **r/Upwork** (v2 — "better platform") | 1 | **16** | "Upwork = volume but not qualified AI buyers", "vague postings", "niche communities > marketplaces" | H1 ✅ H5 ✅ |
+| **r/IOT** | **10** | **14** | Demand réelle mais clients pas prêts. Startups > legacy. Data standardization = blocker | H7 ✅ (adjacent market) |
+| **r/freelance_forhire** | 1 | **13** | 8 experts répondent sans scoper, aucun portfolio, zero question avant de proposer | H1 ✅ H8 ✅ |
+| **r/gohighlevel** (v2 — "non-negotiables") | **8** | **12** | "Found time" > "automation", platform lock-in awareness, money upfront, architecture acceptance | H1 ✅ H2 ✅ H6 ✅ |
+| **r/n8n_ai_agents** | **7** | **9** | "90% tire kickers", "found time" sell, niche "one specific mess" | H1 ✅ H2 ✅ H5 ✅ |
+| r/digitalnomad | 0 | 4 | **HOSTILE** : "Do you use AI to write all your posts?", "I scam people just like you" | ❌ anti-signal |
+| r/ClaudeAI (v2 — "building solutions") | 0 | 4 | Code block roast. 1 pertinent: "referrals and niche positioning > tech itself" | — |
+| r/ArtificialNtelligence (v1) | 1 | 3 | HotNeon: "No one needs an AI consultant" — enterprise internalize, SMB can't | H12 ⚠️ ICP=SMB ✅ |
+| r/ArtificialNtelligence (v2 — "urgently") | 1 | 3 | HotNeon: "speed to hire isn't top 5" — enterprise-centric view | H12 ⚠️ |
+| r/Upwork (v1 — "is it worth it") | 1 | 2 | "10% conversion proposals→paid", "ignore $5 budget posts" | H5 ✅ |
+| r/ClaudeAI (v1 — "how would you describe") | 1 | 2 | Removed by moderator | ❌ |
+| r/automation | 1 | 1 | Removed by automod (karma < 100) | ❌ |
+| r/gohighlevel (v1 — "lead quality") | 1 | 0 | — | — |
+| r/freelancing (v1) | 1 | 0 | Removed by moderator | ❌ |
+| r/freelancing (v2 — "paid for leads") | 1 | 0 | — | — |
+| r/jobsearchhacks | 1 | 0 | — | — |
+| r/Automate | 1 | 0 | — | — |
+| r/AiSolopreneurs | ✅ posté | — | Non retrouvé via API (supprimé ou removed) | — |
+| r/AiAutomations | ✅ posté | — | Non retrouvé via API (supprimé ou removed) | — |
+| r/buhaydigital | ✅ posté | — | Non retrouvé via API (supprimé ou removed) | — |
+
+**Totaux Discovery :** 22 posts visibles, ~134 commentaires, 7 subreddits avec signal exploitable.
+
+### .gaai Framework Posts (antérieurs à Discovery)
+
+| Subreddit | Score | Comments | Signal |
+|---|---|---|---|
+| **r/AIMemory** | **15** | 6 | Meilleur engagement. "Top learnings about memory?" = question de qualité |
+| **r/ContextEngineering** (v1) | **13** | 2 | "You should look at Claude Code's slash commands" — suggestion directe |
+| **r/opencodeCLI** | **12** | 1 | High score silencieux |
+| **r/ClaudeAI** (.gaai memory) | **9** | 10 | JimmyEatReality = user potentiel. MuscleLazy (axivo/claude) = projet voisin |
+| r/ClaudeAI (QoL update) | 3 | 3 | JimmyEatReality revient — engagement récurrent |
+| r/ContextEngineering (v2) | 1 | 0 | — |
+| r/ClaudeCode | 1 | 1 | — |
+| r/windsurf | 1 | 0 | — |
+| r/LLMDevs | 1 | 1 | Removed by moderator |
+
+**Totaux .gaai :** 9 posts, ~24 commentaires, score cumulé 56. Signal fort r/AIMemory + r/ContextEngineering.
 
 ---
 
@@ -452,6 +482,60 @@ Drop a short note about relevant experience and availability. No agencies — lo
 **Hypothèses :**
 - H12 ⚠️ : la question "est-ce qu'une plateforme spécialisée manque" est répondue différemment selon le segment. Enterprise : non. SMB : potentiellement oui.
 - H13 : l'argument "domain knowledge" valide que les experts généralistes ont du mal — confirme l'intérêt d'un matching par spécialité
+
+---
+
+### r/n8n_ai_agents — Détail commentaires (API extraction 24/02/2026)
+
+> Subreddit non prévu initialement — posté en remplacement de r/n8n (Règle 2 bloquée).
+
+**Thread :** "For those of you doing n8n consulting — how do you actually get qualified clients?"
+**Score: 7 | 9 commentaires**
+
+**Littlecutsie** (score: 2) — Signal clé H1/H2
+- "The biggest shift was we stopped selling 'n8n workflows' and started selling 'found time'"
+- "90% of inbound is just 'tire kickers' looking for a $50 fix"
+- "Our best clients come from targeting one specific mess, like messy CRM data"
+- Fred reply : "90% tire kickers is brutal — do you have a way to filter them before they reach you?"
+- **Hypothèses :** H1 ✅ (90% non qualifiés) H2 ✅ (triage manuel permanent) H5 ✅ ("one specific mess" = niche targeting works)
+- **Vocabulaire :** "found time" = outcome-based framing qui convertit. "tire kickers" = terme spontané dominant.
+
+**cockerspanielhere** (score: 1)
+- "I sold a chatbot, not even mentioned n8n" — outcome over tool
+
+---
+
+### r/aisolobusinesses — Données enrichies (API extraction 24/02/2026)
+
+**Thread :** "How much time per week do you spend on lead gen vs. actual client work?"
+**Score: 5 | 16 commentaires** (était noté "3 upvotes | 5 commentaires" — corrigé)
+
+**Verbatims clés ajoutés :**
+- **ViceCityVixen** (score: 2) : "30-40% on lead gen early on, then closer to 20% once referrals kicked in. Cold outreach was hit or miss; partnerships and niche positioning worked way better."
+- **workingover60** (score: 2) : "Maybe 16+ but that covers lead gen for myself and some of my clients"
+- **Tiny-Celery4942** (score: 1) : "30 to 40 percent of your time on lead gen, after referrals and content kick in it drops to 10 to 20 percent"
+- **JJCookieMonster** (score: 2) : "5 hours per week networking. I'm finding my ideal clients are unresponsive."
+
+**Signal consolidé :** Multiple confirmations indépendantes — lead gen = 20-40% du temps, plus tôt dans la carrière. Referrals + niche positioning = seuls leviers qui réduisent le ratio. Exactement le problème que Callibrate résout.
+
+---
+
+### r/freelance_forhire — Données enrichies (API extraction 24/02/2026)
+
+**Thread :** "[HIRING] AI Automation Consultant — CV screening & interview routing — n8n or Make — Budget: $800-1,500"
+**Score: 1 | 13 commentaires** (était noté "2 commentaires" — corrigé)
+
+**Analyse des 8 réponses d'experts :**
+- **knighto8o8** : "I can deliver in 10 hours... start immediately" — aucune question, aucun portfolio
+- **Jumpy_Draft7160** : "I can help you with that. Just sent you a message." — 1 phrase
+- **sourabhnanwani** : Seule réponse structurée — mentionne stack, décrit le workflow, montre de la compréhension. **Meilleur candidat du lot.**
+- **tusharmangla1120** : "send me resumes... I will send you top 20 candidates" — hors sujet complet
+- **Itchy_Willow_2642** : Réponse détaillée, mentionne avoir déjà construit un workflow similaire — 2e meilleur
+- **mbktemidayo** : Bonne réponse technique, montre un projet similaire
+- **Hefty_Piglet_112** : "Kindly check ur dm" + liste d'industries servies — formulaic
+- **HarjjotSinghh** : "this could finally make my cv skip all the fluff" — prospect, pas expert
+
+**Signal H1 massif :** Sur 8 répondants, 2-3 sont réellement qualifiés. Les autres envoient des réponses génériques sans scoper le projet. Confirme PathStoneAnalytics : "10-15% of that pool are real." Le ratio ici est ~25-37% (meilleur que Upwork car budget affiché = filtre naturel).
 
 ---
 
