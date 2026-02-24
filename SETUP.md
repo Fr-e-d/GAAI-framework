@@ -1,7 +1,11 @@
 # Callibrate Core — Setup Guide
 
 This guide documents all manual steps required to provision Cloudflare infrastructure
-after the initial `wrangler login`. Run these commands from the repo root.
+after the initial `wrangler login`. Run these commands from the repo root unless otherwise noted.
+
+> **Monorepo structure:** All Workers live under `workers/`. Core API is at `workers/backend/api/`,
+> matching engine at `workers/backend/matching-engine/`, posthog proxy at `workers/backend/posthog-proxy/`,
+> and satellites at `workers/frontend/satellites/`. `npm install` at root installs all workspace deps.
 
 ---
 
@@ -37,8 +41,8 @@ after the initial `wrangler login`. Run these commands from the repo root.
 | `callibrate-io-prod` | expert UI (Next.js) | production | *(separate repo)* |
 | `callibrate-ai-staging` | prospect UI (Next.js) | staging | *(separate repo)* |
 | `callibrate-ai-prod` | prospect UI (Next.js) | production | *(separate repo)* |
-| `callibrate-core-dev` | local dev | never deployed | `wrangler dev` |
-| `callibrate-satellite-dev` | satellite local dev | never deployed | `cd workers/satellite && wrangler dev` |
+| `callibrate-core-dev` | local dev | never deployed | `cd workers/backend/api && wrangler dev` (or `npm run dev:api` from root) |
+| `callibrate-satellite-dev` | satellite local dev | never deployed | `cd workers/frontend/satellites && wrangler dev` (or `npm run dev:satellite` from root) |
 
 ---
 
@@ -141,7 +145,7 @@ npx wrangler queues create callibrate-core-queue-lead-billing-prod
 npx wrangler queues create callibrate-core-queue-lead-billing-prod-dlq
 ```
 
-> DLQ routing is wired in `wrangler.toml` via `dead_letter_queue` on each consumer.
+> DLQ routing is wired in `workers/backend/api/wrangler.toml` via `dead_letter_queue` on each consumer.
 > The DLQ queues must still be created on Cloudflare (commands above).
 
 ---
@@ -149,15 +153,15 @@ npx wrangler queues create callibrate-core-queue-lead-billing-prod-dlq
 ## Step 3 — Create KV Namespaces
 
 Create one KV namespace per binding per environment. After running each command,
-Wrangler prints the namespace ID — copy it into `wrangler.toml` replacing the
+Wrangler prints the namespace ID — copy it into `workers/backend/api/wrangler.toml` replacing the
 corresponding `PLACEHOLDER_*` string.
 
 > Dev local reuses the staging KV namespace IDs — no separate dev namespaces to create.
 > After creating the staging namespaces below, copy their IDs into **both** the root
-> `[[kv_namespaces]]` block and the `[[env.staging.kv_namespaces]]` block in `wrangler.toml`.
+> `[[kv_namespaces]]` block and the `[[env.staging.kv_namespaces]]` block in `workers/backend/api/wrangler.toml`.
 
 KV namespaces are created with explicit names (not via `--env` auto-naming) to match the convention.
-Copy the returned ID into `wrangler.toml` for both the root block and the env-specific block.
+Copy the returned ID into `workers/backend/api/wrangler.toml` for both the root block and the env-specific block.
 
 ### Staging namespaces *(also used by local dev)*
 
@@ -192,7 +196,7 @@ npx wrangler kv namespace create "callibrate-core-kv-expert-pool-prod"
 # -> id into: [[env.production.kv_namespaces]] binding="EXPERT_POOL" id=
 ```
 
-After updating all IDs in `wrangler.toml`, no `PLACEHOLDER_*` strings should remain.
+After updating all IDs in `workers/backend/api/wrangler.toml`, no `PLACEHOLDER_*` strings should remain.
 
 ---
 
@@ -200,6 +204,8 @@ After updating all IDs in `wrangler.toml`, no `PLACEHOLDER_*` strings should rem
 
 Secrets are never hardcoded. Bind them per environment using `wrangler secret put`.
 You will be prompted to paste the value interactively (nothing is echoed to the terminal).
+
+> **Run from `workers/backend/api/`** (or add `--config workers/backend/api/wrangler.toml` from root).
 
 Find the values in the Supabase dashboard at:
 `https://supabase.com/dashboard/project/xiilmuuafyapkhflupqx/settings/api`
@@ -317,22 +323,23 @@ Reports are managed via Cloudflare DMARC Management.
 | `EMAIL_FROM_DOMAIN` | Sending subdomain for Resend | `send.callibrate.io` |
 | `EMAIL_REPLY_TO` | Reply-to address on all transactional emails | `support@callibrate.io` |
 
-These are set as `[vars]` in `wrangler.toml` (staging + production) and in `.dev.vars` for local development.
+These are set as `[vars]` in `workers/backend/api/wrangler.toml` (staging + production) and in `workers/backend/api/.dev.vars` for local development.
 
 ---
 
 ## Step 6 — Verify Local Dev
 
-Install dependencies (one-time):
+Install dependencies (one-time, from repo root — installs all workspaces):
 
 ```bash
 npm install
 ```
 
-Start local dev server:
+Start local Core API dev server:
 
 ```bash
-npx wrangler dev
+npm run dev:api
+# or: cd workers/backend/api && npx wrangler dev
 ```
 
 Expected output:
@@ -364,14 +371,14 @@ If `supabase` shows `"error"`, verify that `SUPABASE_URL` and `SUPABASE_ANON_KEY
 available in your local environment. For local dev set them via a `.dev.vars` file (gitignored):
 
 ```
-# .dev.vars  (never commit this file)
+# workers/backend/api/.dev.vars  (never commit this file)
 # Points to the staging Supabase project (shared with the staging environment)
 SUPABASE_URL=https://xiilmuuafyapkhflupqx.supabase.co
 SUPABASE_ANON_KEY=<your-anon-key>
 SUPABASE_SERVICE_KEY=<your-service-key>
 ```
 
-Wrangler automatically loads `.dev.vars` during `wrangler dev`.
+Wrangler automatically loads `.dev.vars` during `wrangler dev` (relative to the Worker directory).
 
 ---
 
@@ -383,7 +390,7 @@ Each satellite domain is configured via a row in the `satellite_configs` Supabas
 ### Satellite KV Namespaces
 
 Create one KV namespace per environment for satellite config caching.
-Copy the returned ID into `workers/satellite/wrangler.toml` replacing `PLACEHOLDER_*` strings.
+Copy the returned ID into `workers/frontend/satellites/wrangler.toml` replacing `PLACEHOLDER_*` strings.
 
 ```bash
 npx wrangler kv namespace create "callibrate-satellite-kv-config-staging"
@@ -396,8 +403,8 @@ npx wrangler kv namespace create "callibrate-satellite-kv-config-prod"
 ### Satellite Secrets
 
 ```bash
-# Staging (run from workers/satellite/)
-cd workers/satellite
+# Staging (run from workers/frontend/satellites/)
+cd workers/frontend/satellites
 npx wrangler secret put SUPABASE_URL --env staging
 # Paste: https://xiilmuuafyapkhflupqx.supabase.co
 
@@ -444,13 +451,12 @@ curl -X POST https://[satellite_domain]/admin/cache/purge \
 ### Satellite Local Dev
 
 ```bash
-cd workers/satellite
-npm install
-npx wrangler dev
+npm run dev:satellite
+# or: cd workers/frontend/satellites && npx wrangler dev
 # -> http://localhost:8787
 ```
 
-Create `workers/satellite/.dev.vars` for local development:
+Create `workers/frontend/satellites/.dev.vars` for local development:
 ```
 SUPABASE_URL=https://xiilmuuafyapkhflupqx.supabase.co
 SUPABASE_ANON_KEY=<your-anon-key>
@@ -525,28 +531,30 @@ The MCP server runs via `npx mcp-remote@latest` — no local installation requir
 `expert-pool-edge` is a D1 database that caches the expert pool at the edge for <5ms reads.
 It is synced from Supabase every 5 minutes via the `*/5 * * * *` cron trigger.
 
-### Create and provision (run from repo root)
+### Create and provision (run from `workers/backend/api/`)
 
 ```bash
+cd workers/backend/api
+
 # 1. Create the D1 database (staging)
 npx wrangler d1 create expert-pool-edge --env staging
-# Copy the returned database_id into wrangler.toml [[env.staging.d1_databases]] database_id=
+# Copy the returned database_id into workers/backend/api/wrangler.toml [[env.staging.d1_databases]] database_id=
 
 # 2. Apply the schema (staging)
 npx wrangler d1 execute expert-pool-edge --file=d1/expert-pool-edge.schema.sql --env staging
 
 # 3. Create the D1 database (production)
 npx wrangler d1 create expert-pool-edge --env production
-# Copy the returned database_id into wrangler.toml [[env.production.d1_databases]] database_id=
+# Copy the returned database_id into workers/backend/api/wrangler.toml [[env.production.d1_databases]] database_id=
 # Also update top-level [[d1_databases]] database_id= for wrangler dev
 
 # 4. Apply the schema (production)
 npx wrangler d1 execute expert-pool-edge --file=d1/expert-pool-edge.schema.sql --env production
 ```
 
-After updating the database IDs in `wrangler.toml`, deploy to staging:
+After updating the database IDs in `workers/backend/api/wrangler.toml`, deploy to staging:
 ```bash
-npx wrangler deploy --env staging
+npx wrangler deploy --env staging  # from workers/backend/api/
 ```
 
 The first cron run (`*/5 * * * *`) will trigger a full load of the expert pool into D1.
@@ -600,8 +608,7 @@ Extend the `CLOUDFLARE_API_TOKEN` GitHub secret to include `callibrate-posthog-p
 No pre-provisioning required (no KV, no Queues, no secrets). Install and deploy:
 
 ```bash
-cd workers/posthog-proxy
-npm install
+cd workers/backend/posthog-proxy
 npx wrangler deploy --env staging    # staging
 npx wrangler deploy --env production  # production
 ```
@@ -609,9 +616,8 @@ npx wrangler deploy --env production  # production
 ### Local Dev
 
 ```bash
-cd workers/posthog-proxy
-npm install
-npx wrangler dev
+npm run dev:proxy
+# or: cd workers/backend/posthog-proxy && npx wrangler dev
 # -> http://localhost:8787
 ```
 

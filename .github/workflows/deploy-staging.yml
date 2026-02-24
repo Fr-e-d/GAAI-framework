@@ -21,6 +21,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: deploy --env staging
+          workingDirectory: workers/backend/api
 
   deploy-satellite:
     runs-on: ubuntu-latest
@@ -31,15 +32,13 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: workers/satellite/package-lock.json
       - run: npm ci
-        working-directory: workers/satellite
       - name: Deploy callibrate-satellite (staging)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: deploy --env staging
-          workingDirectory: workers/satellite
+          workingDirectory: workers/frontend/satellites
 
   deploy-posthog-proxy:
     runs-on: ubuntu-latest
@@ -50,12 +49,10 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: workers/posthog-proxy/package-lock.json
       - run: npm ci
-        working-directory: workers/posthog-proxy
       - name: Deploy callibrate-posthog-proxy (staging)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: deploy --env staging
-          workingDirectory: workers/posthog-proxy
+          workingDirectory: workers/backend/posthog-proxy

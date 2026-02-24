@@ -18,13 +18,16 @@ jobs:
       - run: npm ci
       - name: Type check
         run: npx tsc --noEmit
+        working-directory: workers/backend/api
       - name: Run tests
         run: npx vitest run
+        working-directory: workers/backend/api
       - name: Deploy callibrate-core (production)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: deploy --env production
+          workingDirectory: workers/backend/api
 
   deploy-satellite:
     runs-on: ubuntu-latest
@@ -35,15 +38,13 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: workers/satellite/package-lock.json
       - run: npm ci
-        working-directory: workers/satellite
       - name: Deploy callibrate-satellite (production)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: deploy --env production
-          workingDirectory: workers/satellite
+          workingDirectory: workers/frontend/satellites
 
   deploy-posthog-proxy:
     runs-on: ubuntu-latest
@@ -54,12 +55,10 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: workers/posthog-proxy/package-lock.json
       - run: npm ci
-        working-directory: workers/posthog-proxy
       - name: Deploy callibrate-posthog-proxy (production)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: deploy --env production
-          workingDirectory: workers/posthog-proxy
+          workingDirectory: workers/backend/posthog-proxy
