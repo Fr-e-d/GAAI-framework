@@ -530,7 +530,7 @@ items:
     epic: E08
     title: "OAuth security — CSRF state token + PKCE (SEC-01, SEC-03)"
     priority: critical
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E08S01.story.md
     dependencies: []
     notes: "SEC-AUDIT-001: SEC-01 (CRITICAL) + SEC-03 (HIGH). OAuth state = plain expertId → CSRF. No PKCE. Random state token in SESSIONS KV + code_verifier/code_challenge. Blocks go-live."
