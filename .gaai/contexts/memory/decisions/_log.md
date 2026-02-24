@@ -20,6 +20,16 @@ updated_at: 2026-02-23
 
 ---
 
+### DEC-2026-02-24-71 — Mandatory PR merge to staging at end of delivery cycle
+
+**Context:** 19 PRs accumulated unmerged on staging over multiple delivery cycles. When batch-merged, cascading conflicts required 3 full rounds of resolution across all branches. Root causes: (1) delivery agent created PRs but never merged them, (2) story branches were stacked on previous stories instead of branching from staging, (3) hotspot files (`index.ts`, `wrangler.toml`, `env.ts`) modified by nearly every story guaranteed conflicts. Total remediation: ~60 conflict files resolved, 3 test fixes, 2+ hours of agent work.
+**Decision:** PR merge to staging becomes a mandatory final step of the delivery cycle. The delivery agent must: create PR → pass QA → merge PR → confirm CI. PRs must not be left open. Story branches must be created from `staging`, never from other story branches. A dedicated "merge agent" is NOT needed — this is a process fix within the existing delivery track.
+**Rationale:** The problem was not "who merges" but "when." Immediate merge after delivery keeps the conflict surface at exactly 1 PR (the current story) against a fresh staging. Accumulation is the enemy. A 4th sub-agent adds coordination overhead without addressing the root cause (branching strategy + merge timing).
+**Impact:** conventions.md updated (5 new rules). Delivery agent flow should be updated to include merge-to-staging as final step. No new agent needed.
+**Date:** 2026-02-24
+
+---
+
 ### DEC-2026-02-24-70 — Artefact directory structure: one dedicated subdirectory per type
 
 **Context:** Delivery artefacts (impl-report, qa-report, memory-delta) were scattered across wrong locations: root of `artefacts/`, inside `plans/`, and in a hybrid `reports/` catch-all folder. Root cause: all sub-agents (implementation, QA, micro-delivery), skills (coordinate-handoffs, memory-alignment-check), and README.artefacts.md hardcoded `reports/` as the single output directory. The filesystem had evolved to use dedicated subdirectories (`impl-reports/`, `qa-reports/`, `memory-deltas/`) but the agent instructions were never updated. The delivery.agent.md orchestration flow used abbreviated paths (no directory prefix), providing zero guidance.

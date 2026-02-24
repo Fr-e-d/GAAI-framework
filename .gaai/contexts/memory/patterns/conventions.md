@@ -43,6 +43,11 @@ updated_at: 2026-02-23
 - **PR optional for:** Tier 1/2 routine Stories (squash merge directly — solo founder MVP context)
 - **Cleanup after merge:** `git worktree remove ../{id}-workspace && git branch -d story/{id} && git push origin --delete story/{id}`
 - **Never:** force push · commit to `production` directly · leave stale worktrees or branches
+- **PR merge timing (DEC-2026-02-24-71):** PRs MUST be merged to staging as the final step of delivery — never left open to accumulate. 19 unmerged PRs caused cascading conflicts that required 3 rounds of resolution (2026-02-24 incident). Each merge changed staging, invalidating all other pending branches.
+- **Branch base rule:** Story branches MUST be created from `staging` (or `production` for hotfixes) — NEVER from another story branch. Stacking branches (E06S22 on E06S21 on E06S18) creates an implicit dependency chain that cascades conflicts.
+- **Conflict-minimizing merge order:** When multiple PRs must be merged, process sequentially in dependency order (oldest/leaf first). For each PR: (1) merge staging into branch, (2) push immediately, (3) merge PR immediately. Do NOT batch-resolve then batch-merge — each merge changes staging and invalidates subsequent resolutions.
+- **Shared hotspot files:** `src/index.ts`, `wrangler.toml`, `src/types/env.ts` are modified by nearly every story and are guaranteed conflict zones when PRs accumulate. This reinforces the merge-immediately rule.
+- **Worktree cleanup:** Always `git worktree remove` after use. Stale worktrees under `.claude/worktrees/` are picked up by vitest test discovery, causing phantom test failures.
 - **Ignored files:** `.DS_Store`, `temp/`, `.env`, `node_modules/`, `.wrangler/` — `.gitignore` in root
 
 ---
