@@ -559,7 +559,7 @@ items:
     epic: E08
     title: "Admin auth hardening + booking input validation (SEC-06, SEC-07)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E08S04.story.md
     dependencies: []
     notes: "SEC-AUDIT-001: SEC-06 (HIGH admin key) + SEC-07 (HIGH input validation). ADMIN_API_KEY dédié + timing-safe comparison. Zod validation sur confirm/reschedule."
