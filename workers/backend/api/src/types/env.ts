@@ -73,6 +73,9 @@ export interface Env {
   EMAIL_FROM_DOMAIN: string;
   EMAIL_REPLY_TO: string;
 
+  // Admin API key — dedicated secret for admin endpoints (E08S04, SEC-06)
+  ADMIN_API_KEY: string;
+
   // Analytics Engine (optional — no-op if binding missing)
   MATCHING_ANALYTICS?: AnalyticsEngineDataset;
 }

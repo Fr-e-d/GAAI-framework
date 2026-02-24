@@ -1,21 +1,23 @@
-// Tests for handleVectorizeReindex — updated for E06S24 Service Binding proxy architecture.
-// The handler now proxies to MATCHING_SERVICE instead of directly calling AI/Vectorize.
+// Tests for handleVectorizeReindex — updated for E08S04 (ADMIN_API_KEY) + E06S24 (Service Binding proxy).
+// AC7 (E08S04): wrong key → 401; correct ADMIN_API_KEY → proxied.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleVectorizeReindex } from './vectorize';
 import type { Env } from '../../types/env';
+
+const ADMIN_KEY = 'admin-api-key-secret';
 
 const mockMatchingService = {
   fetch: vi.fn(),
 };
 
 const mockEnvWithService = {
-  SUPABASE_SERVICE_KEY: 'service-key-secret',
+  ADMIN_API_KEY: ADMIN_KEY,
   MATCHING_SERVICE: mockMatchingService,
 } as unknown as Env;
 
 const mockEnvNoService = {
-  SUPABASE_SERVICE_KEY: 'service-key-secret',
+  ADMIN_API_KEY: ADMIN_KEY,
 } as unknown as Env;
 
 const mockCtx = {
@@ -28,7 +30,7 @@ beforeEach(() => {
 });
 
 describe('handleVectorizeReindex — POST /api/admin/vectorize/reindex', () => {
-  it('returns 401 when Authorization header is absent', async () => {
+  it('returns 401 when Authorization header is absent (AC7a)', async () => {
     const req = new Request('https://api.callibrate.io/api/admin/vectorize/reindex', {
       method: 'POST',
     });
@@ -37,7 +39,7 @@ describe('handleVectorizeReindex — POST /api/admin/vectorize/reindex', () => {
     expect(mockMatchingService.fetch).not.toHaveBeenCalled();
   });
 
-  it('returns 401 when Authorization header has wrong value', async () => {
+  it('returns 401 when Authorization header has wrong key (AC7a)', async () => {
     const req = new Request('https://api.callibrate.io/api/admin/vectorize/reindex', {
       method: 'POST',
       headers: { Authorization: 'Bearer wrong-key' },
@@ -50,13 +52,13 @@ describe('handleVectorizeReindex — POST /api/admin/vectorize/reindex', () => {
   it('returns 503 when MATCHING_SERVICE is not bound', async () => {
     const req = new Request('https://api.callibrate.io/api/admin/vectorize/reindex', {
       method: 'POST',
-      headers: { Authorization: 'Bearer service-key-secret' },
+      headers: { Authorization: `Bearer ${ADMIN_KEY}` },
     });
     const res = await handleVectorizeReindex(req, mockEnvNoService, mockCtx);
     expect(res.status).toBe(503);
   });
 
-  it('proxies to MATCHING_SERVICE /admin/reindex and returns its response', async () => {
+  it('proxies to MATCHING_SERVICE /admin/reindex when correct ADMIN_API_KEY (AC7b)', async () => {
     mockMatchingService.fetch.mockResolvedValue(
       new Response(JSON.stringify({ queued: 5 }), {
         status: 202,
@@ -66,7 +68,7 @@ describe('handleVectorizeReindex — POST /api/admin/vectorize/reindex', () => {
 
     const req = new Request('https://api.callibrate.io/api/admin/vectorize/reindex', {
       method: 'POST',
-      headers: { Authorization: 'Bearer service-key-secret' },
+      headers: { Authorization: `Bearer ${ADMIN_KEY}` },
     });
 
     const res = await handleVectorizeReindex(req, mockEnvWithService, mockCtx);

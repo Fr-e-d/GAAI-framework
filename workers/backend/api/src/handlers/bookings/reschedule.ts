@@ -1,7 +1,31 @@
+import { z } from 'zod';
 import { Env } from '../../types/env';
 import { createSql } from '../../lib/db';
 import { getAccessToken, gcalFreebusy, gcalPatchEvent, GcalApiError } from '../../lib/gcalClient';
 import type { BookingRow, ExpertRow } from '../../types/db';
+
+// AC5 (E08S04): Strict validation for reschedule — ISO-8601 datetimes, start < end, start in future
+const RescheduleBodySchema = z.object({
+  new_start_at: z.string().datetime({ message: 'new_start_at must be a valid ISO-8601 datetime' }),
+  new_end_at: z.string().datetime({ message: 'new_end_at must be a valid ISO-8601 datetime' }),
+}).superRefine((data, ctx) => {
+  const start = new Date(data.new_start_at);
+  const end = new Date(data.new_end_at);
+  if (start >= end) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'new_start_at must be before new_end_at',
+      path: ['new_start_at'],
+    });
+  }
+  if (start <= new Date()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'new_start_at must be in the future',
+      path: ['new_start_at'],
+    });
+  }
+});
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -24,20 +48,20 @@ export async function handleReschedule(
   if (booking.status !== 'confirmed') return json({ error: 'Booking is not confirmed' }, 409);
   if (!booking.gcal_event_id) return json({ error: 'No GCal event to reschedule' }, 409);
 
-  let body: unknown;
+  let rawBody: unknown;
   try {
-    body = await request.json();
+    rawBody = await request.json();
   } catch {
     return json({ error: 'Invalid JSON' }, 400);
   }
 
-  const { new_start_at, new_end_at } = body as Record<string, unknown>;
-  if (!new_start_at || !new_end_at) {
-    return json({ error: 'Missing required fields: new_start_at, new_end_at' }, 422);
+  // AC5 (E08S04): Strict Zod validation — invalid datetime, end ≤ start, or past start → 422
+  const parseResult = RescheduleBodySchema.safeParse(rawBody);
+  if (!parseResult.success) {
+    return json({ error: 'Validation error', details: parseResult.error.issues }, 422);
   }
 
-  const newStart = new_start_at as string;
-  const newEnd = new_end_at as string;
+  const { new_start_at: newStart, new_end_at: newEnd } = parseResult.data;
 
   // DB conflict check (excluding self)
   const conflicts = await sql<{ id: string }[]>`

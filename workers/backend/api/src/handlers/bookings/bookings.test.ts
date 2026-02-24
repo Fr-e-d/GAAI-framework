@@ -3,6 +3,7 @@ import { computeFreeSlots, DEFAULT_AVAILABILITY_RULES } from '../../lib/availabi
 import { handleHold } from './hold';
 import { handleConfirm } from './confirm';
 import { handleCancel } from './cancel';
+import { handleReschedule } from './reschedule';
 
 // ── Mock db ────────────────────────────────────────────────────────────────────
 
@@ -317,6 +318,149 @@ describe('handleConfirm', () => {
       const body = await response.json() as Record<string, string>;
       expect(body.error).toBe('slot_taken');
     }
+  });
+});
+
+// ── handleConfirm — input validation tests (AC7c, E08S04) ────────────────────
+
+describe('handleConfirm — input validation (E08S04)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns 422 when prospect_email is invalid (AC7c)', async () => {
+    const mockSql = vi.fn() as Mock;
+    // Booking fetch — held, not expired
+    mockSql.mockResolvedValueOnce([{
+      id: 'booking-1',
+      expert_id: 'expert-1',
+      prospect_id: 'prospect-1',
+      start_at: '2026-02-24T10:00:00Z',
+      end_at: '2026-02-24T10:20:00Z',
+      status: 'held',
+      held_until: '2999-01-01T00:00:00Z',
+      prep_token: 'token',
+      match_id: null,
+      duration_min: 20,
+    }]);
+    mockSql.mockResolvedValue([]);
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const request = new Request('https://test.workers.dev/api/bookings/booking-1/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prospect_name: 'Test', prospect_email: 'not-an-email' }),
+    });
+
+    const response = await handleConfirm(request, mockEnv as unknown as Parameters<typeof handleConfirm>[1], 'booking-1', mockCtx);
+    expect(response.status).toBe(422);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body.error).toBe('Validation error');
+  });
+
+  it('returns 422 when prospect_name is empty (AC7c)', async () => {
+    const mockSql = vi.fn() as Mock;
+    mockSql.mockResolvedValueOnce([{
+      id: 'booking-1',
+      expert_id: 'expert-1',
+      prospect_id: 'prospect-1',
+      start_at: '2026-02-24T10:00:00Z',
+      end_at: '2026-02-24T10:20:00Z',
+      status: 'held',
+      held_until: '2999-01-01T00:00:00Z',
+      prep_token: 'token',
+      match_id: null,
+      duration_min: 20,
+    }]);
+    mockSql.mockResolvedValue([]);
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const request = new Request('https://test.workers.dev/api/bookings/booking-1/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prospect_name: '', prospect_email: 'valid@test.com' }),
+    });
+
+    const response = await handleConfirm(request, mockEnv as unknown as Parameters<typeof handleConfirm>[1], 'booking-1', mockCtx);
+    expect(response.status).toBe(422);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body.error).toBe('Validation error');
+  });
+});
+
+// ── handleReschedule — input validation tests (AC7d, E08S04) ─────────────────
+
+describe('handleReschedule — input validation (E08S04)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns 422 when new_end_at is before new_start_at (AC7d)', async () => {
+    const mockSql = vi.fn() as Mock;
+    // Booking fetch — confirmed, has gcal_event_id
+    mockSql.mockResolvedValueOnce([{
+      id: 'booking-1',
+      expert_id: 'expert-1',
+      gcal_event_id: 'gcal-event-1',
+      meeting_url: null,
+      status: 'confirmed',
+      start_at: '2026-02-24T10:00:00Z',
+      end_at: '2026-02-24T10:20:00Z',
+    }]);
+    mockSql.mockResolvedValue([]);
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    // end_at is before start_at
+    const request = new Request('https://test.workers.dev/api/bookings/booking-1/reschedule', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        new_start_at: '2099-03-01T11:00:00Z',
+        new_end_at: '2099-03-01T10:00:00Z',
+      }),
+    });
+
+    const response = await handleReschedule(request, mockEnv as unknown as Parameters<typeof handleReschedule>[1], 'booking-1');
+    expect(response.status).toBe(422);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body.error).toBe('Validation error');
+  });
+
+  it('returns 422 when new_start_at is not a valid ISO-8601 datetime (AC7d)', async () => {
+    const mockSql = vi.fn() as Mock;
+    mockSql.mockResolvedValueOnce([{
+      id: 'booking-1',
+      expert_id: 'expert-1',
+      gcal_event_id: 'gcal-event-1',
+      meeting_url: null,
+      status: 'confirmed',
+      start_at: '2026-02-24T10:00:00Z',
+      end_at: '2026-02-24T10:20:00Z',
+    }]);
+    mockSql.mockResolvedValue([]);
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const request = new Request('https://test.workers.dev/api/bookings/booking-1/reschedule', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        new_start_at: 'not-a-date',
+        new_end_at: '2099-03-01T11:00:00Z',
+      }),
+    });
+
+    const response = await handleReschedule(request, mockEnv as unknown as Parameters<typeof handleReschedule>[1], 'booking-1');
+    expect(response.status).toBe(422);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body.error).toBe('Validation error');
   });
 });
 
