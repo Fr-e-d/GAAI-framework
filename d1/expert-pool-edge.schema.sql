@@ -1,6 +1,8 @@
 -- D1 schema for expert-pool-edge database (E06S23)
 -- Apply with: wrangler d1 execute expert-pool-edge-staging --file=d1/expert-pool-edge.schema.sql
 -- Apply with: wrangler d1 execute expert-pool-edge-prod --file=d1/expert-pool-edge.schema.sql
+-- Alt:        wrangler d1 execute expert-pool-edge --file=d1/expert-pool-edge.schema.sql --env staging
+-- Alt:        wrangler d1 execute expert-pool-edge --file=d1/expert-pool-edge.schema.sql --env production
 
 -- AC2: denormalized expert_pool table (read-only at query time — writes via cron sync)
 CREATE TABLE IF NOT EXISTS expert_pool (

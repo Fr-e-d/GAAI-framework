@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
-import { createServiceClient } from '../../lib/supabase';
+import { createSql } from '../../lib/db';
 import { checkRateLimit } from '../../lib/rateLimit';
+import { notifyExpertPoolDO } from '../../durable-objects/expertPoolDO';
+import type { ExpertRow } from '../../types/db';
+import { captureEvent } from '../../lib/posthog';
 
 const RegisterSchema = z.object({
   display_name: z.string().min(1, 'display_name is required').max(100),
@@ -15,7 +18,8 @@ const RegisterSchema = z.object({
 export async function handleRegister(
   request: Request,
   env: Env,
-  user: AuthUser
+  user: AuthUser,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   // AC6: Rate limiting
   const rateCheck = await checkRateLimit(request, env);
@@ -53,25 +57,20 @@ export async function handleRegister(
   }
 
   const { display_name, headline, bio, rate_min, rate_max } = parsed.data;
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
   // Insert expert row (Google Calendar OAuth layer wired in E06S10 — DEC-41)
-  const { data: expert, error } = await supabase
-    .from('experts')
-    .insert({
-      id: user.id,
-      display_name,
-      headline: headline ?? null,
-      bio: bio ?? null,
-      rate_min: rate_min ?? null,
-      rate_max: rate_max ?? null,
-    })
-    .select('id, display_name')
-    .single();
-
-  if (error) {
+  let expert: Pick<ExpertRow, 'id' | 'display_name'>;
+  try {
+    const [row] = await sql<Pick<ExpertRow, 'id' | 'display_name'>[]>`
+      INSERT INTO experts (id, display_name, headline, bio, rate_min, rate_max)
+      VALUES (${user.id}, ${display_name}, ${headline ?? null}, ${bio ?? null}, ${rate_min ?? null}, ${rate_max ?? null})
+      RETURNING id, display_name`;
+    if (!row) throw new Error('Insert failed');
+    expert = row;
+  } catch (err) {
     // AC4: Duplicate detection — Postgres unique violation
-    if (error.code === '23505') {
+    if ((err as { code?: string }).code === '23505') {
       return new Response(
         JSON.stringify({ error: 'Expert already registered' }),
         {
@@ -81,7 +80,7 @@ export async function handleRegister(
       );
     }
     return new Response(
-      JSON.stringify({ error: 'Registration failed', details: { message: error.message } }),
+      JSON.stringify({ error: 'Registration failed', details: { message: String(err) } }),
       {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -95,6 +94,46 @@ export async function handleRegister(
     expert_id: user.id,
     email: user.email ?? '',
   });
+
+  // AC5 (E06S25): Notify ExpertPoolDO — fire-and-forget, must NOT block response
+  notifyExpertPoolDO(env, ctx, {
+    id: user.id,
+    profile: {},
+    preferences: {},
+    rate_min: rate_min ?? null,
+    rate_max: rate_max ?? null,
+    composite_score: null,
+    total_leads: 0,
+    availability: null,
+  });
+
+  // AC4 (E06S24): Fire-and-forget embedding via MATCHING_SERVICE — failure must NOT block registration
+  if (env.MATCHING_SERVICE) {
+    ctx.waitUntil(
+      env.MATCHING_SERVICE.fetch(new Request('https://matching/embed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expert_id: user.id,
+          profile: {},
+          rate_min: rate_min ?? null,
+          rate_max: rate_max ?? null,
+          availability: null,
+        }),
+      })).catch((err) => console.error('register: MATCHING_SERVICE embed failed', err))
+    );
+  }
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${user.id}`,
+    event: 'expert.registered',
+    properties: {
+      has_headline: headline !== undefined && headline !== null,
+      has_bio: bio !== undefined && bio !== null,
+      rate_min: rate_min ?? null,
+      rate_max: rate_max ?? null,
+    },
+  }));
 
   // Return 201
   return new Response(

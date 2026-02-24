@@ -33,7 +33,7 @@ Typical tasks: bug fixes, typo corrections, single-line changes, dependency upda
 ```
 SPAWN   ← Orchestrator provides minimal context bundle
 EXECUTE ← Plans, implements, and verifies in single context window
-HANDOFF ← Writes combined contexts/artefacts/reports/{id}.micro-delivery-report.md
+HANDOFF ← Writes combined contexts/artefacts/delivery/{id}.micro-delivery-report.md
 DIE     ← Terminates; context window released
 ```
 
@@ -62,7 +62,7 @@ No planning skill invocation. For complexity ≤ 2, the plan is implicit in the 
 
 ## Handoff Artefact
 
-Writes to: `contexts/artefacts/reports/{id}.micro-delivery-report.md`
+Writes to: `contexts/artefacts/delivery/{id}.micro-delivery-report.md`
 
 Includes:
 - Files changed

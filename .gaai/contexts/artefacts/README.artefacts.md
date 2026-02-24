@@ -43,8 +43,12 @@ contexts/artefacts/
 ├── prd/                    ← Product Requirements Documents
 ├── epics/                  ← Epic artefacts
 ├── stories/                ← Story artefacts (mirrors backlog items)
-├── plans/                  ← Delivery execution plans
-├── reports/                ← QA reports, post-mortems, findings
+├── plans/                  ← Execution plans + plan-blocked artefacts
+├── impl-reports/           ← Implementation reports (+ specialist reports)
+├── qa-reports/             ← QA verdict reports
+├── memory-deltas/          ← Memory alignment delta reports (QA PASS only)
+├── delivery/               ← MicroDelivery combined reports (Tier 1)
+├── evaluations/            ← Approach evaluation artefacts
 ├── marketing/              ← Content artefacts: posts, campaigns, copy, observation logs, validated hypotheses
 └── strategy/               ← GTM plans, positioning, go-to-market artefacts
 ```
@@ -96,12 +100,29 @@ updated_at: YYYY-MM-DD
 - may be iterated freely
 - **execution notes, not strategy**
 
-### Reports (`reports/`)
+### Implementation Reports (`impl-reports/`)
 
-- capture results, findings, or observations
-- record execution outcomes
-- document failures or anomalies
-- never update backlog state or memory directly
+- record what was implemented and how
+- map changes to acceptance criteria
+- document rules applied and known risks
+- include specialist sub-agent outputs when applicable
+
+### QA Reports (`qa-reports/`)
+
+- capture QA verdict: PASS / FAIL / ESCALATE
+- per-criterion result with evidence
+- remediation attempts log when applicable
+
+### Memory Deltas (`memory-deltas/`)
+
+- produced by `memory-alignment-check` on QA PASS only
+- report confirmed, contradicted, and new knowledge candidates
+- never write to memory — informational only for Discovery
+
+### Delivery Reports (`delivery/`)
+
+- combined plan+implement+QA reports from MicroDelivery (Tier 1)
+- used for low-complexity stories only
 
 ### PRD (`prd/`)
 
