@@ -20,6 +20,26 @@ updated_at: 2026-02-23
 
 ---
 
+### DEC-2026-02-24-79 — .gaai origin story as narrative backbone for all content
+
+**Context:** Le founder a partagé l'histoire d'origine de .gaai : 6 semaines au Vietnam en digital detox (sa compagne a interdit le laptop), mais l'écosystème AI explosait (OpenClaw, Cowork, B-Mad, Ralph Wiggum). Depuis un iPhone 8 (très lent), il a lu des papiers scientifiques, suivi les releases Anthropic, condensé le state-of-the-art avec Gemini 3 via NotebookLM, fait challenger ses idées brutalement par ChatGPT 5.2, consigné tout dans Notion via MCP server. Construit sur AI-Governor-Framework (son premier OSS). Retour en Belgique → premier test avec Claude Code → résultats bien au-dessus des attentes → décision de valider sur un vrai projet (Callibrate) avant d'open-sourcer. Background : 10+ ans de dev autodidacte (des centaines d'heures de nuits), co-fondateur transport company 2015, program manager, "Swiss Army knife", persévérance + curiosité + painkillers not vitamins.
+**Decision:** Cette origin story devient le **narrative backbone** de tout le contenu (COMMS-001 mis à jour). Structure en 7 beats : qui suis-je → digital detox → research phase → assemblage → retour + premier test → décision de validation → les preuves. Nouvel Angle D ajouté à E01S05 DC1 : "My girlfriend banned my laptop for 6 weeks. I came back with a governance framework for AI agents." Nouveau DC7 : structurer le narrative arc en Discovery. Nouveau AC2b : origin story section = premier tiers du blog post (Golden Circle: WHY first).
+**Rationale:** L'histoire est le différenciateur ultime : authentique (iPhone 8, digital detox, girlfriend), impossible à copier, mémorable, et elle établit la crédibilité (10+ ans de dev, pas du vibe coding) tout en humanisant le builder. Chaque channel peut réutiliser cette histoire à des longueurs différentes. L'Angle D est probablement le hook le plus fort pour HN/Reddit — intrigant, humain, pas clickbait.
+**Impact:** E01S05 mis à jour (origin story dans Context, Angle D dans DC1, DC7 ajouté, AC2b ajouté). COMMS-001 mis à jour (nouvelle section "Storytelling Backbone" avec 7 beats + usage par canal).
+**Date:** 2026-02-24
+
+---
+
+### DEC-2026-02-24-78 — Communication & Publication Strategic Plan (COMMS-001)
+
+**Context:** Le build-in-public orchestré (DEC-77) et le flagship blog post (DEC-76, E01S05) nécessitent un plan de communication complet et actionnable. Besoin de définir : empathy maps pour tous les personas, stratégie canal par canal, axes éditoriaux, personal branding, stratégie de réponse aux commentaires, pipeline d'automatisation contenu, et gestion des risques — le tout dans un budget de 5h/semaine.
+**Decision:** Créer l'artefact COMMS-001.strategy.md — plan stratégique de communication en 7 parties : (1) Empathy maps pour 4 personas (P1 expert, P2 prospect PME, P3 dev/AI builder, P4 industry/recruteurs), grounded dans les hypothèses validées (H1, H2, H5, H7, H8 de E01S01). (2) Channel strategy matrix — X/Twitter (2-3 threads/semaine), Reddit (3-4 interactions/semaine), blog perso (Substack, 1x/mois), dev.to (cross-post), HN (3-4 Show HN total), LinkedIn (différé DEC-31), GitHub (différé post Gate 2). (3) Personal brand guidelines — IS/ISN'T, voice rules, mots interdits, bio templates, identité visuelle. (4) Launch orchestration calendar — Phase 1 → Gate 1 (flagship post J1-J7) → Phase 2 → Gate 2 (.gaai OSS) → Phase 3. (5) Comment response strategy — système 3-tier (2h/24h/never), templates par type, AI-assisted triage. (6) Content pipeline — weekly routine exacte (SAT→FRI time blocks), SKILL-CRS-021 flow, métriques à tracker vs vanité. (7) Risk mitigation — viral capacity plan, 3-at-bat rule pour flops, contrainte employeur, copycats.
+**Rationale:** Un plan actionnable permet de tenir le rythme 5h/semaine sans réfléchir chaque semaine à quoi poster/où/comment. L'automatisation via SKILL-CRS-021 élimine la création de contenu — le founder ne fait que la curation et la voix. Chaque élément du plan sert le funnel orchestré (DEC-77) en chauffant les 3 audiences en parallèle.
+**Impact:** Nouvel artefact `artefacts/strategy/COMMS-001.strategy.md`. Aucun changement code. Cross-référencé dans GTM-001. S'exécute en parallèle du dev Callibrate sans augmenter la charge.
+**Date:** 2026-02-24
+
+---
+
 ### DEC-2026-02-24-77 — Build-in-public comme stratégie de lancement orchestré + protection copycats
 
 **Context:** Le build-in-public initialement conçu comme contenu de visibilité (DEC-76, E01S05) peut servir un rôle plus stratégique : orchestrer le pré-lancement de TOUS les produits simultanément (Callibrate, .gaai OSS, plugin Cowork, .gaai Cloud). Chaque thread X, chaque blog post tease naturellement les lancements à venir, chauffant l'audience progressivement. Question soulevée sur les copycats : faut-il protéger le framework en restant stealth ?
