@@ -95,6 +95,97 @@ Immediate reaction: "I need to share this and open-source it." But the founder's
 
 ---
 
+## Part 0 — Writing Style Guide (AI-Assisted Human Voice)
+
+> Référence : recherche best practices 2025-2026 (Wikipedia Signs of AI Writing, Every.to, SurferSEO, Paul Graham analysis, Julia Evans analysis, HN/Reddit/dev.to channel studies). Appliqué à TOUT le contenu produit par SKILL-CRS-021 et édité par le founder.
+
+### The 3-Phase Workflow (Context Engineering > Prompt Engineering)
+
+1. **OBSERVE** — gather raw materials BEFORE writing: decision log entries, backlog data, test results, Reddit quotes, real metrics
+2. **DISTILL** — convert into narrative context: what happened, why it matters, what the reader gains
+3. **CRYSTALLIZE** — AI drafts with full context loaded, founder edits for voice and personality
+
+### 10 Non-Negotiable Writing Rules
+
+1. **Specific beats comprehensive.** "79 decisions in 4 days" not "many decisions made quickly."
+2. **Opinion beats hedging.** "This approach is wrong because..." not "While some may argue..."
+3. **Kill every AI tell word.** See kill list below. Search-and-destroy before publishing.
+4. **Front-load value.** First 25% of any piece delivers 50% of the insight.
+5. **Show the work.** Code, screenshots, data, real examples. Not theory.
+6. **Write for one reader.** Picture a specific person (P3 dev using Claude Code) and write to them.
+7. **Match the channel.** HN = technical depth. X = hooks. Reddit = community value. dev.to = tutorials.
+8. **The 90/10 rule.** Give value 90% of the time. Promote 10%.
+9. **Read it aloud.** If it sounds like a corporate press release, rewrite.
+10. **10-15% informality quota.** Contractions, sentence fragments, conversational asides. "It's" not "it is."
+
+### AI Writing Kill List (words/phrases to ELIMINATE)
+
+**Dead giveaway words:** delve, tapestry, landscape (as metaphor), beacon, crucible, labyrinth, gossamer, whimsical, enigma, virtuoso, symphony (metaphorical), treasure trove, bustling
+
+**Overused transitions (replace or delete):** Furthermore → [delete], Moreover → [delete], Additionally → "Also" or nothing, In conclusion → [stop writing before you need this], It's worth noting that → just state the thing, Subsequently → "Then", Consequently → "So", Nevertheless → "But" or "Still"
+
+**Inflated importance (deflate or cut):** "A testament to..." → say what it demonstrates. "Plays a vital/crucial/pivotal role" → say what it does. "Transformative" → say what it transformed, from what to what. "Watershed moment" → be specific about what changed.
+
+**Structural tells to avoid:**
+- Negative parallelism overuse ("It's not X, it's Y" — AI uses this every 3rd paragraph)
+- Trailing -ing clauses ("...highlighting the importance of..." — cut them)
+- "Despite its [positives], [subject] faces challenges..." — name the specific challenges or cut
+- The everything sandwich ("In today's fast-paced X..." → [DELETE ENTIRE SENTENCE])
+- Bolded bullet point headers ("**Scalability:** The system scales..." — let content speak)
+- Weasel attribution ("Industry reports suggest..." — name the source or cut)
+
+**The replacement test:** For every AI word, ask "What would I say to a colleague at a whiteboard?"
+- "Leverage AI capabilities" → "use AI"
+- "Navigate the complex landscape" → "figure out"
+- "A robust and scalable solution" → "it handles load well"
+- "Embark on a transformative journey" → [DELETE]
+
+### Channel-Specific Adaptation Rules
+
+**Hacker News:**
+- Zero marketing language. If it reads like a press release, it dies.
+- Factual title with a concrete detail: "79 decisions, 39 stories: governing AI agents to build a SaaS in 4 days"
+- Post link, add context as first comment explaining the backstory
+- Engage every reply with data and reasoning, never defensiveness
+- Post Tue/Wed 9am-12pm Pacific
+
+**X/Twitter threads:**
+- Hook tweet is everything. Write 10-15 versions before choosing.
+- Patterns that work: surprising stat, provocative question, bold claim, "I [did X] and [unexpected result]"
+- Each tweet = one clear point. One sentence per line where possible.
+- 5-15 tweets optimal. Under 5 feels thin; over 15 loses readers.
+- Include 1-2 visuals (screenshots, diagrams, before/after)
+- End with clear CTA in last tweet only
+
+**Reddit:**
+- 90/10 rule: 90% genuine community value, 10% own work
+- New accounts posting links = auto-flagged. 2-4 weeks warm-up minimum.
+- Roughen the writing style: shorter sentences, contractions, deliberate imperfection
+- TL;DR at the top for longer posts
+- Disclose affiliation: "Full disclosure: I built this"
+- Link to project at END, after providing value
+
+**dev.to:**
+- Cover image (mandatory for visibility)
+- Canonical URL if cross-posting from blog
+- Tutorial-style with code blocks and step-by-step
+- 4 tags, lead with most popular relevant tag
+
+### Techniques from the Best Technical Writers
+
+**Paul Graham style:**
+- Self-riffing: introduce a word, then call attention to it ("That word 'governance' is the key")
+- Deliberate chattiness: mix contractions with formal constructions
+- Relentless curation: every essay is 1,000 ideas narrowed to 13
+- Shorten sentences as you approach a key point, then pause
+
+**Julia Evans style:**
+- Narrate the journey from confusion to understanding
+- Wonder and curiosity as tone: "I just figured this out and it's wild"
+- Specific is better than comprehensive: deep dive on one thing beats survey of 50
+
+---
+
 ## Part 1 — Empathy Maps
 
 ### P1 — Expert AI/Automation (paying customer Callibrate)
