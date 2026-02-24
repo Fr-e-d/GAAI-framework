@@ -3,6 +3,7 @@ import type { Env } from './types/env';
 import type { SatelliteConfig } from './types/config';
 import { resolveConfig } from './middleware/config';
 import { renderLandingPage } from './pages/landing';
+import { applySecurityHeaders } from './lib/securityHeaders';
 import { renderPrivacyPolicy } from './pages/privacy';
 import { renderTermsOfService } from './pages/terms';
 import { renderRobotsTxt } from './pages/robots';
@@ -135,4 +136,9 @@ app.get('/', (c) => {
   });
 });
 
-export default app;
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const response = await app.fetch(request, env, ctx);
+    return applySecurityHeaders(response);
+  },
+};
