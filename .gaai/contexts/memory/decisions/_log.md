@@ -20,6 +20,36 @@ updated_at: 2026-02-24
 
 ---
 
+### DEC-2026-02-25-88 — Niche-down candidates evaluated: Real Estate #1, trigger = ≥30% domain concentration post-Gate 2
+
+**Context:** After deciding on AI-pure launch (DEC-85) with data-driven niche-down post-Gate 2, needed to pre-identify which IA×Domain combinations are viable candidates so the team knows what to look for in conversion data. 13 industry domains evaluated across 39 combinations (3 AI expertise × 13 domains). Scoring: 6 parameters (/30) — search volume, Reddit/community signals, market size, SMB accessibility, expert supply niche, Callibrate fit.
+**Decision:** (1) **#1 candidate: Real Estate × (Chatbot + Workflow) — score 26/30.** Only niche scoring well on ALL axes: SMB-native (agents are independents), habitué à payer pour leads, ROI mesurable (+40% conversion), short decision cycle, 87% adoption, $25K/mo revenue documented. (2) **Sleepers: Accounting (21/30)** — French e-invoicing mandate 2026-2027 creates time-bound urgency, 44% CAGR, but expert supply is near-zero. **Legal (20/30)** — $35K deals proven on r/n8n, confidentiality moat, but 20% SMB adoption and near-zero freelancer supply. (3) **Eliminated: Healthcare (21/30 but SMB accessibility 2/5), Insurance (18/30, enterprise-only), Financial Services (16/30, enterprise), HR (18/30, integrated tools dominate), E-commerce (23/30 but Callibrate fit 2/5 — self-serve tools dominate).** (4) **Trigger:** Niche-down activates when Phase 2 data shows ≥30% of V1/V3 prospects coming from same industry domain. (5) **Key insight:** Big TAM ≠ good Callibrate market. Enterprise-driven niches (healthcare $39B, fintech $30B) are structurally incompatible with 30-min consultation calls. Callibrate fit requires: SMB prospect, accustomed to paying for services, short decision cycle, measurable ROI.
+**Rationale:** Pre-identifying candidates avoids starting niche research from scratch post-Gate 2. The 30% concentration trigger prevents premature niche-down while ensuring signal isn't missed. Real Estate's dominance is structural: agents are the archetypal SMB buyer — they already pay for leads (Zillow, Realtor.com) and make fast decisions. The empathy maps reveal that Real Estate experts also match the supply-side ICP: they actively seek client acquisition channels and can charge 4-figure monthly retainers.
+**Impact:** MARKET-001 Section 11 created with full scoring matrix, empathy maps (prospect + expert for top 3), elimination rationale, and activation trigger. No backlog changes — niche-down satellites are not authorized until Gate 2 data. Conversion tracking should tag prospect industry domain when available.
+**Date:** 2026-02-25
+
+---
+
+### DEC-2026-02-25-87 — Content blueprint knowledge base: 7 sources cataloged, gap analysis complete
+
+**Context:** To design skills for the GAAI content blueprint ("The Content Architect for Blog Post & Social Media"), we needed a state-of-the-art knowledge base covering SEO, GEO, writing methodology, AI authenticity, social media, credibility, and agentic content systems. 7 research reports were collected, analyzed for GAAI compatibility (agent/skill separation, no duplicates, scope filtering), and cataloged.
+**Decision:** (1) Knowledge base created at `.gaai/contexts/memory/content/` with 7 sources totaling 118 AKUs. (2) Each source filtered for GAAI compatibility: 8 AKUs excluded (duplicates or incompatible), 5 reframed (agent→skill), 11 flagged as out-of-scope (infrastructure/strategy context only). (3) All sources enriched with GAAI skill mappings and cross-references. (4) Gap analysis completed: 5 skills ready for design (CNT-002, 003, 004, 006, 009), CNT-008-youtube-script has critical gap (blocking), CNT-001/005/007 have partial gaps (high priority), 5 transversal gaps identified. (5) Content blueprint architecture: skills live in `skills/content/`, no new agents (existing sub-agents orchestrate), single backlog with blueprint tags.
+**Rationale:** Separating knowledge collection from skill design prevents premature abstraction. Filtering for GAAI compatibility ensures the knowledge base doesn't introduce architectural violations (e.g., "content agents" that break the domain-agnostic agent model). Gap analysis before skill design prevents building on incomplete foundations.
+**Impact:** `memory/content/index.md` (source registry), `memory/content/sources/` (7 files), `memory/content/gap-analysis.md`. Next: fill critical gaps (CNT-008 YouTube, CNT-001 research methodology, CNT-007 transformation templates), then design skills for the 5 ready ones.
+**Date:** 2026-02-25
+
+---
+
+### DEC-2026-02-25-86 — GAAI modular blueprint architecture: domain skills as extractable packs, not separate frameworks
+
+**Context:** Question arose whether to create a separate framework for content production vs integrating into GAAI. Also whether to formalize the "Playbooks" concept from VISION-GAAI-CLOUD.md.
+**Decision:** (1) No separate framework — content is a skill domain within GAAI, not a parallel system. (2) Blueprint architecture: each domain (coding/, content/) gets a folder in `skills/` with a `blueprint.yaml` manifest. (3) Agents remain domain-agnostic — no "content agent." Existing sub-agents (Planning, Implementation, QA) handle all domains. (4) Single backlog with `blueprint:` tag per story. (5) Memory namespaced per blueprint (`memory/content/`, `memory/patterns/`). (6) Future open-source: each blueprint extractable as a `gaai-blueprint-{name}` pack. (7) Minimum Viable Blueprint approach: structure for extractability without building formal plugin system now.
+**Rationale:** Creating a separate framework would duplicate GAAI's structure (backlog, memory, agents, skills, artefacts) with no architectural benefit. The "Playbooks" concept from VISION-GAAI-CLOUD.md is the right vision but premature to formalize as a plugin system before Gate 2. Current approach: structure content skills so they're naturally extractable later. PostHog skills confirmed as `coding/` blueprint (output = code commits). Rule of thumb: if delivery produces a commit → `coding/`, if delivery produces a document → corresponding blueprint.
+**Impact:** Blueprint architecture defined. `skills/content/` to be created with blueprint.yaml when first skill is designed. No changes to agents, backlog format, or delivery daemon. COMMS-001, GTM-001, and existing content artefacts remain in place — new skills complement, don't replace.
+**Date:** 2026-02-25
+
+---
+
 ### DEC-2026-02-24-85 — Scope strategy: stay AI-pure at launch, niche-down by domain data-driven post-Gate 2
 
 **Context:** After selecting Tier 1 verticals (DEC-84), question arose: should Callibrate limit to AI expertise domains, niche-down (AI × industry domain), niche-up (broad IT consulting), or expand to non-AI expertise? Four approaches evaluated across 6 coherence dimensions.

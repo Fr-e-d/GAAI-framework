@@ -265,3 +265,110 @@ C'est précisément là que le matching engine Callibrate apporte le plus de val
 - Pas de 30 micro-satellites IA×Domaine au lancement — fragmentation prématurée.
 - Pas de consulting IT large — aucune différenciation vs Upwork/Toptal/Clutch.
 - Le niche-down est une conséquence de la data, pas une hypothèse a priori.
+
+---
+
+## 11. Niche-Down Candidates : IA × Domaine (DEC-88)
+
+> Recherche pré-Gate 2 : identifier les candidats viables pour le niche-down data-driven.
+> 13 domaines évalués × 3 expertises IA = 39 combinaisons. 8 viables, 5 éliminées d'emblée.
+
+### Méthodologie de scoring (/30)
+
+| Paramètre | Ce qu'il mesure |
+|-----------|----------------|
+| Volume de recherche (1-5) | Demand-side : volume mensuel US + FR pour les keywords IA×Domaine |
+| Signal Reddit/communauté (1-5) | Pain signals réels : threads, deals documentés, use cases spécifiques |
+| Taille marché (1-5) | TAM du segment IA dans ce domaine |
+| SMB accessibility (1-5) | Le prospect est-il un SMB qui achète via marketplace ? (vs enterprise/RFP) |
+| Expert supply niche (1-5) | Existe-t-il des freelancers spécialisés IA × ce domaine ? |
+| Callibrate fit (1-5) | Le modèle "consultation call payante" fonctionne-t-il pour ce cycle d'achat ? |
+
+### Classement
+
+| Rang | Niche-Down | Score /30 | Forces clés | Faiblesses fatales |
+|:---:|-----------|:---:|-------------|---------------------|
+| **1** | **Real Estate × (Chatbot + Workflow)** | **26** | SMB natif, habitué à payer pour leads, ROI mesurable (+40% conversion), cycle court, 87% adoption, $25K/mo revenue documenté, 9+ templates n8n | Plateformes PropTech existantes (chatbot standard) |
+| **2** | E-commerce × (Chatbot + Workflow) | 23 | Volume recherche max (15K+ US), SMB natif, 88% adoption | Self-serve tools dominent (Tidio $29/mo, Gorgias), Storetasker |
+| **3** | Healthcare × (Chatbot + Workflow) | 21 | Volume fort (8K-14K US), deals $12K, moat HIPAA, $380K/an économies | SMB accessibility faible (81% hôpitaux non-adopteurs), supply expert rare, cycle long |
+| **4** | Accounting × (Workflow + AI) | 21 | CAGR 44% (plus rapide), urgence facturation électronique FR 2026-2027, 76% cabinets FR utilisent IA | Supply expert nulle, SaaS (QuickBooks AI, Pennylane) absorbe la demande |
+| **5** | Legal × (Workflow + AI) | 20 | Deal $35K documenté (r/n8n), moat confidentialité (LLM self-hosted), 315% YoY croissance usage | Adoption 20% petits cabinets, supply expert quasi-nulle |
+| **6** | HR/Recrutement × (Workflow + Chatbot) | 18 | EU AI Act high-risk (conformité = demande consulting), $15K/placement ROI | Outils intégrés dominent (Workday, BambooHR), saisonnier |
+| **7** | Insurance × (Chatbot + AI) | 18 | CPC $16 = intent max, 8%→34% adoption en 1 an, marché $4.5B chatbot | Enterprise-only, pas de freelancers spécialisés |
+| **8** | Financial Services × (AI + Chatbot) | 16 | Marché $18-30B, high CPC | Enterprise, long sales cycle, pas de SMB |
+
+### Domaines éliminés
+
+| Domaine | Raison d'élimination |
+|---------|---------------------|
+| Education | Procurement institutionnel (ministère, rectorat), VC en contraction, 46% districts ont banni l'IA |
+| Construction | 78% non-adopteurs, 1.5% multi-process AI, le plus digitalement en retard |
+| Manufacturing | Enterprise + hardware/IoT, legacy systems, pas de marketplace fit |
+| Logistics | Enterprise-heavy, faibles signaux SMB communautaires |
+| Hospitality/Restaurant | Margins razor-thin, budgets $0-$500/mo max, adoption 26% |
+
+### Cartes d'empathie — Top 3
+
+#### Real Estate — Prospect (Agent immo / Directeur agence)
+
+| Dimension | |
+|-----------|---|
+| **Pense** | "Je rate des leads le soir et le weekend parce que personne ne répond." |
+| **Ressent** | Urgence (lead immo = périmable en heures), FOMO (87% des agences utilisent déjà l'IA) |
+| **Cherche** | "chatbot immobilier", "real estate chatbot", "automatiser relance prospects immobilier" |
+| **Pain** | 50% des appels = touristes, suivi relance manuel, réponse soir/weekend impossible |
+| **Gain espéré** | +40% conversion leads, 0 lead perdu, qualification automatique 24/7 |
+| **Budget** | $500-$2K/mois recurring (habitué à payer pour des leads) |
+
+#### Real Estate — Expert (Consultant Automatisation Immo)
+
+| Dimension | |
+|-----------|---|
+| **Pense** | "En immobilier on peut facilement facturer 4 chiffres par mois." |
+| **Ressent** | Opportunisme (87% adoption = marché chaud), confiance (ROI évident et mesurable) |
+| **Pain** | Agents immobiliers ne traînent pas sur Upwork → pas de canal d'acquisition |
+| **Gain espéré** | Un flux régulier de prospects immobiliers prêts à payer |
+
+#### Healthcare — Prospect (Directeur de clinique)
+
+| Dimension | |
+|-----------|---|
+| **Pense** | "Mes secrétaires passent 3h/jour au téléphone pour des RDV et vérifications d'assurance." |
+| **Ressent** | Frustration (patients le soir sans réponse), méfiance (HIPAA/RGPD santé = risque) |
+| **Pain** | Interruptions staff, vérification assurance 12min→2min automatisable, patients perdus le soir |
+| **Budget** | $99-$12K/projet (variable, dental chains au haut du range) |
+
+#### Healthcare — Expert
+
+| Dimension | |
+|-----------|---|
+| **Pain** | "Mon expertise HIPAA vaut 2× le tarif générique mais les plateformes ne différencient pas." |
+| **Gain espéré** | Des prospects pré-qualifiés qui comprennent le besoin conformité |
+
+#### Legal — Prospect (Associé cabinet 5-30 pers.)
+
+| Dimension | |
+|-----------|---|
+| **Pense** | "Je ne peux PAS utiliser ChatGPT avec les dossiers de mes clients. Il me faut du self-hosted." |
+| **Pain** | Revue documentaire = dizaines d'heures/semaine, intake client manuel, confidentialité |
+| **Budget** | $7K-$35K/projet (payback attendu en 1 trimestre) |
+
+#### Legal — Expert
+
+| Dimension | |
+|-----------|---|
+| **Pain** | "Les cabinets ne savent même pas que ça existe. Le problème c'est l'éducation, pas la compétition." |
+| **Gain espéré** | Un prospect qui a DÉJÀ compris qu'il a besoin d'un système IA privé |
+
+### Pattern stratégique identifié
+
+**Gros marché ≠ bon marché pour Callibrate.** Les niches avec les plus gros TAM (healthcare $39B, fintech $30B, insurance $18B) sont enterprise-driven → cycle d'achat 6 mois, comités, RFP. Un call de 30 min ne correspond pas.
+
+**Callibrate fit optimal :** Prospect = SMB/indépendant + habitué à payer pour services + cycle de décision court + ROI mesurable et immédiat.
+
+### Décision niche-down
+
+- **Premier candidat post-Gate 2 :** Real Estate × (Chatbot + Workflow) — si les données de conversion confirment le signal
+- **Sleepers à surveiller :** Accounting (vague facturation électronique FR 2026-2027), Legal (si supply expert se développe)
+- **Ne pas activer :** Healthcare, Insurance, Financial Services — enterprise procurement incompatible avec le modèle
+- **Trigger :** Le niche-down s'active quand les données Phase 2 montrent ≥30% des prospects V1/V3 provenant d'un même domaine
