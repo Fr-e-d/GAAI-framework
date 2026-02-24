@@ -4,7 +4,6 @@ import { AuthUser } from '../../middleware/auth';
 import { createSql } from '../../lib/db';
 import { checkRateLimit } from '../../lib/rateLimit';
 import { notifyExpertPoolDO } from '../../durable-objects/expertPoolDO';
-import { upsertExpertEmbedding } from '../../lib/vectorize';
 import type { ExpertRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
 
@@ -108,13 +107,22 @@ export async function handleRegister(
     availability: null,
   });
 
-  // AC3, AC7: Fire-and-forget embedding — failure must NOT block registration
-  upsertExpertEmbedding(env, ctx, user.id, {
-    profile: {},
-    rate_min: rate_min ?? null,
-    rate_max: rate_max ?? null,
-    availability: null,
-  });
+  // AC4 (E06S24): Fire-and-forget embedding via MATCHING_SERVICE — failure must NOT block registration
+  if (env.MATCHING_SERVICE) {
+    ctx.waitUntil(
+      env.MATCHING_SERVICE.fetch(new Request('https://matching/embed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expert_id: user.id,
+          profile: {},
+          rate_min: rate_min ?? null,
+          rate_max: rate_max ?? null,
+          availability: null,
+        }),
+      })).catch((err) => console.error('register: MATCHING_SERVICE embed failed', err))
+    );
+  }
 
   ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
     distinctId: `expert:${user.id}`,

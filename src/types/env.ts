@@ -23,10 +23,13 @@ export interface Env {
   // Optional: graceful degradation when not yet provisioned
   EXPERT_DB?: D1Database;
 
-  // Vectorize + Workers AI bindings (E06S21)
-  // Optional: graceful degradation when not yet provisioned
-  AI?: Ai;
-  VECTORIZE?: VectorizeIndex;
+  // Vectorize + Workers AI bindings
+  AI: Ai;
+  VECTORIZE: VectorizeIndex;
+
+  // Service Binding — callibrate-matching Worker (AC2, E06S24)
+  // Optional: falls back to local deterministic scoring when not bound (dev/test, AC6)
+  MATCHING_SERVICE?: Fetcher;
 
   // Durable Object — expert pool write coordinator (AC1–AC5, E06S25)
   // Optional: graceful degradation when not yet provisioned

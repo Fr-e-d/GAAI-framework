@@ -1,25 +1,19 @@
 {
-  "name": "callibrate-core",
+  "name": "callibrate-matching",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
     "deploy:staging": "wrangler deploy --env staging",
     "deploy:prod": "wrangler deploy --env production",
-    "type-check": "tsc --noEmit",
-    "test": "vitest run"
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.47.0",
-    "postgres": "^3.4.4",
-    "posthog-node": "^5.21.2",
-    "postgres": "^3.4.4",
-    "zod": "^4.3.6"
+    "postgres": "^3.4.4"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241022.0",
     "typescript": "^5.6.3",
-    "vitest": "^4.0.18",
     "wrangler": "^4.0.0"
   }
 }

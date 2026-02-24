@@ -3,7 +3,6 @@ import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
 import { createSql } from '../../lib/db';
 import { notifyExpertPoolDO } from '../../durable-objects/expertPoolDO';
-import { upsertExpertEmbedding, ExpertProfile } from '../../lib/vectorize';
 import type { ExpertRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
 
@@ -119,7 +118,7 @@ export async function handlePatchProfile(
     });
   }
 
-  const updated = rows[0]!;
+  const updated = rows[0] as ExpertRow;
 
   // AC5 (E06S25): Notify ExpertPoolDO — fire-and-forget, must NOT block response
   notifyExpertPoolDO(env, ctx, {
@@ -133,13 +132,22 @@ export async function handlePatchProfile(
     availability: updated.availability ?? null,
   });
 
-  // AC4, AC7: Fire-and-forget re-embedding — failure must NOT block profile update
-  upsertExpertEmbedding(env, ctx, expertId, {
-    profile: (updated.profile as ExpertProfile) ?? {},
-    rate_min: updated.rate_min ?? null,
-    rate_max: updated.rate_max ?? null,
-    availability: updated.availability ?? null,
-  });
+  // AC4 (E06S24): Fire-and-forget re-embedding via MATCHING_SERVICE — failure must NOT block profile update
+  if (env.MATCHING_SERVICE) {
+    ctx.waitUntil(
+      env.MATCHING_SERVICE.fetch(new Request('https://matching/embed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expert_id: expertId,
+          profile: updated.profile ?? {},
+          rate_min: updated.rate_min ?? null,
+          rate_max: updated.rate_max ?? null,
+          availability: updated.availability ?? null,
+        }),
+      })).catch((err) => console.error('profile: MATCHING_SERVICE embed failed', err))
+    );
+  }
 
   const fieldsUpdated: string[] = [];
   if (display_name !== undefined) fieldsUpdated.push('display_name');

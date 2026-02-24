@@ -19,10 +19,10 @@ import { scoreMatch, applyReliabilityModifier } from '../matching/score';
 import { signProspectToken, verifyProspectToken } from '../lib/jwt';
 import { loadExpertPool } from '../lib/expertPool';
 import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
-import { buildProspectEmbeddingText, queryVectorizeForProspect } from '../lib/vectorize';
 import { createSql } from '../lib/db';
 import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../types/db';
 import { captureEvent } from '../lib/posthog';
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -211,46 +211,32 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     weights = satellite.matching_weights as unknown as MatchingWeights;
   }
 
-  // AC1–AC3/AC7: Vectorize semantic pre-filter
-  // candidates = Vectorize top-K (AC2: topK ≥ pool size → no filtering loss when pool < 100)
-  // Fallback: all experts with deterministic-only scoring (AC7)
-  let candidates = experts;
-  let similarityMap = new Map<string, number>(); // expert_id → cosine similarity
-
-  if (experts.length > 0 && env.VECTORIZE && env.AI) {
+  // AC4 (E06S24): Delegate scoring to callibrate-matching via Service Binding (zero network hop)
+  // AC6: Fallback to local deterministic scoring when MATCHING_SERVICE not bound
+  if (env.MATCHING_SERVICE) {
     try {
-      const embeddingText = buildProspectEmbeddingText(requirements);
-      const embeddingResult = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
-        text: [embeddingText],
-      }) as { data: number[][] };
-      const vector = embeddingResult.data[0];
-
-      if (vector && vector.length > 0) {
-        // AC2: topK ≥ pool size ensures all experts returned when pool < 100
-        const topK = Math.max(experts.length, 100);
-        similarityMap = await queryVectorizeForProspect(env, vector, topK);
-
-        if (similarityMap.size > 0) {
-          // AC3: only score Vectorize candidates
-          const candidateIds = new Set(similarityMap.keys());
-          const filtered = experts.filter((e) => candidateIds.has(e.id));
-          if (filtered.length > 0) candidates = filtered;
-          // if filtered is empty (index not yet populated): fallback to all experts
-        }
+      const matchResp = await env.MATCHING_SERVICE.fetch(
+        new Request('https://matching/match', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prospect_id: prospect.id, satellite_id }),
+        })
+      );
+      if (matchResp.ok) {
+        const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
+        return jsonResponse({ prospect_id: prospect.id, token, token_expires_at: expiresAt });
       }
+      console.error('prospect submit: MATCHING_SERVICE returned', matchResp.status, '— falling back to local scoring');
     } catch (err) {
-      // AC7: Vectorize unavailable or error → score all experts, deterministic-only
-      console.error('prospect submit: Vectorize query failed, falling back to deterministic scoring', err);
-      candidates = experts;
-      similarityMap = new Map();
+      console.error('prospect submit: MATCHING_SERVICE.fetch failed, falling back to local scoring', err);
     }
   }
 
-  // AC3: scoreMatch() synchronously for each candidate
-  // B1 fix (AC9): insert maximum 20 match rows (sorted by score DESC)
+  // AC6 Fallback: local deterministic scoring (no Vectorize/AI — those bindings live in Matching Worker)
+  const similarityMap = new Map<string, number>();
   const scoredResults: { score: number }[] = [];
-  if (candidates.length > 0) {
-    const matchRows = candidates.map((expert) => {
+  if (experts.length > 0) {
+    const matchRows = experts.map((expert) => {
       const profile: ExpertProfile = {
         ...((expert.profile ?? {}) as ExpertProfile),
         rate_min: expert.rate_min,
@@ -290,7 +276,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     }
   }
 
-  // AC2/AC3: fire-and-forget analytics — does not block response
+  // Analytics for fallback path
   const topScore = scoredResults.length > 0 ? Math.max(...scoredResults.map((r) => r.score)) : 0;
   const meanScore =
     scoredResults.length > 0
@@ -305,7 +291,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     meanScore,
   });
 
-  // AC3: sign JWT token (24h TTL)
+  // Sign JWT token (24h TTL)
   const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
 
   ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {

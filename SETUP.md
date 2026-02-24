@@ -559,7 +559,6 @@ Cache API L1 (60s TTL) requires a **custom domain** — it is silently a no-op o
 
 On a miss, D1 serves the request in <5ms. Cache API misses are expected on first hit per datacenter.
 
-
 ## PostHog Proxy Worker — `callibrate-posthog-proxy` (E07S01)
 
 The PostHog proxy routes analytics events through a first-party subdomain (`ph.callibrate.io`),

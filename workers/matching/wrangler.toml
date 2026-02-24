@@ -1,0 +1,94 @@
+name = "callibrate-matching-dev"
+main = "src/index.ts"
+compatibility_date = "2024-10-22"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Default (dev) environment — local only, never deployed ───────────────────
+
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+localConnectionString = "postgresql://postgres:postgres@db.PLACEHOLDER.supabase.co:5432/postgres"
+
+[[kv_namespaces]]
+binding = "EXPERT_POOL"
+id = "68927a33fd9a46ec8b537a22a9cf2d20"
+preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
+
+[[d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge"
+database_id = "PLACEHOLDER_D1_DATABASE_ID"
+
+[ai]
+binding = "AI"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+[[analytics_engine_datasets]]
+binding = "MATCHING_ANALYTICS"
+dataset = "matching-metrics"
+
+# ── Staging ────────────────────────────────────────────────────────────────────
+
+[env.staging]
+name = "callibrate-matching-staging"
+
+[[env.staging.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+
+[[env.staging.kv_namespaces]]
+binding = "EXPERT_POOL"
+id = "68927a33fd9a46ec8b537a22a9cf2d20"
+
+[[env.staging.d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge"
+database_id = "PLACEHOLDER_D1_DATABASE_ID"
+
+[env.staging.ai]
+binding = "AI"
+
+[[env.staging.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+[[env.staging.analytics_engine_datasets]]
+binding = "MATCHING_ANALYTICS"
+dataset = "matching-metrics"
+
+# ── Production ─────────────────────────────────────────────────────────────────
+
+[env.production]
+name = "callibrate-matching-prod"
+
+[[env.production.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+
+[[env.production.kv_namespaces]]
+binding = "EXPERT_POOL"
+id = "af0c9c22c77b45ffbac4215009a295d4"
+
+[[env.production.d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge"
+database_id = "PLACEHOLDER_D1_DATABASE_ID"
+
+[env.production.ai]
+binding = "AI"
+
+[[env.production.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+[[env.production.analytics_engine_datasets]]
+binding = "MATCHING_ANALYTICS"
+dataset = "matching-metrics"
+
+# ── Secrets (set via wrangler secret put per env) ──────────────────────────────
+# SUPABASE_URL          — for admin reindex auth validation
+# SUPABASE_SERVICE_KEY  — for admin reindex auth validation
