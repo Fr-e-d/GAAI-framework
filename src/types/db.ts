@@ -11,6 +11,8 @@ export interface ExpertRow {
   composite_score: number | null;
   created_at: string | null;
   credit_balance: number;
+  max_lead_price: number | null;
+  spending_limit: number | null;
   display_name: string | null;
   gcal_access_token: string | null;
   gcal_connected: boolean | null;
@@ -137,4 +139,15 @@ export interface LeadEvaluationRow {
   lead_quality_score: number | null;
   notes: string | null;
   submitted_at: string | null;
+}
+
+export interface CreditTransactionRow {
+  id: string;
+  expert_id: string;
+  type: string;
+  amount: number;
+  lead_id: string | null;
+  description: string | null;
+  balance_after: number;
+  created_at: string | null;
 }

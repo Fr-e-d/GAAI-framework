@@ -52,6 +52,9 @@ export async function consumeEmailNotifications(
         case 'expert.billing.payment_failed':
           // TODO(E06S34+): implement payment failed email — stub acks for now
           break;
+        case 'expert.billing.lead_missed':
+          // TODO(E06S34+): implement missed lead notification email — stub acks for now
+          break;
         default: {
           const exhaustiveCheck: never = body;
           console.warn('email-notifications: unknown message type', (exhaustiveCheck as EmailNotificationMessage & { type: string }).type);

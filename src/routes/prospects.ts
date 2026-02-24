@@ -22,6 +22,8 @@ import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
 import { createSql } from '../lib/db';
 import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../types/db';
 import { captureEvent } from '../lib/posthog';
+import { calculateLeadPrice } from '../lib/pricing';
+import { loadBillingData, applyBillingFilters } from '../lib/billingFilter';
 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -223,6 +225,29 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
         })
       );
       if (matchResp.ok) {
+        const matchBody = await matchResp.json() as {
+          computed: number;
+          top_matches: unknown[];
+          billing_excluded?: { expert_id: string; reason: string }[];
+        };
+        const billingExcluded = matchBody.billing_excluded ?? [];
+        if (billingExcluded.length > 0) {
+          const lpResult = calculateLeadPrice(
+            requirements.budget_range?.max ?? null,
+            { budget_max: requirements.budget_range?.max ?? null }
+          );
+          for (const ex of billingExcluded) {
+            ctx.waitUntil(
+              env.EMAIL_NOTIFICATIONS.send({
+                type: 'expert.billing.lead_missed',
+                expert_id: ex.expert_id,
+                reason: ex.reason as 'insufficient_balance' | 'max_lead_price_exceeded' | 'spending_limit_reached',
+                prospect_vertical: satellite_id,
+                budget_tier: lpResult.tier,
+              })
+            );
+          }
+        }
         const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
         return jsonResponse({ prospect_id: prospect.id, token, token_expires_at: expiresAt });
       }
@@ -233,10 +258,39 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
   }
 
   // AC6 Fallback: local deterministic scoring (no Vectorize/AI — those bindings live in Matching Worker)
+
+  // AC1: calculate leadPrice once
+  const budgetMax = requirements.budget_range?.max ?? null;
+  const lpResultFallback = calculateLeadPrice(budgetMax, { budget_max: budgetMax });
+  const leadPrice = lpResultFallback.amount;
+
+  // AC2–AC4: apply billing filter
+  const billingMapFallback = await loadBillingData(env, experts.map((e) => e.id));
+  const { eligible, excluded: billingExcludedFallback } = applyBillingFilters(experts, billingMapFallback, leadPrice);
+
+  // AC6: fire-and-forget notifications
+  for (const ex of billingExcludedFallback) {
+    ctx.waitUntil(
+      env.EMAIL_NOTIFICATIONS.send({
+        type: 'expert.billing.lead_missed',
+        expert_id: ex.expert_id,
+        reason: ex.reason,
+        prospect_vertical: satellite_id,
+        budget_tier: lpResultFallback.tier,
+      })
+    );
+  }
+
+  // AC7: all excluded → still return token (prospect was submitted successfully)
+  if (eligible.length === 0) {
+    const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
+    return jsonResponse({ prospect_id: prospect.id, token, token_expires_at: expiresAt });
+  }
+
   const similarityMap = new Map<string, number>();
   const scoredResults: { score: number }[] = [];
-  if (experts.length > 0) {
-    const matchRows = experts.map((expert) => {
+  if (eligible.length > 0) {
+    const matchRows = eligible.map((expert) => {
       const profile: ExpertProfile = {
         ...((expert.profile ?? {}) as ExpertProfile),
         rate_min: expert.rate_min,
@@ -286,7 +340,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     endpoint: '/api/prospects/submit',
     satelliteId: satellite_id,
     latencyMs: Date.now() - startTime,
-    poolSize: experts.length,
+    poolSize: eligible.length,
     topScore,
     meanScore,
   });
