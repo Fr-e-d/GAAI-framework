@@ -33,6 +33,36 @@ function redirect(url: string): Response {
   });
 }
 
+// ── PKCE + CSRF state helpers ──────────────────────────────────────────────────
+
+function generateStateToken(): string {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function base64urlEncode(buffer: ArrayBuffer | Uint8Array): string {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  let str = '';
+  for (const byte of bytes) {
+    str += String.fromCharCode(byte);
+  }
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function generateCodeVerifier(): string {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return base64urlEncode(arr);
+}
+
+async function generateCodeChallenge(codeVerifier: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(codeVerifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return base64urlEncode(digest);
+}
+
 // ── AC1: GET /api/experts/:id/gcal/auth-url ──────────────────────────────────
 
 export async function handleGcalAuthUrl(
@@ -48,6 +78,22 @@ export async function handleGcalAuthUrl(
 
   if (!data) return notFound();
 
+  // AC1: Generate cryptographically random CSRF state token (32 bytes, hex-encoded = 64 chars)
+  const stateToken = generateStateToken();
+
+  // AC2: Generate PKCE code_verifier and code_challenge
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+  // AC1 + AC3: Store state token in SESSIONS KV with TTL 600s; value includes expert_id and code_verifier
+  await env.SESSIONS.put(
+    `oauth-state:${stateToken}`,
+    JSON.stringify({ expert_id: expertId, code_verifier: codeVerifier }),
+    { expirationTtl: 600 }
+  );
+
+  // AC6: state param is the random token, NOT expertId
+  // AC2: code_challenge and code_challenge_method=S256 included in auth URL
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
     redirect_uri: `${env.WORKER_BASE_URL}/api/gcal/callback`,
@@ -55,7 +101,9 @@ export async function handleGcalAuthUrl(
     scope: 'openid email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly',
     access_type: 'offline',
     prompt: 'consent',
-    state: expertId,
+    state: stateToken,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
   });
 
   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
@@ -77,7 +125,14 @@ export async function handleGcalCallback(
   if (!state) return redirect('/onboarding/gcal-error?reason=invalid_state');
   if (!code) return redirect('/onboarding/gcal-error?reason=no_code');
 
-  const expertId = state;
+  // AC4: Look up state token in SESSIONS KV
+  const kvValue = await env.SESSIONS.get(`oauth-state:${state}`);
+  if (!kvValue) return redirect('/onboarding/gcal-error?reason=invalid_state');
+
+  // AC4: Delete immediately (one-time use)
+  await env.SESSIONS.delete(`oauth-state:${state}`);
+
+  const { expert_id: expertId, code_verifier: codeVerifier } = JSON.parse(kvValue) as { expert_id: string; code_verifier: string };
 
   const sql = createSql(env);
   const [expert] = await sql<Pick<ExpertRow, 'id'>[]>`SELECT id FROM experts WHERE id = ${expertId}`;
@@ -86,7 +141,7 @@ export async function handleGcalCallback(
     return redirect('/onboarding/gcal-error?reason=expert_not_found');
   }
 
-  // Exchange code for tokens
+  // AC5: Exchange code for tokens — includes code_verifier for PKCE
   const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -96,6 +151,7 @@ export async function handleGcalCallback(
       client_secret: env.GOOGLE_CLIENT_SECRET,
       redirect_uri: `${env.WORKER_BASE_URL}/api/gcal/callback`,
       grant_type: 'authorization_code',
+      code_verifier: codeVerifier,
     }).toString(),
   });
 
