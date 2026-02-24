@@ -231,6 +231,11 @@ npx wrangler secret put OPENAI_API_KEY --env staging
 npx wrangler secret put PROSPECT_TOKEN_SECRET --env staging
 # Already set — skip if already done
 # openssl rand -base64 32 | npx wrangler secret put PROSPECT_TOKEN_SECRET --env staging
+
+# Admin API key for POST /api/admin/vectorize/reindex (E08S04, SEC-06)
+# Generate: openssl rand -hex 32
+npx wrangler secret put ADMIN_API_KEY --env staging
+# Paste: (32-byte random hex — keep this private)
 ```
 
 ### Production secrets
@@ -244,6 +249,7 @@ npx wrangler secret put PROSPECT_TOKEN_SECRET --env staging
 # npx wrangler secret put SUPABASE_ANON_KEY --env production       # (deferred to launch)
 # npx wrangler secret put SUPABASE_SERVICE_KEY --env production    # (deferred to launch)
 # npx wrangler secret put OPENAI_API_KEY --env production              # (deferred to launch)
+# npx wrangler secret put ADMIN_API_KEY --env production           # (deferred to launch — openssl rand -hex 32)
 
 ```
 

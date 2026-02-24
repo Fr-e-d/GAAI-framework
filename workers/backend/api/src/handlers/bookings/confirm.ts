@@ -1,8 +1,16 @@
+import { z } from 'zod';
 import { Env } from '../../types/env';
 import { createSql } from '../../lib/db';
 import { getAccessToken, gcalFreebusy, gcalInsertEvent, GcalApiError } from '../../lib/gcalClient';
 import type { BookingRow, ExpertRow, ProspectRow, SatelliteConfigRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
+
+// AC3/AC4 (E08S04): Strict input validation for booking confirmation
+const ConfirmBodySchema = z.object({
+  prospect_name: z.string().min(1).max(255),
+  prospect_email: z.string().email(),
+  description: z.string().optional(),
+});
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -30,17 +38,19 @@ export async function handleConfirm(
     return json({ error: 'Hold has expired' }, 410);
   }
 
-  let body: unknown;
+  let rawBody: unknown;
   try {
-    body = await request.json();
+    rawBody = await request.json();
   } catch {
     return json({ error: 'Invalid JSON' }, 400);
   }
 
-  const { prospect_name, prospect_email, description } = body as Record<string, unknown>;
-  if (!prospect_name || !prospect_email) {
-    return json({ error: 'Missing required fields: prospect_name, prospect_email' }, 422);
+  // AC3/AC4 (E08S04): Strict Zod validation — invalid email or name → 422
+  const parseResult = ConfirmBodySchema.safeParse(rawBody);
+  if (!parseResult.success) {
+    return json({ error: 'Validation error', details: parseResult.error.issues }, 422);
   }
+  const { prospect_name, prospect_email, description } = parseResult.data;
 
   // Fetch expert
   const [expert] = await sql<Pick<ExpertRow, 'gcal_email' | 'gcal_access_token' | 'gcal_token_expiry_at' | 'display_name'>[]>`
@@ -77,7 +87,7 @@ export async function handleConfirm(
   }
 
   // Fetch prospect requirements for event description
-  let eventDescription = typeof description === 'string' ? description : '';
+  let eventDescription = description ?? '';
   let prepUrl = `${env.WORKER_BASE_URL}/prep/${booking.prep_token}`;
 
   try {
@@ -121,7 +131,7 @@ export async function handleConfirm(
         end: { dateTime: booking.end_at!, timeZone: 'UTC' },
         attendees: [
           { email: expert.gcal_email },
-          { email: prospect_email as string },
+          { email: prospect_email },
         ],
         conferenceData: {
           createRequest: {
@@ -142,8 +152,8 @@ export async function handleConfirm(
 
   // Update booking
   await sql`UPDATE bookings SET status = 'confirmed', gcal_event_id = ${gcalResult.eventId},
-    meeting_url = ${gcalResult.meetingUrl}, prospect_name = ${prospect_name as string},
-    prospect_email = ${prospect_email as string}, description = ${eventDescription},
+    meeting_url = ${gcalResult.meetingUrl}, prospect_name = ${prospect_name},
+    prospect_email = ${prospect_email}, description = ${eventDescription},
     confirmed_at = ${new Date().toISOString()} WHERE id = ${bookingId}`;
 
   // AC5: Push queue messages
