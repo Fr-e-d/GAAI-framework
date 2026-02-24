@@ -8,8 +8,11 @@ mode = "smart"
 
 [[hyperdrive]]
 binding = "HYPERDRIVE"
+# ⚠️ REPLACE with real Hyperdrive config ID after running (E06S27 AC1):
+#   npx wrangler hyperdrive create callibrate-core-hyperdrive-staging \
+#     --connection-string "postgresql://postgres:[PASSWORD]@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
 id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
-localConnectionString = "postgresql://postgres:postgres@db.PLACEHOLDER.supabase.co:5432/postgres"
+localConnectionString = "postgresql://postgres:postgres@db.xiilmuuafyapkhflupqx.supabase.co:5432/postgres"
 
 # ── Default (dev) environment — local only, never deployed ───────────────────
 # Binds to staging remote resources (queues, KV, Supabase).
@@ -65,26 +68,29 @@ preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
-# AC1: D1 edge database for expert pool (expert-pool-edge)
-# Human action required: wrangler d1 create expert-pool-edge --env staging
-# Then: wrangler d1 execute expert-pool-edge --file=d1/expert-pool-edge.schema.sql --env staging
+# D1 edge database for expert pool — provisioned E06S27
 [[d1_databases]]
 binding = "EXPERT_DB"
-database_name = "expert-pool-edge"
+database_name = "expert-pool-edge-staging"
 database_id = "7d8ce9de-71ac-482f-8e3e-5c023729fe8f"
 
-# Workers AI binding
+# Workers AI binding (E06S21)
 [ai]
 binding = "AI"
 
-# Vectorize index binding
+# Vectorize index binding (E06S21) — index provisioned E06S27
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "expert-profiles"
 
+# Rate Limiter (E06S20)
+[[rate_limiting]]
+binding = "RATE_LIMITER"
+namespace_id = 1001
+simple = { limit = 30, period = 60 }
+
 # Durable Object — ExpertPoolDO write coordinator (E06S25)
 # AC4: singleton via idFromName('expert-pool-coordinator')
-# Human action required: class migration auto-applied on first deploy
 [[durable_objects.bindings]]
 name = "EXPERT_POOL_DO"
 class_name = "ExpertPoolDO"
@@ -93,11 +99,6 @@ class_name = "ExpertPoolDO"
 [[migrations]]
 tag = "v1"
 new_classes = ["ExpertPoolDO"]
-
-[[rate_limiting]]
-binding = "RATE_LIMITER"
-namespace_id = 1001
-simple = { limit = 30, period = 60 }
 
 # CF Workflows (top-level only — not per-env; isolation via separate Worker scripts)
 [[workflows]]
@@ -134,6 +135,11 @@ FLAG_WINDOW_MS = "60000"
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "cc93b8f0e9554e4f8c1dbd9ad83688f5"
+
+[[env.staging.hyperdrive]]
+binding = "HYPERDRIVE"
+# ⚠️ REPLACE after creating Hyperdrive config (E06S27 AC1)
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
 
 [[env.staging.queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-staging"
@@ -181,16 +187,17 @@ id = "68927a33fd9a46ec8b537a22a9cf2d20"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
+# D1 edge database — provisioned E06S27
 [[env.staging.d1_databases]]
 binding = "EXPERT_DB"
-database_name = "expert-pool-edge"
+database_name = "expert-pool-edge-staging"
 database_id = "7d8ce9de-71ac-482f-8e3e-5c023729fe8f"
 
-# Workers AI binding
+# Workers AI binding (E06S21)
 [env.staging.ai]
 binding = "AI"
 
-# Vectorize index binding
+# Vectorize index binding (E06S21)
 [[env.staging.vectorize]]
 binding = "VECTORIZE"
 index_name = "expert-profiles"
@@ -205,6 +212,7 @@ service = "callibrate-matching-staging"
 name = "EXPERT_POOL_DO"
 class_name = "ExpertPoolDO"
 
+# Rate Limiter (E06S20)
 [[env.staging.rate_limiting]]
 binding = "RATE_LIMITER"
 namespace_id = 1002
@@ -225,6 +233,7 @@ EMAIL_REPLY_TO = "support@callibrate.io"
 
 [[env.production.hyperdrive]]
 binding = "HYPERDRIVE"
+# ⚠️ REPLACE at launch with production Hyperdrive config ID
 id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
 
 [[env.production.queues.consumers]]
@@ -273,16 +282,17 @@ id = "af0c9c22c77b45ffbac4215009a295d4"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
+# D1 edge database — provisioned E06S27
 [[env.production.d1_databases]]
 binding = "EXPERT_DB"
-database_name = "expert-pool-edge"
+database_name = "expert-pool-edge-prod"
 database_id = "ab015247-cecc-4f0f-a56a-474f73055a78"
 
-# Workers AI binding
+# Workers AI binding (E06S21)
 [env.production.ai]
 binding = "AI"
 
-# Vectorize index binding
+# Vectorize index binding (E06S21)
 [[env.production.vectorize]]
 binding = "VECTORIZE"
 index_name = "expert-profiles"
@@ -297,6 +307,7 @@ service = "callibrate-matching-prod"
 name = "EXPERT_POOL_DO"
 class_name = "ExpertPoolDO"
 
+# Rate Limiter (E06S20)
 [[env.production.rate_limiting]]
 binding = "RATE_LIMITER"
 namespace_id = 1003
