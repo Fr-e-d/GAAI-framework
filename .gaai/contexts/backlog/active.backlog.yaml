@@ -559,10 +559,12 @@ items:
     epic: E08
     title: "Admin auth hardening + booking input validation (SEC-06, SEC-07)"
     priority: high
-    status: in_progress
+    status: done
+    started_at: "2026-02-24T20:00:00+01:00"
+    completed_at: "2026-02-24T21:03:00+01:00"
     artefact: contexts/artefacts/stories/E08S04.story.md
     dependencies: []
-    notes: "SEC-AUDIT-001: SEC-06 (HIGH admin key) + SEC-07 (HIGH input validation). ADMIN_API_KEY dédié + timing-safe comparison. Zod validation sur confirm/reschedule."
+    notes: "DONE 2026-02-24. QA PASS (first cycle). All 8 ACs met. ADMIN_API_KEY in Env + handleVectorizeReindex. HMAC-based timing-safe comparison (as CryptoKey cast for TS). Zod ConfirmBodySchema (email+name→422) + RescheduleBodySchema (datetime+temporal→422). 331/331 vitest. PR#35 squash-merged → staging. ⚠️ Human action required: openssl rand -hex 32 | npx wrangler secret put ADMIN_API_KEY --env staging (and production at launch)."
 
   - id: E08S05
     epic: E08
