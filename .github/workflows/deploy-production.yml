@@ -16,6 +16,10 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Run tests
+        run: npx vitest run
       - name: Deploy callibrate-core (production)
         uses: cloudflare/wrangler-action@v3
         with:
