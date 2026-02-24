@@ -125,6 +125,8 @@ preview_urls = true
 WORKER_BASE_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
 EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
+SURVEY_DELAY_7D_MS = "60000"
+SURVEY_DELAY_38D_MS = "120000"
 # Production TURNSTILE_SECRET_KEY must be set via: wrangler secret put TURNSTILE_SECRET_KEY --env production
 TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA"
 # Staging acceleration: lead flag window = 1 minute (production default: 7 days)

@@ -265,7 +265,7 @@ async function sendSurveyEmail(
     prospectEmail = prospect.email;
   }
 
-  const token = await signSurveyToken(body.booking_id, body.prospect_id, env.PROSPECT_TOKEN_SECRET);
+  const token = await signSurveyToken(body.booking_id, body.prospect_id, env.SURVEY_TOKEN_SECRET);
   const surveyPath = surveyType === 'call_experience' ? 'call-experience' : 'project-satisfaction';
   const surveyUrl = `${env.WORKER_BASE_URL}/api/surveys/${surveyPath}?token=${token}`;
 
