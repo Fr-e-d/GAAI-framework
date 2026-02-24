@@ -541,7 +541,7 @@ items:
     epic: E08
     title: "Security headers middleware + XSS fix (SEC-04, SEC-05, SEC-17)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E08S02.story.md
     dependencies: []
     notes: "SEC-AUDIT-001: SEC-04 (HIGH XSS JSON-LD) + SEC-05 (HIGH missing headers) + SEC-17 (LOW Content-Type). Middleware global sur les 4 workers. CSP sur satellite."
