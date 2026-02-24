@@ -3,9 +3,18 @@ main = "src/index.ts"
 compatibility_date = "2024-10-22"
 compatibility_flags = ["nodejs_compat"]
 
+[placement]
+mode = "smart"
+
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
+localConnectionString = "postgresql://postgres:postgres@db.PLACEHOLDER.supabase.co:5432/postgres"
+
 # ── Default (dev) environment — local only, never deployed ───────────────────
 # Binds to staging remote resources (queues, KV, Supabase).
 # Secrets loaded from .dev.vars (gitignored).
+# Note: MATCHING_SERVICE not bound in dev — Core falls back to local deterministic scoring (AC6).
 
 [[queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-staging"
@@ -43,11 +52,6 @@ id = "eb21bf12dbd74b96928a98c866af62a1"
 preview_id = "eb21bf12dbd74b96928a98c866af62a1"
 
 [[kv_namespaces]]
-binding = "RATE_LIMITING"
-id = "a36dd2f3e3a649a3b605baf3519843ea"
-preview_id = "a36dd2f3e3a649a3b605baf3519843ea"
-
-[[kv_namespaces]]
 binding = "FEATURE_FLAGS"
 id = "24a3f09adaf34c26805ba2351d773829"
 preview_id = "24a3f09adaf34c26805ba2351d773829"
@@ -60,6 +64,40 @@ preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
 [[analytics_engine_datasets]]
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
+
+# AC1: D1 edge database for expert pool (expert-pool-edge)
+# Human action required: wrangler d1 create expert-pool-edge --env staging
+# Then: wrangler d1 execute expert-pool-edge --file=d1/expert-pool-edge.schema.sql --env staging
+[[d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge"
+database_id = "PLACEHOLDER_D1_DATABASE_ID"
+
+# Workers AI binding
+[ai]
+binding = "AI"
+
+# Vectorize index binding
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+# Durable Object — ExpertPoolDO write coordinator (E06S25)
+# AC4: singleton via idFromName('expert-pool-coordinator')
+# Human action required: class migration auto-applied on first deploy
+[[durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
+
+# DO migration tag (required for new classes)
+[[migrations]]
+tag = "v1"
+new_classes = ["ExpertPoolDO"]
+
+[[rate_limiting]]
+binding = "RATE_LIMITER"
+namespace_id = 1001
+simple = { limit = 30, period = 60 }
 
 # CF Workflows (top-level only — not per-env; isolation via separate Worker scripts)
 [[workflows]]
@@ -74,7 +112,7 @@ class_name = "BookingCompletedWorkflow"
 
 # Top-level (used by wrangler dev)
 [triggers]
-crons = ["*/5 * * * *", "*/15 * * * *"]
+crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *"]
 
 # ── Staging environment ───────────────────────────────────────────────────────
 
@@ -88,6 +126,14 @@ EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
 SURVEY_DELAY_7D_MS = "60000"
 SURVEY_DELAY_38D_MS = "120000"
+# Production TURNSTILE_SECRET_KEY must be set via: wrangler secret put TURNSTILE_SECRET_KEY --env production
+TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA"
+# Staging acceleration: lead flag window = 1 minute (production default: 7 days)
+FLAG_WINDOW_MS = "60000"
+
+[[env.staging.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "cc93b8f0e9554e4f8c1dbd9ad83688f5"
 
 [[env.staging.queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-staging"
@@ -124,10 +170,6 @@ binding = "SESSIONS"
 id = "eb21bf12dbd74b96928a98c866af62a1"
 
 [[env.staging.kv_namespaces]]
-binding = "RATE_LIMITING"
-id = "a36dd2f3e3a649a3b605baf3519843ea"
-
-[[env.staging.kv_namespaces]]
 binding = "FEATURE_FLAGS"
 id = "24a3f09adaf34c26805ba2351d773829"
 
@@ -139,8 +181,37 @@ id = "68927a33fd9a46ec8b537a22a9cf2d20"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
+[[env.staging.d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge"
+database_id = "PLACEHOLDER_D1_DATABASE_ID"
+
+# Workers AI binding
+[env.staging.ai]
+binding = "AI"
+
+# Vectorize index binding
+[[env.staging.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+# AC2: Service Binding to callibrate-matching-staging (AC4: zero network hop)
+[[env.staging.services]]
+binding = "MATCHING_SERVICE"
+service = "callibrate-matching-staging"
+
+# Durable Object binding (E06S25)
+[[env.staging.durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
+
+[[env.staging.rate_limiting]]
+binding = "RATE_LIMITER"
+namespace_id = 1002
+simple = { limit = 30, period = 60 }
+
 [env.staging.triggers]
-crons = ["*/5 * * * *", "*/15 * * * *"]
+crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *"]
 
 # ── Production environment ────────────────────────────────────────────────────
 
@@ -151,6 +222,10 @@ name = "callibrate-core-prod"
 WORKER_BASE_URL = "https://api.callibrate.io"
 EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
+
+[[env.production.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
 
 [[env.production.queues.consumers]]
 queue = "callibrate-core-queue-email-notifications-prod"
@@ -187,10 +262,6 @@ binding = "SESSIONS"
 id = "dc5d4d61b04d44fe827254ae8c8bade8"
 
 [[env.production.kv_namespaces]]
-binding = "RATE_LIMITING"
-id = "2305532d36024641a7ceb171dbdf98a2"
-
-[[env.production.kv_namespaces]]
 binding = "FEATURE_FLAGS"
 id = "4d5d37620fe14ddfb34aa374cbc37ffe"
 
@@ -202,5 +273,34 @@ id = "af0c9c22c77b45ffbac4215009a295d4"
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
 
+[[env.production.d1_databases]]
+binding = "EXPERT_DB"
+database_name = "expert-pool-edge"
+database_id = "PLACEHOLDER_D1_DATABASE_ID"
+
+# Workers AI binding
+[env.production.ai]
+binding = "AI"
+
+# Vectorize index binding
+[[env.production.vectorize]]
+binding = "VECTORIZE"
+index_name = "expert-profiles"
+
+# AC2: Service Binding to callibrate-matching-prod (AC4: zero network hop)
+[[env.production.services]]
+binding = "MATCHING_SERVICE"
+service = "callibrate-matching-prod"
+
+# Durable Object binding (E06S25)
+[[env.production.durable_objects.bindings]]
+name = "EXPERT_POOL_DO"
+class_name = "ExpertPoolDO"
+
+[[env.production.rate_limiting]]
+binding = "RATE_LIMITER"
+namespace_id = 1003
+simple = { limit = 30, period = 60 }
+
 [env.production.triggers]
-crons = ["*/5 * * * *", "*/15 * * * *"]
+crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *"]

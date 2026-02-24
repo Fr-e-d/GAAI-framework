@@ -1,0 +1,348 @@
+// Tests for E06S33: LemonSqueezy webhook handler (AC1–AC5, AC9, AC10, AC13)
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import { handleLsWebhook } from './lemonsqueezy';
+import type { Env } from '../../types/env';
+
+// ── Mocks ─────────────────────────────────────────────────────────────────────
+
+vi.mock('../../lib/db', () => ({ createSql: vi.fn() }));
+
+import { createSql } from '../../lib/db';
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function makeEnv(overrides: Partial<Env> = {}): Env {
+  return {
+    LEMON_SQUEEZY_WEBHOOK_SECRET: 'test-secret',
+    LEMON_SQUEEZY_API_KEY: 'test-ls-api-key',
+    HYPERDRIVE: { connectionString: 'postgresql://test' } as unknown as Hyperdrive,
+    SUPABASE_URL: 'https://test.supabase.co',
+    SUPABASE_ANON_KEY: 'anon-key',
+    SUPABASE_SERVICE_KEY: 'service-key',
+    SESSIONS: {
+      get: vi.fn().mockResolvedValue(null),
+      put: vi.fn().mockResolvedValue(undefined),
+    } as unknown as KVNamespace,
+    EMAIL_NOTIFICATIONS: {
+      send: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Queue,
+    ...overrides,
+  } as unknown as Env;
+}
+
+function makeLsEvent(eventName: string, overrides: Record<string, unknown> = {}) {
+  return {
+    meta: {
+      event_name: eventName,
+      custom_data: { expert_id: 'expert-uuid-1' },
+    },
+    data: {
+      id: 'sub-123',
+      attributes: {
+        status: 'active',
+        customer_email: 'expert@example.com',
+      },
+    },
+    ...overrides,
+  };
+}
+
+async function makeSignedRequest(body: unknown, secret: string, eventName: string): Promise<Request> {
+  const bodyText = JSON.stringify(body);
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(bodyText));
+  const sigHex = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+  return new Request('https://api.callibrate.io/api/webhooks/lemonsqueezy', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Signature': sigHex,
+    },
+    body: bodyText,
+  });
+}
+
+// ── AC1: Signature verification tests ─────────────────────────────────────────
+
+describe('handleLsWebhook — signature verification (AC1)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('valid HMAC signature — returns 200', async () => {
+    const env = makeEnv();
+    const event = makeLsEvent('subscription_updated');
+    const mockSql = vi.fn().mockResolvedValue([]);
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const req = await makeSignedRequest(event, 'test-secret', 'subscription_updated');
+    const res = await handleLsWebhook(req, env);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean };
+    expect(body.ok).toBe(true);
+  });
+
+  it('invalid HMAC signature — returns 401', async () => {
+    const env = makeEnv();
+    const event = makeLsEvent('subscription_updated');
+
+    // Sign with wrong secret
+    const req = await makeSignedRequest(event, 'wrong-secret', 'subscription_updated');
+    const res = await handleLsWebhook(req, env);
+
+    expect(res.status).toBe(401);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('Unauthorized');
+  });
+
+  it('missing X-Signature header — returns 401', async () => {
+    const env = makeEnv();
+    const event = makeLsEvent('subscription_updated');
+
+    const req = new Request('https://api.callibrate.io/api/webhooks/lemonsqueezy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(event),
+    });
+    const res = await handleLsWebhook(req, env);
+
+    expect(res.status).toBe(401);
+  });
+});
+
+// ── AC5: Idempotency tests ─────────────────────────────────────────────────────
+
+describe('handleLsWebhook — idempotency (AC5)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('duplicate event_id — returns 200 deduplicated without re-processing', async () => {
+    const env = makeEnv({
+      SESSIONS: {
+        get: vi.fn().mockResolvedValue('1'), // already processed
+        put: vi.fn().mockResolvedValue(undefined),
+      } as unknown as KVNamespace,
+    });
+
+    const event = makeLsEvent('subscription_updated');
+    const req = await makeSignedRequest(event, 'test-secret', 'subscription_updated');
+    const res = await handleLsWebhook(req, env);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; deduplicated: boolean };
+    expect(body.deduplicated).toBe(true);
+
+    // createSql must NOT be called (no DB access for duplicate)
+    expect(createSql).not.toHaveBeenCalled();
+  });
+
+  it('new event_id — marks processed in KV after handling', async () => {
+    const env = makeEnv();
+    const putSpy = env.SESSIONS.put as ReturnType<typeof vi.fn>;
+    const event = makeLsEvent('subscription_updated');
+    const mockSql = vi.fn().mockResolvedValue([]);
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const req = await makeSignedRequest(event, 'test-secret', 'subscription_updated');
+    await handleLsWebhook(req, env);
+
+    // KV.put must be called with idem key
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.stringContaining('idem:ls-webhook:'),
+      '1',
+      { expirationTtl: 86400 }
+    );
+  });
+});
+
+// ── AC2: subscription_created tests ──────────────────────────────────────────
+
+describe('handleLsWebhook — subscription_created (AC2)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('happy path: expert found via custom_data.expert_id, welcome credit inserted', async () => {
+    const env = makeEnv();
+    const event = makeLsEvent('subscription_created');
+
+    // Mock fetch for LS subscription items API
+    const globalFetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: [{ id: 'si-456' }] }), { status: 200 })
+    );
+
+    // sql mock: 1) SELECT expert by id → found, 2) UPDATE experts RETURNING, 3) INSERT credit_transactions
+    const mockSql = vi.fn()
+      .mockResolvedValueOnce([{ id: 'expert-uuid-1' }])     // SELECT id FROM experts WHERE id
+      .mockResolvedValueOnce([{ credit_balance: 10000 }])   // UPDATE experts RETURNING credit_balance
+      .mockResolvedValueOnce([]);                             // INSERT credit_transactions
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const req = await makeSignedRequest(event, 'test-secret', 'subscription_created');
+    const res = await handleLsWebhook(req, env);
+
+    expect(res.status).toBe(200);
+
+    // LS subscription items API called
+    expect(globalFetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('subscription-items?filter[subscription_id]=sub-123'),
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-ls-api-key' }) })
+    );
+
+    // SQL called 3 times (SELECT, UPDATE, INSERT)
+    expect(mockSql).toHaveBeenCalledTimes(3);
+
+    globalFetchSpy.mockRestore();
+  });
+
+  it('fallback to gcal_email when custom_data.expert_id returns no expert', async () => {
+    const env = makeEnv();
+    const event = makeLsEvent('subscription_created');
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: [{ id: 'si-789' }] }), { status: 200 })
+    );
+
+    const mockSql = vi.fn()
+      .mockResolvedValueOnce([])                              // SELECT id WHERE id → not found
+      .mockResolvedValueOnce([{ id: 'expert-uuid-2' }])      // SELECT id WHERE gcal_email → found
+      .mockResolvedValueOnce([{ credit_balance: 10000 }])    // UPDATE experts
+      .mockResolvedValueOnce([]);                             // INSERT credit_transactions
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const req = await makeSignedRequest(event, 'test-secret', 'subscription_created');
+    const res = await handleLsWebhook(req, env);
+
+    expect(res.status).toBe(200);
+    expect(mockSql).toHaveBeenCalledTimes(4);
+
+    vi.restoreAllMocks();
+  });
+
+  it('expert not found — logs warning, returns 200 (silent failure)', async () => {
+    const env = makeEnv();
+    const event = makeLsEvent('subscription_created', {
+      meta: { event_name: 'subscription_created', custom_data: {} },
+    });
+
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const mockSql = vi.fn()
+      .mockResolvedValueOnce([]);   // gcal_email fallback → not found
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const req = await makeSignedRequest(event, 'test-secret', 'subscription_created');
+    const res = await handleLsWebhook(req, env);
+
+    expect(res.status).toBe(200);
+
+    vi.restoreAllMocks();
+  });
+});
+
+// ── AC4: subscription_payment_failed tests ────────────────────────────────────
+
+describe('handleLsWebhook — subscription_payment_failed (AC4)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('sets ls_subscription_status to past_due and queues payment_failed notification', async () => {
+    const env = makeEnv();
+    const sendSpy = env.EMAIL_NOTIFICATIONS.send as ReturnType<typeof vi.fn>;
+    const event = makeLsEvent('subscription_payment_failed');
+
+    const mockSql = vi.fn()
+      .mockResolvedValueOnce([{ id: 'expert-uuid-1' }]);  // UPDATE experts RETURNING id
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const req = await makeSignedRequest(event, 'test-secret', 'subscription_payment_failed');
+    const res = await handleLsWebhook(req, env);
+
+    expect(res.status).toBe(200);
+
+    // UPDATE called — check first SQL call contains past_due
+    expect(mockSql).toHaveBeenCalledTimes(1);
+
+    // EMAIL_NOTIFICATIONS.send called with payment_failed type
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'expert.billing.payment_failed',
+      expert_id: 'expert-uuid-1',
+    });
+  });
+
+  it('no expert found for subscription — logs warning, no notification sent', async () => {
+    const env = makeEnv();
+    const sendSpy = env.EMAIL_NOTIFICATIONS.send as ReturnType<typeof vi.fn>;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const event = makeLsEvent('subscription_payment_failed');
+
+    const mockSql = vi.fn()
+      .mockResolvedValueOnce([]);  // UPDATE experts → no rows (subscription not found)
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const req = await makeSignedRequest(event, 'test-secret', 'subscription_payment_failed');
+    const res = await handleLsWebhook(req, env);
+
+    expect(res.status).toBe(200);
+    expect(sendSpy).not.toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+  });
+});
+
+// ── AC3: subscription_updated status mapping tests ────────────────────────────
+
+describe('handleLsWebhook — subscription_updated (AC3)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const statusMappings = [
+    { lsStatus: 'active', expected: 'active' },
+    { lsStatus: 'past_due', expected: 'past_due' },
+    { lsStatus: 'cancelled', expected: 'cancelled' },
+    { lsStatus: 'canceled', expected: 'cancelled' },
+    { lsStatus: 'unpaid', expected: 'unpaid' },
+  ];
+
+  for (const { lsStatus, expected } of statusMappings) {
+    it(`maps LS status '${lsStatus}' → '${expected}'`, async () => {
+      const env = makeEnv();
+      const event = makeLsEvent('subscription_updated', {
+        data: {
+          id: 'sub-123',
+          attributes: { status: lsStatus },
+        },
+      });
+
+      // Capture the SQL template tag arguments
+      let capturedStatus: unknown;
+      const mockSql = vi.fn().mockImplementation((...args: unknown[]) => {
+        // The sql tagged template: first call captures the status argument
+        if (Array.isArray(args[0])) {
+          capturedStatus = args[1]; // second arg = first interpolation
+        }
+        return Promise.resolve([]);
+      });
+      (createSql as Mock).mockReturnValue(mockSql);
+
+      const req = await makeSignedRequest(event, 'test-secret', 'subscription_updated');
+      const res = await handleLsWebhook(req, env);
+
+      expect(res.status).toBe(200);
+      expect(capturedStatus).toBe(expected);
+    });
+  }
+});

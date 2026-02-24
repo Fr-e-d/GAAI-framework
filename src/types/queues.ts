@@ -8,6 +8,8 @@ export type EmailNotificationMessage =
   | { type: 'booking.rescheduled'; booking_id: string }
   | { type: 'booking.reminder_prospect'; booking_id: string }
   | { type: 'booking.reminder_expert'; booking_id: string }
+  | { type: 'expert.billing.insufficient_balance'; expert_id: string }
+  | { type: 'expert.billing.payment_failed'; expert_id: string }
   | { type: 'survey.call_experience'; booking_id: string; prospect_id: string }
   | { type: 'survey.project_satisfaction'; booking_id: string; prospect_id: string };
 

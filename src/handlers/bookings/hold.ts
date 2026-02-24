@@ -1,5 +1,7 @@
 import { Env } from '../../types/env';
-import { createServiceClient } from '../../lib/supabase';
+import { createSql } from '../../lib/db';
+import type { BookingRow } from '../../types/db';
+import { captureEvent } from '../../lib/posthog';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -8,7 +10,7 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-export async function handleHold(request: Request, env: Env): Promise<Response> {
+export async function handleHold(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   let body: unknown;
   try {
     body = await request.json();
@@ -26,54 +28,40 @@ export async function handleHold(request: Request, env: Env): Promise<Response> 
     return json({ error: 'Invalid field types' }, 422);
   }
 
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
   // Conflict check: any held or confirmed booking overlapping this slot
-  const { data: conflicts } = await supabase
-    .from('bookings')
-    .select('id')
-    .eq('expert_id', expert_id)
-    .in('status', ['held', 'confirmed'])
-    .lt('start_at', end_at)
-    .gt('end_at', start_at);
+  const conflicts = await sql<{ id: string }[]>`
+    SELECT id FROM bookings WHERE expert_id = ${expert_id}
+    AND status = ANY(ARRAY['held', 'confirmed'])
+    AND start_at < ${end_at} AND end_at > ${start_at}`;
 
-  if (conflicts && conflicts.length > 0) {
+  if (conflicts.length > 0) {
     return json({ error: 'slot_taken' }, 409);
   }
 
   // Lookup match_id (nullable)
-  const { data: match } = await supabase
-    .from('matches')
-    .select('id')
-    .eq('expert_id', expert_id)
-    .eq('prospect_id', prospect_id)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const [match] = await sql<{ id: string }[]>`
+    SELECT id FROM matches WHERE expert_id = ${expert_id} AND prospect_id = ${prospect_id}
+    ORDER BY created_at DESC LIMIT 1`;
 
   const heldUntil = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const prepToken = crypto.randomUUID();
 
-  const { data: booking, error: insertError } = await supabase
-    .from('bookings')
-    .insert({
-      expert_id,
-      prospect_id,
-      match_id: match?.id ?? null,
-      start_at,
-      end_at,
-      scheduled_at: start_at,
-      status: 'held',
-      held_until: heldUntil,
-      duration_min: 20,
-      prep_token: prepToken,
-    })
-    .select('id, held_until')
-    .single();
+  const [booking] = await sql<Pick<BookingRow, 'id' | 'held_until'>[]>`
+    INSERT INTO bookings (expert_id, prospect_id, match_id, start_at, end_at, scheduled_at, status, held_until, duration_min, prep_token)
+    VALUES (${expert_id}, ${prospect_id}, ${match?.id ?? null}, ${start_at}, ${end_at}, ${start_at}, 'held', ${heldUntil}, 20, ${prepToken})
+    RETURNING id, held_until`;
 
-  if (insertError || !booking) {
-    return json({ error: 'Failed to create hold', details: insertError?.message }, 500);
+  if (!booking) {
+    return json({ error: 'Failed to create hold' }, 500);
   }
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${expert_id}`,
+    event: 'booking.held',
+    properties: { expert_id, duration_min: 20 },
+  }));
 
   return json({ booking_id: booking.id, held_until: booking.held_until });
 }

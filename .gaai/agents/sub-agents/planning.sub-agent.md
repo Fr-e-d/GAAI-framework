@@ -35,7 +35,7 @@ No communication with the Orchestrator or sibling sub-agents during execution. A
 - `contexts/memory/project/context.md` — stack, constraints, architecture (used by `approach-evaluation` for criteria)
 - `contexts/memory/decisions/_log.md` (relevant entries — used by `approach-evaluation` to check prior decisions)
 - `contexts/memory/patterns/conventions.md` — established patterns (used by `approach-evaluation` to detect existing conventions)
-- Codebase map if available (`contexts/artefacts/reports/*.codebase-scan.md`)
+- Codebase map if available (`contexts/artefacts/impl-reports/*.codebase-scan.md`)
 
 ---
 

@@ -4,9 +4,9 @@
 // AC7/AC8: POST /api/prospects/:id/identify
 // AC10: consistent error shape { error: string, details?: object }
 
-import { createClient } from '@supabase/supabase-js';
-import type { Json, Database } from '../types/database';
+import type { Json } from '../types/database';
 import type { Env } from '../types/env';
+import { checkRateLimit } from '../lib/rateLimit';
 import {
   DEFAULT_WEIGHTS,
   type ExpertPreferences,
@@ -19,6 +19,10 @@ import { scoreMatch, applyReliabilityModifier } from '../matching/score';
 import { signProspectToken, verifyProspectToken } from '../lib/jwt';
 import { loadExpertPool } from '../lib/expertPool';
 import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
+import { createSql } from '../lib/db';
+import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../types/db';
+import { captureEvent } from '../lib/posthog';
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,6 +39,25 @@ function errorResponse(error: string, status: number, details?: unknown): Respon
 // Basic email format validation (RFC-permissive, sufficient for MVP)
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function verifyTurnstile(token: string, ip: string, secretKey: string): Promise<boolean> {
+  const body = new URLSearchParams({
+    secret: secretKey,
+    response: token,
+    remoteip: ip,
+  });
+  try {
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      body,
+    });
+    if (!res.ok) return false;
+    const data = await res.json() as { success: boolean };
+    return data.success === true;
+  } catch {
+    return false;
+  }
 }
 
 // Extract required field keys from quiz_schema JSONB.
@@ -104,13 +127,39 @@ function normalizeRequirements(quizAnswers: Record<string, unknown>): ProspectRe
 
 // ── POST /api/prospects/submit ─────────────────────────────────────────────────
 
-export async function handleProspectSubmit(request: Request, env: Env): Promise<Response> {
+export async function handleProspectSubmit(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const startTime = Date.now();
-  let body: { satellite_id?: unknown; quiz_answers?: unknown; utm_source?: unknown; utm_campaign?: unknown };
+
+  // AC3: Rate limit public endpoint (30 req/min per IP)
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
+  let body: {
+    satellite_id?: unknown;
+    quiz_answers?: unknown;
+    utm_source?: unknown;
+    utm_campaign?: unknown;
+    'cf-turnstile-response'?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
     return errorResponse('Invalid JSON body', 400);
+  }
+
+  // AC4: Turnstile token required
+  const turnstileToken = body['cf-turnstile-response'];
+  if (typeof turnstileToken !== 'string' || !turnstileToken) {
+    return errorResponse('Validation failed', 422, { 'cf-turnstile-response': 'required' });
+  }
+
+  // AC5: Verify Turnstile token
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+  const turnstileOk = await verifyTurnstile(turnstileToken, ip, env.TURNSTILE_SECRET_KEY);
+  if (!turnstileOk) {
+    return errorResponse('Bot verification failed', 422);
   }
 
   const { satellite_id, quiz_answers, utm_source, utm_campaign } = body;
@@ -125,18 +174,12 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
     return errorResponse('Validation failed', 422, { quiz_answers: 'must be an object' });
   }
 
-  const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false },
-  });
+  const sql = createSql(env);
 
   // Load satellite config
-  const { data: satellite, error: satErr } = await supabase
-    .from('satellite_configs')
-    .select('quiz_schema, matching_weights')
-    .eq('id', satellite_id)
-    .maybeSingle();
+  const [satellite] = await sql<Pick<SatelliteConfigRow, 'quiz_schema' | 'matching_weights'>[]>`
+    SELECT quiz_schema, matching_weights FROM satellite_configs WHERE id = ${satellite_id}`;
 
-  if (satErr) return errorResponse('Database error', 500);
   if (!satellite) return errorResponse('Satellite not found', 404);
 
   // AC2: validate quiz_answers has all required keys from quiz_schema
@@ -152,22 +195,14 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
   const requirements = normalizeRequirements(answers);
 
   // AC3: create prospect row
-  const { data: prospect, error: prospectErr } = await supabase
-    .from('prospects')
-    .insert({
-      satellite_id,
-      quiz_answers: answers as unknown as Json,
-      requirements: requirements as unknown as Json,
-      status: 'anonymous',
-      utm_source: typeof utm_source === 'string' ? utm_source : null,
-      utm_campaign: typeof utm_campaign === 'string' ? utm_campaign : null,
-    })
-    .select('id')
-    .single();
+  const [prospect] = await sql<Pick<ProspectRow, 'id'>[]>`
+    INSERT INTO prospects (satellite_id, quiz_answers, requirements, status, utm_source, utm_campaign)
+    VALUES (${satellite_id}, ${JSON.stringify(answers)}::jsonb, ${JSON.stringify(requirements)}::jsonb, 'anonymous', ${typeof utm_source === 'string' ? utm_source : null}, ${typeof utm_campaign === 'string' ? utm_campaign : null})
+    RETURNING id`;
 
-  if (prospectErr || !prospect) return errorResponse('Database error', 500);
+  if (!prospect) return errorResponse('Database error', 500);
 
-  // AC3: load expert pool from KV (with DB fallback)
+  // AC1/AC3: load expert pool from KV (with DB fallback)
   const experts = await loadExpertPool(env);
 
   // Resolve matching weights from satellite config or fall back to defaults
@@ -176,17 +211,41 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
     weights = satellite.matching_weights as unknown as MatchingWeights;
   }
 
-  // AC3: scoreMatch() synchronously for each expert
+  // AC4 (E06S24): Delegate scoring to callibrate-matching via Service Binding (zero network hop)
+  // AC6: Fallback to local deterministic scoring when MATCHING_SERVICE not bound
+  if (env.MATCHING_SERVICE) {
+    try {
+      const matchResp = await env.MATCHING_SERVICE.fetch(
+        new Request('https://matching/match', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prospect_id: prospect.id, satellite_id }),
+        })
+      );
+      if (matchResp.ok) {
+        const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
+        return jsonResponse({ prospect_id: prospect.id, token, token_expires_at: expiresAt });
+      }
+      console.error('prospect submit: MATCHING_SERVICE returned', matchResp.status, '— falling back to local scoring');
+    } catch (err) {
+      console.error('prospect submit: MATCHING_SERVICE.fetch failed, falling back to local scoring', err);
+    }
+  }
+
+  // AC6 Fallback: local deterministic scoring (no Vectorize/AI — those bindings live in Matching Worker)
+  const similarityMap = new Map<string, number>();
   const scoredResults: { score: number }[] = [];
   if (experts.length > 0) {
-    const matchRows: Database['public']['Tables']['matches']['Insert'][] = experts.map((expert) => {
+    const matchRows = experts.map((expert) => {
       const profile: ExpertProfile = {
         ...((expert.profile ?? {}) as ExpertProfile),
         rate_min: expert.rate_min,
         rate_max: expert.rate_max,
       };
       const prefs = (expert.preferences ?? {}) as ExpertPreferences;
-      const raw = scoreMatch(profile, prefs, requirements, weights);
+      // AC4/AC5: pass per-expert cosine similarity; undefined in fallback path → deterministic-only
+      const semanticSimilarity = similarityMap.get(expert.id);
+      const raw = scoreMatch(profile, prefs, requirements, weights, semanticSimilarity);
       const { score, breakdown } = applyReliabilityModifier(raw, {
         composite_score: expert.composite_score,
         total_leads: expert.total_leads,
@@ -203,11 +262,21 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
       };
     });
 
-    // AC3: INSERT all scored results (best-effort — AC6 guard covers insert failures)
-    await supabase.from('matches').insert(matchRows);
+    // B1 fix: sort by score DESC and take top 20
+    const top20Rows = matchRows
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      .slice(0, 20);
+
+    // AC3: INSERT top 20 scored results
+    for (const row of top20Rows) {
+      await sql`
+        INSERT INTO matches (prospect_id, expert_id, score, score_breakdown, status, expires_at)
+        VALUES (${row.prospect_id}, ${row.expert_id}, ${row.score}, ${JSON.stringify(row.score_breakdown)}::jsonb, ${row.status}, ${row.expires_at})
+        ON CONFLICT DO NOTHING`;
+    }
   }
 
-  // AC2/AC3: fire-and-forget analytics — does not block response
+  // Analytics for fallback path
   const topScore = scoredResults.length > 0 ? Math.max(...scoredResults.map((r) => r.score)) : 0;
   const meanScore =
     scoredResults.length > 0
@@ -222,8 +291,19 @@ export async function handleProspectSubmit(request: Request, env: Env): Promise<
     meanScore,
   });
 
-  // AC3: sign JWT token (24h TTL)
+  // Sign JWT token (24h TTL)
   const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospect.id}`,
+    event: 'prospect.form_submitted',
+    properties: {
+      satellite_id,
+      utm_source: typeof utm_source === 'string' ? utm_source : null,
+      utm_campaign: typeof utm_campaign === 'string' ? utm_campaign : null,
+      quiz_field_count: Object.keys(answers).length,
+    },
+  }));
 
   return jsonResponse({
     prospect_id: prospect.id,
@@ -238,7 +318,14 @@ export async function handleProspectMatches(
   request: Request,
   env: Env,
   prospectId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
+  // AC3: Rate limit public endpoint
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
   const url = new URL(request.url);
   const token = url.searchParams.get('token');
 
@@ -253,19 +340,13 @@ export async function handleProspectMatches(
     return errorResponse('Forbidden', 403);
   }
 
-  const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false },
-  });
+  const sql = createSql(env);
 
   // AC5: load all matches for prospect, ordered by score DESC
-  const { data: matches, error: matchErr } = await supabase
-    .from('matches')
-    .select('id, expert_id, score, score_breakdown')
-    .eq('prospect_id', prospectId)
-    .neq('status', 'expired')
-    .order('score', { ascending: false });
-
-  if (matchErr) return errorResponse('Database error', 500);
+  const matches = await sql<Pick<MatchRow, 'id' | 'expert_id' | 'score' | 'score_breakdown'>[]>`
+    SELECT id, expert_id, score, score_breakdown FROM matches
+    WHERE prospect_id = ${prospectId} AND status != 'expired'
+    ORDER BY score DESC`;
 
   // AC6: defensive guard — empty matches table
   if (!matches || matches.length === 0) {
@@ -274,14 +355,10 @@ export async function handleProspectMatches(
 
   // Load expert profiles for anonymized fields
   const expertIds = matches.map((m) => m.expert_id).filter((id): id is string => Boolean(id));
-  const { data: experts, error: expertErr } = await supabase
-    .from('experts')
-    .select('id, composite_score, profile, rate_min, rate_max')
-    .in('id', expertIds);
+  const experts = await sql<Pick<ExpertRow, 'id' | 'composite_score' | 'profile' | 'rate_min' | 'rate_max'>[]>`
+    SELECT id, composite_score, profile, rate_min, rate_max FROM experts WHERE id = ANY(${expertIds})`;
 
-  if (expertErr) return errorResponse('Database error', 500);
-
-  const expertMap = new Map((experts ?? []).map((e) => [e.id, e]));
+  const expertMap = new Map(experts.map((e) => [e.id, e]));
 
   // AC5: anonymized expert cards — no display_name, avatar_url, cal_username
   const anonymizedMatches = matches.map((match, idx) => {
@@ -302,6 +379,15 @@ export async function handleProspectMatches(
     };
   });
 
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospectId}`,
+    event: 'prospect.matches_viewed',
+    properties: {
+      match_count: anonymizedMatches.length,
+      top_score: anonymizedMatches[0]?.score ?? 0,
+    },
+  }));
+
   return jsonResponse({ matches: anonymizedMatches });
 }
 
@@ -311,7 +397,14 @@ export async function handleProspectIdentify(
   request: Request,
   env: Env,
   prospectId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
+  // AC3: Rate limit public endpoint
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
   let body: { email?: unknown; token?: unknown };
   try {
     body = await request.json();
@@ -336,18 +429,12 @@ export async function handleProspectIdentify(
     return errorResponse('Validation failed', 422, { email: 'must be a valid email address' });
   }
 
-  const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false },
-  });
+  const sql = createSql(env);
 
   // AC8: check if prospect already identified
-  const { data: prospect, error: fetchErr } = await supabase
-    .from('prospects')
-    .select('id, email')
-    .eq('id', prospectId)
-    .maybeSingle();
+  const [prospect] = await sql<Pick<ProspectRow, 'id' | 'email'>[]>`
+    SELECT id, email FROM prospects WHERE id = ${prospectId}`;
 
-  if (fetchErr) return errorResponse('Database error', 500);
   if (!prospect) return errorResponse('Prospect not found', 404);
 
   if (prospect.email !== null) {
@@ -355,24 +442,15 @@ export async function handleProspectIdentify(
   }
 
   // AC7: update prospect with email + status
-  const { error: updateErr } = await supabase
-    .from('prospects')
-    .update({ email, status: 'identified' })
-    .eq('id', prospectId);
-
-  if (updateErr) return errorResponse('Database error', 500);
+  await sql`UPDATE prospects SET email = ${email}, status = 'identified' WHERE id = ${prospectId}`;
 
   // Load matches to get expert_ids, sorted by score DESC
-  const { data: matches, error: matchErr } = await supabase
-    .from('matches')
-    .select('expert_id, score')
-    .eq('prospect_id', prospectId)
-    .neq('status', 'expired')
-    .order('score', { ascending: false });
+  const matches = await sql<Pick<MatchRow, 'expert_id' | 'score'>[]>`
+    SELECT expert_id, score FROM matches
+    WHERE prospect_id = ${prospectId} AND status != 'expired'
+    ORDER BY score DESC`;
 
-  if (matchErr) return errorResponse('Database error', 500);
-
-  const expertIds = (matches ?? [])
+  const expertIds = matches
     .map((m) => m.expert_id)
     .filter((id): id is string => Boolean(id));
 
@@ -381,15 +459,11 @@ export async function handleProspectIdentify(
   }
 
   // AC7: load full expert profiles
-  const { data: expertRows, error: expertErr } = await supabase
-    .from('experts')
-    .select('id, display_name, headline, bio, profile, rate_min, rate_max, cal_username')
-    .in('id', expertIds);
+  const expertRows = await sql<Pick<ExpertRow, 'id' | 'display_name' | 'headline' | 'bio' | 'profile' | 'rate_min' | 'rate_max' | 'cal_username'>[]>`
+    SELECT id, display_name, headline, bio, profile, rate_min, rate_max, cal_username FROM experts WHERE id = ANY(${expertIds})`;
 
-  if (expertErr) return errorResponse('Database error', 500);
-
-  const expertMap = new Map((expertRows ?? []).map((e) => [e.id, e]));
-  const matchScoreMap = new Map((matches ?? []).map((m) => [m.expert_id ?? '', m.score ?? 0]));
+  const expertMap = new Map(expertRows.map((e) => [e.id, e]));
+  const matchScoreMap = new Map(matches.map((m) => [m.expert_id ?? '', m.score ?? 0]));
 
   // AC7: full profiles with booking_url
   const expertProfiles = expertIds
@@ -414,6 +488,13 @@ export async function handleProspectIdentify(
       };
     })
     .filter(Boolean);
+
+  const emailDomain = email.split('@')[1] ?? 'unknown';
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospectId}`,
+    event: 'prospect.identified',
+    properties: { email_domain: emailDomain },
+  }));
 
   return jsonResponse({ experts: expertProfiles });
 }

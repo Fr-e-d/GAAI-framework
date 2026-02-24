@@ -20,6 +20,17 @@ vi.mock('../../middleware/auth', () => ({
   authenticate: vi.fn(),
 }));
 
+vi.mock('posthog-node', () => ({
+  PostHog: vi.fn().mockImplementation(() => ({
+    captureImmediate: vi.fn().mockResolvedValue(undefined),
+  })),
+}));
+
+const mockCtx = {
+  waitUntil: vi.fn(),
+  passThroughOnException: vi.fn(),
+} as unknown as ExecutionContext;
+
 import { createServiceClient } from '../../lib/supabase';
 import { authenticate } from '../../middleware/auth';
 
@@ -128,7 +139,7 @@ describe('handleCallExperienceSurvey', () => {
     makeSurveyDbMock();
 
     const req = makeRequest({ token, score: 4 });
-    const res = await handleCallExperienceSurvey(req, env);
+    const res = await handleCallExperienceSurvey(req, env, mockCtx);
 
     expect(res.status).toBe(201);
     const body = await res.json() as { id: string };
@@ -145,7 +156,7 @@ describe('handleCallExperienceSurvey', () => {
     makeSurveyDbMock();
 
     const req = makeRequest({ token, score: 5, comment: 'Great call!' });
-    const res = await handleCallExperienceSurvey(req, env);
+    const res = await handleCallExperienceSurvey(req, env, mockCtx);
 
     expect(res.status).toBe(201);
   });
@@ -158,7 +169,7 @@ describe('handleCallExperienceSurvey', () => {
     });
 
     const req = makeRequest({ token, score: 3 });
-    const res = await handleCallExperienceSurvey(req, env);
+    const res = await handleCallExperienceSurvey(req, env, mockCtx);
 
     expect(res.status).toBe(409);
     const body = await res.json() as { error: string };
@@ -168,7 +179,7 @@ describe('handleCallExperienceSurvey', () => {
   it('CE4: invalid token (bad signature) → 401', async () => {
     const env = makeEnv();
     const req = makeRequest({ token: 'bad.token.here', score: 4 });
-    const res = await handleCallExperienceSurvey(req, env);
+    const res = await handleCallExperienceSurvey(req, env, mockCtx);
 
     expect(res.status).toBe(401);
     expect(createServiceClient).not.toHaveBeenCalled();
@@ -193,7 +204,7 @@ describe('handleCallExperienceSurvey', () => {
 
     const env = makeEnv();
     const req = makeRequest({ token: expiredToken, score: 4 });
-    const res = await handleCallExperienceSurvey(req, env);
+    const res = await handleCallExperienceSurvey(req, env, mockCtx);
 
     expect(res.status).toBe(401);
   });
@@ -202,7 +213,7 @@ describe('handleCallExperienceSurvey', () => {
     const token = await signSurveyToken(TEST_BOOKING_ID, TEST_PROSPECT_ID, TEST_SECRET);
     const env = makeEnv();
     const req = makeRequest({ token, score: 6 });
-    const res = await handleCallExperienceSurvey(req, env);
+    const res = await handleCallExperienceSurvey(req, env, mockCtx);
 
     expect(res.status).toBe(422);
     expect(createServiceClient).not.toHaveBeenCalled();
@@ -212,7 +223,7 @@ describe('handleCallExperienceSurvey', () => {
     const token = await signSurveyToken(TEST_BOOKING_ID, TEST_PROSPECT_ID, TEST_SECRET);
     const env = makeEnv();
     const req = makeRequest({ token, score: 0 });
-    const res = await handleCallExperienceSurvey(req, env);
+    const res = await handleCallExperienceSurvey(req, env, mockCtx);
 
     expect(res.status).toBe(422);
   });
@@ -221,7 +232,7 @@ describe('handleCallExperienceSurvey', () => {
     const token = await signSurveyToken(TEST_BOOKING_ID, TEST_PROSPECT_ID, TEST_SECRET);
     const env = makeEnv();
     const req = makeRequest({ token });
-    const res = await handleCallExperienceSurvey(req, env);
+    const res = await handleCallExperienceSurvey(req, env, mockCtx);
 
     expect(res.status).toBe(422);
   });
@@ -331,7 +342,7 @@ describe('handleLeadEvaluation', () => {
     makeLeadDbMock();
 
     const req = makeRequest({ lead_id: TEST_LEAD_ID, score: 8 });
-    const res = await handleLeadEvaluation(req, env);
+    const res = await handleLeadEvaluation(req, env, mockCtx);
 
     expect(res.status).toBe(201);
     const body = await res.json() as { id: string };
@@ -353,7 +364,7 @@ describe('handleLeadEvaluation', () => {
       notes: 'Good project',
       conversion_declared: true,
     });
-    const res = await handleLeadEvaluation(req, env);
+    const res = await handleLeadEvaluation(req, env, mockCtx);
 
     expect(res.status).toBe(201);
   });
@@ -366,7 +377,7 @@ describe('handleLeadEvaluation', () => {
     });
 
     const req = makeRequest({ lead_id: TEST_LEAD_ID, score: 8 });
-    const res = await handleLeadEvaluation(req, env);
+    const res = await handleLeadEvaluation(req, env, mockCtx);
 
     expect(res.status).toBe(409);
     const body = await res.json() as { error: string };
@@ -377,7 +388,7 @@ describe('handleLeadEvaluation', () => {
     mockAuthenticateFail();
     const env = makeEnv();
     const req = makeRequest({ lead_id: TEST_LEAD_ID, score: 8 });
-    const res = await handleLeadEvaluation(req, env);
+    const res = await handleLeadEvaluation(req, env, mockCtx);
 
     expect(res.status).toBe(401);
     expect(createServiceClient).not.toHaveBeenCalled();
@@ -387,7 +398,7 @@ describe('handleLeadEvaluation', () => {
     mockAuthenticateOk();
     const env = makeEnv();
     const req = makeRequest({ lead_id: TEST_LEAD_ID, score: 11 });
-    const res = await handleLeadEvaluation(req, env);
+    const res = await handleLeadEvaluation(req, env, mockCtx);
 
     expect(res.status).toBe(422);
     expect(createServiceClient).not.toHaveBeenCalled();
@@ -397,7 +408,7 @@ describe('handleLeadEvaluation', () => {
     mockAuthenticateOk();
     const env = makeEnv();
     const req = makeRequest({ lead_id: TEST_LEAD_ID, score: 0 });
-    const res = await handleLeadEvaluation(req, env);
+    const res = await handleLeadEvaluation(req, env, mockCtx);
 
     expect(res.status).toBe(422);
   });
@@ -406,7 +417,7 @@ describe('handleLeadEvaluation', () => {
     mockAuthenticateOk();
     const env = makeEnv();
     const req = makeRequest({ lead_id: 'not-a-uuid', score: 8 });
-    const res = await handleLeadEvaluation(req, env);
+    const res = await handleLeadEvaluation(req, env, mockCtx);
 
     expect(res.status).toBe(422);
     expect(createServiceClient).not.toHaveBeenCalled();
@@ -422,7 +433,7 @@ describe('handleLeadEvaluation', () => {
     });
 
     const req = makeRequest({ lead_id: TEST_LEAD_ID, score: 7 });
-    const res = await handleLeadEvaluation(req, env);
+    const res = await handleLeadEvaluation(req, env, mockCtx);
 
     expect(res.status).toBe(403);
     const body = await res.json() as { error: string };
@@ -437,7 +448,7 @@ describe('handleLeadEvaluation', () => {
     });
 
     const req = makeRequest({ lead_id: TEST_LEAD_ID, score: 8 });
-    const res = await handleLeadEvaluation(req, env);
+    const res = await handleLeadEvaluation(req, env, mockCtx);
 
     expect(res.status).toBe(404);
     const body = await res.json() as { error: string };
@@ -450,7 +461,7 @@ describe('handleLeadEvaluation', () => {
     makeLeadDbMock();
 
     const req = makeRequest({ lead_id: TEST_LEAD_ID, score: 9 });
-    await handleLeadEvaluation(req, env);
+    await handleLeadEvaluation(req, env, mockCtx);
 
     expect(vi.mocked(env.SCORE_COMPUTATION.send)).toHaveBeenCalledWith({
       type: 'feedback.lead_evaluation',

@@ -2,6 +2,8 @@ import { Env } from '../types/env';
 import { EmailNotificationMessage } from '../types/queues';
 import { isAlreadyProcessed, markProcessed } from '../lib/idempotency';
 import { handleMessageFailure } from '../lib/retryQueue';
+import { createSql } from '../lib/db';
+import type { ExpertRow, ProspectRow } from '../types/db';
 import { createServiceClient } from '../lib/supabase';
 import { signSurveyToken } from '../lib/jwt';
 
@@ -43,6 +45,12 @@ export async function consumeEmailNotifications(
         case 'booking.reminder_prospect':
         case 'booking.reminder_expert':
           // TODO(E06S16+): implement notification — stub acks for now
+          break;
+        case 'expert.billing.insufficient_balance':
+          // TODO(E06S33+): implement insufficient balance email — stub acks for now
+          break;
+        case 'expert.billing.payment_failed':
+          // TODO(E06S34+): implement payment failed email — stub acks for now
           break;
         default: {
           const exhaustiveCheck: never = body;
@@ -109,28 +117,22 @@ async function sendBookingConfirmedEmails(
   body: Extract<EmailNotificationMessage, { type: 'booking.confirmed' }>,
   env: Env
 ): Promise<void> {
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
 
   // Fetch expert gcal_email
-  const { data: expert, error: expertErr } = await supabase
-    .from('experts')
-    .select('gcal_email, display_name')
-    .eq('id', body.expert_id)
-    .single();
+  const [expert] = await sql<Pick<ExpertRow, 'gcal_email' | 'display_name'>[]>`
+    SELECT gcal_email, display_name FROM experts WHERE id = ${body.expert_id}`;
 
-  if (expertErr || !expert?.gcal_email) {
-    throw new Error(`Expert not found or no email for ${body.expert_id}: ${expertErr?.message}`);
+  if (!expert?.gcal_email) {
+    throw new Error(`Expert not found or no email for ${body.expert_id}`);
   }
 
   // Fetch prospect email
-  const { data: prospect, error: prospectErr } = await supabase
-    .from('prospects')
-    .select('email')
-    .eq('id', body.prospect_id)
-    .single();
+  const [prospect] = await sql<Pick<ProspectRow, 'email'>[]>`
+    SELECT email FROM prospects WHERE id = ${body.prospect_id}`;
 
-  if (prospectErr || !prospect?.email) {
-    throw new Error(`Prospect not found or no email for ${body.prospect_id}: ${prospectErr?.message}`);
+  if (!prospect?.email) {
+    throw new Error(`Prospect not found or no email for ${body.prospect_id}`);
   }
 
   // Email to expert

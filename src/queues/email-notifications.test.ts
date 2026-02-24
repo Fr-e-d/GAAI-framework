@@ -1,15 +1,15 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { consumeEmailNotifications } from './email-notifications';
 import type { Env } from '../types/env';
 import type { EmailNotificationMessage } from '../types/queues';
 
-// ── Mock supabase ──────────────────────────────────────────────────────────────
+// ── Mock db ────────────────────────────────────────────────────────────────────
 
-vi.mock('../lib/supabase', () => ({
-  createServiceClient: vi.fn(),
+vi.mock('../lib/db', () => ({
+  createSql: vi.fn(),
 }));
 
-import { createServiceClient } from '../lib/supabase';
+import { createSql } from '../lib/db';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -136,29 +136,13 @@ describe('consumeEmailNotifications', () => {
       BOOKING_CONFIRMED_WORKFLOW: confirmedWorkflow as unknown as Workflow,
     });
 
-    // Mock supabase: expert + prospect queries
-    const mockFrom = vi.fn();
-    const mockSelect = vi.fn();
-    const mockEq = vi.fn();
-    const mockSingle = vi.fn();
+    // Mock sql: expert query returns expert data, prospect query returns prospect data
+    const mockSql = vi.fn() as Mock;
+    mockSql
+      .mockResolvedValueOnce([{ gcal_email: 'expert@gcal.com', display_name: 'Alice' }])  // expert query
+      .mockResolvedValueOnce([{ email: 'prospect@example.com' }]);                          // prospect query
 
-    // Chain builder that returns different data on each .single() call
-    let singleCallCount = 0;
-    mockSingle.mockImplementation(() => {
-      singleCallCount++;
-      if (singleCallCount === 1) {
-        // expert query
-        return Promise.resolve({ data: { gcal_email: 'expert@gcal.com', display_name: 'Alice' }, error: null });
-      }
-      // prospect query
-      return Promise.resolve({ data: { email: 'prospect@example.com' }, error: null });
-    });
-
-    mockEq.mockReturnValue({ single: mockSingle });
-    mockSelect.mockReturnValue({ eq: mockEq });
-    mockFrom.mockReturnValue({ select: mockSelect });
-
-    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as unknown as ReturnType<typeof createServiceClient>);
+    (createSql as Mock).mockReturnValue(mockSql);
 
     // fetch: Resend x2 (no n8n)
     vi.mocked(fetch)

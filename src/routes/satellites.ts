@@ -3,9 +3,9 @@
 // AC1: 404 if satellite not found
 // AC10: consistent error shape { error: string, details?: object }
 
-import { createClient } from '@supabase/supabase-js';
-import type { Database } from '../types/database';
+import { createSql } from '../lib/db';
 import type { Env } from '../types/env';
+import type { SatelliteConfigRow } from '../types/db';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
@@ -22,17 +22,12 @@ export async function handleSatelliteConfig(
   env: Env,
   satelliteId: string,
 ): Promise<Response> {
-  const supabase = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false },
-  });
+  const sql = createSql(env);
 
-  const { data, error } = await supabase
-    .from('satellite_configs')
-    .select('id, label, domain, vertical, quiz_schema, matching_weights')
-    .eq('id', satelliteId)
-    .maybeSingle();
+  const [data] = await sql<Pick<SatelliteConfigRow, 'id' | 'label' | 'domain' | 'vertical' | 'quiz_schema' | 'matching_weights'>[]>`
+    SELECT id, label, domain, vertical, quiz_schema, matching_weights
+    FROM satellite_configs WHERE id = ${satelliteId}`;
 
-  if (error) return errorResponse('Database error', 500);
   if (!data) return errorResponse('Satellite not found', 404);
 
   return jsonResponse({

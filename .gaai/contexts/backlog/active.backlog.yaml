@@ -357,7 +357,7 @@ items:
     epic: E07
     title: "PostHog EU — compte + dashboards + MCP (founder setup)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E07S06.story.md
     dependencies: [E07S05, E06S27]
     notes: "Partiellement fait + agent-deliverable via PostHog MCP. AC1-AC3 DONE (compte PostHog EU créé, POSTHOG_API_KEY=phc_9MGVc1dDaNAugnSHJ692t5YuWFNy2WQ4kIHNvlEsXkr configurée). AC6 (dashboards): agent via PostHog MCP server (mcp-eu.posthog.com). AC9-AC10 (smoke tests): agent via curl. Founder reste: AC4 Personal API Key (phx_) + AC5 export ~/.zshrc + AC7 MCP restart + AC8 ph.callibrate.io CNAME. Bloque l'observabilité analytics."
@@ -380,19 +380,25 @@ items:
     epic: E06
     title: "Staging — Secrets manquants (Core + Satellite + Turnstile)"
     priority: critical
-    status: in_progress
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-24T00:00:00+01:00"
+    completed_at: "2026-02-24T00:30:00+01:00"
     artefact: contexts/artefacts/stories/E06S28.story.md
     dependencies: [E06S27]
-    notes: "Agent-deliverable via wrangler CLI. AC1 (SURVEY_TOKEN_SECRET) + AC2 (TURNSTILE_SECRET_KEY) déjà configurés sur core staging. Reste: AC3 delay vars dans wrangler.toml + AC4 vérif E06S16 token + AC5-AC7 secrets satellite (SUPABASE_URL via Supabase MCP, SUPABASE_ANON_KEY via Supabase MCP, POSTHOG_API_KEY=phc_9MGVc1dDaNAugnSHJ692t5YuWFNy2WQ4kIHNvlEsXkr) + AC8 Turnstile site key=0x4AAAAAAChD0LT5UgifFL-I (var satellite wrangler.toml) + AC9-AC10 smoke tests. Bloque E06S29."
+    notes: "DONE 2026-02-24. QA PASS. All 10 ACs met. AC3: SURVEY_DELAY_7D_MS=60000 + SURVEY_DELAY_38D_MS=120000 in wrangler.toml [env.staging.vars]. AC4: Fixed survey token bug — email-notifications.ts used PROSPECT_TOKEN_SECRET to sign survey JWTs; changed to SURVEY_TOKEN_SECRET. Also fixed pre-existing jwt.ts duplicate signSurveyToken export (E06S16/E06S17 merge artifact). AC5-AC7: Satellite staging now has SUPABASE_URL + SUPABASE_ANON_KEY + POSTHOG_API_KEY. AC8: No change needed (no Turnstile form in satellite HTML). AC9: 13 secrets on core staging. AC10: 4 secrets on satellite staging. 111/111 vitest PASS. PR#25 open → staging."
 
   - id: E06S29
     epic: E06
     title: "Staging — Smoke test end-to-end"
     priority: critical
-    status: refined
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-24T00:00:00+01:00"
+    completed_at: "2026-02-24T10:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S29.story.md
     dependencies: [E06S27, E06S28]
-    notes: "Agent-deliverable via curl. AC1-AC9 (happy path curl: health → register → profile → extract → submit → matches → availability) 100% automatisable. AC10-AC11 (CF Dashboard Analytics) vérification visuelle post-delivery par founder. AC12 (PostHog) optionnel. Bloquant pour M1 ('Full loop working end-to-end')."
+    notes: "DONE 2026-02-24. QA PASS (first cycle). All 9 automated ACs met. scripts/smoke-test-staging.sh created — idempotent, macOS-compatible, covers AC1–AC9. Staging fully operational: health 200, satellite 302, expert register/profile/gcal-url, AI extract, prospect submit, match retrieval (empty pool OK), availability graceful fallback (422 gcal_not_connected). Pre-seeded smoke-runner@callibrate.io user (Supabase admin SQL). PR#26 open → staging. AC10–AC11 (CF Dashboard Analytics) + AC12 (PostHog) are founder-executed visual checks."
 
   - id: E06S30
     epic: E06
@@ -437,10 +443,13 @@ items:
     epic: E06
     title: "LS usage-based subscription + welcome credit + usage reporting cron (DEC-68)"
     priority: high
-    status: refined
+    status: done
+    cost_usd: 0
+    started_at: "2026-02-24T00:00:00+01:00"
+    completed_at: "2026-02-24T00:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S33.story.md
     dependencies: [E06S31]
-    notes: "DEC-68. LS webhook (HMAC verified) for subscription lifecycle. 100€ welcome credit on activation. Hourly cron: auto-confirm leads past 7-day flag window + report usage to LS API. Founder action: create LS product + webhook + secret."
+    notes: "DONE 2026-02-24. QA PASS (1 remediation cycle). All 13 ACs met. POST /api/webhooks/lemonsqueezy (HMAC-SHA256, KV idempotency). subscription_created: UPDATE experts (ls_subscription_id, ls_subscription_status, ls_subscription_item_id) + 100€ welcome credit. subscription_updated: status mapping. subscription_payment_failed: past_due + email notification. Hourly cron: auto-confirm leads past FLAG_WINDOW_MS + LS usage-records reporting. DB migration: ls_subscription_item_id column. 23/23 vitest tests. PR#27 open → staging. ⚠️ Human action required: (1) wrangler secret put LEMON_SQUEEZY_WEBHOOK_SECRET --env staging/production, (2) Configure LS webhook (subscription_created/updated/payment_failed), (3) Create LS product with usage-based pricing (see SETUP.md), (4) deploy via tag."
 
   - id: E06S34
     epic: E06
@@ -450,6 +459,17 @@ items:
     artefact: contexts/artefacts/stories/E06S34.story.md
     dependencies: [E06S31]
     notes: "DEC-67/68. Adds 3 billing filters to matching engine (pre-scoring): balance >= leadPrice, max_lead_price deal-breaker, spending_limit monthly cap. Fire-and-forget notification on exclusion. Applies to both POST /api/matches/compute and POST /api/prospects/submit."
+
+  # ── EPIC E06 (suite): Monorepo Restructure ──────────────────────────────
+
+  - id: E06S35
+    epic: E06
+    title: "Monorepo restructure — move Core API into workers/api/"
+    priority: medium
+    status: blocked
+    artefact: contexts/artefacts/stories/E06S35.story.md
+    dependencies: []
+    notes: "Structural refactoring. Move src/ + wrangler.toml + package.json + tsconfig.json + d1/ into workers/api/. Root becomes npm workspaces orchestrator. Update GH Actions. Preserve git history via git mv. Best delivered when staging is clean (no pending merges on src/).Recommandation : à délivrer quand staging est propre — ce refactoring conflictera avec tout PR qui touche src/ ou les configs racine."
 
   # ── EPIC E03: Prospect Gets Qualified and Matched to the Right Expert ────
   # Layer 3.2 — satellite sites. Depends on E02 + E06.

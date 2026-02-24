@@ -12,9 +12,9 @@ metadata:
   updated_at: 2026-02-18
 inputs:
   - contexts/artefacts/plans/{id}.execution-plan.md       (after Planning phase)
-  - contexts/artefacts/reports/{id}.impl-report.md        (after Implementation phase)
-  - contexts/artefacts/reports/{id}.qa-report.md          (after QA phase)
-  - contexts/artefacts/reports/{id}.micro-delivery-report.md  (Tier 1)
+  - contexts/artefacts/impl-reports/{id}.impl-report.md   (after Implementation phase)
+  - contexts/artefacts/qa-reports/{id}.qa-report.md       (after QA phase)
+  - contexts/artefacts/delivery/{id}.micro-delivery-report.md  (Tier 1)
   - contexts/artefacts/plans/{id}.plan-blocked.md         (on Planning failure)
 outputs:
   - next-action decision (inline — to Orchestrator)

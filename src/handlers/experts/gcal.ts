@@ -1,7 +1,9 @@
 import { Env } from '../../types/env';
 import { AuthUser } from '../../middleware/auth';
-import { createServiceClient } from '../../lib/supabase';
+import { createSql } from '../../lib/db';
 import { encryptToken, decryptToken, GcalDecryptionError } from '../../lib/gcalCrypto';
+import type { ExpertRow } from '../../types/db';
+import { captureEvent } from '../../lib/posthog';
 
 function forbidden(): Response {
   return new Response(JSON.stringify({ error: 'Forbidden' }), {
@@ -41,14 +43,10 @@ export async function handleGcalAuthUrl(
 ): Promise<Response> {
   if (user.id !== expertId) return forbidden();
 
-  const supabase = createServiceClient(env);
-  const { data, error } = await supabase
-    .from('experts')
-    .select('id')
-    .eq('id', expertId)
-    .single();
+  const sql = createSql(env);
+  const [data] = await sql<Pick<ExpertRow, 'id'>[]>`SELECT id FROM experts WHERE id = ${expertId}`;
 
-  if (error || !data) return notFound();
+  if (!data) return notFound();
 
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
@@ -69,7 +67,8 @@ export async function handleGcalAuthUrl(
 
 export async function handleGcalCallback(
   request: Request,
-  env: Env
+  env: Env,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
@@ -80,14 +79,10 @@ export async function handleGcalCallback(
 
   const expertId = state;
 
-  const supabase = createServiceClient(env);
-  const { data: expert, error: expertError } = await supabase
-    .from('experts')
-    .select('id')
-    .eq('id', expertId)
-    .single();
+  const sql = createSql(env);
+  const [expert] = await sql<Pick<ExpertRow, 'id'>[]>`SELECT id FROM experts WHERE id = ${expertId}`;
 
-  if (expertError || !expert) {
+  if (!expert) {
     return redirect('/onboarding/gcal-error?reason=expert_not_found');
   }
 
@@ -117,6 +112,7 @@ export async function handleGcalCallback(
   const { access_token, refresh_token, expires_in } = tokens;
 
   const encryptedAccessToken = await encryptToken(access_token, env.GCAL_TOKEN_ENCRYPTION_KEY);
+  const expiryAt = expires_in ? new Date(Date.now() + expires_in * 1000).toISOString() : null;
 
   // AC3: Only encrypt+store refresh token if present and non-null
   let encryptedRefreshToken: string | undefined;
@@ -138,29 +134,30 @@ export async function handleGcalCallback(
     // Non-blocking — proceed without email
   }
 
-  // Build update object conditionally (AC3: do NOT include gcal_refresh_token if not present)
-  // AC4: gcal_connected = true only when a refresh token is present (not just any token exchange)
-  const updateData: Record<string, unknown> = {
-    gcal_access_token: encryptedAccessToken,
-    gcal_token_expiry_at: expires_in ? new Date(Date.now() + expires_in * 1000).toISOString() : null,
-    gcal_connected: encryptedRefreshToken !== undefined,
-    gcal_connected_at: new Date().toISOString(),
-  };
+  const now = new Date().toISOString();
+
+  // Build update SQL conditionally (AC3: do NOT include gcal_refresh_token if not present)
+  // AC4: gcal_connected = true only when a refresh token is present
+  try {
+    if (encryptedRefreshToken !== undefined && gcalEmail !== null) {
+      await sql`UPDATE experts SET gcal_access_token = ${encryptedAccessToken}, gcal_token_expiry_at = ${expiryAt}, gcal_connected = ${encryptedRefreshToken !== undefined}, gcal_connected_at = ${now}, gcal_refresh_token = ${encryptedRefreshToken}, gcal_email = ${gcalEmail} WHERE id = ${expertId}`;
+    } else if (encryptedRefreshToken !== undefined) {
+      await sql`UPDATE experts SET gcal_access_token = ${encryptedAccessToken}, gcal_token_expiry_at = ${expiryAt}, gcal_connected = ${encryptedRefreshToken !== undefined}, gcal_connected_at = ${now}, gcal_refresh_token = ${encryptedRefreshToken} WHERE id = ${expertId}`;
+    } else if (gcalEmail !== null) {
+      await sql`UPDATE experts SET gcal_access_token = ${encryptedAccessToken}, gcal_token_expiry_at = ${expiryAt}, gcal_connected = false, gcal_connected_at = ${now}, gcal_email = ${gcalEmail} WHERE id = ${expertId}`;
+    } else {
+      await sql`UPDATE experts SET gcal_access_token = ${encryptedAccessToken}, gcal_token_expiry_at = ${expiryAt}, gcal_connected = false, gcal_connected_at = ${now} WHERE id = ${expertId}`;
+    }
+  } catch {
+    return redirect('/onboarding/gcal-error?reason=db_error');
+  }
 
   if (encryptedRefreshToken !== undefined) {
-    updateData['gcal_refresh_token'] = encryptedRefreshToken;
-  }
-  if (gcalEmail !== null) {
-    updateData['gcal_email'] = gcalEmail;
-  }
-
-  const { error: updateError } = await supabase
-    .from('experts')
-    .update(updateData)
-    .eq('id', expertId);
-
-  if (updateError) {
-    return redirect('/onboarding/gcal-error?reason=db_error');
+    ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+      distinctId: `expert:${expertId}`,
+      event: 'expert.gcal_connected',
+      properties: { expert_id: expertId },
+    }));
   }
 
   return redirect('/onboarding/gcal-connected');
@@ -176,18 +173,12 @@ export async function handleGcalStatus(
 ): Promise<Response> {
   if (user.id !== expertId) return forbidden();
 
-  const supabase = createServiceClient(env);
+  const sql = createSql(env);
   // AC4: connected: true only if non-null refresh token exists — select gcal_refresh_token to derive it
-  const { data, error } = await supabase
-    .from('experts')
-    .select('gcal_refresh_token, gcal_email, gcal_connected_at')
-    .eq('id', expertId)
-    .single();
+  const [data] = await sql<Pick<ExpertRow, 'gcal_refresh_token' | 'gcal_email' | 'gcal_connected_at'>[]>`
+    SELECT gcal_refresh_token, gcal_email, gcal_connected_at FROM experts WHERE id = ${expertId}`;
 
-  if (error) {
-    if (error.code === 'PGRST116') return notFound();
-    return json({ error: 'Internal Server Error' }, 500);
-  }
+  if (!data) return notFound();
 
   return json({
     connected: data.gcal_refresh_token != null,
@@ -202,21 +193,16 @@ export async function handleGcalDisconnect(
   _request: Request,
   env: Env,
   user: AuthUser,
-  expertId: string
+  expertId: string,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   if (user.id !== expertId) return forbidden();
 
-  const supabase = createServiceClient(env);
-  const { data, error: fetchError } = await supabase
-    .from('experts')
-    .select('gcal_refresh_token')
-    .eq('id', expertId)
-    .single();
+  const sql = createSql(env);
+  const [data] = await sql<Pick<ExpertRow, 'gcal_refresh_token'>[]>`
+    SELECT gcal_refresh_token FROM experts WHERE id = ${expertId}`;
 
-  if (fetchError || !data) {
-    if (fetchError?.code === 'PGRST116') return notFound();
-    return json({ error: 'Internal Server Error' }, 500);
-  }
+  if (!data) return notFound();
 
   // Attempt Google token revocation (non-blocking)
   if (data.gcal_refresh_token) {
@@ -234,21 +220,17 @@ export async function handleGcalDisconnect(
     }
   }
 
-  const { error: updateError } = await supabase
-    .from('experts')
-    .update({
-      gcal_connected: false,
-      gcal_access_token: null,
-      gcal_refresh_token: null,
-      gcal_token_expiry_at: null,
-      gcal_email: null,
-      gcal_connected_at: null,
-    })
-    .eq('id', expertId);
-
-  if (updateError) {
+  try {
+    await sql`UPDATE experts SET gcal_connected = false, gcal_access_token = null, gcal_refresh_token = null, gcal_token_expiry_at = null, gcal_email = null, gcal_connected_at = null WHERE id = ${expertId}`;
+  } catch {
     return json({ error: 'Internal Server Error' }, 500);
   }
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `expert:${expertId}`,
+    event: 'expert.gcal_disconnected',
+    properties: { expert_id: expertId },
+  }));
 
   return json({ disconnected: true });
 }
