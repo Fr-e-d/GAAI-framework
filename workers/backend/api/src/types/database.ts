@@ -203,6 +203,7 @@ export type Database = {
       }
       experts: {
         Row: {
+          admissibility_criteria: Json
           availability: string | null
           availability_rules: Json | null
           avatar_url: string | null
@@ -233,6 +234,7 @@ export type Database = {
           verified_at: string | null
         }
         Insert: {
+          admissibility_criteria?: Json
           availability?: string | null
           availability_rules?: Json | null
           avatar_url?: string | null
@@ -263,6 +265,7 @@ export type Database = {
           verified_at?: string | null
         }
         Update: {
+          admissibility_criteria?: Json
           availability?: string | null
           availability_rules?: Json | null
           avatar_url?: string | null
@@ -599,6 +602,7 @@ export type Database = {
     Functions: {
       merge_expert_profile: {
         Args: {
+          p_admissibility_criteria?: Json
           p_availability?: string
           p_bio?: string
           p_display_name?: string
@@ -610,6 +614,7 @@ export type Database = {
           p_rate_min?: number
         }
         Returns: {
+          admissibility_criteria: Json
           availability: string | null
           availability_rules: Json | null
           avatar_url: string | null

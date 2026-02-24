@@ -17,6 +17,8 @@ import { loadExpertPool } from '../lib/expertPool';
 import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../types/db';
 import { calculateLeadPrice } from '../lib/pricing';
 import { loadBillingData, applyBillingFilters } from '../lib/billingFilter';
+import { loadAdmissibilityData, applyAdmissibilityFilters } from '../lib/admissibilityFilter';
+import type { ProspectContext } from '../lib/admissibilityFilter';
 import type { ProspectRequirements as _PR } from '../types/matching';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -80,6 +82,7 @@ export async function handleMatchCompute(request: Request, env: Env, ctx: Execut
       computed: number;
       top_matches: unknown[];
       billing_excluded?: { expert_id: string; reason: string }[];
+      admissibility_excluded?: { expert_id: string; reason: string }[];
     };
     const billingExcluded = matchBody.billing_excluded ?? [];
     if (billingExcluded.length > 0) {
@@ -97,8 +100,23 @@ export async function handleMatchCompute(request: Request, env: Env, ctx: Execut
         );
       }
     }
+    const admissibilityExcluded = matchBody.admissibility_excluded ?? [];
+    for (const ex of admissibilityExcluded) {
+      ctx.waitUntil(
+        env.EMAIL_NOTIFICATIONS.send({
+          type: 'expert.admissibility.lead_missed',
+          expert_id: ex.expert_id,
+          reason: ex.reason,
+          prospect_vertical: typeof effectiveSatelliteId === 'string' ? effectiveSatelliteId : '',
+        })
+      );
+    }
     return new Response(
-      JSON.stringify({ computed: matchBody.computed, top_matches: matchBody.top_matches }),
+      JSON.stringify({
+        computed: matchBody.computed,
+        top_matches: matchBody.top_matches,
+        admissibility_excluded: admissibilityExcluded.length,
+      }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -134,9 +152,9 @@ export async function handleMatchCompute(request: Request, env: Env, ctx: Execut
 
   // AC2–AC4: apply billing filter
   const billingMap = await loadBillingData(env, expertPool.map((e) => e.id));
-  const { eligible, excluded: billingExcluded } = applyBillingFilters(expertPool, billingMap, leadPrice);
+  const { eligible: billingEligible, excluded: billingExcluded } = applyBillingFilters(expertPool, billingMap, leadPrice);
 
-  // AC6: fire-and-forget notifications
+  // AC6: fire-and-forget billing exclusion notifications
   for (const ex of billingExcluded) {
     ctx.waitUntil(
       env.EMAIL_NOTIFICATIONS.send({
@@ -149,9 +167,37 @@ export async function handleMatchCompute(request: Request, env: Env, ctx: Execut
     );
   }
 
+  // AC4 (E06S36): apply admissibility filter AFTER billing, BEFORE scoring
+  const admissibilityMap = await loadAdmissibilityData(env, billingEligible.map((e) => e.id));
+  const prospectCtx: ProspectContext = {
+    industry: (requirements as { industry?: string }).industry ?? null,
+    vertical: typeof effectiveSatelliteId === 'string' ? effectiveSatelliteId : null,
+    timeline: (requirements as { timeline?: string }).timeline ?? null,
+    budget_max: requirements.budget_range?.max ?? null,
+    skills_needed: requirements.skills_needed ?? [],
+    methodology: (requirements as { methodology?: string[] }).methodology ?? [],
+  };
+  const { eligible, excluded: admissibilityExcluded } = applyAdmissibilityFilters(
+    billingEligible,
+    admissibilityMap,
+    prospectCtx,
+  );
+
+  // AC6 (E06S36): fire-and-forget admissibility exclusion notifications
+  for (const ex of admissibilityExcluded) {
+    ctx.waitUntil(
+      env.EMAIL_NOTIFICATIONS.send({
+        type: 'expert.admissibility.lead_missed',
+        expert_id: ex.expert_id,
+        reason: ex.reason,
+        prospect_vertical: typeof effectiveSatelliteId === 'string' ? effectiveSatelliteId : '',
+      })
+    );
+  }
+
   // AC7: all excluded → empty results
   if (eligible.length === 0) {
-    return jsonResponse({ computed: 0, top_matches: [] });
+    return jsonResponse({ computed: 0, top_matches: [], admissibility_excluded: admissibilityExcluded.length });
   }
 
   const scored = eligible.map((expert) => {
@@ -218,7 +264,11 @@ export async function handleMatchCompute(request: Request, env: Env, ctx: Execut
     meanScore,
   });
 
-  return jsonResponse({ computed: top20.length, top_matches: topMatches });
+  return jsonResponse({
+    computed: top20.length,
+    top_matches: topMatches,
+    admissibility_excluded: admissibilityExcluded.length,
+  });
 }
 
 // ── GET /api/matches/:prospect_id ─────────────────────────────────────────────

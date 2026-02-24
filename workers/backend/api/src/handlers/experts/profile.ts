@@ -8,6 +8,16 @@ import { captureEvent } from '../../lib/posthog';
 
 const VALID_AVAILABILITY = ['available', 'limited', 'unavailable'] as const;
 
+// admissibility_criteria sub-schema (AC3)
+const AdmissibilityCriteriaSchema = z.object({
+  min_project_duration_days: z.number().int().positive().optional(),
+  required_methodology: z.array(z.string()).optional(),
+  excluded_verticals: z.array(z.string()).optional(),
+  min_budget: z.number().int().positive().optional(),
+  required_stack_overlap_min: z.number().min(0).max(1).optional(),
+  custom_rules: z.array(z.string()).optional(),
+}).optional();
+
 const PatchProfileSchema = z.object({
   display_name: z.string().min(1).max(100).optional(),
   headline: z.string().max(200).optional(),
@@ -17,6 +27,7 @@ const PatchProfileSchema = z.object({
   availability: z.enum(VALID_AVAILABILITY).optional(),
   profile: z.record(z.string(), z.unknown()).optional(),
   preferences: z.record(z.string(), z.unknown()).optional(),
+  admissibility_criteria: AdmissibilityCriteriaSchema,
 });
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -92,12 +103,13 @@ export async function handlePatchProfile(
     );
   }
 
-  const { display_name, headline, bio, rate_min, rate_max, availability, profile, preferences } =
+  const { display_name, headline, bio, rate_min, rate_max, availability, profile, preferences, admissibility_criteria } =
     parsed.data;
 
   const sql = createSql(env);
 
   // AC8: JSONB merge via RPC (postgres.js named-param call)
+  // AC3 (E06S36): p_admissibility_criteria replaces existing value when provided (non-null = full replace, not merge)
   const rows = await sql<ExpertRow[]>`
     SELECT * FROM merge_expert_profile(
       p_id := ${expertId},
@@ -108,7 +120,8 @@ export async function handlePatchProfile(
       p_rate_max := ${rate_max ?? null},
       p_availability := ${availability ?? null},
       p_profile := ${profile ? JSON.stringify(profile) : null}::jsonb,
-      p_preferences := ${preferences ? JSON.stringify(preferences) : null}::jsonb
+      p_preferences := ${preferences ? JSON.stringify(preferences) : null}::jsonb,
+      p_admissibility_criteria := ${admissibility_criteria !== undefined ? JSON.stringify(admissibility_criteria) : null}::jsonb
     )`;
 
   if (!rows || rows.length === 0) {
@@ -158,6 +171,7 @@ export async function handlePatchProfile(
   if (availability !== undefined) fieldsUpdated.push('availability');
   if (profile !== undefined) fieldsUpdated.push('profile');
   if (preferences !== undefined) fieldsUpdated.push('preferences');
+  if (admissibility_criteria !== undefined) fieldsUpdated.push('admissibility_criteria');
 
   ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
     distinctId: `expert:${expertId}`,

@@ -24,6 +24,8 @@ import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../ty
 import { captureEvent } from '../lib/posthog';
 import { calculateLeadPrice } from '../lib/pricing';
 import { loadBillingData, applyBillingFilters } from '../lib/billingFilter';
+import { loadAdmissibilityData, applyAdmissibilityFilters } from '../lib/admissibilityFilter';
+import type { ProspectContext } from '../lib/admissibilityFilter';
 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -229,6 +231,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
           computed: number;
           top_matches: unknown[];
           billing_excluded?: { expert_id: string; reason: string }[];
+          admissibility_excluded?: { expert_id: string; reason: string }[];
         };
         const billingExcluded = matchBody.billing_excluded ?? [];
         if (billingExcluded.length > 0) {
@@ -248,6 +251,17 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
             );
           }
         }
+        const admissibilityExcludedMS = matchBody.admissibility_excluded ?? [];
+        for (const ex of admissibilityExcludedMS) {
+          ctx.waitUntil(
+            env.EMAIL_NOTIFICATIONS.send({
+              type: 'expert.admissibility.lead_missed',
+              expert_id: ex.expert_id,
+              reason: ex.reason,
+              prospect_vertical: satellite_id,
+            })
+          );
+        }
         const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET);
         return jsonResponse({ prospect_id: prospect.id, token, token_expires_at: expiresAt });
       }
@@ -266,9 +280,9 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
 
   // AC2–AC4: apply billing filter
   const billingMapFallback = await loadBillingData(env, experts.map((e) => e.id));
-  const { eligible, excluded: billingExcludedFallback } = applyBillingFilters(experts, billingMapFallback, leadPrice);
+  const { eligible: billingEligibleFallback, excluded: billingExcludedFallback } = applyBillingFilters(experts, billingMapFallback, leadPrice);
 
-  // AC6: fire-and-forget notifications
+  // AC6: fire-and-forget billing exclusion notifications
   for (const ex of billingExcludedFallback) {
     ctx.waitUntil(
       env.EMAIL_NOTIFICATIONS.send({
@@ -277,6 +291,34 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
         reason: ex.reason,
         prospect_vertical: satellite_id,
         budget_tier: lpResultFallback.tier,
+      })
+    );
+  }
+
+  // AC4 (E06S36): apply admissibility filter AFTER billing, BEFORE scoring
+  const admissibilityMapFallback = await loadAdmissibilityData(env, billingEligibleFallback.map((e) => e.id));
+  const prospectCtxFallback: ProspectContext = {
+    industry: requirements.industry ?? null,
+    vertical: satellite_id,
+    timeline: requirements.timeline ?? null,
+    budget_max: requirements.budget_range?.max ?? null,
+    skills_needed: requirements.skills_needed ?? [],
+    methodology: (requirements as unknown as { methodology?: string[] }).methodology ?? [],
+  };
+  const { eligible, excluded: admissibilityExcludedFallback } = applyAdmissibilityFilters(
+    billingEligibleFallback,
+    admissibilityMapFallback,
+    prospectCtxFallback,
+  );
+
+  // AC6 (E06S36): fire-and-forget admissibility exclusion notifications
+  for (const ex of admissibilityExcludedFallback) {
+    ctx.waitUntil(
+      env.EMAIL_NOTIFICATIONS.send({
+        type: 'expert.admissibility.lead_missed',
+        expert_id: ex.expert_id,
+        reason: ex.reason,
+        prospect_vertical: satellite_id,
       })
     );
   }

@@ -3,6 +3,7 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 
 export interface ExpertRow {
   id: string;
+  admissibility_criteria: Json;
   availability: string | null;
   availability_rules: Json | null;
   avatar_url: string | null;
