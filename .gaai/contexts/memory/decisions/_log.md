@@ -20,6 +20,29 @@ updated_at: 2026-02-23
 
 ---
 
+### DEC-2026-02-24-70 — Artefact directory structure: one dedicated subdirectory per type
+
+**Context:** Delivery artefacts (impl-report, qa-report, memory-delta) were scattered across wrong locations: root of `artefacts/`, inside `plans/`, and in a hybrid `reports/` catch-all folder. Root cause: all sub-agents (implementation, QA, micro-delivery), skills (coordinate-handoffs, memory-alignment-check), and README.artefacts.md hardcoded `reports/` as the single output directory. The filesystem had evolved to use dedicated subdirectories (`impl-reports/`, `qa-reports/`, `memory-deltas/`) but the agent instructions were never updated. The delivery.agent.md orchestration flow used abbreviated paths (no directory prefix), providing zero guidance.
+**Decision:** Canonical artefact routing — one directory per artefact type, no exceptions:
+
+| Artefact type | Directory |
+|---|---|
+| `{id}.execution-plan.md` | `plans/` |
+| `{id}.plan-blocked.md` | `plans/` |
+| `{id}.approach-evaluation.md` | `evaluations/` |
+| `{id}.impl-report.md` | `impl-reports/` |
+| `{id}.specialist-{domain}.md` | `impl-reports/` |
+| `{id}.qa-report.md` | `qa-reports/` |
+| `{id}.memory-delta.md` | `memory-deltas/` |
+| `{id}.micro-delivery-report.md` | `delivery/` |
+
+New rule R7 in `artefacts.rules.md`: no artefact may be written to the root of `contexts/artefacts/`. The hybrid `reports/` directory has been deleted — its contents redistributed to the dedicated subdirectories.
+**Rationale:** Separation of concerns eliminates ambiguity. Each type has a single canonical location. Agents no longer have to guess. The routing table in `artefacts.rules.md` is the single source of truth.
+**Impact:** 8 files updated (4 sub-agents, 2 skills, delivery.agent.md, README.artefacts.md, artefacts.rules.md). 80+ existing artefacts moved to correct locations. `reports/` deleted. All future deliveries will write to the correct directories.
+**Date:** 2026-02-24
+
+---
+
 ### DEC-2026-02-22-69 — KV eliminated from expert pool read path; E06S19 merged into E06S23
 
 **Context:** The expert pool cache architecture planned 3 layers: Cache API (L1) → KV (L2) → Hyperdrive (L3). Analysis revealed KV adds no value over D1: KV has a 25 Mo per-value limit (~5,000 experts max), no SQL filtering, ~50ms latency. D1 provides SQL WHERE filtering, sub-5ms edge reads, 10 Go limit, and $0.001/M rows. R2 was also evaluated and rejected — `list()` does not support metadata filtering, making it unsuitable for queryable structured data.

@@ -2,6 +2,8 @@ import { Env } from '../types/env';
 import { LeadBillingMessage } from '../types/queues';
 import { isAlreadyProcessed, markProcessed } from '../lib/idempotency';
 import { handleMessageFailure } from '../lib/retryQueue';
+import { createSql } from '../lib/db';
+import type { LeadRow, ExpertRow } from '../types/db';
 import { createServiceClient } from '../lib/supabase';
 import { calculateLeadPrice } from '../lib/pricing';
 import { ProspectRequirements } from '../types/matching';
@@ -39,6 +41,7 @@ async function processLeadBilling(
   body: LeadBillingMessage,
   env: Env
 ): Promise<void> {
+  const sql = createSql(env);
   const supabase = createServiceClient(env);
 
   // Step 1: Fetch prospect requirements for lead price calculation (AC1)
@@ -60,6 +63,7 @@ async function processLeadBilling(
     // Any non-null timeline string signals the prospect provided a timeline (premium eligibility)
     timeline_days: requirements?.timeline != null ? 30 : null,
     ...(requirements?.skills_needed ? { skills: requirements.skills_needed } : {}),
+  
   });
 
   // Step 3: Atomic credit debit via PostgreSQL RPC function (AC1, AC3)

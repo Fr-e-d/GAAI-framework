@@ -23,7 +23,7 @@ EXECUTE ← Implements per plan steps inside the worktree; spawns specialists if
 COMMIT  ← Atomic commit after all ACs are implemented and self-validated:
           git add . && git commit -m "feat({id}): {title} [AC1–ACn]
           Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
-HANDOFF ← Writes contexts/artefacts/reports/{id}.impl-report.md
+HANDOFF ← Writes contexts/artefacts/impl-reports/{id}.impl-report.md
 DIE     ← Terminates; context window released
 ```
 
@@ -58,7 +58,7 @@ The Implementation Sub-Agent reads the execution plan and matches against `agent
 Specialist lifecycle: spawn → execute → handoff-specialist-artefact → die
 ```
 
-Specialist handoff artefacts are written to `contexts/artefacts/reports/{id}.specialist-{domain}.md`.
+Specialist handoff artefacts are written to `contexts/artefacts/impl-reports/{id}.specialist-{domain}.md`.
 
 The Implementation Sub-Agent waits for each specialist handoff before proceeding to the next plan step that depends on it.
 
@@ -66,7 +66,7 @@ The Implementation Sub-Agent waits for each specialist handoff before proceeding
 
 ## Handoff Artefact
 
-Writes to: `contexts/artefacts/reports/{id}.impl-report.md`
+Writes to: `contexts/artefacts/impl-reports/{id}.impl-report.md`
 
 The artefact must include:
 - Summary of changes made (files created/modified)

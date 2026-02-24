@@ -106,6 +106,27 @@ Artefacts MUST NOT:
 
 Only agents may decide if an artefact should be summarized into memory.
 
+## 🗂️ Artefact Routing Table (Canonical)
+
+Every artefact type has **one and only one** target directory. This table is the single source of truth for artefact placement. Agents MUST write to these paths — no exceptions.
+
+| Artefact type | Directory | Written by |
+|---|---|---|
+| `{id}.execution-plan.md` | `contexts/artefacts/plans/` | Planning Sub-Agent |
+| `{id}.plan-blocked.md` | `contexts/artefacts/plans/` | Planning Sub-Agent |
+| `{id}.approach-evaluation.md` | `contexts/artefacts/evaluations/` | Planning Sub-Agent |
+| `{id}.impl-report.md` | `contexts/artefacts/impl-reports/` | Implementation Sub-Agent |
+| `{id}.specialist-{domain}.md` | `contexts/artefacts/impl-reports/` | Specialist Sub-Agent |
+| `{id}.qa-report.md` | `contexts/artefacts/qa-reports/` | QA Sub-Agent |
+| `{id}.memory-delta.md` | `contexts/artefacts/memory-deltas/` | QA Sub-Agent (PASS only) |
+| `{id}.micro-delivery-report.md` | `contexts/artefacts/delivery/` | MicroDelivery Sub-Agent |
+| `{id}.story.md` | `contexts/artefacts/stories/` | Discovery Agent |
+| `{id}.epic.md` | `contexts/artefacts/epics/` | Discovery Agent |
+
+**R7 — No artefact may be written to the root of `contexts/artefacts/`.** Every artefact must be placed in its designated subdirectory.
+
+---
+
 ## 🚫 Forbidden Artefact Behaviors (Hard Fail)
 
 The following behaviors are **explicitly forbidden**:

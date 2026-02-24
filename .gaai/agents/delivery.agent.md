@@ -83,9 +83,9 @@ Trigger: `complexity ≤ 2`, `files_affected ≤ 2`, `criteria_count ≤ 3`, no 
 
 ```
 Delivery Orchestrator
-    ├── Planning Sub-Agent        → {id}.execution-plan.md
-    ├── Implementation Sub-Agent  → {id}.impl-report.md
-    └── QA Sub-Agent              → {id}.qa-report.md
+    ├── Planning Sub-Agent        → plans/{id}.execution-plan.md
+    ├── Implementation Sub-Agent  → impl-reports/{id}.impl-report.md
+    └── QA Sub-Agent              → qa-reports/{id}.qa-report.md + memory-deltas/{id}.memory-delta.md (PASS only)
 ```
 
 ### Tier 3 — Core Team + Specialists (complexity ≥ 8)
@@ -162,23 +162,23 @@ invoke evaluate-story
        ↓
 Tier 1? → spawn MicroDelivery Sub-Agent
            ↓
-           collect {id}.micro-delivery-report.md → PASS/FAIL/ESCALATE
+           collect delivery/{id}.micro-delivery-report.md → PASS/FAIL/ESCALATE
        ↓
 Tier 2 or 3? → assemble context bundle
            ↓
            spawn Planning Sub-Agent
            ↓
-           collect {id}.execution-plan.md (validate)
+           collect plans/{id}.execution-plan.md (validate)
            ↓
            spawn Implementation Sub-Agent
            ↓
-           collect {id}.impl-report.md (validate)
+           collect impl-reports/{id}.impl-report.md (validate)
            ↓
            spawn QA Sub-Agent
            ↓
-           collect {id}.qa-report.md
+           collect qa-reports/{id}.qa-report.md
            ↓
-           PASS → collect {id}.memory-delta.md
+           PASS → collect memory-deltas/{id}.memory-delta.md
                   → if verdict DRIFT_DETECTED or NEW_KNOWLEDGE_FOUND or DRIFT_AND_NEW_KNOWLEDGE:
                       flag Discovery with delta report before marking done
                   → push story/{id} → gh pr create --base staging
@@ -197,15 +197,15 @@ Tier 2 or 3? → assemble context bundle
 
 All artefacts are written by sub-agents and read by the Orchestrator:
 
-| Artefact | Written by | Read by |
-|----------|-----------|---------|
-| `{id}.approach-evaluation.md` | Planning Sub-Agent (via `approach-evaluation` skill, when triggered) | Planning Sub-Agent, Implementation Sub-Agent |
-| `{id}.execution-plan.md` | Planning Sub-Agent | Implementation Sub-Agent, QA Sub-Agent |
-| `{id}.impl-report.md` | Implementation Sub-Agent | QA Sub-Agent, Orchestrator |
-| `{id}.qa-report.md` | QA Sub-Agent | Orchestrator |
-| `{id}.memory-delta.md` | QA Sub-Agent (PASS only) | Orchestrator → Discovery |
-| `{id}.micro-delivery-report.md` | MicroDelivery Sub-Agent | Orchestrator |
-| `{id}.plan-blocked.md` | Planning Sub-Agent (on failure or architectural escalation from approach evaluation) | Orchestrator (triggers escalation) |
+| Artefact | Directory | Written by | Read by |
+|----------|-----------|-----------|---------|
+| `{id}.approach-evaluation.md` | `evaluations/` | Planning Sub-Agent (via `approach-evaluation` skill, when triggered) | Planning Sub-Agent, Implementation Sub-Agent |
+| `{id}.execution-plan.md` | `plans/` | Planning Sub-Agent | Implementation Sub-Agent, QA Sub-Agent |
+| `{id}.impl-report.md` | `impl-reports/` | Implementation Sub-Agent | QA Sub-Agent, Orchestrator |
+| `{id}.qa-report.md` | `qa-reports/` | QA Sub-Agent | Orchestrator |
+| `{id}.memory-delta.md` | `memory-deltas/` | QA Sub-Agent (PASS only) | Orchestrator → Discovery |
+| `{id}.micro-delivery-report.md` | `delivery/` | MicroDelivery Sub-Agent | Orchestrator |
+| `{id}.plan-blocked.md` | `plans/` | Planning Sub-Agent (on failure or architectural escalation from approach evaluation) | Orchestrator (triggers escalation) |
 
 Artefacts persist until the Story is archived. They are the audit trail.
 

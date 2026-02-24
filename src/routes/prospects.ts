@@ -233,6 +233,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
   }
 
   // AC6 Fallback: local deterministic scoring (no Vectorize/AI — those bindings live in Matching Worker)
+  const similarityMap = new Map<string, number>();
   const scoredResults: { score: number }[] = [];
   if (experts.length > 0) {
     const matchRows = experts.map((expert) => {
@@ -242,7 +243,9 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
         rate_max: expert.rate_max,
       };
       const prefs = (expert.preferences ?? {}) as ExpertPreferences;
-      const raw = scoreMatch(profile, prefs, requirements, weights);
+      // AC4/AC5: pass per-expert cosine similarity; undefined in fallback path → deterministic-only
+      const semanticSimilarity = similarityMap.get(expert.id);
+      const raw = scoreMatch(profile, prefs, requirements, weights, semanticSimilarity);
       const { score, breakdown } = applyReliabilityModifier(raw, {
         composite_score: expert.composite_score,
         total_leads: expert.total_leads,
@@ -259,10 +262,12 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
       };
     });
 
+    // B1 fix: sort by score DESC and take top 20
     const top20Rows = matchRows
       .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
       .slice(0, 20);
 
+    // AC3: INSERT top 20 scored results
     for (const row of top20Rows) {
       await sql`
         INSERT INTO matches (prospect_id, expert_id, score, score_breakdown, status, expires_at)

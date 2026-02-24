@@ -1,4 +1,5 @@
 import { Env } from './types/env';
+export { ExpertPoolDO } from './durable-objects/expertPoolDO';
 import { handleMatchCompute, handleMatchGet } from './routes/matches';
 import { handleExtract } from './routes/extract';
 import { authenticate } from './middleware/auth';
