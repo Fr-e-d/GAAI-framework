@@ -33,7 +33,7 @@ CF edge cache (max-age=300, stale-while-revalidate=3600)
 ## Dev local
 
 ```bash
-cd workers/satellite
+cd workers/frontend/satellites
 npm install
 npx wrangler dev
 # -> http://localhost:8787
@@ -49,10 +49,10 @@ ADMIN_SECRET=local-dev-secret
 
 ## Secrets (par environnement)
 
-Toutes les commandes doivent etre lancees depuis `workers/satellite/` :
+Toutes les commandes doivent etre lancees depuis `workers/frontend/satellites/` :
 
 ```bash
-cd workers/satellite
+cd workers/frontend/satellites
 
 # Staging
 npx wrangler secret put SUPABASE_URL --env staging
@@ -90,7 +90,7 @@ Le deploiement est automatique via GitHub Actions (en parallele avec `callibrate
 Deploiement manuel :
 
 ```bash
-cd workers/satellite
+cd workers/frontend/satellites
 npx wrangler deploy --env staging
 npx wrangler deploy --env production
 ```

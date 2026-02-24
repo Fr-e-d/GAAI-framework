@@ -46,7 +46,7 @@ updated_at: 2026-02-23
 - **PR merge timing (DEC-2026-02-24-71):** PRs MUST be merged to staging as the final step of delivery — never left open to accumulate. 19 unmerged PRs caused cascading conflicts that required 3 rounds of resolution (2026-02-24 incident). Each merge changed staging, invalidating all other pending branches.
 - **Branch base rule:** Story branches MUST be created from `staging` (or `production` for hotfixes) — NEVER from another story branch. Stacking branches (E06S22 on E06S21 on E06S18) creates an implicit dependency chain that cascades conflicts.
 - **Conflict-minimizing merge order:** When multiple PRs must be merged, process sequentially in dependency order (oldest/leaf first). For each PR: (1) merge staging into branch, (2) push immediately, (3) merge PR immediately. Do NOT batch-resolve then batch-merge — each merge changes staging and invalidates subsequent resolutions.
-- **Shared hotspot files:** `src/index.ts`, `wrangler.toml`, `src/types/env.ts` are modified by nearly every story and are guaranteed conflict zones when PRs accumulate. This reinforces the merge-immediately rule.
+- **Shared hotspot files:** `workers/backend/api/src/index.ts`, `workers/backend/api/wrangler.toml`, `workers/backend/api/src/types/env.ts` are modified by nearly every story and are guaranteed conflict zones when PRs accumulate. This reinforces the merge-immediately rule.
 - **Worktree cleanup:** Always `git worktree remove` after use. Stale worktrees under `.claude/worktrees/` are picked up by vitest test discovery, causing phantom test failures.
 - **Ignored files:** `.DS_Store`, `temp/`, `.env`, `node_modules/`, `.wrangler/` — `.gitignore` in root
 
@@ -184,10 +184,16 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 
 ---
 
-## Multi-Worker Project Structure (E06S14)
+## Monorepo Structure (E06S14, E06S35)
 
-- **Secondary Workers** live in `workers/{name}/` subdirectory (e.g. `workers/satellite/`)
-- Each has its own `package.json`, `wrangler.toml`, `tsconfig.json`
+- **All Workers** live under `workers/backend/` or `workers/frontend/`:
+  - `workers/backend/api/` — Core API (callibrate-core)
+  - `workers/backend/matching-engine/` — Matching engine (callibrate-matching)
+  - `workers/backend/posthog-proxy/` — PostHog proxy (callibrate-posthog-proxy)
+  - `workers/frontend/satellites/` — Satellite landing pages (callibrate-satellite)
+- Root is npm workspaces orchestrator: `"workspaces": ["workers/backend/*", "workers/frontend/*"]`
+- Single root `package-lock.json` — no per-worker lockfiles
+- Each Worker has its own `package.json`, `wrangler.toml`, `tsconfig.json`
 - GitHub Actions deploy all Workers in parallel (separate jobs in same workflow)
 - **Satellite Worker uses Hono** for routing (first use in the project). Core Worker remains regex-based. Both patterns are valid.
 - **Satellite config resolution pattern:** `resolveConfig(hostname, env)` — KV cache-aside (key: `satellite:config:${hostname}`, TTL: 3600s) with Supabase REST fallback (anon key). Non-blocking KV write on miss. Returns null on DB miss or Supabase unreachable → caller handles 302 redirect.

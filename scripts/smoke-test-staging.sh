@@ -35,7 +35,7 @@ SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ
 SATELLITE_ID="default"
 
 # Cloudflare Turnstile test token — staging uses the always-pass secret key
-# (TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA" in wrangler.toml [env.staging.vars])
+# (TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA" in workers/backend/api/wrangler.toml [env.staging.vars])
 # Any non-empty string passes when the test secret key is active.
 TURNSTILE_TOKEN="SMOKE.TEST.TOKEN.E06S29"
 
