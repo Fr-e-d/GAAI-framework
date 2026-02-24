@@ -31,7 +31,7 @@ updated_at: 2026-02-23
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-23 (updated: E07 PostHog analytics stack — DEC-65 complement) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-23 (11 active entries — DEC-60 to DEC-2026-02-23-02. Older entries compacted.) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-24 (17 active entries — DEC-60 to DEC-2026-02-24-77. Older entries compacted.) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-23 (OpenAI function calling pattern replaces Anthropic — E06S12/DEC-2026-02-23-01) |
 | `ops/platform.md` | ops | OPS-001 | 2026-02-23 (CI/CD & preview deployments — DEC-2026-02-23-02) |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
@@ -86,7 +86,8 @@ updated_at: 2026-02-23
 | `artefacts/stories/E06S33.story.md` | Story | Refined — LS subscription + welcome credit + usage reporting cron (DEC-68) |
 | `artefacts/stories/E06S34.story.md` | Story | Refined — balance/max_lead_price/spending_limit at matching (DEC-67/68) |
 | `artefacts/stories/E03S05.story.md` | Story | Refined — crawler access policy |
-| `artefacts/strategy/GTM-001.md` | Strategy | GTM plan — 4 phases, binary PASS/FAIL gates, J0–J90 — Phase 0 restructurée (DEC-31) |
+| `artefacts/strategy/GTM-001.md` | Strategy | GTM plan — 4 phases, binary PASS/FAIL gates, J0–J90 — Phase 0 restructurée (DEC-31) — build-in-public orchestrated launch (DEC-77) — .gaai OSS (DEC-72) + formation (DEC-73) |
+| `artefacts/strategy/VISION-GAAI-CLOUD.md` | Strategy | Vision long-terme — .gaai comme SaaS universel de gouvernance d'agents AI — architecture technique 3 couches (DEC-74, DEC-75) — NOT ACTIVE |
 | `artefacts/manifesto/MANIFESTO-001.md` | Manifesto | Manifeste public Callibrate — draft FR — pay-for-value + game theory + invitation |
 | `artefacts/marketing/E01S01-reddit-posts.md` | Marketing | Reddit discussion posts + observation log |
 | `artefacts/marketing/E01S01-community-posts.md` | Marketing | Slack/Discord engagement messages + observation log |

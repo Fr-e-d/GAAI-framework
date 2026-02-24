@@ -3,8 +3,8 @@
 # Source of truth: frontmatter in each SKILL.md
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-02-23
-total: 37
+generated_at: 2026-02-24
+total: 38
 
 # ─────────────────────────────────────────────
 # DISCOVERY — skills that produce artefacts
@@ -358,3 +358,12 @@ cross:
     status: future
     updated_at: 2026-02-06
     path: cross/success-metrics-evaluation/SKILL.md
+
+  - id: SKILL-CRS-021
+    name: generate-build-in-public-content
+    description: "Generate build-in-public content drafts from completed delivery artefacts. Applies the Golden Circle (WHY → HOW → WHAT) to transform stories, decisions, and metrics into ready-to-review content pieces (X threads, blog snippets, metrics posts). Activate automatically after each story reaches done status."
+    category: cross
+    track: cross-cutting
+    tags: [content, build-in-public, marketing, automation]
+    updated_at: 2026-02-24
+    path: cross/generate-build-in-public-content/SKILL.md

@@ -203,6 +203,10 @@ Tier 2 or 3? → assemble context bundle
                   → verify staging deploy CI; if fails → ESCALATE with logs
                   → flock: commit artefacts + mark done → push staging
                   → cleanup worktree + delete remote branch
+                  → generate-build-in-public-content (non-blocking, best-effort)
+                    inputs: story artefact, impl-report, qa-report, referenced DEC- entries, backlog metrics
+                    output: content/drafts/{id}-thread.md (+ blog snippet if milestone story)
+                    failure: silent — content is a byproduct, not a dependency
            FAIL → re-spawn Implementation Sub-Agent with qa-report (max 2 re-spawns)
                   → re-spawn QA Sub-Agent
                   → if still FAIL after 2 cycles → ESCALATE
@@ -222,6 +226,8 @@ All artefacts are written by sub-agents and read by the Orchestrator:
 | `{id}.impl-report.md` | `impl-reports/` | Implementation Sub-Agent | QA Sub-Agent, Orchestrator |
 | `{id}.qa-report.md` | `qa-reports/` | QA Sub-Agent | Orchestrator |
 | `{id}.memory-delta.md` | `memory-deltas/` | QA Sub-Agent (PASS only) | Orchestrator → Discovery |
+| `{id}-thread.md` | `content/drafts/` | Orchestrator (via `generate-build-in-public-content`) | Human review → publication |
+| `{id}-blog.md` | `content/drafts/` | Orchestrator (milestone stories only) | Human review → publication |
 | `{id}.micro-delivery-report.md` | `delivery/` | MicroDelivery Sub-Agent | Orchestrator |
 | `{id}.plan-blocked.md` | `plans/` | Planning Sub-Agent (on failure or architectural escalation from approach evaluation) | Orchestrator (triggers escalation) |
 
