@@ -19,6 +19,17 @@ vi.mock('posthog-node', () => ({
   })),
 }));
 
+// ── Mock jwt (E08S03) ──────────────────────────────────────────────────────────
+
+vi.mock('../../lib/jwt', () => ({
+  verifyProspectToken: vi.fn().mockResolvedValue(true),
+  signProspectToken: vi.fn(),
+  signSurveyToken: vi.fn(),
+  verifySurveyToken: vi.fn(),
+}));
+
+import { verifyProspectToken } from '../../lib/jwt';
+
 const mockCtx = {
   waitUntil: vi.fn(),
   passThroughOnException: vi.fn(),
@@ -32,7 +43,10 @@ const mockEnv = {
   SUPABASE_SERVICE_KEY: 'service-key',
   ANTHROPIC_API_KEY: '',
   CLOUDFLARE_AI_GATEWAY_URL: '',
-  SESSIONS: {} as KVNamespace,
+  SESSIONS: {
+    get: vi.fn().mockResolvedValue(null),
+    put: vi.fn().mockResolvedValue(undefined),
+  } as unknown as KVNamespace,
   RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: true }) } as unknown as RateLimit,
   FEATURE_FLAGS: {} as KVNamespace,
   EXPERT_POOL: {} as KVNamespace,
@@ -125,16 +139,22 @@ describe('computeFreeSlots', () => {
 describe('handleHold', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (verifyProspectToken as Mock).mockResolvedValue(true);
+    (mockEnv.SESSIONS as unknown as { get: Mock }).get.mockResolvedValue(null);
   });
 
   it('should return 200 with booking_id on happy path', async () => {
     const mockSql = vi.fn() as Mock;
-    // Call 1: conflict check → no conflicts
+    // Call 1: expert check → found
+    mockSql.mockResolvedValueOnce([{ id: 'expert-1' }]);
+    // Call 2: active holds count → 0
+    mockSql.mockResolvedValueOnce([{ count: 0 }]);
+    // Call 3: conflict check → no conflicts
     mockSql.mockResolvedValueOnce([]);
-    // Call 2: match lookup → no match (optional)
+    // Call 4: match lookup → no match (optional)
     mockSql.mockResolvedValueOnce([]);
-    // Call 3: INSERT bookings RETURNING id, held_until
-    mockSql.mockResolvedValueOnce([{ id: 'booking-456', held_until: '2026-02-23T10:10:00Z' }]);
+    // Call 5: INSERT bookings RETURNING id, held_until
+    mockSql.mockResolvedValueOnce([{ id: 'booking-456', held_until: '2099-02-23T10:10:00Z' }]);
     (createSql as Mock).mockReturnValue(mockSql);
 
     const request = new Request('https://test.workers.dev/api/bookings/hold', {
@@ -142,12 +162,12 @@ describe('handleHold', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         expert_id: 'expert-1',
-        start_at: '2026-02-24T10:00:00Z',
-        end_at: '2026-02-24T10:20:00Z',
+        start_at: '2099-02-24T10:00:00Z',
+        end_at: '2099-02-24T10:20:00Z',
         prospect_id: 'prospect-1',
+        token: 'valid-token',
       }),
     });
-
 
     const response = await handleHold(request, mockEnv as unknown as Parameters<typeof handleHold>[1], mockCtx);
     expect([200, 500]).toContain(response.status);
@@ -160,7 +180,11 @@ describe('handleHold', () => {
 
   it('should return 409 when slot is already taken', async () => {
     const mockSql = vi.fn() as Mock;
-    // Conflict check returns an array with one conflict
+    // Call 1: expert check → found
+    mockSql.mockResolvedValueOnce([{ id: 'expert-1' }]);
+    // Call 2: active holds count → 0
+    mockSql.mockResolvedValueOnce([{ count: 0 }]);
+    // Call 3: conflict check → slot taken
     mockSql.mockResolvedValueOnce([{ id: 'existing-booking' }]);
     (createSql as Mock).mockReturnValue(mockSql);
 
@@ -169,9 +193,10 @@ describe('handleHold', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         expert_id: 'expert-1',
-        start_at: '2026-02-24T10:00:00Z',
-        end_at: '2026-02-24T10:20:00Z',
+        start_at: '2099-02-24T10:00:00Z',
+        end_at: '2099-02-24T10:20:00Z',
         prospect_id: 'prospect-1',
+        token: 'valid-token',
       }),
     });
 
@@ -179,6 +204,158 @@ describe('handleHold', () => {
     expect(response.status).toBe(409);
     const body = await response.json() as Record<string, string>;
     expect(body.error).toBe('slot_taken');
+  });
+
+  // ── E08S03 AC6: New security tests ────────────────────────────────────────
+
+  it('should return 403 when token is missing (AC6a)', async () => {
+    const request = new Request('https://test.workers.dev/api/bookings/hold', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expert_id: 'expert-1',
+        start_at: '2099-02-24T10:00:00Z',
+        end_at: '2099-02-24T10:20:00Z',
+        prospect_id: 'prospect-1',
+        // no token
+      }),
+    });
+
+    const response = await handleHold(request, mockEnv as unknown as Parameters<typeof handleHold>[1], mockCtx);
+    expect(response.status).toBe(403);
+    const body = await response.json() as Record<string, string>;
+    expect(body.error).toBe('Forbidden');
+  });
+
+  it('should return 403 when token is invalid (AC6b)', async () => {
+    (verifyProspectToken as Mock).mockResolvedValueOnce(false);
+
+    const request = new Request('https://test.workers.dev/api/bookings/hold', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expert_id: 'expert-1',
+        start_at: '2099-02-24T10:00:00Z',
+        end_at: '2099-02-24T10:20:00Z',
+        prospect_id: 'prospect-1',
+        token: 'invalid-token',
+      }),
+    });
+
+    const response = await handleHold(request, mockEnv as unknown as Parameters<typeof handleHold>[1], mockCtx);
+    expect(response.status).toBe(403);
+    const body = await response.json() as Record<string, string>;
+    expect(body.error).toBe('Forbidden');
+  });
+
+  it('should return 429 when rate limit exceeded (AC6c)', async () => {
+    (mockEnv.SESSIONS as unknown as { get: Mock }).get.mockResolvedValueOnce('5');
+
+    const request = new Request('https://test.workers.dev/api/bookings/hold', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expert_id: 'expert-1',
+        start_at: '2099-02-24T10:00:00Z',
+        end_at: '2099-02-24T10:20:00Z',
+        prospect_id: 'prospect-1',
+        token: 'valid-token',
+      }),
+    });
+
+    const response = await handleHold(request, mockEnv as unknown as Parameters<typeof handleHold>[1], mockCtx);
+    expect(response.status).toBe(429);
+    const body = await response.json() as Record<string, string>;
+    expect(body.error).toBe('Too Many Requests');
+  });
+
+  it('should return 409 when max holds exceeded (AC6d)', async () => {
+    const mockSql = vi.fn() as Mock;
+    // Call 1: expert check → found
+    mockSql.mockResolvedValueOnce([{ id: 'expert-1' }]);
+    // Call 2: active holds count → 3 (max reached)
+    mockSql.mockResolvedValueOnce([{ count: 3 }]);
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const request = new Request('https://test.workers.dev/api/bookings/hold', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expert_id: 'expert-1',
+        start_at: '2099-02-24T10:00:00Z',
+        end_at: '2099-02-24T10:20:00Z',
+        prospect_id: 'prospect-1',
+        token: 'valid-token',
+      }),
+    });
+
+    const response = await handleHold(request, mockEnv as unknown as Parameters<typeof handleHold>[1], mockCtx);
+    expect(response.status).toBe(409);
+    const body = await response.json() as Record<string, string>;
+    expect(body.error).toBe('max_holds_reached');
+  });
+
+  it('should return 422 when dates are invalid (AC6e)', async () => {
+    // end_at before start_at
+    const request = new Request('https://test.workers.dev/api/bookings/hold', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expert_id: 'expert-1',
+        start_at: '2099-02-24T11:00:00Z',
+        end_at: '2099-02-24T10:00:00Z',
+        prospect_id: 'prospect-1',
+        token: 'valid-token',
+      }),
+    });
+
+    const response = await handleHold(request, mockEnv as unknown as Parameters<typeof handleHold>[1], mockCtx);
+    expect(response.status).toBe(422);
+    const body = await response.json() as Record<string, string>;
+    expect(body.error).toBe('end_at must be after start_at');
+  });
+
+  it('should return 422 when start_at is in the past (AC5)', async () => {
+    const request = new Request('https://test.workers.dev/api/bookings/hold', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expert_id: 'expert-1',
+        start_at: '2020-01-01T10:00:00Z',
+        end_at: '2020-01-01T10:20:00Z',
+        prospect_id: 'prospect-1',
+        token: 'valid-token',
+      }),
+    });
+
+    const response = await handleHold(request, mockEnv as unknown as Parameters<typeof handleHold>[1], mockCtx);
+    expect(response.status).toBe(422);
+    const body = await response.json() as Record<string, string>;
+    expect(body.error).toBe('start_at must be in the future');
+  });
+
+  it('should return 404 when expert_id does not exist (AC4)', async () => {
+    const mockSql = vi.fn() as Mock;
+    // Call 1: expert check → not found
+    mockSql.mockResolvedValueOnce([]);
+    (createSql as Mock).mockReturnValue(mockSql);
+
+    const request = new Request('https://test.workers.dev/api/bookings/hold', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expert_id: 'nonexistent-expert',
+        start_at: '2099-02-24T10:00:00Z',
+        end_at: '2099-02-24T10:20:00Z',
+        prospect_id: 'prospect-1',
+        token: 'valid-token',
+      }),
+    });
+
+    const response = await handleHold(request, mockEnv as unknown as Parameters<typeof handleHold>[1], mockCtx);
+    expect(response.status).toBe(404);
+    const body = await response.json() as Record<string, string>;
+    expect(body.error).toBe('expert_not_found');
   });
 });
 
