@@ -84,9 +84,9 @@ binding = "VECTORIZE"
 index_name = "expert-profiles"
 
 # Rate Limiter (E06S20)
-[[rate_limiting]]
-binding = "RATE_LIMITER"
-namespace_id = 1001
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
 simple = { limit = 30, period = 60 }
 
 # Durable Object — ExpertPoolDO write coordinator (E06S25)
@@ -207,10 +207,21 @@ name = "EXPERT_POOL_DO"
 class_name = "ExpertPoolDO"
 
 # Rate Limiter (E06S20)
-[[env.staging.rate_limiting]]
-binding = "RATE_LIMITER"
-namespace_id = 1002
+[[env.staging.ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1002"
 simple = { limit = 30, period = 60 }
+
+# CF Workflows (E08)
+[[env.staging.workflows]]
+binding = "BOOKING_CONFIRMED_WORKFLOW"
+name = "booking-confirmed-workflow"
+class_name = "BookingConfirmedWorkflow"
+
+[[env.staging.workflows]]
+binding = "BOOKING_COMPLETED_WORKFLOW"
+name = "booking-completed-workflow"
+class_name = "BookingCompletedWorkflow"
 
 [env.staging.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *"]
@@ -302,10 +313,21 @@ name = "EXPERT_POOL_DO"
 class_name = "ExpertPoolDO"
 
 # Rate Limiter (E06S20)
-[[env.production.rate_limiting]]
-binding = "RATE_LIMITER"
-namespace_id = 1003
+[[env.production.ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1003"
 simple = { limit = 30, period = 60 }
+
+# CF Workflows (E08)
+[[env.production.workflows]]
+binding = "BOOKING_CONFIRMED_WORKFLOW"
+name = "booking-confirmed-workflow"
+class_name = "BookingConfirmedWorkflow"
+
+[[env.production.workflows]]
+binding = "BOOKING_COMPLETED_WORKFLOW"
+name = "booking-completed-workflow"
+class_name = "BookingCompletedWorkflow"
 
 [env.production.triggers]
 crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *"]
