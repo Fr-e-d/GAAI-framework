@@ -541,19 +541,23 @@ items:
     epic: E08
     title: "Security headers middleware + XSS fix (SEC-04, SEC-05, SEC-17)"
     priority: high
-    status: in_progress
+    status: done
+    started_at: "2026-02-24T20:00:00+01:00"
+    completed_at: "2026-02-24T20:54:00+01:00"
     artefact: contexts/artefacts/stories/E08S02.story.md
     dependencies: []
-    notes: "SEC-AUDIT-001: SEC-04 (HIGH XSS JSON-LD) + SEC-05 (HIGH missing headers) + SEC-17 (LOW Content-Type). Middleware global sur les 4 workers. CSP sur satellite."
+    notes: "DONE 2026-02-24. QA PASS (8/8 ACs verified). securityHeaders middleware (X-Content-Type-Options, X-Frame-Options, HSTS, Referrer-Policy, Permissions-Policy) applied on Core API + Satellite + PostHog Proxy. CSP on satellite HTML. JSON-LD XSS escape (\\u003c). POST Content-Type guard (415). PR#34 squash-merged → staging. SEC-AUDIT-001 SEC-04 (HIGH) + SEC-05 (HIGH) + SEC-17 (LOW) remediated."
 
   - id: E08S03
     epic: E08
     title: "Booking hold authentication + rate limiting (SEC-02)"
     priority: critical
-    status: failed
+    status: done
+    started_at: "2026-02-25T00:40:00+01:00"
+    completed_at: "2026-02-25T00:50:00+01:00"
     artefact: contexts/artefacts/stories/E08S03.story.md
     dependencies: []
-    notes: "SEC-AUDIT-001: SEC-02 (CRITICAL). /api/bookings/hold = 0 auth, 0 rate limit. Prospect token required + 5 holds/h/IP + max 3 active holds/prospect. DoS vector sur calendriers experts."
+    notes: "DONE 2026-02-25. QA PASS (re-delivery, first attempt failed). All 7 ACs met. AC1: verifyProspectToken(token, prospect_id, PROSPECT_TOKEN_SECRET, 'prospect:identify'). AC2: KV-based rate limit (5 holds/h/IP via SESSIONS). AC3: DB check max 3 active holds/prospect → 409 max_holds_reached. AC4: expert_id existence check → 404. AC5: ISO-8601 + future + end>start → 422. AC6: 8 new tests (403×2, 429, 409 max_holds, 422×2, 404 expert). AC7: tsc clean (4 workers). 342/342 vitest. SEC-AUDIT-001 SEC-02 (CRITICAL) remediated."
 
   - id: E08S04
     epic: E08

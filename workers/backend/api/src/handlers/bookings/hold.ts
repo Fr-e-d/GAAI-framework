@@ -2,6 +2,7 @@ import { Env } from '../../types/env';
 import { createSql } from '../../lib/db';
 import type { BookingRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
+import { verifyProspectToken } from '../../lib/jwt';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -11,6 +12,15 @@ function json(data: unknown, status = 200): Response {
 }
 
 export async function handleHold(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  // AC2: Rate limiting — 5 holds per hour per IP (KV-based sliding window)
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+  const holdRateKey = `hold-rate:${ip}`;
+  const holdCountStr = await env.SESSIONS.get(holdRateKey);
+  const holdCount = holdCountStr ? parseInt(holdCountStr, 10) : 0;
+  if (holdCount >= 5) {
+    return json({ error: 'Too Many Requests' }, 429);
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -18,7 +28,7 @@ export async function handleHold(request: Request, env: Env, ctx: ExecutionConte
     return json({ error: 'Invalid JSON' }, 400);
   }
 
-  const { expert_id, start_at, end_at, prospect_id } = body as Record<string, unknown>;
+  const { expert_id, start_at, end_at, prospect_id, token } = body as Record<string, unknown>;
 
   if (!expert_id || !start_at || !end_at || !prospect_id) {
     return json({ error: 'Missing required fields: expert_id, start_at, end_at, prospect_id' }, 422);
@@ -28,7 +38,44 @@ export async function handleHold(request: Request, env: Env, ctx: ExecutionConte
     return json({ error: 'Invalid field types' }, 422);
   }
 
+  // AC1: Prospect token verification
+  if (!token || typeof token !== 'string') {
+    return json({ error: 'Forbidden' }, 403);
+  }
+  const tokenValid = await verifyProspectToken(token, prospect_id, env.PROSPECT_TOKEN_SECRET, 'prospect:identify');
+  if (!tokenValid) {
+    return json({ error: 'Forbidden' }, 403);
+  }
+
+  // AC5: ISO-8601 datetime validation
+  const startDate = new Date(start_at);
+  const endDate = new Date(end_at);
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    return json({ error: 'Invalid datetime format: start_at and end_at must be ISO-8601' }, 422);
+  }
+  if (startDate.getTime() <= Date.now()) {
+    return json({ error: 'start_at must be in the future' }, 422);
+  }
+  if (endDate.getTime() <= startDate.getTime()) {
+    return json({ error: 'end_at must be after start_at' }, 422);
+  }
+
   const sql = createSql(env);
+
+  // AC4: Validate expert_id exists
+  const [expert] = await sql<{ id: string }[]>`
+    SELECT id FROM experts WHERE id = ${expert_id}`;
+  if (!expert) {
+    return json({ error: 'expert_not_found' }, 404);
+  }
+
+  // AC3: Max 3 active holds per prospect
+  const [activeHolds] = await sql<{ count: number }[]>`
+    SELECT COUNT(*)::int AS count FROM bookings
+    WHERE prospect_id = ${prospect_id} AND status = 'held'`;
+  if (activeHolds && activeHolds.count >= 3) {
+    return json({ error: 'max_holds_reached' }, 409);
+  }
 
   // Conflict check: any held or confirmed booking overlapping this slot
   const conflicts = await sql<{ id: string }[]>`
@@ -56,6 +103,9 @@ export async function handleHold(request: Request, env: Env, ctx: ExecutionConte
   if (!booking) {
     return json({ error: 'Failed to create hold' }, 500);
   }
+
+  // Increment hold rate counter after successful hold (AC2)
+  ctx.waitUntil(env.SESSIONS.put(holdRateKey, String(holdCount + 1), { expirationTtl: 3600 }));
 
   ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
     distinctId: `expert:${expert_id}`,
