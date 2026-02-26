@@ -368,10 +368,12 @@ items:
     epic: E07
     title: "PostHog EU — compte + dashboards + MCP (founder setup)"
     priority: high
-    status: failed
+    status: done
+    started_at: "2026-02-23T22:00:00+01:00"
+    completed_at: "2026-02-26T18:30:00+01:00"
     artefact: contexts/artefacts/stories/E07S06.story.md
     dependencies: [E07S05, E06S27]
-    notes: "Partiellement fait + agent-deliverable via PostHog MCP. AC1-AC3 DONE (compte PostHog EU créé, POSTHOG_API_KEY=phc_9MGVc1dDaNAugnSHJ692t5YuWFNy2WQ4kIHNvlEsXkr configurée). AC6 (dashboards): agent via PostHog MCP server (mcp-eu.posthog.com). AC9-AC10 (smoke tests): agent via curl. Founder reste: AC4 Personal API Key (phx_) + AC5 export ~/.zshrc + AC7 MCP restart + AC8 ph.callibrate.io CNAME. Bloque l'observabilité analytics."
+    notes: "DONE 2026-02-26. AC1-AC6 founder+agent (compte EU, projet 131035, API keys, dashboards script). AC7 pending restart Claude Code. AC8 CNAME ph.callibrate.io actif. AC9 proxy smoke POST /i/v0/e/ → 200 OK (fix: catch-all POST route added to proxy, commit 22e3801). AC10 expert.registered → 201 (Hyperdrive password reset required). Proxy bug fix deployed staging+prod. Hyperdrive staging password updated."
 
   # ── EPIC E06 (suite): Staging readiness — Provisionnement & Smoke Test ────
 
