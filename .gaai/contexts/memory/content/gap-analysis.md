@@ -1,63 +1,93 @@
 # Content Knowledge Base — Gap Analysis
 
-> **Date:** 2026-02-25
-> **Scope:** Coverage assessment of 7 sources (118 AKUs) against 10 planned content blueprint skills
-> **Purpose:** Identify missing knowledge before skill design begins
+> **Date:** 2026-02-26
+> **Scope:** Coverage assessment of 10 sources (141 AKUs) against 10 planned content blueprint skills
+> **Purpose:** Identify remaining knowledge gaps and resolution paths before skill design
+> **Framework context:** `domain-knowledge-research` (SKILL-CRS-023) + Capability Readiness rule
+> now provide on-demand gap resolution. Pre-requisite knowledge collection is no longer the
+> only path — the framework self-heals knowledge gaps during story refinement.
 
 ---
 
 ## SKILL COVERAGE MATRIX
 
-| Skill | Coverage | Primary Sources | Gaps |
-|-------|----------|-----------------|------|
-| CNT-001-research | PARTIAL | AGT-001, SRC-001, SEO-001 | No keyword research methodology, no competitive analysis, no audience language extraction process |
-| CNT-002-outline | GOOD | WRT-001, AGT-001, SRC-001 | Minor: no standardized artefact template (skill design concern, not knowledge gap) |
-| CNT-003-draft | GOOD | WRT-001, HMN-001, AGT-001, SRC-001 | Minor: no prompt engineering methodology for AI-assisted drafting |
-| CNT-004-edit | EXCELLENT | HMN-001, WRT-001 | None significant |
-| CNT-005-seo-optimize | PARTIAL | SEO-001 | No on-page operational checklist (title tags, meta descriptions, alt text, internal linking, schema types) |
-| CNT-006-geo-optimize | EXCELLENT | GEO-001, SRC-001 | None significant |
-| CNT-007-social-adapt | PARTIAL | SOC-001 | No transformation templates (blog→thread, blog→carousel, blog→LinkedIn), no tone adaptation rules per platform |
-| CNT-008-youtube-script | **CRITICAL GAP** | SOC-001 (3 AKUs only) | Almost nothing: no YT algorithm signals, no script structure, no Shorts vs long-form, no YT SEO, no pre-production |
-| CNT-009-quality-gate | GOOD | AGT-001, HMN-001, SRC-001, GEO-001 | Minor: no readability score targets by content type |
-| CNT-010-repurpose | WEAK | SOC-001, WRT-001, SRC-001 | No repurposing methodology, no refresh criteria, no cadence framework |
+| Skill | Coverage | Primary Sources | Gaps | Resolution Path |
+|-------|----------|-----------------|------|-----------------|
+| CNT-001-research | **GOOD** | AGT-001, SRC-001, SEO-001, KWR-001 | Minor: voice-of-customer mining, competitive gap analysis not formalized | Auto: Capability Readiness triggers `domain-knowledge-research` (surface) if needed at refinement |
+| CNT-002-outline | GOOD | WRT-001, AGT-001, SRC-001 | Minor: artefact template | Skill design concern, not knowledge gap |
+| CNT-003-draft | GOOD | WRT-001, HMN-001, AGT-001, SRC-001 | Minor: prompt engineering methodology | Develops during skill design (T2) |
+| CNT-004-edit | EXCELLENT | HMN-001, WRT-001 | None | — |
+| CNT-005-seo-optimize | **GOOD** | SEO-001, SEO-002 | Minor: alt text checklist implicit | Auto: `domain-knowledge-research` (surface) if needed |
+| CNT-006-geo-optimize | EXCELLENT | GEO-001, SRC-001 | None | — |
+| CNT-007-social-adapt | **SUFFICIENT v1** | SOC-001 | Transformation templates (blog→thread/carousel/LinkedIn), tone adaptation rules per platform | Auto: Capability Readiness triggers `domain-knowledge-research` (standard) at refinement. SOC-001 sufficient for v1 design |
+| CNT-008-youtube-script | **DEFERRED** | SOC-001 (3 AKUs only) | Near-total: YT algorithm, script structure, Shorts vs long-form, YT SEO, AI search citation | Planned: `domain-knowledge-research` (comprehensive) when CNT-008 is prioritized. Not a day-1 use case |
+| CNT-009-quality-gate | GOOD | AGT-001, HMN-001, SRC-001, GEO-001 | Minor: readability score targets by content type | Auto: `domain-knowledge-research` (surface) if needed |
+| CNT-010-repurpose | **BUILDABLE** | SOC-001, WRT-001, SRC-001 | Repurposing methodology, refresh criteria, cadence framework | Auto: Capability Readiness triggers `domain-knowledge-research` (standard) at refinement. Iterative build after first production cycle |
 
 ---
 
 ## TRANSVERSAL GAPS
 
-| ID | Gap | Impacts | Severity |
-|----|-----|---------|----------|
-| T1 | Brand voice / voice guide creation methodology | CNT-003, CNT-004, CNT-007 | HIGH |
-| T2 | Prompt engineering for content generation pipeline | All skills | HIGH |
-| T3 | Visual content creation (diagrams, charts, infographics) | CNT-003, CNT-007, CNT-008 | MEDIUM |
-| T4 | Content measurement / analytics framework | CNT-009, CNT-010 | MEDIUM |
-| T5 | Distribution beyond social (email, syndication, community seeding) | CNT-007 scope | LOW |
+| ID | Gap | Impacts | Severity | Resolution |
+|----|-----|---------|----------|------------|
+| T1 | Voice guide (voice-guide.md) | CNT-003, CNT-004, CNT-007 | **ONLY PRE-REQUISITE** | Manual: transform COMMS-001 → voice-guide.md. Not a research gap — founder-authored artefact |
+| T2 | Prompt engineering for pipeline | All skills | RESOLVED | Develops during skill design. Each skill encodes its own prompts |
+| T3 | Visual content creation | CNT-003, CNT-007, CNT-008 | OUT OF SCOPE | Text-first pipeline. Address when visual skill is added |
+| T4 | Content measurement / analytics | CNT-009, CNT-010 | RESOLVED | PostHog integration exists in Callibrate. Framework built alongside first publication cycle |
+| T5 | Distribution beyond social | CNT-007 scope | OUT OF SCOPE | Marketing/GTM concern, not content production |
 
 ---
 
 ## PRIORITIZED ACTIONS
 
-### Blocking
-1. **CNT-008-youtube-script** — Deep search required OR defer skill to later phase
+### Only pre-requisite before content production
+1. **T1 — Voice guide:** Transform COMMS-001 (IS/ISN'T, empathy maps, origin story) into `memory/content/voice-guide.md`. This is the only manual action required before skills can produce content.
 
-### High Priority
-2. **CNT-001** — Source needed: keyword research & content gap analysis methodology
-3. **CNT-007** — Source needed: transformation templates & platform-specific workflows
-4. **T1** — Voice guide: founder-authored artefact for Callibrate, then generalized as methodology
-
-### Can Proceed Without
-5. **CNT-005** — Supplement with Google official docs during skill design
-6. **CNT-010** — Build iteratively from first real usage
-7. **T2** — Prompt engineering develops during skill design (learning by doing)
-8. **T3** — Visual content out of scope for initial pipeline (text-first)
-9. **T4** — Leverage existing PostHog integration in Callibrate
+### Resolved (no action needed)
+2. ~~**CNT-001** — keyword research methodology~~ → **RESOLVED** by KWR-001
+3. ~~**CNT-005** — on-page checklist~~ → **RESOLVED** by SEO-002
+4. ~~**CNT-007** — transformation templates~~ → **RESOLVED** by Capability Readiness (`domain-knowledge-research` on-demand)
+5. ~~**CNT-008** — YouTube knowledge~~ → **DEFERRED** — `domain-knowledge-research` (comprehensive) when prioritized
+6. ~~**CNT-010** — repurposing methodology~~ → **RESOLVED** by Capability Readiness (`domain-knowledge-research` on-demand)
+7. ~~**T2** — prompt engineering~~ → **RESOLVED** by skill design practice
 
 ---
 
-## SKILLS READY FOR DESIGN (sufficient knowledge base)
+## SKILLS READY FOR DESIGN
 
-1. CNT-002-outline
-2. CNT-003-draft
-3. CNT-004-edit
-4. CNT-006-geo-optimize
-5. CNT-009-quality-gate
+### Immediate (sufficient knowledge base now)
+
+1. CNT-001-research
+2. CNT-002-outline
+3. CNT-003-draft
+4. CNT-004-edit
+5. CNT-005-seo-optimize
+6. CNT-006-geo-optimize
+7. CNT-009-quality-gate
+
+### Designable with on-demand knowledge fill (Capability Readiness)
+
+8. CNT-007-social-adapt — SOC-001 sufficient for v1; `domain-knowledge-research` enriches at refinement
+9. CNT-010-repurpose — build iteratively; `domain-knowledge-research` fills gaps at refinement
+
+### Deferred (not day-1 priority)
+
+10. CNT-008-youtube-script — `domain-knowledge-research` (comprehensive) when prioritized
+
+---
+
+## KNOWLEDGE BASE SOURCES
+
+| ID | Domain | AKUs | Status |
+|----|--------|------|--------|
+| SEO-001 | SEO | 15 + 3 UZ | Stable |
+| SEO-002 | SEO (On-Page) | 10 | Stable |
+| WRT-001 | WRT | 20 + 4 UZ + 7 WF | Stable |
+| AGT-001 | AGT | GAAI-filtered | Stable |
+| GEO-001 | GEO | 18 + intervention ranking | Stable |
+| HMN-001 | HMN | 18 + 4-layer model | Stable |
+| SOC-001 | SOC | 20 + protocol | Stable |
+| SRC-001 | SRC | 17 | Stable |
+| MTA-001 | MTA | 17 | Stable |
+| KWR-001 | KWR | 13 | Stable |
+| **Total** | **9 domains** | **~141 AKUs** | — |

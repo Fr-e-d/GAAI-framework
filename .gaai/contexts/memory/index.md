@@ -1,7 +1,7 @@
 ---
 type: memory_index
 id: MEMORY-INDEX
-updated_at: 2026-02-24
+updated_at: 2026-02-26
 ---
 
 # Memory Map
@@ -31,7 +31,7 @@ updated_at: 2026-02-24
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-23 (updated: E07 PostHog analytics stack — DEC-65 complement) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-25 (29 active entries — DEC-60 to DEC-2026-02-25-89. Older entries compacted.) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-26 (32 active entries — DEC-60 to DEC-92. Older entries compacted.) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-23 (OpenAI function calling pattern replaces Anthropic — E06S12/DEC-2026-02-23-01) |
 | `ops/platform.md` | ops | OPS-001 | 2026-02-24 (Delivery costs $149.90/24 stories measured — SKILL-CRS-022 cost-analysis + Reddit API pattern) |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |

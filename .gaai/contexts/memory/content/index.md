@@ -16,6 +16,9 @@
 | HMN-001 | HMN | AI Writing Authenticity — Detection, Perception & Risk Model | sources/HMN-001.md | 2026-02-24 |
 | SOC-001 | SOC | Cross-Platform Social Performance Model | sources/SOC-001.md | 2026-02-24 |
 | SRC-001 | SRC | Machine-Verifiable Credibility — Citation Density & Authority | sources/SRC-001.md | 2026-02-25 |
+| MTA-001 | MTA | Personal Authority Engineering — Positioning & AI-Era Visibility | sources/MTA-001.md | 2026-02-25 |
+| SEO-002 | SEO | On-Page SEO — Weighted Execution Framework (Evidence-Graded) | sources/SEO-002.md | 2026-02-25 |
+| KWR-001 | KWR | Keyword Research — Data Acquisition, Semantic Expansion & Scoring | sources/KWR-001.md | 2026-02-25 |
 
 ## Domains
 
@@ -28,4 +31,5 @@
 | SOC | Social Media Excellence | Platform-specific, hooks, repurposing, engagement |
 | SRC | Sourcing & Credibility | Citations, E-E-A-T signals, fact-checking |
 | AGT | Agentic Writing Systems | Multi-agent pipelines, automation, production patterns |
+| KWR | Keyword Research | Search intelligence, semantic expansion, scoring & prioritization |
 | MTA | Meta / Cross-domain | Composite methodologies, comparative analyses |

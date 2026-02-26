@@ -6,7 +6,7 @@ tags:
   - decisions
   - governance
 created_at: 2026-02-19
-updated_at: 2026-02-24
+updated_at: 2026-02-26
 ---
 
 # Decision Log
@@ -17,6 +17,36 @@ updated_at: 2026-02-24
 >
 > **Compacted 2026-02-23:** DEC-01 to DEC-59 (59 entries) archived.
 > Full text → `archive/decisions-01-59.archive.md` | Summary → `summaries/decisions-01-59.summary.md`
+
+---
+
+### DEC-92 — Framework-wide skill audit: 40 skills reviewed, all gaps fixed
+
+**Context:** After creating `domain-knowledge-research` (DEC-91) with high epistemic rigor, applied the same level of scrutiny to all 40 existing skills.
+**Decision:** Audit all skills via 14 parallel sub-agents, fix all identified gaps via 8 parallel sub-agents, then normalize metadata across remaining files.
+**Results:** 8 SOLID (no changes), 4 SIGNIFICANT rewrites (browser-journey-test, refine-scope, memory-compact, summarization), 16 MINOR content fixes (generate-stories, generate-epics, create-prd, remediate-failures, compose-team, coordinate-handoffs, decision-extraction, memory-retrieve, delivery-readiness-audit, risk-analysis, consistency-check + 5 others), 21 metadata normalizations (`status` field, `## Outputs` heading, `updated_at`). skills-index.yaml regenerated — all 40 entries now have `status` (35 stable, 3 experimental, 1 future).
+**Rationale:** Skills are the execution backbone. Inconsistent quality, missing output specs, or vague processes undermine agent determinism. One-time investment, high compounding returns.
+**Date:** 2026-02-26
+
+---
+
+### DEC-91 — domain-knowledge-research skill (SKILL-CRS-023) — epistemic rigor from manual prompts
+
+**Context:** Need for a governed skill to research industry best practices, extract structured knowledge (AKUs), and filter for GAAI compatibility. Three manual Google Notebook LM prompts (source collection, best practices extraction, knowledge architect) existed but were ungoverned.
+**Decision:** Create a single skill `domain-knowledge-research` (v2.0) that integrates all three prompts into a 5-phase process with GAAI governance. Key design: 6 mandatory epistemic rules (correlation≠causation, preserve quantified data, flag data sparsity), AKU format with `causality` + `evidence_type` + `mechanism` + `guardrails` + `directional_trend`, 5-filter GAAI compatibility pass, confidence calibration layer, safe generation protocol (7 rules for LLM consumption).
+**Rejected alternative:** 4 separate skills (persist-source-catalog, persist-akus, generate-skill-blueprint, validate-skill-scope) — redundant with existing skills and fragmented governance.
+**Files:** `.gaai/skills/cross/domain-knowledge-research/SKILL.md`, `.gaai/agents/discovery.agent.md` (cross-skills list)
+**Date:** 2026-02-26
+
+---
+
+### DEC-90 — Capability Readiness: split knowledge (Discovery) / skills (Delivery)
+
+**Context:** No mechanism existed to verify that agents have both the competencies and current best-practice knowledge needed before executing a mission.
+**Decision:** Split responsibility: (1) Discovery verifies **knowledge readiness** — best practices exist and are current for the domain before marking stories `refined`. Uses `approach-evaluation` (narrow, single problem) or `domain-knowledge-research` (broad, full domain). (2) Delivery verifies **skill coverage** during `evaluate-story` — checks skills-index.yaml against identified domains, blocks on critical gaps with escalation to Discovery.
+**Rejected alternative:** Single readiness check in Delivery between evaluate-story and compose-team. Fatal flaw: Delivery can't run `memory-ingest` (orchestration rules), so any knowledge gap forces escalation back to Discovery = unnecessary ping-pong.
+**Files:** `.gaai/contexts/rules/orchestration.rules.md` (new section), `.gaai/skills/delivery/evaluate-story/SKILL.md` (Step 4 + skill_gaps output)
+**Date:** 2026-02-26
 
 ---
 
