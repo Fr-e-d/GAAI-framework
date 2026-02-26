@@ -45,9 +45,9 @@ updated_at: 2026-02-26
 
 **Channels to engage in:**
 - `#general` — answer tool questions, share tips
-- `#showcase` — comment on builds, ask follow-up questions about client work
-- `#jobs` — observe. Note what experts are offering + pricing
-- `#help` — answer n8n questions if you can
+- `#show-and-tell` — comment on builds, ask follow-up questions about client work
+- `#idea-collaboration` — forum format, longer discussions on pain points
+- `#ai-langchain` — advanced AI builders (sub-segment ICP)
 
 **What to contribute:**
 - Answer workflow questions with specifics, not generics
@@ -55,6 +55,26 @@ updated_at: 2026-02-26
 - Share a real observation from your Reddit research (no self-promo framing): "I keep seeing the same pattern — 90% tire kickers, 10% real projects. Anyone else?"
 
 **Frequency:** 1-2 genuine contributions per day in Discord. 10 min/day.
+
+### Target threads/channels on AI Agency Alliance Discord
+
+**Channels to engage in:**
+- `#general-chat` — daily conversations, most active channel
+- `#ai-forum` — forum format, 8 active posts, deeper AI discussions
+- `#welcome` — general discussions (very active, 4min ago)
+- `#seek-partner` — observe partner requests, identify ICP members
+
+**Channels to observe (don't post yet):**
+- `#jobs-lookin-for` — job posts, spot experts and their pricing
+- `#marketing` — lead gen discussions, directly relevant
+- `#operations` — client management pain points
+
+**What to contribute:**
+- Reply to threads about client acquisition, lead gen, pricing
+- Share concrete data points from your research (anonymized): "I've been talking to 100+ AI automation consultants — 90% say most inbound is tire kickers"
+- Ask genuine questions about how agency owners find clients
+
+**Frequency:** 1-2 contributions per day across both Discord servers. 10 min/day total.
 
 ### X Communities to join + warm
 
@@ -210,6 +230,23 @@ Un hand raiser est "qualifié" si son profil montre :
 - N'est pas un étudiant ou un chercheur de stage
 - Semble avoir des clients (portfolio, expérience, posts)
 - Stack pertinente (n8n, Make, Zapier, custom Python, LangChain, etc.)
+
+---
+
+## Price + Value Framing (DEFERRED — for conversion conversations post-gate)
+
+> Do not use this until you have qualified hand raisers and a product to sell.
+> Applies when you follow up with experts after the gate passes (≥10 qualified).
+
+**Rule:** Never announce price alone. Always pair it with the specific outcome the expert receives.
+
+❌ "It's €X/month."
+
+✅ "It's €X/month — and every lead you receive has a confirmed budget, has been matched to your specific criteria, and has already accepted that a specialist will contact them."
+
+The prospect doesn't buy the price. They buy the outcome the price buys them.
+
+**For Callibrate specifically:** the outcome isn't lead volume — it's *pre-qualified access with no filter tax*. The framing should always emphasize what they no longer have to do (filter, chase, qualify) rather than what they get (leads). Leads are the mechanism. Time back and certainty are the outcome.
 
 ---
 
