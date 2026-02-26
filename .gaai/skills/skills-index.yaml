@@ -4,7 +4,7 @@
 # Regenerate: invoke build-skills-index skill
 
 generated_at: 2026-02-26
-total: 40
+total: 42
 
 # ─────────────────────────────────────────────
 # DISCOVERY — skills that produce artefacts
@@ -420,3 +420,28 @@ cross:
     status: stable
     updated_at: 2026-01-30
     path: cross/summarization/SKILL.md
+
+# ─────────────────────────────────────────────
+# CONTENT — blueprint skills for content production
+# ─────────────────────────────────────────────
+content:
+
+  - id: SKILL-CNT-007
+    name: social-adapt
+    description: "Transform a published blog post or content piece into platform-specific social media formats (X thread, LinkedIn post, Reddit post, carousel outline). Activate after CNT-004-edit or CNT-006-geo-optimize produces a final draft."
+    category: content
+    track: delivery
+    tags: [content, social-media, repurposing, transformation, platform-adaptation]
+    status: stable
+    updated_at: 2026-02-26
+    path: content/social-adapt/SKILL.md
+
+  - id: SKILL-CNT-010
+    name: repurpose
+    description: "Evaluate existing content for refresh, repurposing, or retirement. Activate when content is >90 days old, traffic has declined >20%, or a new content cycle begins. Produces refresh briefs and repurposing plans."
+    category: content
+    track: delivery
+    tags: [content, refresh, repurposing, lifecycle, evergreen, cadence]
+    status: stable
+    updated_at: 2026-02-26
+    path: content/repurpose/SKILL.md

@@ -20,6 +20,22 @@ updated_at: 2026-02-26
 
 ---
 
+### DEC-93 — Domain Sub-Agent architecture for skill overload prevention
+
+**Context:** Framework audit brought skills to 40, with content blueprint adding 7+ more. Evaluated risk of skill overload: agent definition bloat, skill selection ambiguity, cross-cutting sprawl (25/40 = 62.5% in flat `cross/`), no lifecycle/archival mechanism. Framework is well-designed for execution governance but NOT for its own growth governance.
+**Decision:** Adopt a domain sub-agent architecture to solve skill overload structurally:
+1. **Skill namespacing** in `cross/` (memory/, governance/, analysis/, content/, delivery-support/) — validated, implement now
+2. **Domain sub-agents** for Discovery and Delivery — a domain sub-agent is spawned when a Story belongs to a specific functional domain (content, analytics, etc.). In Delivery, it replaces `compose-team` for its domain and dispatches plan/impl/QA with domain-scoped context bundles + skills. In Discovery, it executes domain-specific skills and produces artefacts for Discovery to validate.
+3. **Domain specialist registry** extending the existing specialist pattern per domain/blueprint (functional level), complementary to existing technical specialists (db-migration, api-integration, etc.)
+4. **Activation rule:** domain sub-agent justified when domain has ≥5 skills AND its own memory. Below that, skills stay in cross/.
+5. **Backward compatible:** non-domain stories (backend, infra) use the current flow unchanged.
+**Rejected alternatives:** (a) Skill lifecycle with `deprecated` + auto-pruning — treats symptoms, operational overhead, false positives on rarely-used skills. (b) Agent skill cap at 20 — arbitrary, forces artificial grouping. Both become unnecessary with domain sub-agents.
+**Implementation trigger:** When content blueprint enters Delivery (first domain ≥5 skills).
+**Risk:** Orchestration depth +1 level — mitigated if domain sub-agent stays a "compose-team spécialisé", not a second orchestrator.
+**Date:** 2026-02-26
+
+---
+
 ### DEC-92 — Framework-wide skill audit: 40 skills reviewed, all gaps fixed
 
 **Context:** After creating `domain-knowledge-research` (DEC-91) with high epistemic rigor, applied the same level of scrutiny to all 40 existing skills.

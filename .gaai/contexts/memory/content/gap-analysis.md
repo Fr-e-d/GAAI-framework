@@ -19,10 +19,10 @@
 | CNT-004-edit | EXCELLENT | HMN-001, WRT-001 | None | — |
 | CNT-005-seo-optimize | **GOOD** | SEO-001, SEO-002 | Minor: alt text checklist implicit | Auto: `domain-knowledge-research` (surface) if needed |
 | CNT-006-geo-optimize | EXCELLENT | GEO-001, SRC-001 | None | — |
-| CNT-007-social-adapt | **SUFFICIENT v1** | SOC-001 | Transformation templates (blog→thread/carousel/LinkedIn), tone adaptation rules per platform | Auto: Capability Readiness triggers `domain-knowledge-research` (standard) at refinement. SOC-001 sufficient for v1 design |
+| CNT-007-social-adapt | **DESIGNED** | SOC-001, MTA-001, voice-guide.md | Skill created (SKILL-CNT-007). Templates built into skill process. | Skill ready at `skills/content/social-adapt/SKILL.md` |
 | CNT-008-youtube-script | **DEFERRED** | SOC-001 (3 AKUs only) | Near-total: YT algorithm, script structure, Shorts vs long-form, YT SEO, AI search citation | Planned: `domain-knowledge-research` (comprehensive) when CNT-008 is prioritized. Not a day-1 use case |
 | CNT-009-quality-gate | GOOD | AGT-001, HMN-001, SRC-001, GEO-001 | Minor: readability score targets by content type | Auto: `domain-knowledge-research` (surface) if needed |
-| CNT-010-repurpose | **BUILDABLE** | SOC-001, WRT-001, SRC-001 | Repurposing methodology, refresh criteria, cadence framework | Auto: Capability Readiness triggers `domain-knowledge-research` (standard) at refinement. Iterative build after first production cycle |
+| CNT-010-repurpose | **DESIGNED** | SRC-001, SEO-001, SEO-002, KWR-001 | Skill created (SKILL-CNT-010). Cadence framework + decision tree built into skill. | Skill ready at `skills/content/repurpose/SKILL.md` |
 
 ---
 
@@ -30,7 +30,7 @@
 
 | ID | Gap | Impacts | Severity | Resolution |
 |----|-----|---------|----------|------------|
-| T1 | Voice guide (voice-guide.md) | CNT-003, CNT-004, CNT-007 | **ONLY PRE-REQUISITE** | Manual: transform COMMS-001 → voice-guide.md. Not a research gap — founder-authored artefact |
+| T1 | Voice guide (voice-guide.md) | CNT-003, CNT-004, CNT-007 | **RESOLVED** | Created 2026-02-26 at `memory/content/voice-guide.md` from COMMS-001 Parts 0, 1, 3 |
 | T2 | Prompt engineering for pipeline | All skills | RESOLVED | Develops during skill design. Each skill encodes its own prompts |
 | T3 | Visual content creation | CNT-003, CNT-007, CNT-008 | OUT OF SCOPE | Text-first pipeline. Address when visual skill is added |
 | T4 | Content measurement / analytics | CNT-009, CNT-010 | RESOLVED | PostHog integration exists in Callibrate. Framework built alongside first publication cycle |
@@ -40,8 +40,8 @@
 
 ## PRIORITIZED ACTIONS
 
-### Only pre-requisite before content production
-1. **T1 — Voice guide:** Transform COMMS-001 (IS/ISN'T, empathy maps, origin story) into `memory/content/voice-guide.md`. This is the only manual action required before skills can produce content.
+### All pre-requisites resolved
+1. ~~**T1 — Voice guide:** Transform COMMS-001 → `memory/content/voice-guide.md`~~ → **RESOLVED** (created 2026-02-26)
 
 ### Resolved (no action needed)
 2. ~~**CNT-001** — keyword research methodology~~ → **RESOLVED** by KWR-001
@@ -65,10 +65,10 @@
 6. CNT-006-geo-optimize
 7. CNT-009-quality-gate
 
-### Designable with on-demand knowledge fill (Capability Readiness)
+### Designed (skill files created)
 
-8. CNT-007-social-adapt — SOC-001 sufficient for v1; `domain-knowledge-research` enriches at refinement
-9. CNT-010-repurpose — build iteratively; `domain-knowledge-research` fills gaps at refinement
+8. CNT-007-social-adapt — `skills/content/social-adapt/SKILL.md` (SKILL-CNT-007)
+9. CNT-010-repurpose — `skills/content/repurpose/SKILL.md` (SKILL-CNT-010)
 
 ### Deferred (not day-1 priority)
 
