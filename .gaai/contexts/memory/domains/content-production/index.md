@@ -1,6 +1,22 @@
-# Content Knowledge Base — Index
+---
+type: memory
+category: domain
+domain: content-production
+id: DOMAIN-CONTENT-PRODUCTION-001
+tags:
+  - content
+  - blueprint
+  - research
+  - seo
+  - writing
+  - social-media
+created_at: 2026-02-24
+updated_at: 2026-02-26
+---
 
-> Domain: content | Blueprint: Content Architect for Blog Post & Social Media
+# Content Production — Domain Knowledge Base
+
+> Blueprint: Content Architect for Blog Post & Social Media
 > Purpose: State-of-the-art research to inform skill design for the content blueprint.
 > Usage: Each source file is a classified research report. Load only what's needed per skill design session.
 > Gap analysis: See `gap-analysis.md` for coverage assessment and prioritized actions.
@@ -20,7 +36,7 @@
 | SEO-002 | SEO | On-Page SEO — Weighted Execution Framework (Evidence-Graded) | sources/SEO-002.md | 2026-02-25 |
 | KWR-001 | KWR | Keyword Research — Data Acquisition, Semantic Expansion & Scoring | sources/KWR-001.md | 2026-02-25 |
 
-## Domains
+## Research Domains
 
 | Code | Domain | Description |
 |------|--------|-------------|

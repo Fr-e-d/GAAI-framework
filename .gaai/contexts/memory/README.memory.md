@@ -70,10 +70,17 @@ contexts/memory/
 │   └── _log.md
 ├── patterns/             ← procedural: conventions & coding rules
 │   └── conventions.md
+├── domains/              ← domain-scoped memory (DEC-93)
+│   └── content-production/
+│       ├── index.md      ← domain registry (sources, gaps)
+│       ├── sources/      ← research AKUs
+│       └── voice-guide.md
 ├── summaries/            ← compacted episodic knowledge
 ├── sessions/             ← working: temporary session notes
 └── archive/              ← historical storage
 ```
+
+### Shared Categories
 
 | Category | Memory type | Purpose | Load frequency |
 |---|---|---|---|
@@ -83,6 +90,19 @@ contexts/memory/
 | `summaries/` | Compacted episodic | Distilled knowledge from sessions/decisions | Selective |
 | `sessions/` | Working | Temporary session exploration | Never (source for summaries) |
 | `archive/` | Historical | Old entries after compaction | Rarely |
+
+### Domain Memory
+
+Domain memory is scoped to domain sub-agents (DEC-93). A domain qualifies for its own `domains/{domain}/` folder when it has **≥5 skills AND its own knowledge base**.
+
+| Domain | Memory type | Purpose | Load frequency |
+|---|---|---|---|
+| `domains/content-production/` | Mixed (research + patterns) | AKUs, sources, voice guide, gap analysis for content blueprint | When content domain sub-agent active |
+
+**Convention for new domains:**
+1. Create `domains/{domain-name}/index.md` with standard YAML frontmatter (`type: memory`, `category: domain`, `domain: {name}`)
+2. Register the domain in `index.md` → Domain Memory table
+3. When ingesting into a domain, update BOTH the master `index.md` AND the domain `index.md`
 
 ---
 

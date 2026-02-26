@@ -20,6 +20,16 @@ updated_at: 2026-02-26
 
 ---
 
+### DEC-94 — Domain memory namespace: `memory/domains/{domain}/`
+
+**Context:** Content knowledge base existed at `memory/content/` but was (1) not registered in the master index, (2) missing YAML frontmatter, (3) ambiguously named ("content" = domain? product content? generic content?). With DEC-93 adopting domain sub-agents, memory structure must support domain-scoped retrieval.
+**Decision:** Introduce `memory/domains/` namespace. First domain: `domains/content-production/`. Convention: each domain with ≥5 skills + own knowledge base gets `domains/{domain-name}/` with its own `index.md` (standard YAML frontmatter). Shared memory stays flat at root (project/, decisions/, patterns/, ops/). No cross-domain folder needed — multi-domain Stories spawn multiple domain sub-agents, each loading its own domain memory. Master index gains a `## Domain Memory` section. `memory-ingest` gains a dual-index rule (update master + domain index).
+**Rejected alternatives:** (a) `knowledge/domains/content-production/` + `knowledge/cross-domain/` — "knowledge" frames domain memory as research-only, but domains can contain patterns (voice-guide), ops, and conventions. (b) `content/` flat alongside shared categories — ambiguous name, no namespace convention for future domains.
+**Files changed:** `memory/content/` → `memory/domains/content-production/`, `index.md`, `README.memory.md`, `memory-ingest/SKILL.md`, content skills input paths, source file references.
+**Date:** 2026-02-26
+
+---
+
 ### DEC-93 — Domain Sub-Agent architecture for skill overload prevention
 
 **Context:** Framework audit brought skills to 40, with content blueprint adding 7+ more. Evaluated risk of skill overload: agent definition bloat, skill selection ambiguity, cross-cutting sprawl (25/40 = 62.5% in flat `cross/`), no lifecycle/archival mechanism. Framework is well-designed for execution governance but NOT for its own growth governance.

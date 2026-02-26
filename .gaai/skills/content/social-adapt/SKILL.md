@@ -14,8 +14,8 @@ metadata:
   tags: [content, social-media, repurposing, transformation, platform-adaptation]
 inputs:
   - "contexts/artefacts/content/drafts/{id}-final.md (the edited, optimized source content)"
-  - "contexts/memory/content/voice-guide.md (voice attributes + platform tone variants)"
-  - "contexts/memory/content/sources/SOC-001.md (platform mechanics — load only relevant AKUs)"
+  - "contexts/memory/domains/content-production/voice-guide.md (voice attributes + platform tone variants)"
+  - "contexts/memory/domains/content-production/sources/SOC-001.md (platform mechanics — load only relevant AKUs)"
 outputs:
   - "contexts/artefacts/content/drafts/{id}-x-thread.md"
   - "contexts/artefacts/content/drafts/{id}-linkedin.md"
