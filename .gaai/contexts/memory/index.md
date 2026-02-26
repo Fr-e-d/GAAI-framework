@@ -39,7 +39,7 @@ updated_at: 2026-02-26
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-23 (updated: E07 PostHog analytics stack — DEC-65 complement) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-26 (36 active entries — DEC-60 to DEC-98. Older entries compacted.) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-26 (37 active entries — DEC-60 to DEC-99. Older entries compacted.) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-23 (OpenAI function calling pattern replaces Anthropic — E06S12/DEC-2026-02-23-01) |
 | `ops/platform.md` | ops | OPS-001 | 2026-02-24 (Delivery costs $149.90/24 stories measured — SKILL-CRS-022 cost-analysis + Reddit API pattern) |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |

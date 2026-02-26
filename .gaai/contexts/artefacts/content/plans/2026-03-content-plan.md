@@ -85,6 +85,12 @@ Contenu informel existant :
 - **Goal:** 1-2 interactions/semaine.
 - **Time-box :** 30 min/interaction
 
+### r/AIAgentGovernance (owned — land grab, DEC-99)
+- **Layer:** L2 + L3 (governance in practice)
+- **Mode:** Passive en mars. Seed 1 post/mois max (cross-post depuis engagement r/ClaudeAI ou X). Ne pas investir de temps actif à faire croître le sub.
+- **Goal:** Le sub existe et a du contenu quand .gaai sera OSS (Gate 2).
+- **Time-box :** 0h dédié. Les cross-posts sont un sous-produit de l'engagement P3.
+
 ---
 
 ## Priority #2 — X/Twitter Cold Start (P3 + P4)

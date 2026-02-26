@@ -313,6 +313,7 @@ Immediate reaction: "I need to share this and open-source it." But the founder's
 | r/ClaudeAI, r/artificial | P3 devs | AI governance, persistent memory | Discussion + "here's how I solved X" |
 | r/LocalLLaMA | P3 devs | Framework structure, agent governance | Replies (technique deep) |
 | r/EntreprendreenFrance | P2 prospects FR | PME cherchant consultant AI | Discussion en français |
+| **r/AIAgentGovernance** (owned) | P3 devs | Decision logging, memory, context eng., multi-agent governance | Cross-posts only (seed 1x/mois). Primary venue post-Gate 2 (.gaai OSS). DEC-99 |
 
 **Cadence :** 3-4 interactions substantielles/semaine. Max 1 nouveau post par subreddit par 2 semaines (spam radar). Les réponses sont illimitées et meilleur ROI.
 

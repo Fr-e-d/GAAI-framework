@@ -20,6 +20,15 @@ updated_at: 2026-02-26
 
 ---
 
+### DEC-99 — Created r/AIAgentGovernance subreddit (topical land grab)
+
+**Context:** Content plan mars 2026 identifies Reddit as priority #1 channel for distribution-building. COMMS-001 maps 8 subreddit clusters (15+ subs) but all are existing communities where we participate. No owned sub-channel existed for the core .gaai topic: AI agent governance in practice.
+**Decision:** (1) Create r/AIAgentGovernance as a topical (not branded) subreddit. Land grab on an emerging topic — subreddit names are unique and permanent. Cost: 5 min, $0. (2) Positioning: practical governance of AI agents (decision logging, memory, context engineering, multi-agent coordination, observability) — NOT policy/regulation (that's r/AIgovernance, 10 members, different angle). (3) Do NOT invest active time growing it in Phase 0-1. It's a free option, not a priority. Seed 1 post/month max via cross-posts. (4) Becomes primary venue when .gaai goes OSS (Gate 2). (5) Rejected: r/AgenticGovernance (taken), r/AgenticOps (taken), r/AIAgentOps (taken), names with underscores (hard to type/remember). (6) 4 rules configured: civility (default), stay on topic, share what actually happened, no spam/self-promo (tools OK with substantive writeup). (7) Rejected AI disclosure rule — premature on a 1-member sub, undermines founder credibility during cold start.
+**Files:** No codebase files. External: reddit.com/r/AIAgentGovernance
+**Date:** 2026-02-26
+
+---
+
 ### DEC-98 — Content plan cold-start correction: distribution before content
 
 **Context:** March 2026 content plan (rev.1) allocated 52% of budget to a flagship blog post gated on Gate 1 (can't publish yet) while Reddit engagement (the only activity serving Gate 2 expert recruitment) received 19%. Evaluated against cold-start best practices: Justin Welsh (atomic content first), Rand Fishkin (60 days community before self-promo), Pieter Levels (90% replies, 10% threads for 30 days), Grow & Convert (Pain Point SEO).
