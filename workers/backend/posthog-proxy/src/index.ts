@@ -78,4 +78,9 @@ app.get('/static/*', (c) => proxyTo(POSTHOG_ASSETS, c.req.raw));
 // POST /decide/* → eu.i.posthog.com/decide/* (feature flags)
 app.post('/decide/*', (c) => proxyTo(POSTHOG_INGEST, c.req.raw));
 
+// POST catch-all → eu.i.posthog.com (event capture: /e/, /i/v0/e/, /batch/, etc.)
+// The PostHog SDK discovers its analytics endpoint via /decide/ response (e.g. /i/v0/e/).
+// This route must be AFTER specific routes to preserve their priority.
+app.post('/*', (c) => proxyTo(POSTHOG_INGEST, c.req.raw));
+
 export default app;
