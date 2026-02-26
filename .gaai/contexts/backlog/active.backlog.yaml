@@ -20,16 +20,17 @@ items:
     status: in_progress
     artefact: contexts/artefacts/stories/E01S01.story.md
     dependencies: []
-    notes: "Founder-executed. Observe + engage (non-revealing) on Reddit. Active: r/aisolobusinesses, r/AiForSmallBusiness, r/ArtificialNtelligence. AC4 (promise draft) not yet produced — blocker for E01S02."
+    notes: "Founder-executed. AC1-AC3 done (Reddit observation, 109 comments, 15 posts, 13 hypotheses — 9 validated, 3 indirect). AC4 DONE (promise draft — DEC-102). Pending: founder review + formal close."
 
   - id: E01S02
     epic: E01
-    title: "Expert-side Hand Raiser campaign (LinkedIn + X + Facebook)"
+    title: "Expert-side Hand Raiser campaign (X + Discord + Communities)"
     priority: high
-    status: deferred
+    status: in_progress
+    started_at: "2026-02-26T10:00:00+01:00"
     artefact: contexts/artefacts/stories/E01S02.story.md
     dependencies: [E01S01]
-    notes: "DEFERRED — LinkedIn bloqué (founder employé à poste clé, contrainte professionnelle). X/Twitter possible comme canal alternatif de validation partielle. LinkedIn activé comme levier de lancement simultané quand l'infra tient (voir DEC-31). Gate: ≥10 qualified expert hand raisers."
+    notes: "REFINED 2026-02-26. LinkedIn bloqué (DEC-100) — remplacé par X/Twitter (primary) + n8n Discord + X Communities + Skool. ACs mis à jour. Promise language validé (DEC-102). Prerequisite: ≥2 weeks warm engagement before posting hand raiser. Gate inchangé: ≥10 qualified expert hand raisers."
 
   - id: E01S03
     epic: E01
