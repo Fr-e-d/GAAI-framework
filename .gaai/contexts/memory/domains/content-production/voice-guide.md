@@ -155,6 +155,10 @@ For every AI word, ask "What would I say to a colleague at a whiteboard?"
 **Resonate with:** time saved, pre-qualification, budget-confirmed leads, control over what they accept
 **Avoid:** marketing jargon, platform hype, unproven claims about lead quality
 
+**Core positioning insight (2026-02-27):** The pain is *filter tax*, not lead scarcity. Experts aren't struggling to find leads — they're spending 5-7h/week filtering leads that waste their time. Copy should frame the value as eliminating that cost (what they no longer have to do), not as delivering volume (what they get). "Stop filtering tire kickers" outperforms "get more leads."
+
+**Price + value framing rule:** Never announce price alone. Always anchor to the outcome eliminated: "€X/month — and every lead has a confirmed budget, matched to your criteria, no filter work required." The expert buys back their time, not a list.
+
 ### P2 — Prospect SMB (Callibrate user)
 **Their words:** "I don't know what I don't know", "workflow architect not just someone who knows Zapier", "3 months to find the right person"
 **Resonate with:** trust, vetted experts, speed of matching, industry understanding
