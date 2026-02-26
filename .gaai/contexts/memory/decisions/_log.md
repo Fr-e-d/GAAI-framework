@@ -20,6 +20,23 @@ updated_at: 2026-02-26
 
 ---
 
+### DEC-97 — Framework validation: Capability Readiness + Domain Memory tested and confirmed
+
+**Context:** After implementing DEC-90 (Capability Readiness rule), DEC-93 (domain sub-agents), and DEC-94 (domain memory namespace), ran 3 structured tests to compare theory vs practice — verify the framework changes work in real agent execution, not just on paper.
+**Decision:** All 3 tests PASS. Framework changes validated:
+
+**Test 3 — Domain memory retrieval (post-rename):** Triggered `domain-knowledge-research` skill on a keyword research intent. Agent correctly located and loaded SEO-001, SEO-002, KWR-001 from the renamed `domains/content-production/sources/` path. Domain memory namespace (DEC-94) works.
+
+**Test 1 v1 — Capability Readiness (strategic intent):** Triggered Discovery with "should we add referral/sponsorship?" Agent correctly performed strategic analysis and concluded "not now" WITHOUT creating a Story → no Capability Readiness check triggered. This is correct behavior: the rule applies at `refined` status, not at feasibility analysis. Validates that the rule doesn't over-fire.
+
+**Test 1 v2 — Capability Readiness (production intent):** Triggered Discovery with "create a pilot content for AI Chatbot satellite blog." Agent explicitly: (1) identified architectural conflict (no blog on satellite Worker), (2) checked phase gates against CONTENT-STRATEGY-001, (3) performed full Capability Readiness check — listed all 8 required skills with status (6/8 "Non conçu") and knowledge readiness (GOOD/EXCELLENT), (4) proposed 3 resolution approaches, (5) stopped before `refined` to ask 3 clarifying questions. Validates that Discovery surfaces skill gaps before proceeding.
+
+**Conclusion:** The Capability Readiness mechanism works as designed. Discovery checks skills before `refined`, surfaces gaps with knowledge readiness assessment, and keeps the human in the loop. Domain memory retrieval works after the `content/` → `domains/content-production/` rename.
+**Files:** No files modified — validation only.
+**Date:** 2026-02-26
+
+---
+
 ### DEC-96 — content-plan skill (SKILL-CNT-011) + publishing audit + PostHog blocker
 
 **Context:** CONTENT-STRATEGY-001 defines a 6-dimension model with BP scoring, measurement framework, and phase-gated content authorization. But no mechanism existed to operationalize it — no planning trigger, no monthly cadence, no verification that publishing tools work. Audited the full E07 PostHog analytics stack, all publishing channels, and MCP configuration.
