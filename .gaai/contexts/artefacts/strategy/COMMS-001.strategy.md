@@ -22,6 +22,7 @@ CANAUX ACTIFS          AUDIENCE                   CADENCE
 ─────────────────────────────────────────────────────────────
 X/Twitter (@Fr-e-d)   P3 devs + P4 industry      2-3 threads/semaine
 Reddit (19+ subs)     P1 experts + P2 prospects   3-4 interactions/semaine
+Discord (1 serveur)   P1 experts                  1-2 interactions/semaine
 Blog perso (Substack) P3 devs + P4 industry       1x/mois (milestones)
 dev.to                P3 devs                     1x/mois (cross-post)
 Hacker News           P3 devs + P4 industry       3-4 Show HN total
@@ -318,6 +319,29 @@ Immediate reaction: "I need to share this and open-source it." But the founder's
 **Cadence :** 3-4 interactions substantielles/semaine. Max 1 nouveau post par subreddit par 2 semaines (spam radar). Les réponses sont illimitées et meilleur ROI.
 
 **Règle non-négociable :** NE JAMAIS révéler le nom de la plateforme ou linker vers Callibrate avant le lancement. Le shift vers les mentions naturelles ("I built something for this") se fait uniquement APRÈS le lancement et uniquement dans les subs où le karma/trust est établi.
+
+---
+
+### Discord
+
+**Personas :** P1 (experts), P3 (devs — secondaire)
+**Tone :** Même règle que Reddit. Authentique, community-first. Jamais de pitch. Valeur d'abord, toujours.
+
+**Serveurs actifs :**
+
+| Serveur | Membres | Focus | Personas | Invite |
+|---------|---------|-------|----------|--------|
+| AI Agency Alliance | ~12 800 | Automation agencies, prompt engineering, sales, marketing | P1 experts | [discord.gg/ai-automation-community](https://discord.com/invite/ai-automation-community-902668725298278470) |
+
+**Stratégie Phase 0-1 :**
+- Semaines 1-2 : observation uniquement — identifier les channels actifs, les questions récurrentes, les membres influents
+- Semaines 3+ : réponses substantielles dans les channels pertinents (même logique Reddit : valeur réelle, pas de spam)
+- Jamais de mention de Callibrate avant le lancement
+- Détecter les handraisers P1 : experts qui se plaignent du lead gen → noter dans `memory/contacts/leads.md`
+
+**Cadence :** 1-2 interactions/semaine max. Discord = canal secondaire (Reddit reste primaire P1).
+
+**Condition d'activation canal promotionnel :** Même condition que Reddit — après lancement, dans les channels où la confiance est établie.
 
 ---
 
