@@ -9,7 +9,8 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-CRS-016
-  updated_at: 2026-02-18
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - skill_intent: description of what the skill should do
   - skill_category: discovery|delivery|cross

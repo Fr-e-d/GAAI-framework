@@ -11,6 +11,7 @@ metadata:
   id: SKILL-CRS-019
   updated_at: 2026-02-23
   tags: [governance, delivery-gate, coherence]
+  status: stable
 inputs:
   - delivery-ready stories (from /gaai-status Section 1)
   - contexts/artefacts/stories/*.story.md (for each ready story)
@@ -58,6 +59,7 @@ Scan all backlog item `notes` fields for patterns indicating unresolved work:
 - "sera révisé", "à réviser", "sera revu"
 - "story à générer", "story E0x à générer", "à créer"
 - "TODO", "à remplacer", "à migrer"
+- "will be revised", "to be created", "to migrate", "to replace", "needs update"
 - `DEC-` references followed by a pending action description
 
 For each match:
@@ -72,7 +74,7 @@ Produce a summary:
 - Count of issues by severity (CRITICAL / IMPORTANT / MINOR)
 - Verdict: **READY FOR DELIVERY** (0 critical issues) or **ISSUES TO RESOLVE FIRST** (list critical issues)
 
-If issues are found, offer to fix the ones that are safe for Discovery to fix (missing columns in ACs, metadata corrections). Never fix product decisions or scope — escalate to the human.
+For issues safe to correct (missing AC metadata, column alignment), list them as "auto-fixable" in the report. Discovery or the human decides whether to apply fixes — this skill reports only.
 
 ---
 

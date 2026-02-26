@@ -10,6 +10,7 @@ metadata:
   track: cross-cutting
   id: SKILL-MEMORY-COMPACT-001
   updated_at: 2026-01-27
+  status: stable
 inputs:
   - contexts/memory/index.md
   - contexts/memory/**/*
@@ -34,11 +35,39 @@ More focused than `memory-refresh` — this is a single-pass compression operati
 
 ## Process
 
-1. Select memory by category or tags
+1. **Select memory by category or tags.** Read `contexts/memory/index.md`. Prioritize categories by: (a) largest file count first, (b) oldest entries first, (c) categories not referenced by the current task last. Under extreme pressure, compact the single largest category only.
+
 2. Extract key decisions, constraints, priorities
-3. Generate a single summary file replacing multiple entries
-4. Archive detailed originals to `contexts/memory/archive/`
+
+3. **Generate a single summary file replacing multiple entries.** Produce one summary file per compacted category using bullet format: one bullet per decision, constraint, or durable fact. Target ≤20% of the original token count. Use the format:
+
+```markdown
+# {Category} — Compact Summary
+> Compacted from {N} files on {YYYY-MM-DD}
+> Original token estimate: ~{X} | Summary: ~{Y}
+
+## Key Decisions
+- {decision 1}
+- {decision 2}
+
+## Active Constraints
+- {constraint 1}
+
+## Current State
+- {fact 1}
+```
+
+4. **Archive detailed originals.** Archive originals to `contexts/memory/archive/{category}-{YYYY-MM-DD}.archive.md`. If multiple compactions happen on the same day for the same category, append a sequence number: `{category}-{YYYY-MM-DD}-02.archive.md`.
+
 5. Update memory index
+
+---
+
+## Outputs
+
+- `contexts/memory/summaries/{category}.summary.md`
+- `contexts/memory/archive/{category}-{YYYY-MM-DD}.archive.md`
+- `contexts/memory/index.md` (updated — mandatory)
 
 ---
 
@@ -48,6 +77,8 @@ More focused than `memory-refresh` — this is a single-pass compression operati
 - Context remains precise and small
 - No active constraints are lost
 - Index reflects current state
+- Summary preserves all active decisions and constraints from the originals
+- Archive files are never deleted — only moved
 
 ---
 

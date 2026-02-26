@@ -9,7 +9,8 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-ARCHITECTURE-EXTRACT-001
-  updated_at: 2026-01-27
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - codebase_tree
   - key_files_list
@@ -36,7 +37,7 @@ Activate:
 
 ---
 
-## Output
+## Outputs
 
 **`architecture_insights`** — concise summary including:
 - System structure overview

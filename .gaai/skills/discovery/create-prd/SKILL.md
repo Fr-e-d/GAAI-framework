@@ -10,11 +10,12 @@ metadata:
   track: discovery
   id: SKILL-CREATE-PRD-001
   updated_at: 2026-01-27
+  status: stable
 inputs:
   - human_intent
   - core_user_problem
   - target_users
-  - known_constraints
+  - known_constraints (optional)
 outputs:
   - contexts/artefacts/prd/*.md
 ---
@@ -47,7 +48,7 @@ Skip when adding small features, tweaking existing flows, or implementing obviou
 
 ## Output Format
 
-Produces a file at `contexts/artefacts/prd/{name}.prd.md` using `_template.prd.md`:
+Produces a file at `contexts/artefacts/prd/{name}.prd.md` using `contexts/artefacts/_template.prd.md`:
 
 Key sections:
 - Vision

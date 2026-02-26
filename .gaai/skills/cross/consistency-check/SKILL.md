@@ -10,12 +10,13 @@ metadata:
   track: cross-cutting
   id: SKILL-CONSISTENCY-CHECK-001
   updated_at: 2026-01-30
+  status: stable
 inputs:
   - contexts/artefacts/**  (Epics, Stories, Plans, PRDs as applicable)
   - contexts/rules/**
   - memory_context_bundle  (optional)
 outputs:
-  - consistency_report.md
+  - contexts/artefacts/consistency-reports/{story_id}.consistency-report.md
   - flagged_issues  (structured list)
 ---
 
@@ -61,9 +62,13 @@ This skill **reports issues** — it does not fix them.
 - Plan steps correlate with acceptance criteria
 - No unresolved split dependencies
 
+> **Partial artefact handling:** If the artefact set is incomplete (e.g., Story exists but parent Epic is absent), check only what is available. Report missing artefacts as `ISSUE-{ID}: required artefact absent` with severity: medium. Do not fail the entire check.
+
 ---
 
 ## Output Format
+
+ISSUE-ID naming convention: use format `ISSUE-{STORY_ID}-{NNN}` (e.g., `ISSUE-E06S18-001`).
 
 ```
 ISSUE-ID
@@ -83,6 +88,7 @@ Location: file/path/position
 - Severity is explicit
 - No duplicates
 - No invented fixes
+- Description fields must not contain fix proposals — report the inconsistency factually
 
 ---
 

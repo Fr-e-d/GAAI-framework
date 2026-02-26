@@ -14,7 +14,8 @@ metadata:
     - index
     - discoverability
     - agents
-  updated_at: 2026-02-21
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - .gaai/agents/**                          (all agent .md files — scanned for frontmatter)
   - .gaai/agents/specialists.registry.yaml   (specialist definitions — included as-is)
@@ -88,7 +89,7 @@ Return to the invoking agent:
 
 ---
 
-## Output Format
+## Outputs
 
 ```yaml
 # GAAI Agents Index

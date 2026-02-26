@@ -10,6 +10,7 @@ metadata:
   track: delivery
   id: SKILL-REMEDIATE-FAILURES-001
   updated_at: 2026-01-27
+  status: stable
 inputs:
   - qa_report  (failing)
   - contexts/artefacts/stories/**
@@ -45,6 +46,8 @@ Activate when:
 6. Prepare updated inputs for QA re-run
 
 **Loop: Detect → Correct → Re-validate → repeat until PASS.**
+
+**Convergence / Escalation:** If re-validation does not pass after 3 attempts, or if a fix requires changing acceptance criteria or product intent, STOP. Mark the story as `failed` and escalate to Discovery with a remediation report listing: what was attempted, what failed, and why convergence was not possible.
 
 ---
 

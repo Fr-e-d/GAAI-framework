@@ -10,6 +10,7 @@ metadata:
   track: delivery
   id: SKILL-DEL-008
   updated_at: 2026-02-18
+  status: stable
 inputs:
   - contexts/artefacts/stories/**         (the Story)
   - contexts/rules/**                     (applicable rules)
@@ -70,6 +71,8 @@ MicroDelivery bundle (minimal):
 - codebase-scan artefact (if exists)
 ```
 
+If `risk_analysis_required: true` from evaluate-story, unconditionally include the decisions category from memory in the Planning Sub-Agent bundle, regardless of other relevance filtering.
+
 **Implementation Sub-Agent bundle:**
 ```
 - Story artefact
@@ -107,6 +110,16 @@ For each specialist in `specialists_triggered`:
 Returns (inline, to the Orchestrator) the file list for each sub-agent's context bundle. The Orchestrator uses this list when spawning each sub-agent.
 
 Not written to file — this is the Orchestrator's coordination state, not a durable artefact.
+
+---
+
+## Non-Goals
+
+This skill must NOT:
+- Enrich bundles beyond what is listed for each tier — more context is not better context
+- Load full memory archives into any bundle
+- Make strategic decisions about which specialists to include (the Orchestrator decides based on evaluate-story output)
+- Invoke any other skill (only agents orchestrate)
 
 ---
 

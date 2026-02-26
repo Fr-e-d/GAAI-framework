@@ -5,22 +5,18 @@ license: MIT
 compatibility: Works with any filesystem-based AI coding agent (requires browser automation capability)
 metadata:
   author: gaai-framework
-  version: "1.0"
+  version: "1.1"
   category: delivery
   track: delivery
   id: SKILL-BROWSER-JOURNEY-TEST-001
-  updated_at: 2026-02-18
+  updated_at: 2026-02-26
   status: experimental
   required_capability: browser-automation
 inputs:
   - contexts/artefacts/stories/**
-  - acceptance_criteria
-  - deployed_application_url
+  - deployed_application_url  # Provided by the invoking agent from the staging deploy output. Not supplied manually.
 outputs:
-  - story_test_results
-  - execution_logs
-  - detected_failures
-  - ux_friction_points
+  - contexts/artefacts/test-evidence/{story_id}/journey-test-report.md
 ---
 
 # Browser Journey Test
@@ -41,30 +37,57 @@ Complements (does not replace) `qa-review`.
 ## Process
 
 For each Story:
-1. Interpret acceptance criteria as user actions
-2. Simulate real user actions in a live browser
-3. Validate expected outcomes at each step
-4. Capture evidence (screenshots, logs)
-5. Report pass/fail per acceptance criterion
+
+1. Read the Story's acceptance criteria. For each AC, extract the user action (verb + object) and the expected outcome. Produce a numbered action sequence.
+
+2. Execute each action in the sequence using the browser automation capability available in the current environment (e.g., Playwright, Puppeteer, or the agent's built-in browser tool). Navigate to `deployed_application_url` before starting.
+
+3. After each action, capture: (a) a screenshot saved to `contexts/artefacts/test-evidence/{story_id}/step-{N}.png`, (b) the HTTP status code, (c) any console errors, (d) whether the expected outcome from Step 1 is visually and functionally confirmed.
+
+4. For each step, classify the result: PASS (outcome confirmed), FUNCTIONAL_FAILURE (expected outcome not met — blocks delivery), UX_FRICTION (outcome met but interaction is degraded — e.g., slow load, confusing layout, accessibility issue — does not block delivery).
+
+5. Produce the test report using the output format below.
 
 ---
 
-## Output
+## Output Format
 
-- Story-by-story pass/fail report
-- Screenshots or recordings of each journey
-- Execution logs linked to backlog items
-- Failure reproduction steps
-- UX friction points identified
+```
+# Browser Journey Test — {Story ID}
+
+> **Date:** {YYYY-MM-DD}
+> **URL:** {deployed_application_url}
+> **Overall verdict:** PASS | FAIL
+
+## Step Results
+
+| # | Action | Expected Outcome | Result | Evidence |
+|---|--------|-----------------|--------|----------|
+| 1 | {action} | {outcome} | PASS/FUNCTIONAL_FAILURE/UX_FRICTION | step-1.png |
+
+## Functional Failures (blocking)
+{list or "None"}
+
+## UX Friction Points (non-blocking)
+{list or "None"}
+```
+
+---
+
+## Outputs
+
+- `contexts/artefacts/test-evidence/{story_id}/journey-test-report.md`
+- `contexts/artefacts/test-evidence/{story_id}/step-{N}.png` — one screenshot per action step
 
 ---
 
 ## Quality Checks
 
 - Every acceptance criterion has a corresponding browser test
+- Every step result has a screenshot as evidence
 - Failures include reproduction steps
 - Evidence is captured for audit trail
-- UX friction is distinguished from functional failures
+- FUNCTIONAL_FAILURE vs UX_FRICTION classification follows the rule: outcome not met = failure, outcome met but degraded = friction
 
 ---
 
