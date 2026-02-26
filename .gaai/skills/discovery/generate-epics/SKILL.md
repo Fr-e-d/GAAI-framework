@@ -10,6 +10,7 @@ metadata:
   track: discovery
   id: SKILL-GENERATE-EPICS-001
   updated_at: 2026-01-27
+  status: stable
 inputs:
   - product_intent  (or PRD if available)
 outputs:
@@ -32,25 +33,29 @@ Works with or without a PRD.
 
 ## Process
 
-1. Think in **user outcomes**, not features
-2. Keep Epics high-level and value-focused
-3. Avoid implementation detail
-4. Limit to 3–7 Epics maximum
-5. For each Epic, answer: "What meaningful user result will this create?"
-6. Output using the canonical Epic template
+1. Read the Epic template at `contexts/artefacts/_template.epic.md` before writing any Epic file.
+2. Think in **user outcomes**, not features
+3. Keep Epics high-level and value-focused
+4. Avoid implementation detail
+5. Limit to 3–7 Epics maximum
+6. For each Epic, answer: "What meaningful user result will this create?"
+7. Output using the canonical Epic template
 
 ---
 
-## Output Format
+## Outputs
 
-Produces files at `contexts/artefacts/epics/{id}.epic.md` using `_template.epic.md`:
+Template: `contexts/artefacts/_template.epic.md`
+
+Produces files at `contexts/artefacts/epics/{id}.epic.md`.
 
 Key sections per Epic:
-- Outcome: what user problem this solves
-- Value Hypothesis: why this outcome matters
-- Success Indicators: how to know the Epic succeeded
-- Constraints / Notes
-- Linked Stories (to be generated)
+- Purpose: what user outcome this delivers and why it matters
+- Scope: high-level description of what is included
+- Out of Scope: what is explicitly excluded
+- Stories: list of story IDs (descriptive only; authoritative tracking is in the backlog)
+- Success Metrics: how to know the Epic delivered value
+- Dependencies: other Epics or external factors this depends on
 
 ---
 

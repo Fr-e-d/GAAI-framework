@@ -14,7 +14,8 @@ metadata:
     - build-in-public
     - marketing
     - automation
-  updated_at: 2026-02-24
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - completed story artefact (story.md)
   - impl-report or micro-delivery-report (if available)

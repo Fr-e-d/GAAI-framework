@@ -10,11 +10,12 @@ metadata:
   track: discovery
   id: SKILL-REFINE-SCOPE-001
   updated_at: 2026-01-28
+  status: stable
 inputs:
   - discovery_action_plan
   - contexts/artefacts/**  (partially completed)
   - contexts/memory/**  (selective)
-  - human_feedback
+  - human_feedback: numbered list of feedback items provided by the Discovery Agent, sourced from human input in the current session
 outputs:
   - refined_discovery_plan
   - refined artefacts
@@ -39,15 +40,21 @@ This skill is **not** for first-draft creation — it deepens clarity and reduce
 
 1. Load relevant context (artefacts + partial plan + memory)
 2. Identify gaps, contradictions, or missing acceptance criteria
-3. Incorporate human feedback to resolve ambiguities
+3. For each numbered feedback item: (a) identify the target artefact field or section, (b) apply the feedback as a direct modification to that field, (c) record what was changed and why in the refinement log.
 4. Adjust scope, acceptance criteria, or artefact structure
 5. Produce a refined Discovery plan or refined artefacts
-6. Validate refined artefacts against governance checks
-7. Stop when artefacts meet quality and governance criteria
+6. Verify that all modified fields still comply with the Quality Checks below. If a field fails, mark it for re-refinement in the next iteration. Do NOT invoke `validate-artefacts` — that is the agent's responsibility after this skill completes.
+7. Stop when all feedback items from Step 3 have been applied and all modified fields pass the Quality Checks. If any feedback item cannot be applied without changing product intent, flag it as requiring human escalation.
 
 ---
 
-## Output Format
+## Outputs
+
+**Written outputs:**
+- `contexts/artefacts/` — refined artefacts written back to their original locations
+
+**Inline outputs:**
+- `refined_discovery_plan` — returned inline to the invoking agent
 
 ```
 Refined Discovery Action Plan

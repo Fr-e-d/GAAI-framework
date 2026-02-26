@@ -9,7 +9,7 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-SECURITY-AUDIT-001
-  updated_at: 2026-02-06
+  updated_at: 2026-02-26
   status: experimental
 inputs:
   - codebase
@@ -46,7 +46,7 @@ Enforces security as a system rule, not a human task.
 
 ---
 
-## Output
+## Outputs
 
 - Vulnerability list with severity (critical / high / medium / low)
 - Compliance pass/fail report per security rule

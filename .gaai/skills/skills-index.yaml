@@ -3,8 +3,8 @@
 # Source of truth: frontmatter in each SKILL.md
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-02-24
-total: 39
+generated_at: 2026-02-26
+total: 40
 
 # ─────────────────────────────────────────────
 # DISCOVERY — skills that produce artefacts
@@ -17,6 +17,7 @@ discovery:
     category: discovery
     track: discovery
     tags: []
+    status: stable
     updated_at: 2026-01-27
     path: discovery/create-prd/SKILL.md
 
@@ -26,7 +27,8 @@ discovery:
     category: discovery
     track: discovery
     tags: []
-    updated_at: 2026-01-27
+    status: stable
+    updated_at: 2026-02-26
     path: discovery/discovery-high-level-plan/SKILL.md
 
   - id: SKILL-GENERATE-EPICS-001
@@ -35,6 +37,7 @@ discovery:
     category: discovery
     track: discovery
     tags: []
+    status: stable
     updated_at: 2026-01-27
     path: discovery/generate-epics/SKILL.md
 
@@ -44,6 +47,7 @@ discovery:
     category: discovery
     track: discovery
     tags: []
+    status: stable
     updated_at: 2026-01-27
     path: discovery/generate-stories/SKILL.md
 
@@ -53,6 +57,7 @@ discovery:
     category: discovery
     track: discovery
     tags: []
+    status: stable
     updated_at: 2026-01-28
     path: discovery/refine-scope/SKILL.md
 
@@ -62,7 +67,8 @@ discovery:
     category: discovery
     track: discovery
     tags: []
-    updated_at: 2026-01-29
+    status: stable
+    updated_at: 2026-02-26
     path: discovery/validate-artefacts/SKILL.md
 
 # ─────────────────────────────────────────────
@@ -77,7 +83,7 @@ delivery:
     track: delivery
     tags: []
     status: experimental
-    updated_at: 2026-02-18
+    updated_at: 2026-02-26
     path: delivery/browser-journey-test/SKILL.md
 
   - id: SKILL-DEL-008
@@ -86,6 +92,7 @@ delivery:
     category: delivery
     track: delivery
     tags: []
+    status: stable
     updated_at: 2026-02-18
     path: delivery/compose-team/SKILL.md
 
@@ -95,6 +102,7 @@ delivery:
     category: delivery
     track: delivery
     tags: []
+    status: stable
     updated_at: 2026-02-18
     path: delivery/coordinate-handoffs/SKILL.md
 
@@ -104,7 +112,8 @@ delivery:
     category: delivery
     track: delivery
     tags: []
-    updated_at: 2026-02-18
+    status: stable
+    updated_at: 2026-02-26
     path: delivery/delivery-high-level-plan/SKILL.md
 
   - id: SKILL-DEL-007
@@ -113,7 +122,8 @@ delivery:
     category: delivery
     track: delivery
     tags: []
-    updated_at: 2026-02-18
+    status: stable
+    updated_at: 2026-02-26
     path: delivery/evaluate-story/SKILL.md
 
   - id: SKILL-IMPLEMENT-001
@@ -122,7 +132,8 @@ delivery:
     category: delivery
     track: delivery
     tags: []
-    updated_at: 2026-01-30
+    status: stable
+    updated_at: 2026-02-26
     path: delivery/implement/SKILL.md
 
   - id: SKILL-DEL-006
@@ -131,7 +142,8 @@ delivery:
     category: delivery
     track: delivery
     tags: []
-    updated_at: 2026-02-18
+    status: stable
+    updated_at: 2026-02-26
     path: delivery/prepare-execution-plan/SKILL.md
 
   - id: SKILL-QA-REVIEW-001
@@ -140,7 +152,8 @@ delivery:
     category: delivery
     track: delivery
     tags: []
-    updated_at: 2026-01-28
+    status: stable
+    updated_at: 2026-02-26
     path: delivery/qa-review/SKILL.md
 
   - id: SKILL-REMEDIATE-FAILURES-001
@@ -149,6 +162,7 @@ delivery:
     category: delivery
     track: delivery
     tags: []
+    status: stable
     updated_at: 2026-01-27
     path: delivery/remediate-failures/SKILL.md
 
@@ -173,7 +187,8 @@ cross:
     category: cross
     track: cross-cutting
     tags: []
-    updated_at: 2026-02-20
+    status: stable
+    updated_at: 2026-02-26
     path: cross/approach-evaluation/SKILL.md
 
   - id: SKILL-ARCHITECTURE-EXTRACT-001
@@ -182,7 +197,8 @@ cross:
     category: cross
     track: cross-cutting
     tags: []
-    updated_at: 2026-01-27
+    status: stable
+    updated_at: 2026-02-26
     path: cross/architecture-extract/SKILL.md
 
   - id: SKILL-CRS-018
@@ -191,7 +207,8 @@ cross:
     category: cross
     track: cross-cutting
     tags: [governance, index, discoverability, agents]
-    updated_at: 2026-02-21
+    status: stable
+    updated_at: 2026-02-26
     path: cross/build-agents-index/SKILL.md
 
   - id: SKILL-CRS-017
@@ -200,8 +217,39 @@ cross:
     category: cross
     track: cross-cutting
     tags: [governance, index, discoverability]
-    updated_at: 2026-02-21
+    status: stable
+    updated_at: 2026-02-26
     path: cross/build-skills-index/SKILL.md
+
+  - id: SKILL-CODEBASE-SCAN-001
+    name: codebase-scan
+    description: "Create a high-level map of the project structure and identify architectural pillars, entry points, and module boundaries. Activate at Bootstrap initialization or before architecture extraction."
+    category: cross
+    track: cross-cutting
+    tags: []
+    status: stable
+    updated_at: 2026-02-26
+    path: cross/codebase-scan/SKILL.md
+
+  - id: SKILL-CONSISTENCY-CHECK-001
+    name: consistency-check
+    description: "Detect inconsistencies across related artefacts and governance constraints. Activate after story generation, after plan preparation, before implementation, or after remediation attempts. Reports issues — does not fix them."
+    category: cross
+    track: cross-cutting
+    tags: []
+    status: stable
+    updated_at: 2026-01-30
+    path: cross/consistency-check/SKILL.md
+
+  - id: SKILL-CONTEXT-BUILDING-001
+    name: context-building
+    description: "Assemble a minimal, high-signal execution context bundle from already-retrieved memory, governed artefacts, and applicable rules. Activate after memory-retrieve and before any reasoning or execution skill."
+    category: cross
+    track: cross-cutting
+    tags: []
+    status: stable
+    updated_at: 2026-02-26
+    path: cross/context-building/SKILL.md
 
   - id: SKILL-CRS-022
     name: cost-analysis
@@ -213,49 +261,14 @@ cross:
     updated_at: 2026-02-24
     path: cross/cost-analysis/SKILL.md
 
-  - id: SKILL-CODEBASE-SCAN-001
-    name: codebase-scan
-    description: "Create a high-level map of the project structure and identify architectural pillars, entry points, and module boundaries. Activate at Bootstrap initialization or before architecture extraction."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-01-27
-    path: cross/codebase-scan/SKILL.md
-
-  - id: SKILL-CONSISTENCY-CHECK-001
-    name: consistency-check
-    description: "Detect inconsistencies across related artefacts and governance constraints. Activate after story generation, after plan preparation, before implementation, or after remediation attempts. Reports issues — does not fix them."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-01-30
-    path: cross/consistency-check/SKILL.md
-
-  - id: SKILL-CRS-019
-    name: delivery-readiness-audit
-    description: "Spot-check AC internal consistency and scan for pending revisions on delivery-ready stories. Activated by /gaai-status --audit as Section 5. Complements the standard status checks with depth checks that standard status skips for speed."
-    category: cross
-    track: cross-cutting
-    tags: [governance, delivery-gate, coherence]
-    updated_at: 2026-02-23
-    path: cross/delivery-readiness-audit/SKILL.md
-
-  - id: SKILL-CONTEXT-BUILDING-001
-    name: context-building
-    description: "Assemble a minimal, high-signal execution context bundle from already-retrieved memory, governed artefacts, and applicable rules. Activate after memory-retrieve and before any reasoning or execution skill."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-01-27
-    path: cross/context-building/SKILL.md
-
   - id: SKILL-CRS-016
     name: create-skill
     description: "Guide creation of a new GAAI skill following the agentskills.io spec and GAAI best practices. Activate when adding a new skill to the .gaai/skills/ catalog."
     category: cross
     track: cross-cutting
     tags: [governance]
-    updated_at: 2026-02-18
+    status: stable
+    updated_at: 2026-02-26
     path: cross/create-skill/SKILL.md
 
   - id: SKILL-DECISION-EXTRACTION-001
@@ -264,8 +277,39 @@ cross:
     category: cross
     track: cross-cutting
     tags: [memory]
+    status: stable
     updated_at: 2026-01-27
     path: cross/decision-extraction/SKILL.md
+
+  - id: SKILL-CRS-019
+    name: delivery-readiness-audit
+    description: "Spot-check AC internal consistency and scan for pending revisions on delivery-ready stories. Activated by /gaai-status --audit as Section 5. Complements the standard status checks with depth checks that standard status skips for speed."
+    category: cross
+    track: cross-cutting
+    tags: [governance, delivery-gate, coherence]
+    status: stable
+    updated_at: 2026-02-23
+    path: cross/delivery-readiness-audit/SKILL.md
+
+  - id: SKILL-CRS-023
+    name: domain-knowledge-research
+    description: "Research current industry best practices and standards for a given domain, structure findings into GAAI-compatible Atomic Knowledge Units (AKUs) with evidence grading and anti-hallucination safeguards, and produce a classified knowledge report. Activate when Discovery identifies a knowledge gap during capability readiness assessment or before designing skills in an unfamiliar domain."
+    category: cross
+    track: cross-cutting
+    tags: [knowledge, research, best-practices, capability-readiness]
+    status: stable
+    updated_at: 2026-02-26
+    path: cross/domain-knowledge-research/SKILL.md
+
+  - id: SKILL-CRS-021
+    name: generate-build-in-public-content
+    description: "Generate build-in-public content drafts from completed delivery artefacts. Applies the Golden Circle (WHY → HOW → WHAT) to transform stories, decisions, and metrics into ready-to-review content pieces (X threads, blog snippets, metrics posts). Activate automatically after each story reaches done status."
+    category: cross
+    track: cross-cutting
+    tags: [content, build-in-public, marketing, automation]
+    status: stable
+    updated_at: 2026-02-26
+    path: cross/generate-build-in-public-content/SKILL.md
 
   - id: SKILL-MEMORY-ALIGNMENT-CHECK-001
     name: memory-alignment-check
@@ -273,7 +317,8 @@ cross:
     category: cross
     track: cross-cutting
     tags: [memory, qa]
-    updated_at: 2026-02-19
+    status: stable
+    updated_at: 2026-02-26
     path: cross/memory-alignment-check/SKILL.md
 
   - id: SKILL-MEMORY-COMPACT-001
@@ -282,6 +327,7 @@ cross:
     category: cross
     track: cross-cutting
     tags: [memory]
+    status: stable
     updated_at: 2026-01-27
     path: cross/memory-compact/SKILL.md
 
@@ -291,7 +337,8 @@ cross:
     category: cross
     track: cross-cutting
     tags: [memory]
-    updated_at: 2026-01-27
+    status: stable
+    updated_at: 2026-02-26
     path: cross/memory-ingest/SKILL.md
 
   - id: SKILL-MEMORY-REFRESH-001
@@ -300,7 +347,8 @@ cross:
     category: cross
     track: cross-cutting
     tags: [memory]
-    updated_at: 2026-01-27
+    status: stable
+    updated_at: 2026-02-26
     path: cross/memory-refresh/SKILL.md
 
   - id: SKILL-MEMORY-RETRIEVE-001
@@ -309,6 +357,7 @@ cross:
     category: cross
     track: cross-cutting
     tags: [memory]
+    status: stable
     updated_at: 2026-01-27
     path: cross/memory-retrieve/SKILL.md
 
@@ -319,7 +368,7 @@ cross:
     track: cross-cutting
     tags: []
     status: experimental
-    updated_at: 2026-02-06
+    updated_at: 2026-02-26
     path: cross/post-mortem-learning/SKILL.md
 
   - id: SKILL-RISK-ANALYSIS-001
@@ -328,6 +377,7 @@ cross:
     category: cross
     track: cross-cutting
     tags: []
+    status: stable
     updated_at: 2026-01-27
     path: cross/risk-analysis/SKILL.md
 
@@ -337,7 +387,8 @@ cross:
     category: cross
     track: cross-cutting
     tags: [governance]
-    updated_at: 2026-01-27
+    status: stable
+    updated_at: 2026-02-26
     path: cross/rules-normalize/SKILL.md
 
   - id: SKILL-SECURITY-AUDIT-001
@@ -347,17 +398,8 @@ cross:
     track: cross-cutting
     tags: []
     status: experimental
-    updated_at: 2026-02-06
+    updated_at: 2026-02-26
     path: cross/security-audit/SKILL.md
-
-  - id: SKILL-SUMMARIZATION-001
-    name: summarization
-    description: "Transform large, noisy, or short-term memory into compact, durable, high-signal summaries. Activate when session memory grows large, decisions accumulate, or memory retrieval starts returning too many files."
-    category: cross
-    track: cross-cutting
-    tags: [memory]
-    updated_at: 2026-01-30
-    path: cross/summarization/SKILL.md
 
   - id: SKILL-SUCCESS-METRICS-EVALUATION-001
     name: success-metrics-evaluation
@@ -366,14 +408,15 @@ cross:
     track: cross-cutting
     tags: []
     status: future
-    updated_at: 2026-02-06
+    updated_at: 2026-02-26
     path: cross/success-metrics-evaluation/SKILL.md
 
-  - id: SKILL-CRS-021
-    name: generate-build-in-public-content
-    description: "Generate build-in-public content drafts from completed delivery artefacts. Applies the Golden Circle (WHY → HOW → WHAT) to transform stories, decisions, and metrics into ready-to-review content pieces (X threads, blog snippets, metrics posts). Activate automatically after each story reaches done status."
+  - id: SKILL-SUMMARIZATION-001
+    name: summarization
+    description: "Transform large, noisy, or short-term memory into compact, durable, high-signal summaries. Activate when session memory grows large, decisions accumulate, or memory retrieval starts returning too many files."
     category: cross
     track: cross-cutting
-    tags: [content, build-in-public, marketing, automation]
-    updated_at: 2026-02-24
-    path: cross/generate-build-in-public-content/SKILL.md
+    tags: [memory]
+    status: stable
+    updated_at: 2026-01-30
+    path: cross/summarization/SKILL.md

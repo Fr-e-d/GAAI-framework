@@ -9,7 +9,8 @@ metadata:
   category: discovery
   track: discovery
   id: SKILL-VALIDATE-ARTEFACTS-001
-  updated_at: 2026-01-29
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - contexts/artefacts/epics/**
   - contexts/artefacts/stories/**
@@ -60,7 +61,7 @@ This is the **mandatory gate** between Discovery and Delivery. No Story proceeds
 
 ---
 
-## Output Format
+## Outputs
 
 ```
 Validation Report — Discovery

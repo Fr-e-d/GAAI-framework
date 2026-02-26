@@ -9,7 +9,8 @@ metadata:
   category: delivery
   track: delivery
   id: SKILL-DEL-006
-  updated_at: 2026-02-18
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - contexts/artefacts/plans/*.plan.md        (from delivery-high-level-plan)
   - contexts/artefacts/stories/**             (validated)
@@ -85,7 +86,7 @@ For simple Stories (1-2 files, clear criteria, no order constraints), `delivery-
 
 ---
 
-## Output Format
+## Outputs
 
 ```markdown
 # Execution Plan — {Story ID}: {Story Title}

@@ -9,7 +9,8 @@ metadata:
   category: delivery
   track: delivery
   id: SKILL-QA-REVIEW-001
-  updated_at: 2026-01-28
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - contexts/artefacts/stories/**
   - contexts/artefacts/plans/**
@@ -64,7 +65,7 @@ Activate after implementation is complete. This is a **hard quality gate**.
 
 ---
 
-## Output Format
+## Outputs
 
 **If PASS:**
 ```

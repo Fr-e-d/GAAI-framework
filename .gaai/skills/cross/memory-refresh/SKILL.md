@@ -9,7 +9,8 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-MEMORY-REFRESH-001
-  updated_at: 2026-01-27
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - contexts/memory/index.md        (registry — read first to discover all active categories)
   - contexts/memory/**              (any category registered in index.md — resolved at runtime)

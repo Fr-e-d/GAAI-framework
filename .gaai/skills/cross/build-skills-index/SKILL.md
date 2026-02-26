@@ -13,7 +13,8 @@ metadata:
     - governance
     - index
     - discoverability
-  updated_at: 2026-02-21
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - .gaai/skills/**                  (all SKILL.md files — scanned for frontmatter)
 outputs:
@@ -82,7 +83,7 @@ Return to the invoking agent:
 
 ---
 
-## Output Format
+## Outputs
 
 ```yaml
 # GAAI Skills Index

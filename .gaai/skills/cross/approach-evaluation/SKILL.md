@@ -9,7 +9,8 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-APPROACH-EVALUATION-001
-  updated_at: 2026-02-20
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - problem_statement                      (what needs to be solved)
   - contexts/memory/index.md               (registry — resolve project context, patterns, decisions files)
@@ -90,7 +91,7 @@ Do NOT activate when:
 
 ---
 
-## Output Format
+## Outputs
 
 ```markdown
 # Approach Evaluation — {Story ID or Decision Context}: {Problem Title}

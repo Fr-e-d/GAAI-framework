@@ -9,7 +9,8 @@ metadata:
   category: discovery
   track: discovery
   id: SKILL-DISCOVERY-HIGH-LEVEL-PLAN-001
-  updated_at: 2026-01-27
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - human_intent
   - contexts/artefacts/**  (optional)
@@ -45,7 +46,7 @@ Typical triggers: "I have an idea for a feature", "Users are dropping during onb
 
 ---
 
-## Output Format
+## Outputs
 
 ```
 Discovery Action Plan

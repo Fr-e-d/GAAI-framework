@@ -9,7 +9,8 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-MEMORY-INGEST-001
-  updated_at: 2026-01-27
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - discovery_outputs  (validated)
   - architecture_insights
@@ -45,7 +46,7 @@ Activate after:
 
 ---
 
-## Output
+## Outputs
 
 Memory files created at any registered category path (see `contexts/memory/index.md`). Current categories as of last update:
 - `contexts/memory/project/` — project-level facts, architecture, constraints

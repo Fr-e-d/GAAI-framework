@@ -10,8 +10,9 @@ metadata:
   track: cross-cutting
   id: SKILL-DECISION-EXTRACTION-001
   updated_at: 2026-01-27
+  status: stable
 inputs:
-  - recent_agent_outputs
+  - recent_agent_outputs: session outputs from the invoking agent, or file paths to artefacts produced in the current session (e.g., evaluation reports, refined stories, approach-evaluation outputs)
   - contexts/artefacts/**  (governed)
 outputs:
   - contexts/memory/decisions/*.memory.md
@@ -36,13 +37,14 @@ Do NOT use for trivial steps, implementation details, brainstorming, or reversib
 
 1. Scan outputs for explicit or implicit decisions: architectural choices, accepted trade-offs, scope boundaries, prioritization shifts, constraints introduced
 2. Filter strictly for **durable, governance-relevant decisions**
-3. Convert each into a structured Decision Memory entry:
+3. **Deduplication check:** Before writing a new decision entry, scan `contexts/memory/decisions/` for existing entries covering the same topic. If found: (a) if the new decision supersedes the old, update the existing entry's `updated_at` and add a `supersedes` note; (b) if the new decision confirms the old, skip writing a duplicate.
+4. Convert each into a structured Decision Memory entry:
    - Context
    - Decision
    - Rationale
    - Impact
-4. Tag consistently
-5. Register in memory index
+5. Tag consistently — use tags from this controlled list: `product`, `architecture`, `scope`, `priority`, `billing`, `security`, `integration`, `infrastructure`. Add new tags only if none of these fit.
+6. Register in memory index
 
 ---
 
@@ -56,7 +58,7 @@ type: memory
 category: decision
 id: DEC-YYYY-MM-DD-XX
 tags:
-  - product | architecture | scope | priority
+  - product | architecture | scope | priority | billing | security | integration | infrastructure
 created_at: YYYY-MM-DD
 updated_at: YYYY-MM-DD
 ---

@@ -9,7 +9,7 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-POST-MORTEM-LEARNING-001
-  updated_at: 2026-02-06
+  updated_at: 2026-02-26
   status: experimental
 inputs:
   - failed_or_degraded_story_results
@@ -47,7 +47,7 @@ Activate after:
 
 ---
 
-## Output
+## Outputs
 
 - Root cause analysis report
 - Failure timeline
