@@ -20,6 +20,28 @@ updated_at: 2026-02-26
 
 ---
 
+### DEC-101 — Distribution channels activated (Phase 0-1)
+
+**Context:** March 2026 cold-start plan (DEC-98) requires Reddit 42% + X 32% + flagship 21%. All Phase 0-1 distribution channels needed to be configured before content execution begins.
+**Decision:** (1) X/Twitter personal account `@frederic_geens` created as primary BIP channel (professional type, Google auth, notifications OFF, DMs open). (2) X/Twitter brand account `@callibrate_io` reserved and protected — dormant until Phase 3+. (3) Substack `fredericgeens` created for long-form blog (personal email, not ops@ — personal asset). (4) dev.to `Fr-e-d` created via GitHub for cross-posting (canonical_url → Substack for SEO). (5) Reddit `Fr-e-d` already active + r/AIAgentGovernance owned (DEC-99). (6) Personal brand first: all Phase 0-1 content under Frédéric Geens, not Callibrate. Brand content deferred to Phase 3+. (7) No API keys configured — manual posting in Phase 0-1, reassess if volume > 3 posts/week. (8) Channel registry documented in `memory/ops/channels.md` (OPS-002).
+**Decided by:** Founder
+**Date:** 2026-02-26
+
+---
+
+### DEC-100 — Community seeding for E01S02 hand raiser (X + Discord + Skool)
+
+**Context:** E01S02 (expert hand raiser) was deferred due to LinkedIn constraint (founder employed at key position). Reddit signal analysis (109 comments, 15 posts) validated H1-H12 but H3/H5 (willingness to pay) require direct engagement. X/Twitter identified as viable alternative to LinkedIn for WTP validation.
+**Decision:** (1) X/Twitter replaces LinkedIn as primary hand raiser channel. Gate unchanged: ≥10 qualified expert hand raisers. (2) Communities prioritized by ICP density:
+- **Tier S:** n8n Discord (74k, expert-heavy, Jobs channel active), n8n Community Forum (200k+), Liam Ottley Skool (297k, downgraded from S to B after review — audience is beginners, not established experts)
+- **Tier A:** AI Agency Alliance Discord (13k, business-focused), AI Automation Society Skool (1.1k), 2 X Communities (AI Agents/Automation/N8N + AI Automation Agencies)
+- **Tier B:** Reddit (already active), Indie Hackers, Online Geniuses Slack (53k)
+(3) n8n Discord rules: no spam, no self-promo, no cold DMs. Engagement must be public and organic. (4) Skool signup: fred+skool@callibrate.io, Discord: fred+discord@callibrate.io. LinkedIn provided for Skool anti-bot gate (low risk — verification only, not public). (5) 3-phase engagement: Phase 1 seed (join + lurk), Phase 2 warm engagement (reply to existing threads with Reddit-sourced insights), Phase 3 hand raiser post (promise draft). (6) X profiles identified for follow/engagement: @knoxtwts, @gkotte1, @romanbuildsaas (Tier 1), @liamottley_, @n8n_io, Nadia Privalikhina (Tier 2), @BrOrlandi, @NoahEpstein_ (Tier 3). (7) Reddit contacts with strongest signal: heyiamnickk, Littlecutsie, Academic-Highlight10 (no X profiles found — engage via Reddit DM if needed post-hand raiser).
+**Files:** No codebase files. External: discord.com/invite/n8n, skool.com/ai-automation-agency-hub, x.com/i/communities/1902201901417922832
+**Date:** 2026-02-26
+
+---
+
 ### DEC-99 — Created r/AIAgentGovernance subreddit (topical land grab)
 
 **Context:** Content plan mars 2026 identifies Reddit as priority #1 channel for distribution-building. COMMS-001 maps 8 subreddit clusters (15+ subs) but all are existing communities where we participate. No owned sub-channel existed for the core .gaai topic: AI agent governance in practice.
