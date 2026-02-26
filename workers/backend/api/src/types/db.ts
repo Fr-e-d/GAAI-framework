@@ -69,6 +69,7 @@ export interface ProspectRow {
   satellite_id: string | null;
   status: string | null;
   utm_campaign: string | null;
+  utm_content: string | null;
   utm_source: string | null;
 }
 

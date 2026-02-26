@@ -148,6 +148,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     quiz_answers?: unknown;
     utm_source?: unknown;
     utm_campaign?: unknown;
+    utm_content?: unknown;
     'cf-turnstile-response'?: unknown;
   };
   try {
@@ -169,7 +170,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     return errorResponse('Bot verification failed', 422);
   }
 
-  const { satellite_id, quiz_answers, utm_source, utm_campaign } = body;
+  const { satellite_id, quiz_answers, utm_source, utm_campaign, utm_content } = body;
 
   // Validate satellite_id
   if (typeof satellite_id !== 'string' || !satellite_id) {
@@ -203,8 +204,8 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
 
   // AC3: create prospect row
   const [prospect] = await sql<Pick<ProspectRow, 'id'>[]>`
-    INSERT INTO prospects (satellite_id, quiz_answers, requirements, status, utm_source, utm_campaign)
-    VALUES (${satellite_id}, ${JSON.stringify(answers)}::jsonb, ${JSON.stringify(requirements)}::jsonb, 'anonymous', ${typeof utm_source === 'string' ? utm_source : null}, ${typeof utm_campaign === 'string' ? utm_campaign : null})
+    INSERT INTO prospects (satellite_id, quiz_answers, requirements, status, utm_source, utm_campaign, utm_content)
+    VALUES (${satellite_id}, ${JSON.stringify(answers)}::jsonb, ${JSON.stringify(requirements)}::jsonb, 'anonymous', ${typeof utm_source === 'string' ? utm_source : null}, ${typeof utm_campaign === 'string' ? utm_campaign : null}, ${typeof utm_content === 'string' ? utm_content : null})
     RETURNING id`;
 
   if (!prospect) return errorResponse('Database error', 500);
@@ -400,6 +401,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
       satellite_id,
       utm_source: typeof utm_source === 'string' ? utm_source : null,
       utm_campaign: typeof utm_campaign === 'string' ? utm_campaign : null,
+      utm_content: typeof utm_content === 'string' ? utm_content : null,
       quiz_field_count: Object.keys(answers).length,
     },
   }));
