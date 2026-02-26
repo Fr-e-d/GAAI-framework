@@ -23,6 +23,7 @@
 | CNT-008-youtube-script | **DEFERRED** | SOC-001 (3 AKUs only) | Near-total: YT algorithm, script structure, Shorts vs long-form, YT SEO, AI search citation | Planned: `domain-knowledge-research` (comprehensive) when CNT-008 is prioritized. Not a day-1 use case |
 | CNT-009-quality-gate | GOOD | AGT-001, HMN-001, SRC-001, GEO-001 | Minor: readability score targets by content type | Auto: `domain-knowledge-research` (surface) if needed |
 | CNT-010-repurpose | **DESIGNED** | SRC-001, SEO-001, SEO-002, KWR-001 | Skill created (SKILL-CNT-010). Cadence framework + decision tree built into skill. | Skill ready at `skills/content/repurpose/SKILL.md` |
+| CNT-011-content-plan | **DESIGNED** | CONTENT-STRATEGY-001, GTM-001, COMMS-001 | Skill created (SKILL-CNT-011). Monthly planning from 6-dimension model. | Skill ready at `skills/content/content-plan/SKILL.md` |
 
 ---
 
@@ -35,6 +36,8 @@
 | T3 | Visual content creation | CNT-003, CNT-007, CNT-008 | OUT OF SCOPE | Text-first pipeline. Address when visual skill is added |
 | T4 | Content measurement / analytics | CNT-009, CNT-010 | RESOLVED | PostHog integration exists in Callibrate. Framework built alongside first publication cycle |
 | T5 | Distribution beyond social | CNT-007 scope | OUT OF SCOPE | Marketing/GTM concern, not content production |
+| T6 | UTM content attribution (`utm_content`) | CNT-010, CONTENT-STRATEGY-001 §10 | **IDENTIFIED** | `utm_source` + `utm_campaign` captured, but `utm_content` is missing → cannot attribute conversions to specific content pieces. Fix: add `utm_content` to satellite `landing.ts` page_view + prospect form submission (~5 lines). Needs a backlog story. Not blocking content-plan, blocks measurement at J+30. |
+| T7 | PostHog measurement stack (E07S06) | CNT-010, CONTENT-STRATEGY-001 §10, analytics-query skill | **RESOLVED** | Verified 2026-02-26: MCP PostHog connected, 3 dashboards live (Prospect Conversion #543054, Expert Activation #543055, Business Overview #543056), proxy `ph.callibrate.io` HTTP 200, Personal API Key loaded. Measurement framework and CMF feedback loop fully operational. |
 
 ---
 
@@ -42,6 +45,9 @@
 
 ### All pre-requisites resolved
 1. ~~**T1 — Voice guide:** Transform COMMS-001 → `memory/domains/content-production/voice-guide.md`~~ → **RESOLVED** (created 2026-02-26)
+
+### Content Strategy Map — RESOLVED
+8. ~~**Content Strategy Map:** Formalize 6-dimension model as artefact~~ → **RESOLVED** (DEC-95). Artefact: `artefacts/strategy/CONTENT-STRATEGY-001.md`. 6 gaps from industry research applied: bottom-up sequencing (BP > ARL), Business Potential scoring, Content-Market Fit feedback loop, dual-audience tracks, transparency policy, measurement per objective.
 
 ### Resolved (no action needed)
 2. ~~**CNT-001** — keyword research methodology~~ → **RESOLVED** by KWR-001
@@ -69,6 +75,7 @@
 
 8. CNT-007-social-adapt — `skills/content/social-adapt/SKILL.md` (SKILL-CNT-007)
 9. CNT-010-repurpose — `skills/content/repurpose/SKILL.md` (SKILL-CNT-010)
+10. CNT-011-content-plan — `skills/content/content-plan/SKILL.md` (SKILL-CNT-011)
 
 ### Deferred (not day-1 priority)
 

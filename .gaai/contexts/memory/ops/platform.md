@@ -121,6 +121,7 @@ Le détail technique (robots.txt, sitemap) est implémenté dans chaque satellit
 | **Google Cloud** | OAuth2 Google Calendar (booking layer) | ops@callibrate.io |
 | ~~**n8n**~~ | SUPPRIMÉ (DEC-59) — remplacé par Cloudflare Workflows | — |
 | **OpenAI** | Extraction freetext prospect via GPT-4o-mini (`/api/extract`) | ops@callibrate.io |
+| **PostHog EU** | Product analytics — funnels, events, session replay (`eu.posthog.com`) | ops@callibrate.io |
 | **Anthropic** | Claude Code (Delivery Agent via Claude Sonnet) — développement assisté par .gaai | Compte perso founder |
 
 ---
@@ -279,6 +280,30 @@ Le commentaire contient un marker HTML `<!-- preview-deploy -->` pour identifier
 1. Utiliser `ops@callibrate.io` comme adresse d'inscription
 2. Documenter le provider dans ce fichier (tableau Providers ci-dessus)
 3. Stocker les credentials dans le gestionnaire de mots de passe de l'équipe (à configurer)
+
+---
+
+## PostHog EU — Analytics Stack (E07)
+
+| Paramètre | Valeur |
+|---|---|
+| Instance | EU Cloud (`eu.posthog.com`) |
+| Projet | Callibrate (ID: `131035`) |
+| Project API Key | `phc_9MGVc1dDaNAugnSHJ692t5YuWFNy2WQ4kIHNvlEsXkr` (secret Workers: `POSTHOG_API_KEY`) |
+| Personal API Key | `phx_yEouGY3S...` (shell env: `POSTHOG_PERSONAL_API_KEY`, `.dev.vars`) |
+| Reverse proxy | `ph.callibrate.io` → `callibrate-posthog-proxy` Worker (E07S01) |
+| MCP server | `.mcp.json` → `mcp-eu.posthog.com` (auth via `POSTHOG_PERSONAL_API_KEY`) |
+| GAAI skill | `analytics-query` (SKILL-CRS-020) |
+
+**Dashboards (créés 2026-02-26) :**
+- [Prospect Conversion Funnel](https://eu.posthog.com/project/131035/dashboard/543054) — 5-step funnel + satellite breakdown
+- [Expert Activation Funnel](https://eu.posthog.com/project/131035/dashboard/543055) — 4-step funnel
+- [Business Overview](https://eu.posthog.com/project/131035/dashboard/543056) — daily trends + conversion rate
+
+**Architecture (E07S01→E07S05) :**
+- Client-side : PostHog JS stub dans satellite HTML (cookieless, `persistence:memory`)
+- Server-side : `posthog-node` dans Core API (15 events, `ctx.waitUntil()`)
+- Proxy : CF Worker `ph.callibrate.io` → `eu.i.posthog.com` (no API keys stored)
 
 ---
 

@@ -9,7 +9,8 @@ Runs a complete status report:
 2. Memory evaluation (structure discovery, staleness, accuracy, optimization)
 3. Recent decisions
 4. Framework health check
-5. **Delivery readiness checks** (optional — triggered by `--audit` flag or when explicitly requested)
+5. Content plan status (monthly cadence reminder)
+6. **Delivery readiness checks** (optional — triggered by `--audit` flag or when explicitly requested)
 
 ## When to Use
 
@@ -104,13 +105,33 @@ From the decisions log file discovered via `index.md`, list the 5 most recent en
 
 ---
 
-### Section 5 — Delivery Readiness (optional — `--audit` flag)
+### Section 5 — Content Plan Status
+
+Check the content production cadence:
+
+1. List files in `.gaai/contexts/artefacts/content/plans/`
+2. Determine the current month (`YYYY-MM`)
+3. **If no `{YYYY-MM}-content-plan.md` exists:**
+   - Display: `⚠️ Content plan due: no plan for {Month YYYY}. Run content-plan skill via /gaai-discover.`
+4. **If a plan exists for the current month:**
+   - Read the plan and show: `Content plan: {month} — {N} hub pieces planned`
+   - Cross-reference with `contexts/artefacts/content/drafts/` and `contexts/artefacts/content/published/`
+   - For each planned hub piece, show status: `not started` / `in draft` / `published`
+   - Flag overdue items (planned but not started past their scheduled week)
+5. Count total published pieces in `contexts/artefacts/content/published/`
+6. Count total drafts pending review in `contexts/artefacts/content/drafts/`
+
+This section always runs (no flag needed). It is intentionally lightweight — just a cadence reminder.
+
+---
+
+### Section 6 — Delivery Readiness (optional — `--audit` flag)
 
 **Only run this section if the user passes `--audit` as argument** (e.g., `/gaai-status --audit`), or explicitly asks for delivery readiness checks. Skip entirely otherwise to keep the standard status report fast.
 
 This section uses the `delivery-readiness-audit` skill (`.gaai/skills/cross/delivery-readiness-audit/SKILL.md`).
 
-**5a. AC internal consistency — spot-check READY stories**
+**6a. AC internal consistency — spot-check READY stories**
 
 For each story identified as "ready to deliver" in Section 1:
 - Open the story artefact file
@@ -118,7 +139,7 @@ For each story identified as "ready to deliver" in Section 1:
 - Flag any AC that references something not declared — e.g., a column used in AC12 but missing from the schema migration in AC11
 - Severity: CRITICAL if it would cause the Delivery Agent to produce incomplete code
 
-**5b. Pending revisions scan**
+**6b. Pending revisions scan**
 
 Scan all backlog item `notes` fields for patterns indicating unresolved work:
 - References containing "sera révisé", "à réviser", "story à générer", "à créer", "TODO", "à remplacer"
@@ -129,7 +150,7 @@ For each match:
 - Check whether a corresponding story already exists in the backlog
 - Flag as IMPORTANT if no story exists yet
 
-**5c. Delivery verdict**
+**6c. Delivery verdict**
 
 Produce a summary:
 - Count of stories truly ready (all deps met + ACs internally consistent)

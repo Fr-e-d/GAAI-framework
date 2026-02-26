@@ -17,3 +17,6 @@ PROSPECT_TOKEN_SECRET=any-random-string-32-chars-min
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-your-secret
 GCAL_TOKEN_ENCRYPTION_KEY=base64-encoded-32-byte-key  # openssl rand -base64 32
+
+# PostHog (E07)
+POSTHOG_PERSONAL_API_KEY=phx_your-personal-api-key

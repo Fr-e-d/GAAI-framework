@@ -4,7 +4,7 @@
 # Regenerate: invoke build-skills-index skill
 
 generated_at: 2026-02-26
-total: 42
+total: 43
 
 # ─────────────────────────────────────────────
 # DISCOVERY — skills that produce artefacts
@@ -445,3 +445,13 @@ content:
     status: stable
     updated_at: 2026-02-26
     path: content/repurpose/SKILL.md
+
+  - id: SKILL-CNT-011
+    name: content-plan
+    description: "Generate a monthly content production plan by evaluating current GTM phase, inventorying existing content, and recommending 2-3 hub content pieces positioned on all 6 CONTENT-STRATEGY-001 dimensions with BP scoring. Activate at the start of each month or when /gaai-status flags no current-month plan exists."
+    category: content
+    track: discovery
+    tags: [content, planning, strategy, monthly-cadence, budget]
+    status: stable
+    updated_at: 2026-02-26
+    path: content/content-plan/SKILL.md

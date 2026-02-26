@@ -20,6 +20,31 @@ updated_at: 2026-02-26
 
 ---
 
+### DEC-96 — content-plan skill (SKILL-CNT-011) + publishing audit + PostHog blocker
+
+**Context:** CONTENT-STRATEGY-001 defines a 6-dimension model with BP scoring, measurement framework, and phase-gated content authorization. But no mechanism existed to operationalize it — no planning trigger, no monthly cadence, no verification that publishing tools work. Audited the full E07 PostHog analytics stack, all publishing channels, and MCP configuration.
+**Decision:** (1) Create SKILL-CNT-011 (content-plan) in `skills/content/content-plan/SKILL.md`. Track: discovery (produces plans, not content). 7-step process: determine GTM phase → inventory content → evaluate underserved dimensions → recommend 2-3 hub pieces on 6 dimensions + BP → budget allocation → output plan file → story draft recommendations. (2) Trigger via `/gaai-status` Section 5 (monthly reminder when no current-month plan exists). Rejected: delivery daemon cron (track violation), new slash command (overkill for 1x/month), manual-only (invisible). (3) Publishing audit results: all channels use manual publish by design (COMMS-001). No publishing tool blocks content production. Social scheduling APIs (Buffer/Typefully) not needed at current cadence (4 posts/month). (4) PostHog audit: E07 stack is code-complete (17 events, 3 dashboards, proxy, MCP skill) but E07S06 has 5 founder actions pending (Personal API Key, shell export, dashboard script, DNS CNAME, Claude Code restart). This blocks the measurement framework (CONTENT-STRATEGY-001 §10) and CMF feedback loop, NOT content production. (5) Identified UTM gap: `utm_content` not captured — cannot attribute conversions to specific content pieces. Needs ~5 lines of code + a backlog story.
+**Files:** `skills/content/content-plan/SKILL.md`, `.claude/commands/gaai-status.md` (Section 5 added), `agents/discovery.agent.md` (cross-skills), `domains/content-production/gap-analysis.md` (CNT-011 + T6 + T7)
+**Date:** 2026-02-26
+
+---
+
+### DEC-95 — Content Strategy Map: 6-dimension model with industry gap resolutions
+
+**Context:** Designed a multi-dimensional content strategy model (Layer × Phase × Audience × Channel × Objective × ARL) for build-in-public across Callibrate, .gaai, and personal brand. Before formalizing, conducted industry research against 14 named frameworks (Schwartz's Stages of Awareness, BREW/Ahrefs, Pain Point SEO/Grow & Convert, Content-Market Fit/Vouillon, NFx marketplace tactics, ABC(L)/Seer Interactive, Content Atomization/Bluetext, Progressive Transparency). Identified 6 gaps in our approach and resolved them in the artefact.
+**Decision:** Formalize as `CONTENT-STRATEGY-001.md` with 6 dimensions and 6 gap resolutions integrated:
+1. **GAP-1 — Bottom-up sequencing:** ARL is a classification tool, not a publication order. Prioritize by Business Potential (BP), not ARL level. Pain Point SEO proves BOFU content converts immediately.
+2. **GAP-2 — Business Potential scoring:** Added BP 0-3 scale (BREW-inspired) as an attribute on every content piece. BP drives production priority.
+3. **GAP-3 — Content-Market Fit validation:** Added explicit feedback loop (Publish → Measure J+7/J+30/J+90 → Decide → Act) with per-Objective seuils minimums and pivot trigger after 3 failed Hubs.
+4. **GAP-4 — Dual-audience tracks:** Formalized supply (P1) vs demand (P2) content tracks with phase-based ratios (80% builder Phase 0-1, supply-first Phase 2, balanced Phase 3). NFx marketplace tactic.
+5. **GAP-5 — Transparency policy:** 3 levels (always share / share with delay / never share) replacing implicit BIP behavior.
+6. **GAP-6 — Measurement per Objective:** Mapped primary + secondary metrics to each of the 6 objectives with PostHog/GSC sources and J+30 minimum thresholds.
+**Relationship to existing artefacts:** CONTENT-STRATEGY-001 is the navigation map; COMMS-001 is the instrument panel (empathy maps, channel playbooks, writing style); GTM-001 provides the phase gates; MARKET-001 provides the vertical strategy. No overlap — each document has a distinct scope.
+**Files:** `artefacts/strategy/CONTENT-STRATEGY-001.md`
+**Date:** 2026-02-26
+
+---
+
 ### DEC-94 — Domain memory namespace: `memory/domains/{domain}/`
 
 **Context:** Content knowledge base existed at `memory/content/` but was (1) not registered in the master index, (2) missing YAML frontmatter, (3) ambiguously named ("content" = domain? product content? generic content?). With DEC-93 adopting domain sub-agents, memory structure must support domain-scoped retrieval.
