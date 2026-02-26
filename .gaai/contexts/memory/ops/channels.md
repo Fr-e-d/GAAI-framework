@@ -77,7 +77,7 @@ updated_at: 2026-02-26
 
 | Paramètre | Valeur |
 |---|---|
-| Username | `Fr-e-d` |
+| Username | `Fred-AnIndieCreator` |
 | Subreddit détenu | r/AIAgentGovernance (DEC-99) |
 | Usage | Engagement communautaire, seed content |
 | Phase | Actif — 9 clusters Reddit identifiés (COMMS-001) |
