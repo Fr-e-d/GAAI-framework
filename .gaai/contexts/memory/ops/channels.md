@@ -82,6 +82,44 @@ updated_at: 2026-02-26
 | Usage | Engagement communautaire, seed content |
 | Phase | Actif — 9 clusters Reddit identifiés (COMMS-001) |
 
+### Discord — n8n (P1 expert engagement)
+
+| Paramètre | Valeur |
+|---|---|
+| Serveur | n8n |
+| Membres | ~74k |
+| Email inscription | `fred+discord@callibrate.io` |
+| Intro postée | Oui (2026-02-26, #intros) |
+| Channels prioritaires | #general, #show-and-tell, #idea-collaboration |
+| Règles clé | No spam, no self-promo, no cold DMs (Rule 4) |
+| Usage | Warm engagement P1 experts, observation, hand raiser (post week 3+) |
+| Date rejoint | 2026-02-26 |
+
+### Discord — AI Agency Alliance (P1 agency owner engagement)
+
+| Paramètre | Valeur |
+|---|---|
+| Serveur | AI Agency Alliance |
+| Membres | ~15k |
+| Email inscription | `fred+discord@callibrate.io` |
+| Intro postée | Oui (2026-02-27, #introduce-yourself) |
+| Channels prioritaires | #general-chat, #ai-forum, #seek-partner, #welcome |
+| Channels observer | #jobs-lookin-for, #marketing, #operations |
+| Usage | Warm engagement P1 agency owners, observation, hand raiser (post week 3+) |
+| Date rejoint | 2026-02-27 |
+
+### Skool — Liam Ottley AI Automation Agency Hub (P1 — Tier B)
+
+| Paramètre | Valeur |
+|---|---|
+| Communauté | Liam Ottley's AI Automation Agency Hub |
+| Membres | ~317k |
+| Email inscription | `fred+skool@callibrate.io` |
+| Membership | Pending approval |
+| ICP density | Basse (beginners > established experts — downgraded S→B, DEC-100) |
+| Usage | Observer seulement. Secondary signal source. |
+| Date demandé | 2026-02-26 |
+
 ---
 
 ## Canaux planifiés (non actifs)
