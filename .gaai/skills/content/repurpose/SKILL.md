@@ -14,10 +14,10 @@ metadata:
   tags: [content, refresh, repurposing, lifecycle, evergreen, cadence]
 inputs:
   - "contexts/artefacts/content/published/ (existing published content inventory)"
-  - "contexts/memory/content/voice-guide.md (voice consistency reference)"
-  - "contexts/memory/content/sources/SRC-001.md (CRED013 — Freshness Trust Chain)"
-  - "contexts/memory/content/sources/SEO-001.md (AKU-002 — Trust, timestamp signals)"
-  - "contexts/memory/content/sources/KWR-001.md (scoring model for keyword re-evaluation)"
+  - "contexts/memory/domains/content-production/voice-guide.md (voice consistency reference)"
+  - "contexts/memory/domains/content-production/sources/SRC-001.md (CRED013 — Freshness Trust Chain)"
+  - "contexts/memory/domains/content-production/sources/SEO-001.md (AKU-002 — Trust, timestamp signals)"
+  - "contexts/memory/domains/content-production/sources/KWR-001.md (scoring model for keyword re-evaluation)"
   - "Analytics data (PostHog / GSC — provided by invoking agent)"
 outputs:
   - "contexts/artefacts/content/drafts/{id}-refresh-brief.md"

@@ -11,7 +11,7 @@ updated_at: 2026-02-26
 
 ---
 
-## Categories
+## Shared Categories
 
 | Category | Path | Purpose | Load frequency |
 |---|---|---|---|
@@ -24,6 +24,14 @@ updated_at: 2026-02-26
 | `sessions/` | *(empty — add temporary notes here)* | Short-term session exploration | Never (source for summaries) |
 | `archive/` | `archive/decisions-01-59.archive.md` | Full text of archived decisions | Rarely |
 
+## Domain Memory
+
+> Domain memory is scoped to domain sub-agents (DEC-93). Each domain with ≥5 skills and its own knowledge base gets a folder under `domains/`. Main agents load shared categories; domain sub-agents load shared + their domain folder.
+
+| Domain | Entry point | Skills covered | Load frequency |
+|---|---|---|---|
+| `domains/content-production/` | `domains/content-production/index.md` | CNT-001→010 (content blueprint) | When content domain sub-agent active |
+
 ---
 
 ## Active Files
@@ -31,15 +39,15 @@ updated_at: 2026-02-26
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-23 (updated: E07 PostHog analytics stack — DEC-65 complement) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-26 (33 active entries — DEC-60 to DEC-93. Older entries compacted.) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-26 (34 active entries — DEC-60 to DEC-94. Older entries compacted.) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-23 (OpenAI function calling pattern replaces Anthropic — E06S12/DEC-2026-02-23-01) |
 | `ops/platform.md` | ops | OPS-001 | 2026-02-24 (Delivery costs $149.90/24 stories measured — SKILL-CRS-022 cost-analysis + Reddit API pattern) |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
 | `summaries/decisions-01-59.summary.md` | summaries | SUMMARY-DECISIONS-01-59 | 2026-02-23 |
 | `archive/decisions-01-59.archive.md` | archive | ARCHIVE-DECISIONS-01-59 | 2026-02-23 |
-| `content/voice-guide.md` | content | VOICE-GUIDE-001 | 2026-02-26 (distilled from COMMS-001 Parts 0, 1, 3) |
-| `content/index.md` | content | CONTENT-INDEX | 2026-02-26 (10 sources, 141 AKUs, 9 domains) |
-| `content/gap-analysis.md` | content | CONTENT-GAP-ANALYSIS | 2026-02-26 (all pre-requisites resolved, 9/10 skills ready) |
+| `domains/content-production/voice-guide.md` | domain:content-production | VOICE-GUIDE-001 | 2026-02-26 (distilled from COMMS-001 Parts 0, 1, 3) |
+| `domains/content-production/index.md` | domain:content-production | DOMAIN-CONTENT-PRODUCTION-001 | 2026-02-26 (10 sources, 141 AKUs, 9 research domains) |
+| `domains/content-production/gap-analysis.md` | domain:content-production | CONTENT-GAP-ANALYSIS | 2026-02-26 (all pre-requisites resolved, 9/10 skills ready) |
 
 ---
 

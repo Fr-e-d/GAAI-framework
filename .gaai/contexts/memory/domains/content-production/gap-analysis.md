@@ -30,7 +30,7 @@
 
 | ID | Gap | Impacts | Severity | Resolution |
 |----|-----|---------|----------|------------|
-| T1 | Voice guide (voice-guide.md) | CNT-003, CNT-004, CNT-007 | **RESOLVED** | Created 2026-02-26 at `memory/content/voice-guide.md` from COMMS-001 Parts 0, 1, 3 |
+| T1 | Voice guide (voice-guide.md) | CNT-003, CNT-004, CNT-007 | **RESOLVED** | Created 2026-02-26 at `memory/domains/content-production/voice-guide.md` from COMMS-001 Parts 0, 1, 3 |
 | T2 | Prompt engineering for pipeline | All skills | RESOLVED | Develops during skill design. Each skill encodes its own prompts |
 | T3 | Visual content creation | CNT-003, CNT-007, CNT-008 | OUT OF SCOPE | Text-first pipeline. Address when visual skill is added |
 | T4 | Content measurement / analytics | CNT-009, CNT-010 | RESOLVED | PostHog integration exists in Callibrate. Framework built alongside first publication cycle |
@@ -41,7 +41,7 @@
 ## PRIORITIZED ACTIONS
 
 ### All pre-requisites resolved
-1. ~~**T1 — Voice guide:** Transform COMMS-001 → `memory/content/voice-guide.md`~~ → **RESOLVED** (created 2026-02-26)
+1. ~~**T1 — Voice guide:** Transform COMMS-001 → `memory/domains/content-production/voice-guide.md`~~ → **RESOLVED** (created 2026-02-26)
 
 ### Resolved (no action needed)
 2. ~~**CNT-001** — keyword research methodology~~ → **RESOLVED** by KWR-001

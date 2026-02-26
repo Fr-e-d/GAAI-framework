@@ -39,10 +39,11 @@ Activate after:
 ## Process
 
 1. Read new validated knowledge (discovery results, decisions, architecture insights, validated hypotheses, GTM decisions)
-2. Read `contexts/memory/index.md` to discover available categories. Classify knowledge into the most appropriate existing category. If no existing category fits, create a new one — name it clearly, create the directory, and register it in `index.md` before writing any file.
+2. Read `contexts/memory/index.md` to discover available categories (shared and domain). Classify knowledge into the most appropriate existing category. If no existing category fits, create a new one — name it clearly, create the directory, and register it in `index.md` before writing any file.
 3. Create or update corresponding memory files using standard templates
 4. Register all new or modified entries in `contexts/memory/index.md` — this is mandatory, not optional. Any file not in the index is invisible to all other memory skills.
-5. Ensure memory files remain structured and minimal
+5. **Domain dual-index rule:** When ingesting into a domain category (`domains/{domain}/`), also update the domain's own `index.md` (e.g., `domains/content-production/index.md`). Both the master index AND the domain index must reflect the new entry. Failure to update both causes silent drift — the domain sub-agent won't see entries missing from its domain index.
+6. Ensure memory files remain structured and minimal
 
 ---
 
@@ -54,7 +55,9 @@ Memory files created at any registered category path (see `contexts/memory/index
 - `contexts/memory/patterns/` — coding conventions, procedural knowledge
 - `contexts/memory/ops/` — platform operations, DNS, providers, infra procedures
 - `contexts/memory/contacts/` — experts and leads identified during Discovery
+- `contexts/memory/domains/content-production/` — domain-scoped: research AKUs, sources, voice guide, gap analysis for content blueprint
 - `contexts/memory/index.md` — updated (always, mandatory)
+- Domain `index.md` — updated when ingesting into a domain (mandatory, see Process step 5)
 
 > **Governance rule:** Any new category must be registered in `index.md` before use. Never write a memory file to an unregistered path.
 
