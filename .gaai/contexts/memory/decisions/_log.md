@@ -20,6 +20,15 @@ updated_at: 2026-02-26
 
 ---
 
+### DEC-98 — Content plan cold-start correction: distribution before content
+
+**Context:** March 2026 content plan (rev.1) allocated 52% of budget to a flagship blog post gated on Gate 1 (can't publish yet) while Reddit engagement (the only activity serving Gate 2 expert recruitment) received 19%. Evaluated against cold-start best practices: Justin Welsh (atomic content first), Rand Fishkin (60 days community before self-promo), Pieter Levels (90% replies, 10% threads for 30 days), Grow & Convert (Pain Point SEO).
+**Decision:** (1) Invert the plan — distribution-building FIRST, hub content production SECOND. A flagship with 0 readers = wasted effort. (2) Reddit budget 2h → 4h (33%). Split: P1 supply track (r/aisolobusinesses, r/freelance_forhire) + P3 builder track (r/ClaudeAI, r/cursor). (3) X strategy: weeks 1-3 = engagement pur (replies + follows, no threads). First thread only in week 4 IF ~50+ followers. Algorithm doesn't distribute threads from 0-follower accounts. (4) Flagship: 5h30 → 2h (outline + angle notes only). Full draft deferred to April, informed by 4 weeks of atomic content feedback. New AC: "angle validated by ≥2 atomic content tests showing engagement." (5) Engagement workflow: batch 2x/day (morning triage 15min + evening proactive 15min). No real-time notifications. AI-assisted triage per COMMS-001 Part 5 (tier classification + draft responses). (6) CONTENT-STRATEGY-001 evaluation: 5/6 dimensions validated (Layer, Phase, Audience, Channel, Objective). ARL (dim 6) flagged as premature — no audience to classify yet. Measurement framework (§10) correct but inopérant until first publication. Strategy document overall sound — the plan was the problem, not the strategy.
+**Files:** `artefacts/content/plans/2026-03-content-plan.md` (rev.2 — rewritten)
+**Date:** 2026-02-26
+
+---
+
 ### DEC-97 — Framework validation: Capability Readiness + Domain Memory tested and confirmed
 
 **Context:** After implementing DEC-90 (Capability Readiness rule), DEC-93 (domain sub-agents), and DEC-94 (domain memory namespace), ran 3 structured tests to compare theory vs practice — verify the framework changes work in real agent execution, not just on paper.

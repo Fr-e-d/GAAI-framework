@@ -39,7 +39,7 @@ updated_at: 2026-02-26
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-23 (updated: E07 PostHog analytics stack — DEC-65 complement) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-26 (35 active entries — DEC-60 to DEC-97. Older entries compacted.) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-26 (36 active entries — DEC-60 to DEC-98. Older entries compacted.) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-23 (OpenAI function calling pattern replaces Anthropic — E06S12/DEC-2026-02-23-01) |
 | `ops/platform.md` | ops | OPS-001 | 2026-02-24 (Delivery costs $149.90/24 stories measured — SKILL-CRS-022 cost-analysis + Reddit API pattern) |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
@@ -103,6 +103,7 @@ updated_at: 2026-02-26
 | `artefacts/strategy/COMMS-001.strategy.md` | Strategy | Communication & publication strategic plan — empathy maps, channel strategy, personal branding, launch orchestration, comment response, content pipeline (DEC-78) |
 | `artefacts/strategy/MARKET-001.md` | Strategy | Market research & satellite vertical selection — 8 verticals scored, Tier 1: V3 AI Chatbot + V1 Workflow Auto + V8 AI Integration (DEC-84). Scope strategy AI-pure → niche-down (DEC-85). Niche-down candidates: Real Estate #1, Accounting/Legal sleepers, trigger ≥30% domain concentration (DEC-88) |
 | `artefacts/strategy/CONTENT-STRATEGY-001.md` | Strategy | Content strategy map — 6-dimension model (Layer × Phase × Audience × Channel × Objective × ARL), BP scoring, dual-audience tracks, CMF validation, transparency policy, measurement framework (DEC-95) |
+| `artefacts/content/plans/2026-03-content-plan.md` | Content Plan | March 2026 — distribution-first cold start. Reddit P1+P3 (4h) + X engagement (3h) + flagship outline (2h). Rev.2 corrected from content-first (DEC-98) |
 | `artefacts/strategy/VISION-GAAI-CLOUD.md` | Strategy | Vision long-terme — .gaai comme SaaS universel de gouvernance d'agents AI — architecture technique 3 couches (DEC-74, DEC-75) — NOT ACTIVE |
 | `artefacts/manifesto/MANIFESTO-001.md` | Manifesto | Manifeste public Callibrate — draft FR — pay-for-value + game theory + invitation |
 | `artefacts/marketing/E01S01-reddit-posts.md` | Marketing | Reddit discussion posts + observation log |
