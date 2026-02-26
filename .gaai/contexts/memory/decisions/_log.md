@@ -20,6 +20,33 @@ updated_at: 2026-02-26
 
 ---
 
+### DEC-104 — Discord added to channel map: AI Agency Alliance (Phase 0-1, P1 engagement)
+
+**Context:** During content strategy review, two Discord servers were evaluated against COMMS-001 and OPS-002. AI Hub (537k members) rejected — audience is creative AI (voice cloning, RVC), no overlap with P1/P3 personas. AI Agency Alliance (~12 800 members, focus: automation agencies, prompt engineering, sales) validated as relevant for P1 expert persona.
+**Decision:** (1) AI Agency Alliance added to COMMS-001 as active Discord channel, P1 audience, 1-2 interactions/week cadence. (2) Channel map overview updated. (3) Strategy: weeks 1-2 observation only, weeks 3+ substantive replies (same logic as Reddit). (4) Handraiser detection rule added: P1 experts complaining about lead gen → log to `memory/contacts/leads.md`. (5) No promotional use before launch. (6) Discord remains secondary channel — Reddit stays primary for P1. (7) Webhook/MCP automation deferred — no automation before signal is validated (consistent with OPS-002 API keys policy).
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-27
+
+---
+
+### DEC-103 — E01S02 refined: LinkedIn → X/Discord/Communities (channel pivot + new post copy)
+
+**Context:** E01S02 (expert hand raiser) was deferred since project start due to LinkedIn constraint. E01S01 AC4 (promise draft, DEC-102) now delivered — dependency resolved. Channels mapped in DEC-100.
+**Decision:** (1) Story ACs rewritten: AC1 = ≥2 weeks warm engagement (replaces LinkedIn connections), AC2 = X hand raiser with DEC-102 vocabulary, AC3 = 2 communities (n8n Discord + 1 other), AC4 = log commenters 48h, AC5 = gate ≥10, AC6 = LinkedIn deferred. (2) 6 hand raiser post versions produced, all grounded in validated vocabulary ("tire kickers", "decent leads", "confirmed budgets", "found time", "90%", "5-7h/week"): X Version A (pain direct), X Version B (feast-or-famine), X Version C (outcome framing), n8n Discord (conversational question-first), X Community (short), Reddit (TL;DR + data-backed). (3) All posts QA'd against voice guide (content-production domain memory): kill list clean, P1 persona vocabulary used, channel tone variants respected, Reddit TL;DR added. (4) LinkedIn versions preserved as DEFERRED section in artefact. (5) Backlog status: `deferred` → `refined`. (6) Prerequisite: ≥2 weeks warm engagement before posting — no cold hand raisers.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-26
+
+---
+
+### DEC-102 — Promise draft produced (AC4 of E01S01)
+
+**Context:** E01S01 required a "promise draft" (AC4) — one sentence per side (expert + prospect), grounded in observed language. Data: 109 comments, 15 Reddit posts, 13 hypotheses (9 validated, 3 indirect signal). AC4 was the last blocker before E01S02 (expert hand raiser) could start.
+**Decision:** (1) **Expert promise:** "Stop filtering tire kickers. Get matched only with prospects who have confirmed budgets, real timelines, and a problem worth solving." Grounded in: 90% tire kicker ratio (Littlecutsie), 5-7h/week filtering (JJCookieMonster), budget = #1 drop-off (Academic-Highlight10), total channel fragmentation (SilentButDeadlySquid). (2) **Prospect promise:** "Find a real workflow architect who gets your business logic — in days, not months." Grounded in: 3-month search (Present-Access-2260), 10-15% real experts (PathStoneAnalytics), "prompt engineer with a Zapier account" as anti-pattern. (3) Validated vocabulary: "tire kickers", "decent leads", "found time", "confirmed budget" (expert side); "workflow architect", "business logic", "gets our specific business logic" (prospect side). (4) Promises are internal positioning anchors — not copy-ready taglines. They inform landing page, hand raiser posts, engagement language, and onboarding pitches. (5) Artefact: `.gaai/contexts/artefacts/marketing/E01S01-promise-draft.md`. (6) H3/H5 (willingness to pay) not addressed by promise — require E01S02 direct engagement for validation.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-26
+
+---
+
 ### DEC-101 — Distribution channels activated (Phase 0-1)
 
 **Context:** March 2026 cold-start plan (DEC-98) requires Reddit 42% + X 32% + flagship 21%. All Phase 0-1 distribution channels needed to be configured before content execution begins.
@@ -34,7 +61,7 @@ updated_at: 2026-02-26
 **Context:** E01S02 (expert hand raiser) was deferred due to LinkedIn constraint (founder employed at key position). Reddit signal analysis (109 comments, 15 posts) validated H1-H12 but H3/H5 (willingness to pay) require direct engagement. X/Twitter identified as viable alternative to LinkedIn for WTP validation.
 **Decision:** (1) X/Twitter replaces LinkedIn as primary hand raiser channel. Gate unchanged: ≥10 qualified expert hand raisers. (2) Communities prioritized by ICP density:
 - **Tier S:** n8n Discord (74k, expert-heavy, Jobs channel active), n8n Community Forum (200k+), Liam Ottley Skool (297k, downgraded from S to B after review — audience is beginners, not established experts)
-- **Tier A:** AI Agency Alliance Discord (13k, business-focused), AI Automation Society Skool (1.1k), 2 X Communities (AI Agents/Automation/N8N + AI Automation Agencies)
+- **Tier A:** AI Agency Alliance Discord (13k, business-focused, JOINED 2026-02-26), AI Automation Society Skool (1.1k), 2 X Communities (AI Agents/Automation/N8N + AI Automation Agencies)
 - **Tier B:** Reddit (already active), Indie Hackers, Online Geniuses Slack (53k)
 (3) n8n Discord rules: no spam, no self-promo, no cold DMs. Engagement must be public and organic. (4) Skool signup: fred+skool@callibrate.io, Discord: fred+discord@callibrate.io. LinkedIn provided for Skool anti-bot gate (low risk — verification only, not public). (5) 3-phase engagement: Phase 1 seed (join + lurk), Phase 2 warm engagement (reply to existing threads with Reddit-sourced insights), Phase 3 hand raiser post (promise draft). (6) X profiles identified for follow/engagement: @knoxtwts, @gkotte1, @romanbuildsaas (Tier 1), @liamottley_, @n8n_io, Nadia Privalikhina (Tier 2), @BrOrlandi, @NoahEpstein_ (Tier 3). (7) Reddit contacts with strongest signal: heyiamnickk, Littlecutsie, Academic-Highlight10 (no X profiles found — engage via Reddit DM if needed post-hand raiser).
 **Files:** No codebase files. External: discord.com/invite/n8n, skool.com/ai-automation-agency-hub, x.com/i/communities/1902201901417922832
