@@ -92,7 +92,7 @@ TARGET_BRANCH="${GAAI_TARGET_BRANCH:-staging}"
 DELIVERY_TIMEOUT="${GAAI_DELIVERY_TIMEOUT:-14400}"   # 4h hard kill (last resort)
 MAX_TURNS="${GAAI_MAX_TURNS:-200}"                    # primary safety net
 CLAUDE_MODEL="${GAAI_CLAUDE_MODEL:-sonnet}"           # model (sonnet = cost-effective)
-HEARTBEAT_STALE="${GAAI_HEARTBEAT_STALE:-900}"        # 15min no output = stuck
+HEARTBEAT_STALE="${GAAI_HEARTBEAT_STALE:-1800}"       # 30min no output = stuck (allows long MCP calls like deep research)
 STALENESS_THRESHOLD="${GAAI_STALENESS_THRESHOLD:-}"   # auto-computed below
 DRY_RUN=false
 STATUS_MODE=false
