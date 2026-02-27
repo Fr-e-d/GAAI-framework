@@ -20,6 +20,12 @@ node_modules/
 dist/
 .wrangler/
 
+# React Router build output
+**/build/
+
+# React Router generated types
+**/.react-router/
+
 # Editor
 .cursor/
 .vscode/settings.json

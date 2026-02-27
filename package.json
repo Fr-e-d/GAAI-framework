@@ -14,6 +14,9 @@
     "test": "npm -w callibrate-core run test && npm -w callibrate-posthog-proxy run test && npm -w callibrate-satellite run test",
     "type-check": "npm -w callibrate-core run type-check && npm -w callibrate-satellite run type-check && npm -w callibrate-posthog-proxy run type-check && npm -w callibrate-matching run type-check",
     "deploy:staging": "npm -w callibrate-core run deploy:staging && npm -w callibrate-satellite run deploy:staging && npm -w callibrate-posthog-proxy run deploy:staging",
-    "deploy:prod": "npm -w callibrate-core run deploy:prod && npm -w callibrate-satellite run deploy:prod && npm -w callibrate-posthog-proxy run deploy:prod"
+    "deploy:prod": "npm -w callibrate-core run deploy:prod && npm -w callibrate-satellite run deploy:prod && npm -w callibrate-posthog-proxy run deploy:prod",
+    "dev:dashboard": "npm -w callibrate-dashboard run dev",
+    "test:dashboard": "npm -w callibrate-dashboard run test",
+    "type-check:dashboard": "npm -w callibrate-dashboard run type-check"
   }
 }
