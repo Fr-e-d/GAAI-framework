@@ -30,6 +30,12 @@ import { handleCallExperienceSurvey } from './handlers/surveys/call-experience';
 import { handleProjectSatisfactionSurvey } from './handlers/surveys/project-satisfaction';
 import { handleLeadEvaluation } from './handlers/evaluations/lead';
 import { applySecurityHeaders } from './lib/securityHeaders';
+// E06S38: Dashboard API endpoints
+import { handleGetLeads, handleEvaluateLead } from './handlers/experts/leads';
+import { handleGetBookings } from './handlers/experts/bookings';
+import { handleGetBilling } from './handlers/experts/billing';
+import { handleGetDashboard } from './handlers/experts/dashboard';
+import { handleGetPublicExperts, handleGetPublicExpertBySlug } from './handlers/experts/public';
 
 // CF Workflows — must be named exports so the runtime can locate the classes
 export { BookingConfirmedWorkflow } from './workflows/booking-confirmed.workflow';
@@ -244,6 +250,12 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       }
     }
 
+    // E06S38: POST /api/leads/:id/evaluate — expert lead evaluation
+    const evaluateMatch = pathname.match(/^\/api\/leads\/([^/]+)\/evaluate$/);
+    if (method === 'POST' && evaluateMatch && evaluateMatch[1]) {
+      return handleEvaluateLead(request, env, user, evaluateMatch[1], ctx);
+    }
+
     return new Response(JSON.stringify({ error: 'Not Found' }), {
       status: 404,
       headers: { 'Content-Type': 'application/json' },
@@ -273,6 +285,20 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       status: 404,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  // ── Public expert routes (unauthenticated, E06S38) ───────────────────────
+  // Must be registered BEFORE the authenticated expert block to avoid auth interception.
+
+  // GET /api/experts/public — anonymized public listing
+  if (method === 'GET' && pathname === '/api/experts/public') {
+    return handleGetPublicExperts(request, env);
+  }
+
+  // GET /api/experts/public/:slug — anonymized expert detail
+  const publicExpertMatch = pathname.match(/^\/api\/experts\/public\/([^/]+)$/);
+  if (method === 'GET' && publicExpertMatch && publicExpertMatch[1]) {
+    return handleGetPublicExpertBySlug(request, env, publicExpertMatch[1]);
   }
 
   // ── Expert routes (authenticated) ───────────────────────────────────────
@@ -310,6 +336,27 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       if (method === 'DELETE' && pathname === `/api/experts/${gcalExpertId}/gcal/disconnect`) {
         return handleGcalDisconnect(request, env, user, gcalExpertId, ctx);
       }
+    }
+
+    // E06S38: Dashboard read endpoints — GET /api/experts/:id/leads|bookings|billing|dashboard
+    const leadsMatch = pathname.match(/^\/api\/experts\/([^/]+)\/leads$/);
+    if (method === 'GET' && leadsMatch && leadsMatch[1]) {
+      return handleGetLeads(request, env, user, leadsMatch[1]);
+    }
+
+    const expertBookingsMatch = pathname.match(/^\/api\/experts\/([^/]+)\/bookings$/);
+    if (method === 'GET' && expertBookingsMatch && expertBookingsMatch[1]) {
+      return handleGetBookings(request, env, user, expertBookingsMatch[1]);
+    }
+
+    const billingMatch = pathname.match(/^\/api\/experts\/([^/]+)\/billing$/);
+    if (method === 'GET' && billingMatch && billingMatch[1]) {
+      return handleGetBilling(request, env, user, billingMatch[1]);
+    }
+
+    const dashboardMatch = pathname.match(/^\/api\/experts\/([^/]+)\/dashboard$/);
+    if (method === 'GET' && dashboardMatch && dashboardMatch[1]) {
+      return handleGetDashboard(request, env, user, dashboardMatch[1]);
     }
 
     return new Response(JSON.stringify({ error: 'Not Found' }), {

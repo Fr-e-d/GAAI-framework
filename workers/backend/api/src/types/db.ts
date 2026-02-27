@@ -39,6 +39,7 @@ export interface BookingRow {
   id: string;
   cal_booking_id: string | null;
   cal_meeting_url: string | null;
+  cancel_reason: string | null; // E06S38
   confirmed_at: string | null;
   created_at: string | null;
   description: string | null;
@@ -106,7 +107,11 @@ export interface LeadRow {
   billed_at: string | null;
   booking_id: string | null;
   confirmed_at: string | null;
+  conversion_declared: boolean; // E06S38
   created_at: string | null;
+  evaluated_at: string | null; // E06S38
+  evaluation_notes: string | null; // E06S38
+  evaluation_score: number | null; // E06S38
   expert_id: string | null;
   flag_reason: string | null;
   flagged_at: string | null;

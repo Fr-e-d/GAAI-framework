@@ -20,6 +20,7 @@ import { loadBillingData, applyBillingFilters } from '../lib/billingFilter';
 import { loadAdmissibilityData, applyAdmissibilityFilters } from '../lib/admissibilityFilter';
 import type { ProspectContext } from '../lib/admissibilityFilter';
 import type { ProspectRequirements as _PR } from '../types/matching';
+import { deriveQualityTier } from '../lib/qualityTier';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -31,13 +32,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function errorResponse(error: string, status: number, details?: unknown): Response {
   return jsonResponse({ error, ...(details ? { details } : {}) }, status);
-}
-
-function deriveQualityTier(compositeScore: number | null): QualityTier {
-  if (!compositeScore || compositeScore === 0) return 'new';
-  if (compositeScore <= 25) return 'rising';
-  if (compositeScore <= 60) return 'established';
-  return 'top';
 }
 
 // ── POST /api/matches/compute ─────────────────────────────────────────────────
