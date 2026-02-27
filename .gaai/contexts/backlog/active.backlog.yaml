@@ -522,7 +522,7 @@ items:
     epic: E03
     title: "Prospect freetext input page (/match)"
     priority: high
-    status: in_progress
+    status: done
     artefact: contexts/artefacts/stories/E03S01.story.md
     dependencies: [E06S14, E06S08]
     notes: "Discovery 2026-02-27. 10 ACs. /match route on satellite Worker — branded textarea + POST /api/extract + loading state + client-side transition to E03S02. Design tokens from config.theme. PostHog events. SEO meta. Mobile-responsive. CORE_API_URL injected at render time. No Turnstile on this step."
