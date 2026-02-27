@@ -723,7 +723,7 @@ items:
     epic: E02
     title: "Billing & subscription page (credits, LS activation, spending controls)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E02S07.story.md
     dependencies: [E02S01, E06S38, E06S33, E06S34]
     notes: "Discovery 2026-02-27. 12 ACs. Credit balance hero card. LS subscription activation CTA (Lemon.js overlay). Subscription status badge. Transaction history (paginated). Monthly spending progress bar. Max lead price + spending limit controls (editable). 'Leads manqués' section. Pricing transparency."
