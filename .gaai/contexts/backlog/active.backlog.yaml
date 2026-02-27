@@ -701,7 +701,7 @@ items:
     epic: E02
     title: "Lead pipeline page + actions (confirm, flag, evaluate)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E02S05.story.md
     dependencies: [E02S01, E06S38, E06S32]
     notes: "Discovery 2026-02-27. 13 ACs. URL-driven filters (status tabs + pagination). Lead cards (prospect, score, price, status, actions). Detail drawer (requirements, score breakdown, booking info, flag window countdown). Actions: confirm, flag (7-day window + reason), evaluate (score 1-10 + notes + conversion). Optional: Supabase Realtime for new lead notifications. Absorbs E04S03 + E05S02/S03/S04."
