@@ -23,6 +23,82 @@ updated_at: 2026-02-27
 
 ---
 
+### DEC-108 — GAAI-Cloud build strategy: Gate 2 technical build, Gate 3 commercial launch
+
+**Context:** Complexity comparison between Callibrate (two-sided marketplace + matching engine) and GAAI-Cloud (file sync + MCP server). Key insight: GAAI-Cloud complexity is infrastructure-only (DO + R2 + MCP + auth + billing) because the AI tool is the client, not the product. No custom algorithm, no two-sided acquisition, no frontend required. Estimated build time: 2–3 months vs 12–18 months for Callibrate.
+**Decision:**
+(1) **GAAI-Cloud is structurally simpler than Callibrate.** Callibrate builds product value (matching engine, extraction, booking, scoring, feedback loops, satellite sites, two ICPs). GAAI-Cloud builds infrastructure (file storage + MCP interface). The AI (Claude Code / Cowork) is the client — it delivers the governance/discovery/delivery value, not GAAI-Cloud's application code.
+(2) **Effort-adjusted value favors earlier GAAI-Cloud build.** Callibrate: €2–15M ARR potential / high complexity / high risk / long timeline. GAAI-Cloud: €500K–1.5M ARR potential / low complexity / low risk / 2–3 month build. The ratio is more favorable than raw MRR numbers suggest.
+(3) **Trigger condition refined — two stages:**
+  - Gate 2 (`.gaai` OSS public) → **GAAI-Cloud technical build starts.** Low complexity = no resource conflict with Callibrate. OSS community begins forming = early feedback available.
+  - Gate 3 (Callibrate ≥10 calls payés, GMV ≥1 500€, ≥3 experts re-payants) → **GAAI-Cloud commercial launch.** Proof-of-work established, GAAI credibility validated, audience exists.
+(4) **Sequence:** Callibrate Gate 1–2–3 (primary focus) → GAAI OSS public (Gate 2, parallel) → GAAI-Cloud v1 technical build (Gate 2, light parallel) → GAAI-Cloud commercial launch (Gate 3).
+(5) **PRD-002 updated:** trigger_condition split into two milestones (technical build vs commercial launch).
+**Files:** `.gaai/contexts/artefacts/prd/PRD-002.prd.md`
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-27
+
+---
+
+### DEC-107 — GAAI-Cloud three-level architecture: Organization → User Workspace + Project Workspace
+
+**Context:** Two-workspace model (Org + User) was insufficient for multi-project use. A team or freelancer with N projects would have all their backlogs and memories mixed in one Organization Workspace — architecturally broken.
+**Decision:**
+(1) **Three levels:** Organization (billing entity) → User Workspace(s) (1 per user, portable) + Project Workspace(s) (N per org, isolated per project).
+(2) **Project Workspace:** Contains `contexts/` (memory, backlog, artefacts, rules, reports). Fully isolated per project. Member list per project — users only see their invited projects. 1 Durable Objects instance per Project Workspace.
+(3) **User Workspace:** NOT inside a project. Portable identity — travels with the user across all projects and all orgs. When switching projects, agents/skills unchanged. Only the active Project Workspace (DO connection) changes.
+(4) **Unlimited Project Workspaces for all tiers.** Revenue lever = seats, not projects. A solo freelancer with 10 client projects pays $9/month. Limiting projects creates friction without protecting Team tier.
+(5) **Project management CLI:** `gaai project list|create|switch|archive`.
+(6) **MCP routing:** Workers routes each request to the correct DO instance based on the user's active project (stored in KV).
+(7) **Migration:** Each OSS `.gaai/` becomes a Project Workspace. Multi-user same-project migration shows merge report for `contexts/`.
+(8) **Contractor multi-org:** Caio has his own org (Solo, N personal projects). He's also a seat in Client A's org (Client A pays) and Client B's org (Client B pays). His User Workspace is portable across all — same agents/skills everywhere.
+**Files:** `.gaai/contexts/artefacts/prd/PRD-002.prd.md` (revision 4)
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-27
+
+---
+
+### DEC-106 — GAAI-Cloud product decisions: pricing, seat model, feature gating, core/custom structure
+
+**Context:** Discovery session refining GAAI-Cloud commercial model across 6 dimensions: pricing fairness, seat ownership, account sharing defense, contractor/freelancer multi-org use case, device limits, and User Workspace folder structure.
+**Decision:**
+(1) **Pricing:** Solo $9/month ($84/year, $7/mo effective) | Team $18/seat/month ($168/seat/year, $14/mo effective) | Enterprise custom. Minimum team bill: 2 seats annual = $28/month (impulse-buy threshold). Benchmarks: Obsidian Sync $5 (pure sync anchor), Notion Team $10, Linear Team $8 — GAAI-Cloud Solo above Obsidian (more value), Team below Notion (niche audience, easier adoption).
+(2) **Blueprint Packs:** $29 one-time for Solo add-on (impulse-buy threshold, no budget approval needed). Included in Team+ (drives tier upgrade). Content Blueprint already built (CNT-001→CNT-011, 141 AKUs).
+(3) **Seat ownership model:** Billing at Organization level, not individual. Each org pays per active member. Contractors/freelancers are a seat in each client's org — each client pays. Contractor's User Workspace covered by any active Team seat — no personal subscription needed.
+(4) **User Workspace coverage rule:** Active seat in ≥1 Team workspace → User Workspace included. Solo user (no Team workspace) → $9/month covers User Workspace. No subscription → sync disabled, local cache remains (nothing deleted). Transition notification when leaving last Team workspace.
+(5) **Account sharing defense: feature gating only.** No device counting, IP checks, or fingerprinting. Natural defense: Solo = 1 User Workspace shared by all (broken for teams), no team invitation system, no admin roles, concurrent sessions → second session read-only. If a team prefers broken shared experience over $28/month → value problem, not enforcement problem.
+(6) **Unlimited devices for Solo.** Conversion trigger is number of USERS (Solo → Team), not devices. Limiting devices creates UX friction without protecting Team tier.
+(7) **core/custom split for all User Workspace categories:** `agents/core/`, `agents/custom/`, `skills/core/`, `skills/blueprints/`, `skills/custom/`, `workflows/core/`, `workflows/custom/`, `scripts/core/`, `scripts/custom/`. Priority rule: `custom/` always overrides `core/`. GAAI-Cloud updates `core/` freely without touching user customizations.
+(8) **Naming:** GAAI-Cloud = "la plateforme" in the product trilogy (GAAI OSS = framework/PoC, Callibrate = PoW, GAAI-Cloud = la plateforme).
+(9) **ELv2 license:** Internal corporate use allowed. Competing managed service forbidden. "Source available", not "open source".
+(10) **OSS audience = Claude Code only.** Cowork plugin = thin connector to GAAI-Cloud (no local agents/skills). Cowork users are GAAI-Cloud users, not OSS users.
+**Files:** `.gaai/contexts/artefacts/prd/PRD-002.prd.md`
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-27
+
+---
+
+### DEC-105 — GAAI-Cloud architecture: OpenCore model, two-workspace split, MCP-only interface
+
+**Context:** Discovery session evaluating GAAI framework commercialization. Session progressed through OSS vs OpenCore analysis, Claude Cowork plugin system evaluation, Cloudflare infrastructure options, and converged on a clean architecture.
+**Decision:**
+(1) **OpenCore model:** GAAI OSS (local, free, complete for solo/single-device) is the distribution vector for GAAI-Cloud (paid cloud sync). OSS is not stripped down — it solves single-device use completely. Cloud adds genuine new value (multi-device, team real-time collaboration).
+(2) **Two-workspace split:**
+  - *Organization Workspace* (team-scoped): `contexts/` only — memory, backlog, artefacts, rules, reports. Always fetched live from GAAI-Cloud per MCP request. Durable Objects for real-time concurrent writes without conflict. This is the primary differentiator vs Dropbox/Git.
+  - *User Workspace* (user-scoped): agents, skills, workflows, scripts (advanced). Cloud = source of truth. Local = versioned cache. Hash-manifest sync on MCP connect (cloud sends manifest with file hashes → client pulls only changed files → serves from cache during session). No bidirectional sync — no conflicts.
+(3) **MCP-only interface:** GAAI-Cloud exposes a single MCP server endpoint. No web UI required for workflow execution — AI is the interface. GAAI-Cloud does NOT proxy external tools (Notion, Drive, Slack) — those are configured at AI tool level directly.
+(4) **Cloudflare stack:** DO (Org Workspace + delivery locks) + R2 (User Workspace files) + D1 (hash manifests, metadata) + KV (auth sessions, token cache) + Workers (MCP server) + CF Workflows (Delivery agent — future).
+(5) **LLM inference stays local:** always runs in user's AI tool (Claude Code, Cowork, etc.). GAAI-Cloud is pure storage + MCP — not an inference provider.
+(6) **Scripts security:** disabled by default, explicit opt-in, hash-verified against signed manifest before execution on each device.
+(7) **Monetization tiers:** Solo $7/month (multi-device sync), Team $20/user/month (+ DO real-time collaboration + agent consistency lock + shared skill library), Enterprise (custom + SSO + audit + private deploy). Blueprint Packs $49–149 one-time or included in Team+.
+(8) **Cowork plugin structure:** `agents/` + core `skills/` stay LOCAL (installed with plugin). `contexts/` is MCP-mounted (no local files). `.mcp.json` points to GAAI-Cloud endpoint.
+(9) **Trigger condition:** GAAI-Cloud execution begins only after Callibrate Gate 3 PASS. Artefact: PRD-002.
+**Files:** `.gaai/contexts/artefacts/prd/PRD-002.prd.md`
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-27
+
+---
+
 ### DEC-104 — Discord added to channel map: AI Agency Alliance (Phase 0-1, P1 engagement)
 
 **Context:** During content strategy review, two Discord servers were evaluated against COMMS-001 and OPS-002. AI Hub (537k members) rejected — audience is creative AI (voice cloning, RVC), no overlap with P1/P3 personas. AI Agency Alliance (~12 800 members, focus: automation agencies, prompt engineering, sales) validated as relevant for P1 expert persona.
