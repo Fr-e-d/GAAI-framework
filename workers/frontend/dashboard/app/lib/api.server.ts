@@ -12,7 +12,7 @@ export class ApiError extends Error {
 async function apiFetch<T>(
   env: Env,
   token: string,
-  method: "GET" | "POST" | "PATCH",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   params?: Record<string, string>,
   body?: unknown,
@@ -68,4 +68,12 @@ export function apiPatch<T>(
   body: unknown,
 ): Promise<T> {
   return apiFetch<T>(env, token, "PATCH", path, undefined, body);
+}
+
+export function apiDelete<T>(
+  env: Env,
+  token: string,
+  path: string,
+): Promise<T> {
+  return apiFetch<T>(env, token, "DELETE", path, undefined, undefined);
 }
