@@ -1,8 +1,10 @@
-import { Form, Link, NavLink, Outlet, useOutletContext } from "react-router";
+import { Form, Link, NavLink, Outlet, redirect, useOutletContext } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { useState } from "react";
 import { requireSession } from "~/lib/session.server";
 import type { SessionUser } from "~/lib/session.server";
+import { apiGet } from "~/lib/api.server";
+import { inferOnboardingStep } from "~/lib/onboarding";
 import { Button } from "~/components/ui/button";
 import { Separator } from "~/components/ui/separator";
 import {
@@ -24,6 +26,23 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     request,
     context.cloudflare.env,
   );
+
+  // AC10: Check if onboarding is complete — display_name must be set
+  const profile = await apiGet<{
+    display_name: string | null;
+    profile: Record<string, unknown> | null;
+    preferences: Record<string, unknown> | null;
+  }>(
+    context.cloudflare.env,
+    session.token,
+    `/api/experts/${session.user.id}/profile`,
+  ).catch(() => null);
+
+  if (!profile?.display_name) {
+    const step = inferOnboardingStep(profile);
+    throw redirect(`/onboarding?step=${step}`, { headers: responseHeaders });
+  }
+
   return Response.json(
     { user: session.user } satisfies LoaderData,
     { headers: responseHeaders },

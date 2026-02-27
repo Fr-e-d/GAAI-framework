@@ -4,13 +4,18 @@ export default [
   // Unauthenticated routes
   route("login", "routes/login.tsx"),
   route("logout", "routes/logout.tsx"),
+  route("signup", "routes/signup.tsx"),
+  route("forgot-password", "routes/forgot-password.tsx"),
 
-  // Authenticated routes — auth guard applied by _layout.tsx
+  // Authenticated routes — session guard applied by _layout.tsx
   layout("routes/_layout.tsx", [
-    // Dashboard shell at /dashboard/*
+    // Onboarding wizard — session required, no profile completeness check
+    route("onboarding", "routes/onboarding.tsx"),
+
+    // Dashboard shell at /dashboard/* — session + profile completeness required
     route("dashboard", "routes/_layout.dashboard.tsx", [
       index("routes/dashboard.tsx"),
-      // Sub-routes added by E02S02–E02S08 (leads, bookings, billing, analytics, settings)
+      // Sub-routes added by E02S03–E02S08 (leads, bookings, billing, analytics, settings)
     ]),
   ]),
 ] satisfies RouteConfig;
