@@ -41,8 +41,8 @@ updated_at: 2026-02-27
 | `project/context.md` | project | PROJECT-001 | 2026-02-27 (updated: M0 channels corrected X/Discord — DEC-100/103, promise validated — DEC-102) |
 | `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-27 (15 active entries — DEC-90 to DEC-104. DEC-01–59 and DEC-60–89 compacted.) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-27 (E08 security patterns: OAuth CSRF+PKCE, security headers, JWT hardening, admin auth, prompt injection guard + 6 anti-patterns) |
-| `ops/platform.md` | ops | OPS-001 | 2026-02-24 (Delivery costs $149.90/24 stories measured — SKILL-CRS-022 cost-analysis + Reddit API pattern) |
-| `ops/channels.md` | ops | OPS-002 | 2026-02-26 (distribution channels Phase 0-1 — X, Substack, dev.to, Reddit, Discord, Skool — DEC-100, DEC-101, DEC-104) |
+| `ops/platform.md` | ops | OPS-001 | 2026-02-27 (PostHog EU stack operational — dashboards, proxy, MCP + Delivery costs $149.90/24 stories) |
+| `ops/channels.md` | ops | OPS-002 | 2026-02-27 (distribution channels Phase 0-1 — X, Substack, dev.to, Reddit, Discord, Skool — DEC-100, DEC-101, DEC-104) |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
 | `summaries/decisions-01-59.summary.md` | summaries | SUMMARY-DECISIONS-01-59 | 2026-02-23 |
 | `summaries/decisions-60-89.summary.md` | summaries | SUMMARY-DECISIONS-60-89 | 2026-02-27 |

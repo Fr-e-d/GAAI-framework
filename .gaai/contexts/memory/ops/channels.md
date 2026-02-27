@@ -8,7 +8,7 @@ tags:
   - distribution
   - social-media
 created_at: 2026-02-26
-updated_at: 2026-02-26
+updated_at: 2026-02-27
 ---
 
 # Distribution Channels
