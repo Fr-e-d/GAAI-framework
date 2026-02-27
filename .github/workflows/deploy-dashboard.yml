@@ -1,0 +1,64 @@
+name: Deploy Dashboard
+
+on:
+  push:
+    branches:
+      - staging
+      - main
+    paths:
+      - "workers/frontend/dashboard/**"
+
+jobs:
+  deploy-staging:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    name: Deploy Dashboard to Staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Type check
+        run: npx tsc -b
+        working-directory: workers/frontend/dashboard
+      - name: Run tests
+        run: npx vitest run
+        working-directory: workers/frontend/dashboard
+      - name: Build
+        run: npm run build
+        working-directory: workers/frontend/dashboard
+      - name: Deploy callibrate-dashboard (staging)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy --env staging
+          workingDirectory: workers/frontend/dashboard
+
+  deploy-production:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    name: Deploy Dashboard to Production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Type check
+        run: npx tsc -b
+        working-directory: workers/frontend/dashboard
+      - name: Run tests
+        run: npx vitest run
+        working-directory: workers/frontend/dashboard
+      - name: Build
+        run: npm run build
+        working-directory: workers/frontend/dashboard
+      - name: Deploy callibrate-dashboard (production)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy --env production
+          workingDirectory: workers/frontend/dashboard
