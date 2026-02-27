@@ -77,3 +77,12 @@ export function apiDelete<T>(
 ): Promise<T> {
   return apiFetch<T>(env, token, "DELETE", path, undefined, undefined);
 }
+
+export function apiDeleteWithBody<T>(
+  env: Env,
+  token: string,
+  path: string,
+  body: unknown,
+): Promise<T> {
+  return apiFetch<T>(env, token, "DELETE", path, undefined, body);
+}
