@@ -743,7 +743,7 @@ items:
     epic: E02
     title: "callibrate.io expert landing page (CF Worker + Hono)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E02S09.story.md
     dependencies: []
     notes: "Discovery 2026-02-27 (DEC-115). 15 ACs. New workspace: workers/frontend/landing/. CF Worker + Hono (same pattern as satellites). DEC-102 promise vocabulary. Value props + pricing grid (49€–263€). How it works. Social proof placeholder. PostHog tracking. SEO (JSON-LD Organization). Security headers. Mobile responsive. < 50KB. GH Actions deploy."
