@@ -1,4 +1,6 @@
-import { useOutletContext } from "react-router";
+import { useOutletContext, useSearchParams } from "react-router";
+import { useEffect } from "react";
+import { toast } from "sonner";
 import type { SessionUser } from "~/lib/session.server";
 import {
   Card,
@@ -13,6 +15,14 @@ import {
 
 export default function DashboardIndex() {
   const { user } = useOutletContext<{ user: SessionUser }>();
+  const [searchParams] = useSearchParams();
+
+  // AC9: Show welcome toast after onboarding completion
+  useEffect(() => {
+    if (searchParams.get("welcome") === "1") {
+      toast.success("Votre profil est prêt ! Vous commencerez à recevoir des leads qualifiés.");
+    }
+  }, [searchParams]);
 
   return (
     <div className="space-y-6">
