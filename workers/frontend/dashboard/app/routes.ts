@@ -20,6 +20,7 @@ export default [
       route("bookings", "routes/dashboard.bookings.tsx"),
       route("settings", "routes/dashboard.settings.tsx"),
       route("gcal", "routes/dashboard.gcal.tsx"),
+      route("billing", "routes/dashboard.billing.tsx"),
     ]),
   ]),
 ] satisfies RouteConfig;

@@ -13,6 +13,8 @@ directory = "./build/client"
 CORE_API_URL = "http://localhost:8787"
 SUPABASE_URL = "https://PLACEHOLDER.supabase.co"
 SUPABASE_ANON_KEY = "PLACEHOLDER"
+LS_CHECKOUT_URL = "https://callibrate.lemonsqueezy.com/buy/PLACEHOLDER"
+# LS_CUSTOMER_PORTAL_URL = ""  # Set once LS customer portal is configured
 
 # ── Staging ──────────────────────────────────────────────────────────────────
 
@@ -23,6 +25,8 @@ name = "callibrate-dashboard-staging"
 CORE_API_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
 SUPABASE_URL = "https://PLACEHOLDER.supabase.co"
 SUPABASE_ANON_KEY = "PLACEHOLDER_STAGING_ANON_KEY"
+LS_CHECKOUT_URL = "https://callibrate.lemonsqueezy.com/buy/PLACEHOLDER_STAGING"
+# LS_CUSTOMER_PORTAL_URL = ""  # Set once LS customer portal is configured
 
 # ── Production ───────────────────────────────────────────────────────────────
 
@@ -33,6 +37,8 @@ name = "callibrate-dashboard-prod"
 CORE_API_URL = "https://api.callibrate.io"
 SUPABASE_URL = "https://PLACEHOLDER.supabase.co"
 SUPABASE_ANON_KEY = "PLACEHOLDER_PROD_ANON_KEY"
+LS_CHECKOUT_URL = "https://callibrate.lemonsqueezy.com/buy/PLACEHOLDER_PROD"
+# LS_CUSTOMER_PORTAL_URL = ""  # Set once LS customer portal is configured
 
 # ── Secrets (set via wrangler secret put per env) ────────────────────────────
 # SUPABASE_URL       — actual Supabase project URL

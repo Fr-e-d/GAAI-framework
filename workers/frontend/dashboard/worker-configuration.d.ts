@@ -5,6 +5,8 @@ interface Env {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   POSTHOG_API_KEY?: string;
+  LS_CHECKOUT_URL?: string;
+  LS_CUSTOMER_PORTAL_URL?: string;
 }
 
 // Virtual module type stub — actual module generated at build time by @react-router/dev
