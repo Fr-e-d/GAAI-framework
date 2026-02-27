@@ -126,7 +126,9 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 - **Email transactionnel:** Resend via `send.callibrate.io` (Cloudflare Queues) — DKIM/SPF/DMARC configurés, tracking OFF (DEC-55). Marketing futur sur sous-domaine séparé.
 - **Calendar / Booking:** Google Calendar API directe (OAuth2 — DEC-41). Cal.com supprimé (Platform fermée aux nouveaux signups 15/12/2025). Token storage : chiffrement AES-256-GCM via Workers Web Crypto (`GCAL_TOKEN_ENCRYPTION_KEY`). Visio : Google Meet auto-généré par booking (`conferenceDataVersion=1`). Teams/Outlook : post-MVP.
 - **Payment / MoR:** Lemon Squeezy (Merchant of Record — gestion taxes internationales)
-- **Frontend platform:** Next.js 15 (App Router) — callibrate.io + app.callibrate.io (expert dashboard) + satellites
+- **Expert dashboard (app.callibrate.io):** React Router v7 Framework Mode (SSR) on CF Workers via @cloudflare/vite-plugin (DEC-113). Server-side loaders, cookie-based Supabase Auth, TailwindCSS 4 + shadcn/ui, recharts. Workspace: `workers/frontend/dashboard/`
+- **Expert landing page (callibrate.io):** CF Worker + Hono — same pattern as satellites (DEC-115). Server-rendered HTML, no client-side framework. Workspace: `workers/frontend/landing/`
+- ~~**Frontend platform:** Next.js 15 (App Router) — superseded by React Router v7 + Hono split (DEC-113/115)~~
 - **Satellite sites:** Multi-tenant Cloudflare Worker (`callibrate-satellite`) — hostname routing → `satellite_configs` KV cache (TTL 3600s) → design token injection → HTML render → CF edge cache (DEC-54). Architecture Astro SSG abandonnée.
 - **Dev tooling:** Cloudflare MCP server (`docs.mcp.cloudflare.com/mcp`)
 - **Language:** TypeScript (Workers + Next.js)

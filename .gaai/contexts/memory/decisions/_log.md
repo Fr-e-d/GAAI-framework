@@ -23,6 +23,50 @@ updated_at: 2026-02-27
 
 ---
 
+### DEC-115 — callibrate.io landing page: CF Worker + Hono (same pattern as satellites)
+
+**Context:** The expert-facing landing page at callibrate.io needs a deployment strategy. Three options evaluated: (1) React Router v7 (same as dashboard), (2) CF Worker + Hono (same as satellites), (3) static HTML on CF Pages.
+**Decision:** CF Worker + Hono — same pattern as `workers/frontend/satellites/`. The landing page is a marketing page, not an app. It needs to be fast (< 50KB), SEO-optimized, and server-rendered without a client-side framework. Hono provides routing, HTML templating, and middleware (security headers). No build step needed for HTML — inline critical CSS, PostHog JS snippet only. React Router v7 would add unnecessary complexity (SSR hydration, client-side bundle) for a page that has zero interactivity beyond link clicks.
+**Workspace:** `workers/frontend/landing/`
+**Files:** `.gaai/contexts/artefacts/stories/E02S09.story.md`
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-27
+
+---
+
+### DEC-114 — E02 absorbs Layer 3.1 from E04 and E05
+
+**Context:** E02, E04, and E05 all had Layer 3.1 stories targeting app.callibrate.io. Delivering them as separate epics would mean scaffolding the frontend three times (E02 for profile, E04 for lead page, E05 for billing dashboard). This is architecturally wasteful — one scaffold should serve all expert-facing UI.
+**Decision:**
+(1) E02 absorbs all Layer 3.1 stories from E04 and E05. E02 scope expanded: signup + onboarding + profile + leads + bookings + billing + analytics.
+(2) E04 retains only satellite-side booking UX (Layer 3.2 — booking widget embedded on satellites, booking confirmation page).
+(3) E05 Layer 2 stories already delivered (E06S31–S34). E05 Layer 3.1 stories (E05S01–S05) absorbed into E02S05 (leads), E02S07 (billing), E02S08 (analytics).
+(4) E02 epic file revised to reflect consolidated scope. Story count: 9 E02 stories + 1 E06S38 (supporting API).
+**Files:** `.gaai/contexts/artefacts/epics/E02.epic.md` (revised)
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-27
+
+---
+
+### DEC-113 — Dashboard tech stack: React Router v7 Framework Mode (SSR) on CF Workers
+
+**Context:** Choosing the frontend framework for the expert dashboard (app.callibrate.io). Evaluated: (A) React SPA (Vite + React + TanStack Query + Zustand), (B) React Router v7 Framework Mode (SSR) on CF Workers via Cloudflare Vite plugin, (C) Next.js on CF Workers (via OpenNext), (D) Astro with React islands.
+**Decision:** React Router v7 Framework Mode (SSR) on Cloudflare Workers.
+**Rationale:**
+(1) **Server-side loaders eliminate data waterfalls.** Each route fetches data server-side before rendering — no client-side loading spinners, no TanStack Query boilerplate. Auto-revalidation on form actions replaces manual cache invalidation.
+(2) **Server-side auth guard.** Layout loader checks session → redirects to `/login` before any HTML is sent. No flash of unauthenticated content. No client-side AuthGuard component.
+(3) **Cloudflare's recommended path.** React Router v7 is "the first full-stack framework to provide full support for Cloudflare Vite plugin." First-class Workers runtime support in dev and production.
+(4) **Less code.** Removes TanStack Query, Zustand, and client-side auth state management. URL search params replace client-side state for filters/pagination (RR7 idiom: URL is the state).
+(5) **Same React underneath.** Components, hooks, JSX — identical. No learning curve penalty vs SPA.
+**Revised scoring:** React Router v7 SSR: 24/25 (vs React SPA 19/25 after correcting initial bias toward simplicity).
+**Rejected:** React SPA (more client-side code, auth flash, data waterfalls), Next.js on CF (OpenNext not production-grade), Astro (suboptimal for interactive dashboards).
+**Stack:** react-router v7, @cloudflare/vite-plugin, TailwindCSS 4 + shadcn/ui, react-hook-form + zod, recharts, @supabase/supabase-js.
+**Files:** `.gaai/contexts/artefacts/stories/E02S01.story.md`, `.gaai/contexts/memory/project/context.md`
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-27
+
+---
+
 ### DEC-112 — E03 Discovery: 5 stories refined, delivery order locked
 
 **Context:** E03 (Satellite Frontend — prospect UX) had only E03S05 (robots.txt) done. Remaining scope — quiz funnel, match results, booking widget, directory — needed full Discovery.
@@ -234,8 +278,8 @@ updated_at: 2026-02-27
 ### DEC-96 — content-plan skill (SKILL-CNT-011) + publishing audit + PostHog blocker
 
 **Context:** CONTENT-STRATEGY-001 defines a 6-dimension model with BP scoring, measurement framework, and phase-gated content authorization. But no mechanism existed to operationalize it — no planning trigger, no monthly cadence, no verification that publishing tools work. Audited the full E07 PostHog analytics stack, all publishing channels, and MCP configuration.
-**Decision:** (1) Create SKILL-CNT-011 (content-plan) in `skills/content/content-plan/SKILL.md`. Track: discovery (produces plans, not content). 7-step process: determine GTM phase → inventory content → evaluate underserved dimensions → recommend 2-3 hub pieces on 6 dimensions + BP → budget allocation → output plan file → story draft recommendations. (2) Trigger via `/gaai-status` Section 5 (monthly reminder when no current-month plan exists). Rejected: delivery daemon cron (track violation), new slash command (overkill for 1x/month), manual-only (invisible). (3) Publishing audit results: all channels use manual publish by design (COMMS-001). No publishing tool blocks content production. Social scheduling APIs (Buffer/Typefully) not needed at current cadence (4 posts/month). (4) PostHog audit: E07 stack is code-complete (17 events, 3 dashboards, proxy, MCP skill) but E07S06 has 5 founder actions pending (Personal API Key, shell export, dashboard script, DNS CNAME, Claude Code restart). This blocks the measurement framework (CONTENT-STRATEGY-001 §10) and CMF feedback loop, NOT content production. (5) Identified UTM gap: `utm_content` not captured — cannot attribute conversions to specific content pieces. Needs ~5 lines of code + a backlog story.
-**Files:** `skills/content/content-plan/SKILL.md`, `.claude/commands/gaai-status.md` (Section 5 added), `agents/discovery.agent.md` (cross-skills), `domains/content-production/gap-analysis.md` (CNT-011 + T6 + T7)
+**Decision:** (1) Create SKILL-CNT-011 (content-plan) in `skills/domains/content-production/content-plan/SKILL.md`. Track: discovery (produces plans, not content). 7-step process: determine GTM phase → inventory content → evaluate underserved dimensions → recommend 2-3 hub pieces on 6 dimensions + BP → budget allocation → output plan file → story draft recommendations. (2) Trigger via `/gaai-status` Section 5 (monthly reminder when no current-month plan exists). Rejected: delivery daemon cron (track violation), new slash command (overkill for 1x/month), manual-only (invisible). (3) Publishing audit results: all channels use manual publish by design (COMMS-001). No publishing tool blocks content production. Social scheduling APIs (Buffer/Typefully) not needed at current cadence (4 posts/month). (4) PostHog audit: E07 stack is code-complete (17 events, 3 dashboards, proxy, MCP skill) but E07S06 has 5 founder actions pending (Personal API Key, shell export, dashboard script, DNS CNAME, Claude Code restart). This blocks the measurement framework (CONTENT-STRATEGY-001 §10) and CMF feedback loop, NOT content production. (5) Identified UTM gap: `utm_content` not captured — cannot attribute conversions to specific content pieces. Needs ~5 lines of code + a backlog story.
+**Files:** `skills/domains/content-production/content-plan/SKILL.md`, `.claude/commands/gaai-status.md` (Section 5 added), `agents/discovery.agent.md` (cross-skills), `domains/content-production/gap-analysis.md` (CNT-011 + T6 + T7)
 **Date:** 2026-02-26
 
 ---

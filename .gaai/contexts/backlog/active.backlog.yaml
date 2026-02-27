@@ -630,3 +630,102 @@ items:
     artefact: contexts/artefacts/stories/E08S05.story.md
     dependencies: [E08S01]
     notes: "DONE 2026-02-24. QA PASS (first cycle). All 12 ACs met. 354/354 vitest. tsc clean (4 workers). JWT iss/aud claims + audience validation + survey TTL 30d→7d. TURNSTILE_SECRET_KEY removed from staging vars. localConnectionString removed from both wrangler.toml files. CORS uses ANON_KEY. KNOWN_VERTICALS allowlist in extract.ts. DB-backed L2 webhook idempotency (webhook_events). Ownership assertions in debit/restore RPCs. 3 new Supabase migrations. PR#36 squash-merged → staging. SEC-AUDIT-001 SEC-08→SEC-16 remediated. ⚠️ Human action required: (1) wrangler secret put TURNSTILE_SECRET_KEY --env staging, (2) apply 3 migrations to Supabase staging, (3) deploy to prod via tag."
+
+  # ── EPIC E02: Expert Dashboard (app.callibrate.io) ─────────────────────────
+  # DEC-113: React Router v7 Framework Mode (SSR) on CF Workers
+  # DEC-114: E02 absorbs Layer 3.1 from E04 + E05
+  # DEC-115: callibrate.io landing = CF Worker + Hono
+  # Phase 1 (parallel): E06S38, E02S01, E02S09
+  # Phase 2 (depends E02S01): E02S02, E02S03, E02S04
+  # Phase 3 (depends E02S01 + E06S38): E02S05, E02S06, E02S07, E02S08
+  # Note: all E06 Layer 2 deps (S03/S09/S10/S11/S31-S34/S36/S37) already done — no blockers
+
+  - id: E06S38
+    epic: E06
+    title: "Dashboard read API endpoints (4 new GET routes + public expert listing)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E06S38.story.md
+    dependencies: []
+    notes: "Discovery 2026-02-27. 28 ACs. 6 GET + 1 POST: /experts/:id/leads (paginated, status filter), /experts/:id/bookings (period filter), /experts/:id/billing (credit balance + transactions), /experts/:id/dashboard (aggregate stats + monthly_history 6 months), /experts/public (anonymized listing for directory), /experts/public/:slug (detail), POST /experts/leads/:id/evaluate (score 1-10 + notes + conversion). JWT + ownership for dashboard endpoints. No auth for public. Hyperdrive + postgres.js. Also unblocks E03S04 (directory)."
+
+  - id: E02S01
+    epic: E02
+    title: "Dashboard scaffold (React Router v7 + CF Workers + Supabase Auth + shadcn/ui)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E02S01.story.md
+    dependencies: []
+    notes: "Discovery 2026-02-27 (DEC-113). 18 ACs. React Router v7 framework mode (SSR) + @cloudflare/vite-plugin. Cookie-based Supabase Auth (PKCE). Auth layout loader (server-side redirect). Dashboard shell (responsive sidebar). TailwindCSS 4 + shadcn/ui. API client (typed fetch to callibrate-core). GH Actions deploy workflow. Workspace: workers/frontend/dashboard/."
+
+  - id: E02S02
+    epic: E02
+    title: "Expert signup + onboarding wizard (4 steps)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E02S02.story.md
+    dependencies: [E02S01, E06S03, E06S10]
+    notes: "Discovery 2026-02-27. 14 ACs. Signup (Supabase Auth signUp + POST /api/experts/register). Login + forgot password. 4-step wizard: basic info, expertise (skills/verticals/rate/outcome_tags), preferences (career_stage/work_mode/availability/budget/project_stage/languages/geo/industries → preferences JSONB), GCal (optional). Incomplete detection → forced redirect to /onboarding."
+
+  - id: E02S03
+    epic: E02
+    title: "Profile management page"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E02S03.story.md
+    dependencies: [E02S01, E06S03, E06S36, E06S37]
+    notes: "Discovery 2026-02-27. 10 ACs. View/edit all profile fields in sections: identité, expertise, positionnement marché, critères d'admissibilité (E06S36), GCal link. Section-level saves via PATCH profile. Zod validation. Toast notifications."
+
+  - id: E02S04
+    epic: E02
+    title: "Google Calendar connection page"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E02S04.story.md
+    dependencies: [E02S01, E06S10, E06S11]
+    notes: "Discovery 2026-02-27. 10 ACs. Connection status (connected email or 'non connecté'). Connect → OAuth flow via gcal/auth-url. Disconnect with confirmation. Next 5 availability slots preview when connected. Refresh status after callback."
+
+  - id: E02S05
+    epic: E02
+    title: "Lead pipeline page + actions (confirm, flag, evaluate)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E02S05.story.md
+    dependencies: [E02S01, E06S38, E06S32]
+    notes: "Discovery 2026-02-27. 13 ACs. URL-driven filters (status tabs + pagination). Lead cards (prospect, score, price, status, actions). Detail drawer (requirements, score breakdown, booking info, flag window countdown). Actions: confirm, flag (7-day window + reason), evaluate (score 1-10 + notes + conversion). Optional: Supabase Realtime for new lead notifications. Absorbs E04S03 + E05S02/S03/S04."
+
+  - id: E02S06
+    epic: E02
+    title: "Bookings page (upcoming/past, cancel/reschedule)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E02S06.story.md
+    dependencies: [E02S01, E06S38, E06S11]
+    notes: "Discovery 2026-02-27. 10 ACs. Period tabs (upcoming/past). Booking cards (date, time, prospect, meeting URL, status). Detail view (prospect context, prep link, meeting link). Cancel with confirmation + reschedule with datetime picker. Timezone-aware display."
+
+  - id: E02S07
+    epic: E02
+    title: "Billing & subscription page (credits, LS activation, spending controls)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E02S07.story.md
+    dependencies: [E02S01, E06S38, E06S33, E06S34]
+    notes: "Discovery 2026-02-27. 12 ACs. Credit balance hero card. LS subscription activation CTA (Lemon.js overlay). Subscription status badge. Transaction history (paginated). Monthly spending progress bar. Max lead price + spending limit controls (editable). 'Leads manqués' section. Pricing transparency."
+
+  - id: E02S08
+    epic: E02
+    title: "Analytics page (composite score, charts, conversion metrics)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E02S08.story.md
+    dependencies: [E02S01, E06S38, E06S09]
+    notes: "Discovery 2026-02-27. 12 ACs. Vue d'ensemble (dashboard index — summary cards + monthly trend). Composite score hero with tier badge. Radar chart (5 components). Per-component detail cards with improvement tips. Monthly leads stacked bar chart. Conversion metrics cards. Empty state for new experts. recharts."
+
+  - id: E02S09
+    epic: E02
+    title: "callibrate.io expert landing page (CF Worker + Hono)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E02S09.story.md
+    dependencies: []
+    notes: "Discovery 2026-02-27 (DEC-115). 15 ACs. New workspace: workers/frontend/landing/. CF Worker + Hono (same pattern as satellites). DEC-102 promise vocabulary. Value props + pricing grid (49€–263€). How it works. Social proof placeholder. PostHog tracking. SEO (JSON-LD Organization). Security headers. Mobile responsive. < 50KB. GH Actions deploy."
