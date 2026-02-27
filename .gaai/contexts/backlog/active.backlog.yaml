@@ -26,7 +26,7 @@ items:
     epic: E01
     title: "Expert-side Hand Raiser campaign (X + Discord + Communities)"
     priority: high
-    status: in_progress
+    status: failed
     started_at: "2026-02-26T10:00:00+01:00"
     artefact: contexts/artefacts/stories/E01S02.story.md
     dependencies: [E01S01]
