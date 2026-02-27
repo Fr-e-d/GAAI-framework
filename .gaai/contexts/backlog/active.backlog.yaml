@@ -531,10 +531,13 @@ items:
     epic: E03
     title: "AI-extracted requirements confirmation + submit to matching"
     priority: high
-    status: in_progress
+    status: done
+    started_at: "2026-02-27T17:51:33+01:00"
+    completed_at: "2026-02-27T19:20:34+01:00"
+    cost_usd: null
     artefact: contexts/artefacts/stories/E03S02.story.md
     dependencies: [E03S01]
-    notes: "Discovery 2026-02-27. 11 ACs. Displays extracted fields with confidence indicators. Low-confidence → targeted questions (max 3). All fields editable via 'Modifier'. Turnstile (interaction-only) + POST /api/prospects/submit → sync matching (DEC-40) → JWT. ⚠️ Delivery to assess: E06S07 quiz_answers field vs pre-extracted requirements."
+    notes: "Discovery 2026-02-27. 11 ACs. Displays extracted fields with confidence indicators. Low-confidence → targeted questions (max 3). All fields editable via 'Modifier'. Turnstile (interaction-only) + POST /api/prospects/submit → sync matching (DEC-40) → JWT. quiz_answers accepts pre-extracted requirements directly (normalizeRequirements picks known fields). PR #40 merged 2026-02-27."
 
   - id: E03S03
     epic: E03
