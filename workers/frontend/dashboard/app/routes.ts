@@ -16,6 +16,8 @@ export default [
     route("dashboard", "routes/_layout.dashboard.tsx", [
       index("routes/dashboard.tsx"),
       // Sub-routes added by E02S03–E02S08 (leads, bookings, billing, analytics, settings)
+      route("leads", "routes/dashboard.leads.tsx"),
+      route("bookings", "routes/dashboard.bookings.tsx"),
       route("settings", "routes/dashboard.settings.tsx"),
       route("gcal", "routes/dashboard.gcal.tsx"),
     ]),
