@@ -669,10 +669,11 @@ items:
     epic: E02
     title: "Expert signup + onboarding wizard (4 steps)"
     priority: high
-    status: in_progress
+    status: done
+    completed_at: "2026-02-27"
     artefact: contexts/artefacts/stories/E02S02.story.md
     dependencies: [E02S01, E06S03, E06S10]
-    notes: "Discovery 2026-02-27. 14 ACs. Signup (Supabase Auth signUp + POST /api/experts/register). Login + forgot password. 4-step wizard: basic info, expertise (skills/verticals/rate/outcome_tags), preferences (career_stage/work_mode/availability/budget/project_stage/languages/geo/industries → preferences JSONB), GCal (optional). Incomplete detection → forced redirect to /onboarding."
+    notes: "Discovery 2026-02-27. 14 ACs. Signup (Supabase Auth signUp + POST /api/experts/register). Login + forgot password. 4-step wizard: basic info, expertise (skills/verticals/rate/outcome_tags), preferences (career_stage/work_mode/availability/budget/project_stage/languages/geo/industries → preferences JSONB), GCal (optional). Incomplete detection → forced redirect to /onboarding. Delivered 2026-02-27. PR #44 merged to staging."
 
   - id: E02S03
     epic: E02

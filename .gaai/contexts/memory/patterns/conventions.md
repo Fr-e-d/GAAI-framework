@@ -120,11 +120,24 @@ updated_at: 2026-02-27
 
 ---
 
+## Dashboard Worker Patterns (E02 epic — React Router v7 + Cloudflare Workers)
+
+- **PostHog server-side capture (E02S02):** Dashboard Worker uses direct fetch to PostHog EU API — not `posthog-node` (avoids Node.js compat issues). Pattern: `app/lib/posthog.server.ts` exports `captureEvent(env, distinctId, event, properties)`. Fire-and-forget with try/catch. Returns early if `env.POSTHOG_API_KEY` is absent.
+  ```ts
+  await fetch("https://eu.i.posthog.com/capture/", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ api_key, event, distinct_id, properties }) });
+  ```
+- **Shared utility pattern for cross-route logic (E02S02):** When multiple routes need the same inference (e.g., onboarding step from profile completeness), extract to `app/lib/{name}.ts`. Example: `inferOnboardingStep(profile)` used by `login.tsx`, `_layout.dashboard.tsx`, and future routes. Avoids duplication + keeps routes thin.
+- **React Router v7 loader/action testing — FormData pattern (E02S02):** When constructing test requests with FormData in Vitest (Node.js), do NOT override `Content-Type`. Let runtime auto-detect multipart boundary. Setting `Content-Type: application/x-www-form-urlencoded` with a FormData body causes `request.formData()` to silently return empty data. Correct: `new Request(url, { method: "POST", body: formData })` — no headers override.
+
+---
+
 ## Test Patterns
 
 - **Test framework:** `vitest` — added in E06S05. Pure functions (no CF Worker bindings) test cleanly with vitest. Run: `npm run test`.
 - **Mocking global fetch in vitest (E06S08):** `vi.stubGlobal('fetch', vi.fn())` in `beforeEach`, `vi.unstubAllGlobals()` in `afterEach`. Then `vi.mocked(fetch).mockResolvedValueOnce(new Response(...))` to mock API calls.
 - **scoreMatch timeline behavior:** When a prospect specifies a timeline but the expert has no `accepted_timelines`, the engine returns 0 (no confirmed match). Full points only when: (a) prospect has no timeline requirement, OR (b) expert's `accepted_timelines` explicitly includes the prospect's timeline. Prevents false positives; incentivizes experts to declare preferences.
+- **vi.mock hoisting constraint (E02S02):** `vi.mock()` calls are hoisted to top-of-file before any variable declarations. Therefore: never reference module-level `const`/`let` variables inside `vi.mock()` factory functions; never call `vi.mock()` inside `describe()` or `it()` blocks. Use `beforeEach` + `vi.mocked(fn).mockReturnValue()` for per-test mock configuration. Violation symptom: `ReferenceError: Cannot access 'X' before initialization`.
+- **Supabase SSR mock casting (E02S02):** `vi.mocked(createServerClient).mockReturnValue(...)` — the mock object must be cast as `unknown as ReturnType<typeof createServerClient>` (not just `as ReturnType<...>`). Direct casting triggers TS2352 "Conversion of type may be a mistake" when the partial mock object is structurally incompatible.
 
 ---
 
