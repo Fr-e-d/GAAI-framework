@@ -17,6 +17,9 @@
     "deploy:prod": "npm -w callibrate-core run deploy:prod && npm -w callibrate-satellite run deploy:prod && npm -w callibrate-posthog-proxy run deploy:prod",
     "dev:dashboard": "npm -w callibrate-dashboard run dev",
     "test:dashboard": "npm -w callibrate-dashboard run test",
-    "type-check:dashboard": "npm -w callibrate-dashboard run type-check"
+    "type-check:dashboard": "npm -w callibrate-dashboard run type-check",
+    "dev:landing": "npm -w callibrate-landing run dev",
+    "test:landing": "npm -w callibrate-landing run test",
+    "type-check:landing": "npm -w callibrate-landing run type-check"
   }
 }
