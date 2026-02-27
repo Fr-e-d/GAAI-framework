@@ -658,7 +658,7 @@ items:
     epic: E02
     title: "Dashboard scaffold (React Router v7 + CF Workers + Supabase Auth + shadcn/ui)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E02S01.story.md
     dependencies: []
     notes: "Discovery 2026-02-27 (DEC-113). 18 ACs. React Router v7 framework mode (SSR) + @cloudflare/vite-plugin. Cookie-based Supabase Auth (PKCE). Auth layout loader (server-side redirect). Dashboard shell (responsive sidebar). TailwindCSS 4 + shadcn/ui. API client (typed fetch to callibrate-core). GH Actions deploy workflow. Workspace: workers/frontend/dashboard/."
