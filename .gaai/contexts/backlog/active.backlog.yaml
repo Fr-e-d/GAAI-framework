@@ -514,7 +514,36 @@ items:
     notes: "Discovery-informed. outcome_tags TEXT[] on experts + desired_outcomes in extraction + scoreOutcomeAlignment() scoring dimension (Workers AI semantic, weight 0.10). Field data: 'stopped selling workflows, started selling found time' (Littlecutsie)."
 
   # ── EPIC E03: Prospect Gets Qualified and Matched to the Right Expert ────
-  # Layer 3.2 — satellite sites. Depends on E02 + E06.
+  # Layer 3.2 — satellite frontend (prospect UX). All Layer 2 backend done (E06).
+  # Delivery order: E03S01 → E03S02 → E03S03 → E03S06 → E03S04
+  # E03S04 BLOCKED on public expert listing API (E06S38 — to be created if absent)
+
+  - id: E03S01
+    epic: E03
+    title: "Prospect freetext input page (/match)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E03S01.story.md
+    dependencies: [E06S14, E06S08]
+    notes: "Discovery 2026-02-27. 10 ACs. /match route on satellite Worker — branded textarea + POST /api/extract + loading state + client-side transition to E03S02. Design tokens from config.theme. PostHog events. SEO meta. Mobile-responsive. CORE_API_URL injected at render time. No Turnstile on this step."
+
+  - id: E03S02
+    epic: E03
+    title: "AI-extracted requirements confirmation + submit to matching"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E03S02.story.md
+    dependencies: [E03S01]
+    notes: "Discovery 2026-02-27. 11 ACs. Displays extracted fields with confidence indicators. Low-confidence → targeted questions (max 3). All fields editable via 'Modifier'. Turnstile (interaction-only) + POST /api/prospects/submit → sync matching (DEC-40) → JWT. ⚠️ Delivery to assess: E06S07 quiz_answers field vs pre-extracted requirements."
+
+  - id: E03S03
+    epic: E03
+    title: "Match results display + email gate + full profile reveal"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E03S03.story.md
+    dependencies: [E03S02]
+    notes: "Discovery 2026-02-27. 12 ACs. GET /api/prospects/:id/matches → anonymized cards (rank badge, score breakdown, tier, skills, rate range). Top-3 prominent (DEC-25). Email gate: single field → POST /identify → full profiles revealed (name, bio, headline). 'Réserver un appel' CTA → E03S06 booking widget. noindex/nofollow. ⚠️ Ignores deprecated booking_url (Cal.com) — uses E03S06 widget."
 
   - id: E03S05
     epic: E03
@@ -524,6 +553,24 @@ items:
     artefact: contexts/artefacts/stories/E03S05.story.md
     dependencies: [E06S14]
     notes: "DEC-53. robots.txt and sitemap.xml generated dynamically by the satellite Worker (E06S14), CF-edge-cached 24h — functionally equivalent to static. AC2 (Astro build-time) superseded by E06S14 AC6. SEO bots: full access. AI training bots blocked. AI answer/search bots: platform pages allowed, /experts/ blocked. Manual founder action: Cloudflare AI Training Bots → Block on all pages."
+
+  - id: E03S06
+    epic: E03
+    title: "Inline booking widget (availability → hold → confirm)"
+    priority: high
+    status: refined
+    artefact: contexts/artefacts/stories/E03S06.story.md
+    dependencies: [E03S03, E06S11]
+    notes: "Discovery 2026-02-27. 12 ACs. Reusable inline widget — no modal, no redirect. Calendar view (14 days) → 20-min time slots (local TZ) → instant hold (10min TTL with countdown) → name/email/desc form → confirm → success (Meet link + prep page). Email pre-filled if already identified. Keyboard accessible. Mobile week view. Used by E03S03 + E03S04. ⚠️ prospect_id required — directory path (E03S04) needs lightweight prospect creation."
+
+  - id: E03S04
+    epic: E03
+    title: "Expert directory + profile pages (/experts, /experts/:slug)"
+    priority: medium
+    status: refined
+    artefact: contexts/artefacts/stories/E03S04.story.md
+    dependencies: [E03S06, E06S14, E03S05]
+    notes: "Discovery 2026-02-27. 10 ACs. Server-rendered for SEO. Filtered by satellite vertical. Anonymized cards (tier, score, headline, skills, rate). Profile detail pages with dual CTAs ('Vérifier la compatibilité' → /match, 'Débloquer ce profil' → email gate). ⚠️ BLOCKING: requires GET /api/experts/public endpoint on Core API (E06S38 — to be created). Delivery must flag gap before starting."
 
   # ── EPIC E08: Security Hardening — Production Readiness ─────────────────────
   # SEC-AUDIT-001: 17 findings (2 CRITICAL, 5 HIGH, 7 MEDIUM, 3 LOW)

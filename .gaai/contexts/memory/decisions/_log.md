@@ -23,6 +23,54 @@ updated_at: 2026-02-27
 
 ---
 
+### DEC-112 — E03 Discovery: 5 stories refined, delivery order locked
+
+**Context:** E03 (Satellite Frontend — prospect UX) had only E03S05 (robots.txt) done. Remaining scope — quiz funnel, match results, booking widget, directory — needed full Discovery.
+**Decision:**
+(1) 5 story artefacts produced: E03S01 (freetext input, 10 ACs), E03S02 (confirmation + Turnstile, 11 ACs), E03S03 (match results + email gate, 12 ACs), E03S06 (inline booking widget, 12 ACs), E03S04 (directory + profiles, 10 ACs).
+(2) **Delivery order:** E03S01 → E03S02 → E03S03 → E03S06 → E03S04. Quiz funnel first (primary conversion path, establishes frontend patterns), booking widget next (reused by S03 + S04), directory last (secondary path, has API gap).
+(3) **E03S04 BLOCKED** on public expert listing API (E06S38 — to be created if absent). Delivery flags the gap → Discovery creates the Layer 2 story.
+(4) **Two Delivery flags:** (a) E03S02 — verify `POST /api/prospects/submit` accepts pre-extracted requirements via `quiz_answers` field, (b) E03S06 — directory path needs lightweight prospect creation for booking without prior quiz submission.
+(5) E03 epic updated to reflect all 6 stories (5 new + S05 done) + revised success metrics (email gate conversion ≥40%, booking rate ≥15%).
+**Date:** 2026-02-27
+
+---
+
+### DEC-111 — E03 email gate: after anonymized matches (Option A)
+
+**Context:** Two options for when prospects must provide email: (A) after seeing anonymized match results, before full profiles are revealed; (B) only before booking, with full profiles freely visible.
+**Decision:** Option A — email gate after anonymized matches. Weighted evaluation (7 criteria):
+- **Disintermediation protection (30%):** A=9/10, B=2/10. Option B is existential risk — prospect sees full expert identity → Googles and contacts directly → platform bypassed. For a marketplace, this is the #1 business threat.
+- **Billing alignment (15%):** A=9/10, B=3/10. `POST /identify` = lead creation = credit debit trigger (E06S32). Clean billing boundary.
+- **Expert fairness (10%):** A=8/10, B=3/10. Profiles only shown to committed prospects (email = skin in the game).
+- **Email capture rate (15%):** A=8/10, B=3/10. Gate at peak intent.
+- **Prospect experience (20%):** A=5/10, B=9/10. Mitigated by making anonymized cards info-rich (score breakdown, tier badge, rate range, skills, languages).
+- Weighted total: A=7.35, B=4.15.
+**Rejected:** Option B — better UX but existential disintermediation risk. A marketplace that shows full supplier profiles before capturing buyer identity is a directory, not a marketplace.
+**Mitigation for Option A friction:** info-rich anonymized cards (not just "Expert #1: 87/100"), value-focused CTA copy ("Unlock expert profiles"), single-field form (email only).
+**Date:** 2026-02-27
+
+---
+
+### DEC-110 — E03 booking widget: inline in satellite, split from directory (E03S06)
+
+**Context:** Booking experience design for prospect UX. Three options: (a) inline in satellite page, (b) separate `/book/:expert` page, (c) redirect to external page. Also: directory + booking scope in original E03S04 was too large for one story.
+**Decision:**
+(1) **Inline booking** — prospect picks slot, confirms, gets Meet link without leaving the page. Best UX, highest conversion (no navigation friction at peak intent). Uses E06S11 APIs (availability → hold → confirm).
+(2) **Story split** — E03S04 (directory browsing + expert profiles, 10 ACs) + E03S06 (inline booking widget, 12 ACs). Smaller delivery units, clearer ACs, E03S06 is reusable by both E03S03 (match results) and E03S04 (directory profiles).
+**Rejected:** (b) Separate booking page — unnecessary navigation at conversion point. (c) External redirect — breaks prospect flow, loses PostHog tracking context. Single-story approach — too many ACs (22+), mixed concerns (SEO server-rendering + interactive booking widget).
+**Date:** 2026-02-27
+
+---
+
+### DEC-109 — E03 seeded experts: no E02 dependency for staging/MVP
+
+**Context:** E03 epic lists E02 (Expert Dashboard) as a dependency. E02 not yet in backlog. E02 Discovery launched in parallel. Staging DB designed for mock data.
+**Decision:** E03 stories assume experts are seeded via API/DB (seed data from E06S02). E02 dashboard is NOT required for E03 to function — seeded data is sufficient for staging, testing, and MVP validation. E02 and E03 can be delivered in parallel. The real dependency is "experts must exist in DB for matching to work" — satisfied by seed data. E03 epic dependency note updated accordingly.
+**Date:** 2026-02-27
+
+---
+
 ### DEC-108 — GAAI-Cloud build strategy: Gate 2 technical build, Gate 3 commercial launch
 
 **Context:** Complexity comparison between Callibrate (two-sided marketplace + matching engine) and GAAI-Cloud (file sync + MCP server). Key insight: GAAI-Cloud complexity is infrastructure-only (DO + R2 + MCP + auth + billing) because the AI tool is the client, not the product. No custom algorithm, no two-sided acquisition, no frontend required. Estimated build time: 2–3 months vs 12–18 months for Callibrate.
