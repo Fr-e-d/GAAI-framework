@@ -734,7 +734,7 @@ items:
     epic: E02
     title: "Analytics page (composite score, charts, conversion metrics)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E02S08.story.md
     dependencies: [E02S01, E06S38, E06S09]
     notes: "Discovery 2026-02-27. 12 ACs. Vue d'ensemble (dashboard index — summary cards + monthly trend). Composite score hero with tier badge. Radar chart (5 components). Per-component detail cards with improvement tips. Monthly leads stacked bar chart. Conversion metrics cards. Empty state for new experts. recharts."
