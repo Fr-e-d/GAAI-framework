@@ -647,7 +647,7 @@ items:
     epic: E06
     title: "Dashboard read API endpoints (4 new GET routes + public expert listing)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S38.story.md
     dependencies: []
     notes: "Discovery 2026-02-27. 28 ACs. 6 GET + 1 POST: /experts/:id/leads (paginated, status filter), /experts/:id/bookings (period filter), /experts/:id/billing (credit balance + transactions), /experts/:id/dashboard (aggregate stats + monthly_history 6 months), /experts/public (anonymized listing for directory), /experts/public/:slug (detail), POST /experts/leads/:id/evaluate (score 1-10 + notes + conversion). JWT + ownership for dashboard endpoints. No auth for public. Hyperdrive + postgres.js. Also unblocks E03S04 (directory)."
