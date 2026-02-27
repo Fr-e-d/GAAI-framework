@@ -17,6 +17,7 @@ export default [
       index("routes/dashboard.tsx"),
       // Sub-routes added by E02S03–E02S08 (leads, bookings, billing, analytics, settings)
       route("settings", "routes/dashboard.settings.tsx"),
+      route("gcal", "routes/dashboard.gcal.tsx"),
     ]),
   ]),
 ] satisfies RouteConfig;
