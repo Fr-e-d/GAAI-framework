@@ -1,0 +1,13 @@
+name = "callibrate-landing-dev"
+main = "src/index.ts"
+compatibility_date = "2024-10-22"
+compatibility_flags = ["nodejs_compat"]
+
+[env.staging]
+name = "callibrate-landing-staging"
+
+[env.production]
+name = "callibrate-landing-prod"
+
+# Secrets (set via wrangler secret put per env):
+# POSTHOG_API_KEY — PostHog project API key
