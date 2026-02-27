@@ -1,7 +1,11 @@
-import { useOutletContext, useSearchParams } from "react-router";
+import { Link, useLoaderData, useSearchParams } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { useEffect } from "react";
 import { toast } from "sonner";
-import type { SessionUser } from "~/lib/session.server";
+import { requireSession } from "~/lib/session.server";
+import { apiGet } from "~/lib/api.server";
+import { captureEvent } from "~/lib/posthog.server";
+import { Badge } from "~/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -9,59 +13,265 @@ import {
   CardHeader,
   CardTitle,
 } from "~/components/ui/card";
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 
-// No additional loader needed — auth is handled by parent _layout.dashboard.tsx
-// If additional data is needed later, add a loader here.
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type QualityTier = "New" | "Rising" | "Established" | "Top";
+
+type MonthStats = {
+  leads_received: number;
+  leads_confirmed: number;
+  leads_flagged: number;
+  bookings_total: number;
+  bookings_completed: number;
+  conversions_declared: number;
+};
+
+type MonthHistory = MonthStats & { month: string };
+
+type DashboardIndexResponse = {
+  unread_leads: number;
+  upcoming_bookings: number;
+  credit_balance: number;
+  composite_score: number | null;
+  quality_tier: QualityTier;
+  month_stats: MonthStats;
+  monthly_history: MonthHistory[];
+};
+
+type LoaderData = { data: DashboardIndexResponse; userId: string };
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function centsToEur(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
+function getTierBadgeClass(tier: QualityTier): string {
+  switch (tier) {
+    case "Top":
+      return "bg-yellow-100 text-yellow-800 border border-yellow-300";
+    case "Established":
+      return "bg-green-100 text-green-800 border border-green-200";
+    case "Rising":
+      return "bg-blue-100 text-blue-800 border border-blue-200";
+    default:
+      return "bg-gray-100 text-gray-800 border border-gray-200";
+  }
+}
+
+function getTierLabel(tier: QualityTier): string {
+  switch (tier) {
+    case "Top":
+      return "Expert Top";
+    case "Established":
+      return "Expert Confirmé";
+    case "Rising":
+      return "Expert Prometteur";
+    default:
+      return "Nouvel Expert";
+  }
+}
+
+// ── Loader ────────────────────────────────────────────────────────────────────
+
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  const { session, responseHeaders } = await requireSession(
+    request,
+    context.cloudflare.env,
+  );
+  const env = context.cloudflare.env;
+  const userId = session.user.id;
+
+  const defaultData: DashboardIndexResponse = {
+    unread_leads: 0,
+    upcoming_bookings: 0,
+    credit_balance: 0,
+    composite_score: null,
+    quality_tier: "New",
+    month_stats: {
+      leads_received: 0,
+      leads_confirmed: 0,
+      leads_flagged: 0,
+      bookings_total: 0,
+      bookings_completed: 0,
+      conversions_declared: 0,
+    },
+    monthly_history: [],
+  };
+
+  const data = await apiGet<DashboardIndexResponse>(
+    env,
+    session.token,
+    `/api/experts/${userId}/dashboard`,
+  ).catch(() => defaultData);
+
+  captureEvent(env, `expert:${userId}`, "expert.dashboard_viewed", {
+    unread_leads: data.unread_leads,
+    upcoming_bookings: data.upcoming_bookings,
+  }).catch(() => {});
+
+  return Response.json(
+    { data, userId } satisfies LoaderData,
+    { headers: responseHeaders },
+  );
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function DashboardIndex() {
-  const { user } = useOutletContext<{ user: SessionUser }>();
+  const { data } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
 
-  // AC9: Show welcome toast after onboarding completion
+  // Retain welcome toast from E02S01
   useEffect(() => {
     if (searchParams.get("welcome") === "1") {
       toast.success("Votre profil est prêt ! Vous commencerez à recevoir des leads qualifiés.");
     }
   }, [searchParams]);
 
+  const {
+    unread_leads,
+    upcoming_bookings,
+    credit_balance,
+    composite_score,
+    quality_tier,
+    month_stats,
+    monthly_history,
+  } = data;
+
+  // monthly_history is ASCENDING: index 0 = oldest, index [length-1] = current month
+  // previous month = index [length-2]
+  const prevHistory =
+    monthly_history.length >= 2
+      ? monthly_history[monthly_history.length - 2]
+      : null;
+
+  function TrendArrow({ curr, prev }: { curr: number; prev: number | null }) {
+    if (prev === null) return <Minus className="h-3 w-3 text-muted-foreground inline" />;
+    if (curr > prev) return <TrendingUp className="h-3 w-3 text-green-600 inline" />;
+    if (curr < prev) return <TrendingDown className="h-3 w-3 text-red-600 inline" />;
+    return <Minus className="h-3 w-3 text-muted-foreground inline" />;
+  }
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Bienvenue</h1>
-        <p className="text-muted-foreground mt-1">
-          {user.email}
-        </p>
+        <h1 className="text-2xl font-semibold">Vue d&apos;ensemble</h1>
+        <p className="text-muted-foreground mt-1">Votre activité en un coup d&apos;œil.</p>
       </div>
 
+      {/* AC7: Summary cards grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {/* Placeholder metric cards */}
-        {[
-          { title: "Leads reçus", value: "—", description: "Ce mois" },
-          { title: "Rendez-vous", value: "—", description: "À venir" },
-          { title: "Crédits", value: "—", description: "Solde" },
-          { title: "Conversions", value: "—", description: "Déclarées" },
-        ].map((card) => (
-          <Card key={card.title}>
+        {/* Leads non lus */}
+        <Link to="/dashboard/leads?status=new">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer">
             <CardHeader className="pb-2">
-              <CardDescription>{card.title}</CardDescription>
-              <CardTitle className="text-3xl">{card.value}</CardTitle>
+              <CardDescription>Leads non lus</CardDescription>
+              <CardTitle className="text-3xl tabular-nums">{unread_leads}</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-xs text-muted-foreground">{card.description}</p>
+              <p className="text-xs text-primary">Voir les leads →</p>
             </CardContent>
           </Card>
-        ))}
+        </Link>
+
+        {/* Rendez-vous à venir */}
+        <Link to="/dashboard/bookings">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer">
+            <CardHeader className="pb-2">
+              <CardDescription>Rendez-vous à venir</CardDescription>
+              <CardTitle className="text-3xl tabular-nums">{upcoming_bookings}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-primary">Voir les rendez-vous →</p>
+            </CardContent>
+          </Card>
+        </Link>
+
+        {/* Solde de crédits */}
+        <Link to="/dashboard/billing">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer">
+            <CardHeader className="pb-2">
+              <CardDescription>Solde de crédits</CardDescription>
+              <CardTitle
+                className={[
+                  "text-3xl tabular-nums",
+                  credit_balance > 0 ? "text-green-600" : "text-red-600",
+                ].join(" ")}
+              >
+                {centsToEur(credit_balance)}€
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-primary">Voir la facturation →</p>
+            </CardContent>
+          </Card>
+        </Link>
+
+        {/* Score composite */}
+        <Link to="/dashboard/analytics">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer">
+            <CardHeader className="pb-2">
+              <CardDescription>Score composite</CardDescription>
+              <CardTitle className="text-3xl tabular-nums">
+                {composite_score !== null ? composite_score : "—"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Badge className={getTierBadgeClass(quality_tier)}>
+                {getTierLabel(quality_tier)}
+              </Badge>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
+      {/* AC8: Monthly summary */}
       <Card>
         <CardHeader>
-          <CardTitle>Activité récente</CardTitle>
-          <CardDescription>Vos dernières interactions sur la plateforme</CardDescription>
+          <CardTitle className="text-base">Ce mois</CardTitle>
+          <CardDescription>
+            Activité du mois en cours vs mois précédent
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Aucune activité récente pour le moment.
-          </p>
+          <div className="space-y-3">
+            {[
+              {
+                label: "Leads reçus",
+                curr: month_stats.leads_received,
+                prev: prevHistory?.leads_received ?? null,
+              },
+              {
+                label: "Leads confirmés",
+                curr: month_stats.leads_confirmed,
+                prev: prevHistory?.leads_confirmed ?? null,
+              },
+              {
+                label: "Leads signalés",
+                curr: month_stats.leads_flagged,
+                prev: prevHistory?.leads_flagged ?? null,
+              },
+            ].map((row) => (
+              <div
+                key={row.label}
+                className="flex items-center justify-between text-sm"
+              >
+                <span className="text-muted-foreground">{row.label}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium tabular-nums">{row.curr}</span>
+                  <TrendArrow curr={row.curr} prev={row.prev} />
+                  {row.prev !== null && (
+                    <span className="text-xs text-muted-foreground">
+                      ({row.prev} préc.)
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -21,6 +21,7 @@ export default [
       route("settings", "routes/dashboard.settings.tsx"),
       route("gcal", "routes/dashboard.gcal.tsx"),
       route("billing", "routes/dashboard.billing.tsx"),
+      route("analytics", "routes/dashboard.analytics.tsx"),
     ]),
   ]),
 ] satisfies RouteConfig;
