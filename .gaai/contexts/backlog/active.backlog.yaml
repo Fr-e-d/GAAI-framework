@@ -712,7 +712,7 @@ items:
     epic: E02
     title: "Bookings page (upcoming/past, cancel/reschedule)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E02S06.story.md
     dependencies: [E02S01, E06S38, E06S11]
     notes: "Discovery 2026-02-27. 10 ACs. Period tabs (upcoming/past). Booking cards (date, time, prospect, meeting URL, status). Detail view (prospect context, prep link, meeting link). Cancel with confirmation + reschedule with datetime picker. Timezone-aware display."
