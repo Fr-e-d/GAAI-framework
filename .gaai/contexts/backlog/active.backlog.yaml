@@ -679,7 +679,7 @@ items:
     epic: E02
     title: "Profile management page"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E02S03.story.md
     dependencies: [E02S01, E06S03, E06S36, E06S37]
     notes: "Discovery 2026-02-27. 10 ACs. View/edit all profile fields in sections: identité, expertise, positionnement marché, critères d'admissibilité (E06S36), GCal link. Section-level saves via PATCH profile. Zod validation. Toast notifications."
