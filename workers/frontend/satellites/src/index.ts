@@ -5,6 +5,7 @@ import { resolveConfig } from './middleware/config';
 import { renderLandingPage } from './pages/landing';
 import { renderMatchPage } from './pages/match';
 import { renderConfirmPage } from './pages/confirm';
+import { renderResultsPage } from './pages/results';
 import { applySecurityHeaders } from './lib/securityHeaders';
 import { renderPrivacyPolicy } from './pages/privacy';
 import { renderTermsOfService } from './pages/terms';
@@ -169,6 +170,18 @@ app.get('/confirm', (c) => {
       },
     }
   );
+});
+
+// ── Results page (/results) — match results + email gate ────────────────────
+app.get('/results', (c) => {
+  const config = c.get('config');
+  return new Response(renderResultsPage(config, c.env.POSTHOG_API_KEY, c.env.CORE_API_URL), {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  });
 });
 
 export default {
