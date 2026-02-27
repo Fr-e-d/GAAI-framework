@@ -14,7 +14,9 @@ Each skill lives in its own directory with a `SKILL.md` file:
 skills/
 ├── discovery/   ← produce artefacts (PRD, Epics, Stories, validation)
 ├── delivery/    ← orchestrate and execute (planning, implementation, QA)
-└── cross/       ← memory, context, governance, analysis — usable by any agent
+├── cross/       ← memory, context, governance, analysis — usable by any agent
+└── domains/     ← domain-specific skill packs (mirrors memory/domains/)
+    └── content-production/
 ```
 
 **The source of truth for available skills is the directory itself.**
@@ -118,4 +120,5 @@ To regenerate after adding or modifying a skill:
 → [discovery/](discovery/) — skills that produce artefacts
 → [delivery/](delivery/) — skills that orchestrate and execute
 → [cross/](cross/) — skills for memory, context, governance
+→ [domains/](domains/) — domain-specific skill packs
 → [Back to GAAI.md](../GAAI.md)

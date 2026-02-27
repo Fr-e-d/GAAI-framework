@@ -14,7 +14,7 @@ updated_at: 2026-02-26
 >
 > **Relations :** GTM-001 (phases/gates), COMMS-001 (empathy maps, channel strategy, writing style), MARKET-001 (verticals, niche strategy)
 > **Knowledge base :** `memory/domains/content-production/` (10 sources, 141 AKUs, 9 research domains)
-> **Skills :** `skills/content/` (CNT-001 → CNT-010)
+> **Skills :** `skills/domains/content-production/` (CNT-001 → CNT-010)
 
 ---
 
@@ -442,6 +442,6 @@ Pas de CNT-009 quality gate (coût/bénéfice insuffisant pour du natif).
 - Les phases GTM et gates → GTM-001
 - Les verticales et niche strategy → MARKET-001
 - La knowledge base technique → domains/content-production/index.md
-- L'exécution des skills individuels → skills/content/CNT-*.md
+- L'exécution des skills individuels → skills/domains/content-production/CNT-*.md
 
 Ce document est la **carte de navigation**. Les autres documents sont les **instruments de bord**.

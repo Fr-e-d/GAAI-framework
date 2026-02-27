@@ -422,9 +422,10 @@ cross:
     path: cross/summarization/SKILL.md
 
 # ─────────────────────────────────────────────
-# CONTENT — blueprint skills for content production
+# DOMAINS — domain-specific skill packs
 # ─────────────────────────────────────────────
-content:
+# domains/content-production
+content-production:
 
   - id: SKILL-CNT-007
     name: social-adapt
@@ -434,7 +435,7 @@ content:
     tags: [content, social-media, repurposing, transformation, platform-adaptation]
     status: stable
     updated_at: 2026-02-26
-    path: content/social-adapt/SKILL.md
+    path: domains/content-production/social-adapt/SKILL.md
 
   - id: SKILL-CNT-010
     name: repurpose
@@ -444,7 +445,7 @@ content:
     tags: [content, refresh, repurposing, lifecycle, evergreen, cadence]
     status: stable
     updated_at: 2026-02-26
-    path: content/repurpose/SKILL.md
+    path: domains/content-production/repurpose/SKILL.md
 
   - id: SKILL-CNT-011
     name: content-plan
@@ -454,4 +455,4 @@ content:
     tags: [content, planning, strategy, monthly-cadence, budget]
     status: stable
     updated_at: 2026-02-26
-    path: content/content-plan/SKILL.md
+    path: domains/content-production/content-plan/SKILL.md

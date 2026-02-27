@@ -81,7 +81,7 @@ source: decisions/_log.md (DEC-60 through DEC-89, plus DEC-2026-02-23-01, DEC-20
 
 | ID | Decision | Date |
 |---|---|---|
-| DEC-86 | GAAI modular blueprint architecture — domain skills as extractable packs within GAAI, not separate frameworks. `skills/content/` with blueprint.yaml. | 2026-02-25 |
+| DEC-86 | GAAI modular blueprint architecture — domain skills as extractable packs within GAAI, not separate frameworks. `skills/domains/content-production/` with blueprint.yaml. | 2026-02-25 |
 | DEC-87 | Content blueprint knowledge base — 7 sources, 118 AKUs, GAAI-filtered. Gap analysis: 5 skills ready, CNT-008 critical gap, 5 transversal gaps. | 2026-02-25 |
 
 ## Operations

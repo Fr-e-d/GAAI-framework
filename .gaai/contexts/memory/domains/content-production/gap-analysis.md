@@ -19,11 +19,11 @@
 | CNT-004-edit | EXCELLENT | HMN-001, WRT-001 | None | — |
 | CNT-005-seo-optimize | **GOOD** | SEO-001, SEO-002 | Minor: alt text checklist implicit | Auto: `domain-knowledge-research` (surface) if needed |
 | CNT-006-geo-optimize | EXCELLENT | GEO-001, SRC-001 | None | — |
-| CNT-007-social-adapt | **DESIGNED** | SOC-001, MTA-001, voice-guide.md | Skill created (SKILL-CNT-007). Templates built into skill process. | Skill ready at `skills/content/social-adapt/SKILL.md` |
+| CNT-007-social-adapt | **DESIGNED** | SOC-001, MTA-001, voice-guide.md | Skill created (SKILL-CNT-007). Templates built into skill process. | Skill ready at `skills/domains/content-production/social-adapt/SKILL.md` |
 | CNT-008-youtube-script | **DEFERRED** | SOC-001 (3 AKUs only) | Near-total: YT algorithm, script structure, Shorts vs long-form, YT SEO, AI search citation | Planned: `domain-knowledge-research` (comprehensive) when CNT-008 is prioritized. Not a day-1 use case |
 | CNT-009-quality-gate | GOOD | AGT-001, HMN-001, SRC-001, GEO-001 | Minor: readability score targets by content type | Auto: `domain-knowledge-research` (surface) if needed |
-| CNT-010-repurpose | **DESIGNED** | SRC-001, SEO-001, SEO-002, KWR-001 | Skill created (SKILL-CNT-010). Cadence framework + decision tree built into skill. | Skill ready at `skills/content/repurpose/SKILL.md` |
-| CNT-011-content-plan | **DESIGNED** | CONTENT-STRATEGY-001, GTM-001, COMMS-001 | Skill created (SKILL-CNT-011). Monthly planning from 6-dimension model. | Skill ready at `skills/content/content-plan/SKILL.md` |
+| CNT-010-repurpose | **DESIGNED** | SRC-001, SEO-001, SEO-002, KWR-001 | Skill created (SKILL-CNT-010). Cadence framework + decision tree built into skill. | Skill ready at `skills/domains/content-production/repurpose/SKILL.md` |
+| CNT-011-content-plan | **DESIGNED** | CONTENT-STRATEGY-001, GTM-001, COMMS-001 | Skill created (SKILL-CNT-011). Monthly planning from 6-dimension model. | Skill ready at `skills/domains/content-production/content-plan/SKILL.md` |
 
 ---
 
@@ -73,9 +73,9 @@
 
 ### Designed (skill files created)
 
-8. CNT-007-social-adapt — `skills/content/social-adapt/SKILL.md` (SKILL-CNT-007)
-9. CNT-010-repurpose — `skills/content/repurpose/SKILL.md` (SKILL-CNT-010)
-10. CNT-011-content-plan — `skills/content/content-plan/SKILL.md` (SKILL-CNT-011)
+8. CNT-007-social-adapt — `skills/domains/content-production/social-adapt/SKILL.md` (SKILL-CNT-007)
+9. CNT-010-repurpose — `skills/domains/content-production/repurpose/SKILL.md` (SKILL-CNT-010)
+10. CNT-011-content-plan — `skills/domains/content-production/content-plan/SKILL.md` (SKILL-CNT-011)
 
 ### Deferred (not day-1 priority)
 
