@@ -9,6 +9,9 @@ compatibility_flags = ["nodejs_compat"]
 binding = "CONFIG_CACHE"
 id = "f6319960eb4348d8a3a8a375f5e42d9c"
 
+[vars]
+CORE_API_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
+
 # ── Staging ────────────────────────────────────────────────────────────────────
 
 [env.staging]
@@ -18,6 +21,9 @@ name = "callibrate-satellite-staging"
 binding = "CONFIG_CACHE"
 id = "f6319960eb4348d8a3a8a375f5e42d9c"
 
+[env.staging.vars]
+CORE_API_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
+
 # ── Production ─────────────────────────────────────────────────────────────────
 
 [env.production]
@@ -26,6 +32,9 @@ name = "callibrate-satellite-prod"
 [[env.production.kv_namespaces]]
 binding = "CONFIG_CACHE"
 id = "3efd7935547146149495a9da3c2e8067"
+
+[env.production.vars]
+CORE_API_URL = "https://api.callibrate.io"
 
 # ── Secrets (set via wrangler secret put per env) ──────────────────────────────
 # SUPABASE_URL        — Supabase project URL

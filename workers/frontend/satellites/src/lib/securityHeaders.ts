@@ -11,8 +11,9 @@ const BASE_SECURITY_HEADERS: Record<string, string> = {
 };
 
 // unsafe-inline required for PostHog snippet (inline script). Tighten post-MVP with nonce-based CSP.
+// connect-src includes https://*.callibrate.io to allow client-side fetch() to Core API from /match.
 const HTML_CSP =
-  "default-src 'self'; script-src 'self' 'unsafe-inline' https://ph.callibrate.io; connect-src 'self' https://ph.callibrate.io; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'";
+  "default-src 'self'; script-src 'self' 'unsafe-inline' https://ph.callibrate.io; connect-src 'self' https://ph.callibrate.io https://*.callibrate.io; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'";
 
 export function applySecurityHeaders(response: Response): Response {
   const headers = new Headers(response.headers);

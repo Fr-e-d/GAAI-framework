@@ -3,6 +3,7 @@ import type { Env } from './types/env';
 import type { SatelliteConfig } from './types/config';
 import { resolveConfig } from './middleware/config';
 import { renderLandingPage } from './pages/landing';
+import { renderMatchPage } from './pages/match';
 import { applySecurityHeaders } from './lib/securityHeaders';
 import { renderPrivacyPolicy } from './pages/privacy';
 import { renderTermsOfService } from './pages/terms';
@@ -132,6 +133,19 @@ app.get('/', (c) => {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600',
+    },
+  });
+});
+
+// ── Match page (/match) — prospect freetext input ────────────────────────────
+
+app.get('/match', (c) => {
+  const config = c.get('config');
+  return new Response(renderMatchPage(config, c.env.POSTHOG_API_KEY, c.env.CORE_API_URL), {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
     },
   });
 });
