@@ -4,6 +4,7 @@ import type { SatelliteConfig } from './types/config';
 import { resolveConfig } from './middleware/config';
 import { renderLandingPage } from './pages/landing';
 import { renderMatchPage } from './pages/match';
+import { renderConfirmPage } from './pages/confirm';
 import { applySecurityHeaders } from './lib/securityHeaders';
 import { renderPrivacyPolicy } from './pages/privacy';
 import { renderTermsOfService } from './pages/terms';
@@ -148,6 +149,26 @@ app.get('/match', (c) => {
       'Cache-Control': 'no-store',
     },
   });
+});
+
+// ── Confirm page (/confirm) — AI-extracted requirements confirmation ──────────
+app.get('/confirm', (c) => {
+  const config = c.get('config');
+  return new Response(
+    renderConfirmPage(
+      config,
+      c.env.POSTHOG_API_KEY,
+      c.env.CORE_API_URL,
+      c.env.TURNSTILE_SITE_KEY
+    ),
+    {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    }
+  );
 });
 
 export default {

@@ -250,6 +250,18 @@ export function renderMatchPage(
       }
     }catch(e){}
 
+    // E03S02 dependency: persist UTM params for passthrough to submit
+    try{
+      var utmParams=new URLSearchParams(window.location.search);
+      var utmData={
+        utm_source:utmParams.get('utm_source')||null,
+        utm_campaign:utmParams.get('utm_campaign')||null,
+        utm_medium:utmParams.get('utm_medium')||null,
+        utm_content:utmParams.get('utm_content')||null
+      };
+      sessionStorage.setItem('match:utm',JSON.stringify(utmData));
+    }catch(e){}
+
     function showError(msg){
       errorDiv.textContent=msg;
       errorDiv.style.display='block';

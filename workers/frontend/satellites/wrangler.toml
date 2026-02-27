@@ -11,6 +11,7 @@ id = "f6319960eb4348d8a3a8a375f5e42d9c"
 
 [vars]
 CORE_API_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
+TURNSTILE_SITE_KEY = "0x4AAAAAAA_STAGING_SITE_KEY"
 
 # ── Staging ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ id = "f6319960eb4348d8a3a8a375f5e42d9c"
 
 [env.staging.vars]
 CORE_API_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
+TURNSTILE_SITE_KEY = "0x4AAAAAAA_STAGING_SITE_KEY"
 
 # ── Production ─────────────────────────────────────────────────────────────────
 
@@ -35,9 +37,11 @@ id = "3efd7935547146149495a9da3c2e8067"
 
 [env.production.vars]
 CORE_API_URL = "https://api.callibrate.io"
+TURNSTILE_SITE_KEY = "0x4AAAAAAA_PROD_SITE_KEY"
 
 # ── Secrets (set via wrangler secret put per env) ──────────────────────────────
 # SUPABASE_URL        — Supabase project URL
 # SUPABASE_ANON_KEY   — Supabase anon/public key (for satellite_configs read)
 # ADMIN_SECRET        — Secret for /admin/cache/purge endpoint
 # POSTHOG_API_KEY     — PostHog project API key (for satellite tracking)
+# TURNSTILE_SITE_KEY is a public [vars] entry (not a secret) — replace placeholder with real Cloudflare Turnstile site key before deploy

@@ -13,7 +13,8 @@ export interface Env {
   POSTHOG_API_KEY: string;
 
   // Core API base URL — injected via wrangler.toml [vars] per environment
-  // Staging: https://callibrate-core-staging.frederic-geens-consulting.workers.dev
-  // Production: https://api.callibrate.io
   CORE_API_URL: string;
+
+  // Cloudflare Turnstile site key — public, injected via wrangler.toml [vars] per environment
+  TURNSTILE_SITE_KEY: string;
 }
