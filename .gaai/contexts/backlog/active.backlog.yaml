@@ -543,7 +543,7 @@ items:
     epic: E03
     title: "Match results display + email gate + full profile reveal"
     priority: high
-    status: in_progress
+    status: done
     artefact: contexts/artefacts/stories/E03S03.story.md
     dependencies: [E03S02]
     notes: "Discovery 2026-02-27. 12 ACs. GET /api/prospects/:id/matches → anonymized cards (rank badge, score breakdown, tier, skills, rate range). Top-3 prominent (DEC-25). Email gate: single field → POST /identify → full profiles revealed (name, bio, headline). 'Réserver un appel' CTA → E03S06 booking widget. noindex/nofollow. ⚠️ Ignores deprecated booking_url (Cal.com) — uses E03S06 widget."
