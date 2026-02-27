@@ -1,7 +1,7 @@
 ---
 type: memory_index
 id: MEMORY-INDEX
-updated_at: 2026-02-26
+updated_at: 2026-02-27
 ---
 
 # Memory Map
@@ -20,9 +20,9 @@ updated_at: 2026-02-26
 | `patterns/` | `patterns/conventions.md` | Coding conventions, procedural knowledge | Every Delivery session |
 | `ops/` | `ops/platform.md` | Platform operations — DNS, email, providers, procedures | When onboarding team or making infra changes |
 | `contacts/` | `contacts/leads.md` | Experts identifiés pendant Discovery — à contacter au lancement | Delivery phase |
-| `summaries/` | `summaries/decisions-01-59.summary.md` | Compacted decision summaries | Selective |
+| `summaries/` | `summaries/decisions-*.summary.md` | Compacted decision summaries | Selective |
 | `sessions/` | *(empty — add temporary notes here)* | Short-term session exploration | Never (source for summaries) |
-| `archive/` | `archive/decisions-01-59.archive.md` | Full text of archived decisions | Rarely |
+| `archive/` | `archive/decisions-*.archive.md` | Full text of archived decisions | Rarely |
 
 ## Domain Memory
 
@@ -38,13 +38,16 @@ updated_at: 2026-02-26
 
 | File | Category | ID | Last updated |
 |---|---|---|---|
-| `project/context.md` | project | PROJECT-001 | 2026-02-23 (updated: E07 PostHog analytics stack — DEC-65 complement) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-26 (37 active entries — DEC-60 to DEC-99. Older entries compacted.) |
-| `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-23 (OpenAI function calling pattern replaces Anthropic — E06S12/DEC-2026-02-23-01) |
+| `project/context.md` | project | PROJECT-001 | 2026-02-27 (updated: M0 channels corrected X/Discord — DEC-100/103, promise validated — DEC-102) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-27 (15 active entries — DEC-90 to DEC-104. DEC-01–59 and DEC-60–89 compacted.) |
+| `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-27 (E08 security patterns: OAuth CSRF+PKCE, security headers, JWT hardening, admin auth, prompt injection guard + 6 anti-patterns) |
 | `ops/platform.md` | ops | OPS-001 | 2026-02-24 (Delivery costs $149.90/24 stories measured — SKILL-CRS-022 cost-analysis + Reddit API pattern) |
+| `ops/channels.md` | ops | OPS-002 | 2026-02-26 (distribution channels Phase 0-1 — X, Substack, dev.to, Reddit, Discord, Skool — DEC-100, DEC-101, DEC-104) |
 | `contacts/leads.md` | contacts | CONTACTS-001 | 2026-02-19 |
 | `summaries/decisions-01-59.summary.md` | summaries | SUMMARY-DECISIONS-01-59 | 2026-02-23 |
+| `summaries/decisions-60-89.summary.md` | summaries | SUMMARY-DECISIONS-60-89 | 2026-02-27 |
 | `archive/decisions-01-59.archive.md` | archive | ARCHIVE-DECISIONS-01-59 | 2026-02-23 |
+| `archive/decisions-60-89.archive.md` | archive | ARCHIVE-DECISIONS-60-89 | 2026-02-27 |
 | `domains/content-production/voice-guide.md` | domain:content-production | VOICE-GUIDE-001 | 2026-02-26 (distilled from COMMS-001 Parts 0, 1, 3) |
 | `domains/content-production/index.md` | domain:content-production | DOMAIN-CONTENT-PRODUCTION-001 | 2026-02-26 (10 sources, 141 AKUs, 9 research domains) |
 | `domains/content-production/gap-analysis.md` | domain:content-production | CONTENT-GAP-ANALYSIS | 2026-02-26 (all pre-requisites resolved, 9/10 skills ready) |

@@ -7,7 +7,7 @@ tags:
   - conventions
   - procedural
 created_at: 2026-02-19
-updated_at: 2026-02-23
+updated_at: 2026-02-27
 ---
 
 # Patterns & Conventions
@@ -88,6 +88,17 @@ updated_at: 2026-02-23
 - **Prep endpoint token-expiry pattern (E06S11):** Public route registered BEFORE the CORS-gated block. Token = UUID in `bookings.prep_token` (generated at hold time). Expiry computed at read time: `start_at + 2h`. Returns 404 `{error:'prep_token_expired'}` on expiry — same status as not-found (prevents enumeration via status code). Contains full bi-directional prep payload.
 - **Route placement rule extension (E06S11):** Any no-auth route that shares a URL prefix with a JWT-gated block MUST be registered before that block in `index.ts`. Example: `GET /api/experts/:id/availability` (satellite-facing, CORS-only) registered before `/api/experts/` JWT block. Extends E06S10 OAuth callback rule. Violation symptom: silent 401 for all callers.
 
+- **OAuth CSRF + PKCE pattern (E08S01):** OAuth `state` parameter must be a cryptographically random value (e.g., `crypto.randomUUID()`) stored server-side (KV, TTL 10min) and verified on callback. PKCE (`code_verifier` + `code_challenge` with S256 method) must be used for all OAuth authorization code flows. Both protections are mandatory — state alone does not prevent code injection.
+- **Security headers middleware pattern (E08S02):** Dedicated middleware applies `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Strict-Transport-Security`, `Referrer-Policy`, `Permissions-Policy` on every response. Applied after route handler via response wrapper — never inline in individual handlers.
+- **JSON-LD XSS escape pattern (E08S02):** When injecting JSON-LD (`<script type="application/ld+json">`) into HTML, escape `</script>`, `<!--`, and all HTML entities in string values. Use a dedicated `escapeJsonLd()` utility — never rely on `JSON.stringify()` alone.
+- **Content-Type enforcement pattern (E08S02):** All API endpoints must validate `Content-Type: application/json` on request bodies. Reject non-JSON content types with 415 Unsupported Media Type before parsing.
+- **Booking hold auth + rate limiting pattern (E08S03):** `POST /api/bookings/hold` requires prospect JWT + IP-based rate limiting (e.g., 5 holds/15min). Hold creation must re-verify slot availability atomically (DB conflict check + freebusy re-check). Expired holds cleaned by cron — never by client-triggered cleanup.
+- **Admin API key + constant-time comparison pattern (E08S04):** Admin endpoints authenticate via `x-admin-secret` header. Key comparison MUST use constant-time algorithm (e.g., byte-by-byte XOR with accumulator) — never `===` string equality. Admin key stored as Worker secret (`ADMIN_API_KEY`).
+- **Input validation completeness rule (E08S04):** Every user-facing endpoint must validate ALL input fields (path params, query params, body) via Zod `safeParse()` before any DB operation. Missing validation on even one field is a security gap.
+- **JWT audience + issuer claims hardening pattern (E08S05):** All JWTs must include `iss` (issuer, e.g., `callibrate-core`) and `aud` (audience, e.g., `prospect`, `expert`) claims. Verification must check both claims — a token issued for one audience must not be accepted for another.
+- **Secrets hygiene rule (E08S05):** All secrets (API keys, encryption keys, signing keys) must be stored as Worker secrets via `wrangler secret put` — never in `wrangler.toml` `[vars]`. `wrangler.toml` is committed to git; secrets are not.
+- **Prompt injection guard — vertical allowlist pattern (E08S05):** AI extraction endpoints must validate that the `vertical` context passed to the LLM prompt comes from a strict allowlist (e.g., `satellite_configs.vertical` values). User-controlled strings must never flow into system prompts without allowlist filtering.
+
 ---
 
 ## Supabase Patterns
@@ -104,6 +115,8 @@ updated_at: 2026-02-23
 - **Partial-failure retry recovery pattern (E06S06):** In multi-step queue consumers that INSERT then call external APIs, catch INSERT error code `23505` (unique violation), fetch the existing row by business key, and continue with the existing row ID. Requires a unique constraint on the business key column. Complements KV idempotency: KV prevents re-processing fully completed messages; unique constraint recovery handles partial completion (step 1 succeeded, step 2+ failed).
 - **PostgREST error codes:** `PGRST116` = no rows from `.single()` → 404. `23505` = unique violation → 409. Other errors → generic 500 with `error.message` in details.
 - **Service key scope (E06S03, DEC-37):** `createServiceClient(env)` (service key) is used for ALL Worker DB operations and auth token validation (`supabase.auth.getUser(token)`). Anon key retained only for raw REST health check fetch.
+- **Webhook idempotency — dual-layer DB+KV pattern (E08S05):** External webhooks (e.g., Lemon Squeezy) use dual idempotency: (1) `webhook_events` table with unique constraint on `(provider, event_id)` — INSERT fails on replay, (2) KV `idem:webhook:{provider}:{event_id}` (TTL 86400s) — fast-path skip before DB hit. DB is source of truth; KV is acceleration layer.
+- **RPC ownership assertion pattern (E08S05):** Supabase RPC functions that modify data must assert ownership (`WHERE expert_id = auth.uid()` or equivalent) inside the function body. Never rely on the caller to pass the correct `expert_id` — derive it from `auth.uid()` within `SECURITY DEFINER` functions.
 
 ---
 
@@ -266,3 +279,9 @@ Convention: `{scope}-{entity}-{resource}-{env}` (DEC-32)
 - **`gh pr merge --auto` requires branch protection rules** — without required status checks configured on the target branch, `--auto` silently does nothing (no error, no merge). This was the technical root cause of the 19-PR incident (DEC-71): the delivery agent ran `--auto --squash` which appeared to succeed but never merged. Fix: use `gh pr merge --squash` (immediate) instead. Branch protection is not configured on this repo (solo founder MVP).
 - Cloudflare resource names without `{scope}-{entity}-{resource}-{env}` pattern (DEC-32)
 - Using `production` or `dev` as env suffix — use `staging` and `prod` only (DEC-32)
+- **Service key as admin auth (E08S04):** Never use the Supabase service key as an admin authentication mechanism. Service key bypasses RLS — it's a DB privilege escalation, not an identity assertion. Use a dedicated `ADMIN_API_KEY` Worker secret.
+- **String equality for secret comparison (E08S04):** Never compare secrets (API keys, tokens) using `===` — vulnerable to timing attacks. Use constant-time comparison (byte-by-byte XOR with accumulator).
+- **Predictable OAuth state (E08S01):** Never use predictable or static values for OAuth `state` parameter. Must be `crypto.randomUUID()` or equivalent CSPRNG output, stored server-side with TTL, verified on callback.
+- **PKCE omission (E08S01):** Never implement OAuth authorization code flow without PKCE (`code_verifier` + `code_challenge`). Without PKCE, intercepted authorization codes can be exchanged by attackers.
+- **Prompt injection via unvalidated context (E08S05):** Never pass user-controlled strings (e.g., prospect descriptions, vertical names from query params) directly into LLM system prompts. All context injected into prompts must come from validated sources (DB records, allowlists).
+- **Secrets in wrangler.toml vars (E08S05):** Never store API keys, encryption keys, or signing keys in `wrangler.toml` `[vars]` — this file is committed to git. Use `wrangler secret put` for all secrets.

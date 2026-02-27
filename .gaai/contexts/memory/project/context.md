@@ -7,7 +7,7 @@ tags:
   - vision
   - scope
 created_at: 2026-02-19
-updated_at: 2026-02-24
+updated_at: 2026-02-27
 ---
 
 # Project Memory
@@ -95,7 +95,7 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 
 ## Success Metrics (90-day MVP)
 
-- **M0 (Day 7):** ≥10 experts raise hand (LinkedIn/X/Facebook) + ≥15 prospects raise hand → offer validated
+- **M0 (Day 7):** ≥10 experts raise hand (X/Discord) + ≥15 prospects raise hand → offer validated
 - **M1 (Day 21):** Full loop working end-to-end without manual intervention (1 test prospect completes form → match → book)
 - **M2 (Day 45):** 20 form completions, ≥10 score >65%, ≥5 calls booked, expert lead quality ≥7/10, conversion ≥35%
 - **M3 (Day 90):** ≥10 calls payés, GMV ≥1 500€, ≥3 experts re-payants, expert satisfaction ≥7/10
@@ -152,12 +152,12 @@ Callibrate = **l'intermédiaire de confiance scalable** — celui qui pré-quali
 
 ## Acquisition Strategy (Milestone 0)
 
-- **Pre-step (Day 1–3):** Reddit + Slack/Discord — listen, sharpen promise language
-- **Hand Raiser (Day 3–7):** LinkedIn (primary) + X/Twitter + Facebook Groups
-- Hand Raiser mechanic: public post with measurable result promise + "commentez 'moi'" CTA
-- No video closing at Milestone 0 stage
-- One promise. Multiple surfaces. Same gates apply.
-- **X/Twitter:** compte `@Fr-e-d` (cohérent avec GitHub), cold start + $20 promoted tweet
+- **Pre-step (weeks 1–2):** Reddit + Discord (n8n + AI Agency Alliance) — listen, warm engagement, sharpen promise language
+- **Hand Raiser (week 3+):** X (`@frederic_geens`) primary + Discord communities (n8n + AI Agency Alliance)
+- ≥2 weeks warm engagement prerequisite before hand raiser posting (DEC-103)
+- Hand Raiser mechanic: public post with measurable result promise
+- Gate: ≥10 qualified expert hand raisers
+- LinkedIn deferred until product launch (DEC-31/100/103)
 
 ## Acquisition Strategy (Milestone 1+)
 
@@ -273,9 +273,9 @@ Le Matching OS est agnostique de l'unité — c'est la couche de billing qui s'a
 - Expert : reçoit des prospects qui matchent **ses** critères (budget, secteur, stade de projet) — sans filtrage manuel, sans construire son propre système de qualification
 - Prospect : n'est jamais perdu — il existe toujours un expert configuré pour l'accueillir, quelque soit son stade de qualification
 
-**Promise terrain validée (E01S01) :**
-- Expert : "Reçois des prospects qui matchent tes critères — budget, secteur, stade de projet — directement dans ton agenda, sans filtrage de ta part."
-- Prospect : "3 mois pour trouver le bon expert en cherchant seul. Quelques minutes en décrivant ton besoin ici."
+**Promise terrain validée (E01S01, DEC-102) :**
+- Expert : "Stop filtering tire kickers. Get matched only with prospects who have confirmed budgets, real timelines, and a problem worth solving."
+- Prospect : "Find a real workflow architect who gets your business logic — in days, not months."
 
 **UX match results :** ranked list complet. Top 3 visuellement mis en avant (#1 le plus prominent — badge Best Match). Aucun prospect abandonné — qualification relative aux critères de chaque expert, pas à un standard universel (DEC-25).
 
