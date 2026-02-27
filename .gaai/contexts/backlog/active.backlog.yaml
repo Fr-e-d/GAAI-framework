@@ -723,10 +723,12 @@ items:
     epic: E02
     title: "Billing & subscription page (credits, LS activation, spending controls)"
     priority: high
-    status: in_progress
+    status: done
+    started_at: "2026-02-27T22:00:00+01:00"
+    completed_at: "2026-02-27T23:40:00+01:00"
     artefact: contexts/artefacts/stories/E02S07.story.md
     dependencies: [E02S01, E06S38, E06S33, E06S34]
-    notes: "Discovery 2026-02-27. 12 ACs. Credit balance hero card. LS subscription activation CTA (Lemon.js overlay). Subscription status badge. Transaction history (paginated). Monthly spending progress bar. Max lead price + spending limit controls (editable). 'Leads manqués' section. Pricing transparency."
+    notes: "DONE 2026-02-27. QA PASS (13/13 tests, tsc clean). Credit balance hero card (green/red). Lemon.js overlay activation (LS_CHECKOUT_URL env). Subscription status badge (active/past_due/cancelled). LS customer portal management link (LS_CUSTOMER_PORTAL_URL env). Monthly spending progress bar (orange >80%, red ≥100%). Transaction history table (paginated 20/page). Max lead price + spending limit controls (EUR input → centimes PATCH). PostHog events: billing_viewed, spending_control_updated. AC10 deferred (billing_excluded_leads backend gap). PR #49 squash-merged → staging."
 
   - id: E02S08
     epic: E02
