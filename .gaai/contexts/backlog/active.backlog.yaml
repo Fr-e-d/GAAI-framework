@@ -743,7 +743,9 @@ items:
     epic: E02
     title: "callibrate.io expert landing page (CF Worker + Hono)"
     priority: high
-    status: in_progress
+    status: done
+    started_at: "2026-02-27T23:05:00+01:00"
+    completed_at: "2026-02-28T00:30:00+01:00"
     artefact: contexts/artefacts/stories/E02S09.story.md
     dependencies: []
-    notes: "Discovery 2026-02-27 (DEC-115). 15 ACs. New workspace: workers/frontend/landing/. CF Worker + Hono (same pattern as satellites). DEC-102 promise vocabulary. Value props + pricing grid (49€–263€). How it works. Social proof placeholder. PostHog tracking. SEO (JSON-LD Organization). Security headers. Mobile responsive. < 50KB. GH Actions deploy."
+    notes: "DONE 2026-02-28. QA PASS (first cycle). All 15 ACs met. 44/44 vitest. tsc clean. Page weight 16.2KB. PR#51 squash-merged → staging. Deploy Landing CI green. ⚠️ Human action required: wrangler secret put POSTHOG_API_KEY --env staging (and production at launch)."
