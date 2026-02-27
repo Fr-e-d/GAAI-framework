@@ -690,7 +690,7 @@ items:
     epic: E02
     title: "Google Calendar connection page"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E02S04.story.md
     dependencies: [E02S01, E06S10, E06S11]
     notes: "Discovery 2026-02-27. 10 ACs. Connection status (connected email or 'non connecté'). Connect → OAuth flow via gcal/auth-url. Disconnect with confirmation. Next 5 availability slots preview when connected. Refresh status after callback."
