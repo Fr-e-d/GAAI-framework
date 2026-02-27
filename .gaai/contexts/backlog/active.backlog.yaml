@@ -712,10 +712,12 @@ items:
     epic: E02
     title: "Bookings page (upcoming/past, cancel/reschedule)"
     priority: high
-    status: in_progress
+    status: done
+    started_at: "2026-02-27T22:00:00+01:00"
+    completed_at: "2026-02-27T23:15:00+01:00"
     artefact: contexts/artefacts/stories/E02S06.story.md
     dependencies: [E02S01, E06S38, E06S11]
-    notes: "Discovery 2026-02-27. 10 ACs. Period tabs (upcoming/past). Booking cards (date, time, prospect, meeting URL, status). Detail view (prospect context, prep link, meeting link). Cancel with confirmation + reschedule with datetime picker. Timezone-aware display."
+    notes: "DONE 2026-02-27. QA PASS (13/13 tests, tsc clean). Period tabs (upcoming/past, URL-driven). Booking cards with UTC-locked datetime, prospect, meeting URL + copy, status badge. Detail dialog with prospect context and actions. Cancel (DELETE + optional reason) + reschedule (POST + auto-computed +20min). apiDeleteWithBody added. routes.ts: leads + bookings registered. PR #48 squash-merged → staging."
 
   - id: E02S07
     epic: E02
