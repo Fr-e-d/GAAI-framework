@@ -53,8 +53,12 @@ export async function handleVectorizeReindex(
     );
   }
 
-  // Forward to Matching Worker — no auth header needed (internal Service Binding, AC4)
-  return env.MATCHING_SERVICE.fetch(
-    new Request('https://matching/admin/reindex', { method: 'POST' })
-  );
+  // Forward to Matching Worker via RPC — no auth header needed (internal Service Binding, AC4, DEC-133)
+  try {
+    const result = await env.MATCHING_SERVICE.reindex();
+    return new Response(JSON.stringify(result), { status: 202, headers: JSON_HEADERS });
+  } catch (err) {
+    console.error('[admin/reindex] RPC reindex() failed:', err);
+    return new Response(JSON.stringify({ error: 'Matching service error' }), { status: 502, headers: JSON_HEADERS });
+  }
 }

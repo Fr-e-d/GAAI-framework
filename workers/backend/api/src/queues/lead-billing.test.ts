@@ -109,6 +109,11 @@ function buildMockSupabase(opts: {
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe('consumeLeadBilling', () => {
+  beforeEach(() => {
+    const mockSql = vi.fn();
+    (mockSql as unknown as Record<string, unknown>).end = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(createSql).mockReturnValue(mockSql as unknown as ReturnType<typeof createSql>);
+  });
   afterEach(() => {
     vi.clearAllMocks();
   });

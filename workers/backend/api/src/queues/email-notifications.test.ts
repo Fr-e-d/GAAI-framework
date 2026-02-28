@@ -146,6 +146,7 @@ describe('consumeEmailNotifications', () => {
     mockSql
       .mockResolvedValueOnce([{ gcal_email: 'expert@gcal.com', display_name: 'Alice' }])  // expert query
       .mockResolvedValueOnce([{ email: 'prospect@example.com' }]);                          // prospect query
+    mockSql.end = vi.fn().mockResolvedValue(undefined);
 
     (createSql as Mock).mockReturnValue(mockSql);
 

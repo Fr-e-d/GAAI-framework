@@ -119,7 +119,7 @@ app.get('/robots.txt', (c) => {
 
 app.get('/sitemap.xml', async (c) => {
   const config = c.get('config');
-  const sitemapXml = await renderSitemapXml(config, c.env.CORE_API_URL);
+  const sitemapXml = await renderSitemapXml(config, c.env.CORE_API_URL, c.env.CORE_API);
   return new Response(sitemapXml, {
     status: 200,
     headers: {
@@ -137,7 +137,7 @@ app.get('/', (c) => {
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600',
+      'Cache-Control': 'no-store',
     },
   });
 });
@@ -197,13 +197,20 @@ app.get('/results', async (c) => {
   };
 
   if (cookieToken) {
-    // Validate session via Core API
+    // Validate session via Core API (DEC-133: RPC when available, HTTP fallback)
     try {
-      const sessionRes = await fetch(`${c.env.CORE_API_URL}/api/auth/session`, {
-        headers: { 'Authorization': `Bearer ${cookieToken}` },
-      });
-      if (sessionRes.ok) {
-        const sessionData = await sessionRes.json() as { prospect_id: string; email: string };
+      let sessionData: { prospect_id: string; email: string } | null = null;
+      if (c.env.CORE_API) {
+        sessionData = await c.env.CORE_API.validateSession(cookieToken) as { prospect_id: string; email: string } | null;
+      } else {
+        const sessionRes = await fetch(`${c.env.CORE_API_URL}/api/auth/session`, {
+          headers: { 'Authorization': `Bearer ${cookieToken}` },
+        });
+        if (sessionRes.ok) {
+          sessionData = await sessionRes.json() as { prospect_id: string; email: string };
+        }
+      }
+      if (sessionData) {
         session = { sessionToken: cookieToken, prospectId: sessionData.prospect_id };
       } else {
         // Invalid/expired cookie — clear it
@@ -236,31 +243,46 @@ app.get('/results/:prospectId', async (c) => {
     });
   }
 
-  // Exchange magic link token for session token via Core API
+  // Exchange magic link token for session token via Core API (DEC-133: RPC when available)
   try {
-    const validateRes = await fetch(`${c.env.CORE_API_URL}/api/auth/magic-link/validate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prospect_id: prospectId, token: magicToken }),
-    });
+    let session_token: string;
 
-    if (!validateRes.ok) {
-      // Invalid/expired token — redirect to /match with message
-      const redirectUrl = '/match?error=link_expired';
-      return new Response(null, {
-        status: 302,
-        headers: { Location: redirectUrl, 'Cache-Control': 'no-store' },
+    if (c.env.CORE_API) {
+      const result = await c.env.CORE_API.validateMagicLink(prospectId, magicToken) as { session_token: string; prospect_id: string; email: string } | null;
+      if (!result) {
+        const redirectUrl = '/match?error=link_expired';
+        return new Response(null, {
+          status: 302,
+          headers: { Location: redirectUrl, 'Cache-Control': 'no-store' },
+        });
+      }
+      session_token = result.session_token;
+    } else {
+      const validateRes = await fetch(`${c.env.CORE_API_URL}/api/auth/magic-link/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prospect_id: prospectId, token: magicToken }),
       });
+      if (!validateRes.ok) {
+        const redirectUrl = '/match?error=link_expired';
+        return new Response(null, {
+          status: 302,
+          headers: { Location: redirectUrl, 'Cache-Control': 'no-store' },
+        });
+      }
+      ({ session_token } = await validateRes.json() as { session_token: string });
     }
-
-    const { session_token } = await validateRes.json() as { session_token: string };
 
     const session = { sessionToken: session_token, prospectId };
 
-    // AC5: Fire-and-forget PostHog event — best effort
-    void fetch(`${c.env.CORE_API_URL}/api/auth/session`, {
-      headers: { 'Authorization': `Bearer ${session_token}` },
-    }).catch(() => {});
+    // AC5: Fire-and-forget PostHog event — best effort (DEC-133: RPC when available)
+    if (c.env.CORE_API) {
+      void c.env.CORE_API.validateSession(session_token).catch(() => {});
+    } else {
+      void fetch(`${c.env.CORE_API_URL}/api/auth/session`, {
+        headers: { 'Authorization': `Bearer ${session_token}` },
+      }).catch(() => {});
+    }
 
     const html = renderResultsPage(
       config, c.env.POSTHOG_API_KEY, c.env.CORE_API_URL, c.env.TURNSTILE_SITE_KEY, session,
@@ -288,12 +310,12 @@ app.get('/results/:prospectId', async (c) => {
 
 app.get('/experts', async (c) => {
   const config = c.get('config');
-  const html = await renderExpertsDirectoryPage(config, c.env.POSTHOG_API_KEY, c.env.CORE_API_URL);
+  const html = await renderExpertsDirectoryPage(config, c.env.POSTHOG_API_KEY, c.env.CORE_API_URL, c.env.CORE_API);
   return new Response(html, {
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600',
+      'Cache-Control': 'no-store',
     },
   });
 });
@@ -308,6 +330,7 @@ app.get('/experts/:slug', async (c) => {
     c.env.POSTHOG_API_KEY,
     c.env.CORE_API_URL,
     slug,
+    c.env.CORE_API,
   );
   if (status === 404) {
     const notFoundHtml = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Expert introuvable</title><meta name="robots" content="noindex"></head><body><p>Expert introuvable. <a href="/experts">Retour au répertoire</a></p></body></html>`;
@@ -320,7 +343,7 @@ app.get('/experts/:slug', async (c) => {
     status,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': status === 200 ? 'public, max-age=300, stale-while-revalidate=3600' : 'no-store',
+      'Cache-Control': 'no-store',
     },
   });
 });

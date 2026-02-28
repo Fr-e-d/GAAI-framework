@@ -34,7 +34,7 @@ export async function handleGetPublicExperts(
 
   const sql = createSql(env);
 
-  const rows = await sql<{
+  type ExpertQueryResultRow = {
     id: string;
     headline: string | null;
     profile: unknown;
@@ -45,24 +45,21 @@ export async function handleGetPublicExperts(
     outcome_tags: string[] | null;
     bio: string | null;
     total_count: string;
-  }[]>`
-    SELECT
-      id,
-      headline,
-      profile,
-      rate_min,
-      rate_max,
-      composite_score,
-      availability,
-      outcome_tags,
-      bio,
-      COUNT(*) OVER() AS total_count
-    FROM experts
-    WHERE availability != 'unavailable'
-      AND (${vertical} IS NULL OR profile->>'vertical' = ${vertical})
-    ORDER BY composite_score DESC NULLS LAST
-    LIMIT ${perPage} OFFSET ${offset}
-  `;
+  };
+
+  const rows = vertical
+    ? await sql<ExpertQueryResultRow[]>`
+        SELECT id, headline, profile, rate_min, rate_max, composite_score, availability, outcome_tags, bio, COUNT(*) OVER() AS total_count
+        FROM experts
+        WHERE availability != 'unavailable' AND profile->>'vertical' = ${vertical}
+        ORDER BY composite_score DESC NULLS LAST
+        LIMIT ${perPage} OFFSET ${offset}`
+    : await sql<ExpertQueryResultRow[]>`
+        SELECT id, headline, profile, rate_min, rate_max, composite_score, availability, outcome_tags, bio, COUNT(*) OVER() AS total_count
+        FROM experts
+        WHERE availability != 'unavailable'
+        ORDER BY composite_score DESC NULLS LAST
+        LIMIT ${perPage} OFFSET ${offset}`;
 
   const total = rows.length > 0 ? parseInt(rows[0]!.total_count, 10) : 0;
 

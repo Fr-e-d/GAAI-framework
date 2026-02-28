@@ -7,7 +7,7 @@ tags:
   - conventions
   - procedural
 created_at: 2026-02-19
-updated_at: 2026-02-27
+updated_at: 2026-02-28
 ---
 
 # Patterns & Conventions
@@ -54,7 +54,11 @@ updated_at: 2026-02-27
 
 ## Code Patterns
 
-- **Workers entrypoint:** `src/index.ts` exports `default { fetch(request, env) }` using `satisfies ExportedHandler<Env>`
+- **SQL connection lifecycle (DEC-132, CRITICAL):** `createSql(env)` in `src/lib/db.ts` creates a NEW postgres.js instance per call (via Hyperdrive proxy). Every instance MUST be closed with `sql.end()` in a `finally` block. Leaked connections exhaust Hyperdrive's `origin_connection_limit` (60) and cannot be recovered without deleting+recreating the Hyperdrive config. Config params: `max: 1` (one connection per instance), `prepare: false` (required for Supavisor), `connect_timeout: 10`, `idle_timeout: 5`.
+- **Centralized SQL cleanup safety net (DEC-132):** `cleanupPendingSql(ctx)` in `db.ts` tracks all `createSql()` instances in a module-level array and closes them via `ctx.waitUntil()`. Called in `finally` blocks of ALL three handler exports: `fetch()`, `queue()`, `scheduled()`. This catches leaked connections from handlers that forget `sql.end()`. Individual handlers SHOULD still close their own connections (defense in depth) — the safety net is a last resort, not a license to skip cleanup.
+- **Hyperdrive pool exhaustion recovery:** If `PostgresError: Timed out while waiting for an open slot in the pool` appears, the Hyperdrive config must be deleted and recreated (flush stale connections). Config updates, caching toggles, and Worker redeployments do NOT flush the pool. Procedure: `wrangler hyperdrive delete <id>` → `wrangler hyperdrive create <name> --connection-string=...` → update `wrangler.toml` with new ID → deploy. Use port 5432 (Supavisor session mode) — port 6543 (PgBouncer transaction mode) is redundant with Hyperdrive's own pooling.
+- **Workers entrypoint:** `src/index.ts` exports `default { fetch(request, env) }` using `satisfies ExportedHandler<Env>` — EXCEPT for Workers that are service binding targets: those export `default class extends WorkerEntrypoint<Env>` with RPC methods
+- **Worker-to-Worker RPC pattern (DEC-133, NON-NEGOTIABLE):** All Worker-to-Worker calls MUST use CF RPC Service Bindings (`env.BINDING.methodName(args)`) — never `env.BINDING.fetch(new Request(...))`, never plain HTTP fetch to public URLs. Workers expose methods via `WorkerEntrypoint` class (import from `cloudflare:workers`). `this.env` and `this.ctx` available. Named entrypoints for role-based access: `export class SatelliteRPC extends WorkerEntrypoint<Env>` + wrangler.toml `entrypoint = "SatelliteRPC"`. Requires `compatibility_date >= "2024-04-03"`. Client-side browser JS cannot use RPC — only server-side Worker-to-Worker.
 - **Env interface:** `src/types/env.ts` — single `Env` interface, all bindings typed: secrets = `string`, KV = `KVNamespace`, Queue producers = `Queue`
 - **Queue consumers:** declared in `wrangler.toml` `[[queues.consumers]]` but handler (`queue` export) added in the story that implements the consumer logic — not in bootstrap
 - **Queue consumer dispatcher pattern (E06S06):** `queue` export in `src/index.ts` dispatches by `batch.queue.includes('{name}')` to `src/queues/{name}.ts` consumer modules. The `includes()` match handles env suffixes (`-staging`, `-prod`) without branching. Each consumer module exports a single `consume{Name}(batch, env)` function.

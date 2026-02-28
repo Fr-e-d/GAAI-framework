@@ -127,6 +127,7 @@ describe('consumeScoreComputation', () => {
 
     // Make sql throw on first call (matches query)
     const mockSql = vi.fn().mockRejectedValue(new Error('DB unavailable'));
+    mockSql.end = vi.fn().mockResolvedValue(undefined);
     (createSql as Mock).mockReturnValue(mockSql);
 
     const body: ScoreComputationMessage = { type: 'feedback.call_experience', expert_id: 'expert-1' };
@@ -146,6 +147,7 @@ describe('consumeScoreComputation', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     const mockSql = vi.fn().mockRejectedValue(new Error('DB error'));
+    mockSql.end = vi.fn().mockResolvedValue(undefined);
     (createSql as Mock).mockReturnValue(mockSql);
 
     const body: ScoreComputationMessage = { type: 'feedback.lead_evaluation', expert_id: 'expert-1' };
@@ -257,6 +259,7 @@ describe('consumeScoreComputation', () => {
       .mockResolvedValueOnce([expertProfile])                       // call 7: trust (parallel)
       .mockResolvedValueOnce([]);                                   // call 8: UPDATE experts
 
+    mockSql.end = vi.fn().mockResolvedValue(undefined);
     return { mockSql };
   }
 

@@ -68,19 +68,29 @@ export async function renderExpertProfilePage(
   posthogApiKey: string,
   coreApiUrl: string,
   slug: string,
+  coreApiBinding?: import('../types/env').CoreApiRPC,
 ): Promise<{ html: string; status: number }> {
   const theme = config.theme;
   const brand = config.brand;
 
-  // AC4: Fetch expert detail from Core API server-side
+  // AC4: Fetch expert detail from Core API server-side (DEC-133: RPC when available)
   let expert: AnonymizedExpertDetail | null = null;
   try {
-    const res = await fetch(`${coreApiUrl}/api/experts/public/${encodeURIComponent(slug)}`);
-    if (res.status === 404) {
-      return { html: '', status: 404 };
-    }
-    if (res.ok) {
-      expert = await res.json();
+    if (coreApiBinding) {
+      // RPC path — zero network hop
+      expert = await coreApiBinding.getPublicExpertBySlug(slug) as AnonymizedExpertDetail | null;
+      if (!expert) {
+        return { html: '', status: 404 };
+      }
+    } else {
+      // HTTP fallback
+      const res = await fetch(`${coreApiUrl}/api/experts/public/${encodeURIComponent(slug)}`);
+      if (res.status === 404) {
+        return { html: '', status: 404 };
+      }
+      if (res.ok) {
+        expert = await res.json();
+      }
     }
   } catch {
     // Graceful degradation

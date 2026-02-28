@@ -43,47 +43,50 @@ export async function consumeScoreComputation(
 
 async function computeAndSaveCompositeScore(expertId: string, env: Env): Promise<void> {
   const sql = createSql(env);
+  try {
+    // Fetch all match IDs for this expert (shared by call_exp, satisfaction, recency)
+    const matchRows = await sql<Pick<MatchRow, 'id'>[]>`
+      SELECT id FROM matches WHERE expert_id = ${expertId}`;
 
-  // Fetch all match IDs for this expert (shared by call_exp, satisfaction, recency)
-  const matchRows = await sql<Pick<MatchRow, 'id'>[]>`
-    SELECT id FROM matches WHERE expert_id = ${expertId}`;
+    const matchIds = matchRows.map((m) => m.id);
 
-  const matchIds = matchRows.map((m) => m.id);
+    // If no matches yet, expert score remains 0 (initialized at registration)
+    // Only compute when there is at least one match to avoid meaningless score writes
+    if (matchIds.length === 0) {
+      return;
+    }
 
-  // If no matches yet, expert score remains 0 (initialized at registration)
-  // Only compute when there is at least one match to avoid meaningless score writes
-  if (matchIds.length === 0) {
-    return;
+    // Fetch booking IDs for those matches (shared by call_exp and satisfaction)
+    const bookingRows = await sql<Pick<BookingRow, 'id'>[]>`
+      SELECT id FROM bookings WHERE match_id = ANY(${matchIds})`;
+
+    const bookingIds = bookingRows.map((b) => b.id);
+
+    // Compute all 5 components in parallel
+    const [callExperienceAvg, clientSatisfactionAvg, hireRate, recencyScore, trustScore] =
+      await Promise.all([
+        computeCallExperienceAvg(bookingIds, sql),
+        computeClientSatisfactionAvg(bookingIds, sql),
+        computeHireRate(expertId, sql),
+        computeRecencyScore(matchIds, sql),
+        computeTrustScore(expertId, sql),
+      ]);
+
+    // Composite formula (AC2): weights sum to 1.0
+    const compositeScore = Math.round(
+      (callExperienceAvg * 0.35 +
+        trustScore * 0.20 +
+        clientSatisfactionAvg * 0.20 +
+        hireRate * 0.10 +
+        recencyScore * 0.15) *
+        100
+    ) / 100;
+
+    // Write result atomically (AC2)
+    await sql`UPDATE experts SET composite_score = ${compositeScore}, score_updated_at = ${new Date().toISOString()} WHERE id = ${expertId}`;
+  } finally {
+    await sql.end();
   }
-
-  // Fetch booking IDs for those matches (shared by call_exp and satisfaction)
-  const bookingRows = await sql<Pick<BookingRow, 'id'>[]>`
-    SELECT id FROM bookings WHERE match_id = ANY(${matchIds})`;
-
-  const bookingIds = bookingRows.map((b) => b.id);
-
-  // Compute all 5 components in parallel
-  const [callExperienceAvg, clientSatisfactionAvg, hireRate, recencyScore, trustScore] =
-    await Promise.all([
-      computeCallExperienceAvg(bookingIds, sql),
-      computeClientSatisfactionAvg(bookingIds, sql),
-      computeHireRate(expertId, sql),
-      computeRecencyScore(matchIds, sql),
-      computeTrustScore(expertId, sql),
-    ]);
-
-  // Composite formula (AC2): weights sum to 1.0
-  const compositeScore = Math.round(
-    (callExperienceAvg * 0.35 +
-      trustScore * 0.20 +
-      clientSatisfactionAvg * 0.20 +
-      hireRate * 0.10 +
-      recencyScore * 0.15) *
-      100
-  ) / 100;
-
-  // Write result atomically (AC2)
-  await sql`UPDATE experts SET composite_score = ${compositeScore}, score_updated_at = ${new Date().toISOString()} WHERE id = ${expertId}`;
 }
 
 // AC3: call_experience_avg — average of call_experience_surveys.score × 20 (1–5 → 0–100)

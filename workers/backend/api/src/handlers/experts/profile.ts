@@ -124,9 +124,9 @@ export async function handlePatchProfile(
       p_rate_min := ${rate_min ?? null},
       p_rate_max := ${rate_max ?? null},
       p_availability := ${availability ?? null},
-      p_profile := ${profile ? JSON.stringify(profile) : null}::jsonb,
-      p_preferences := ${preferences ? JSON.stringify(preferences) : null}::jsonb,
-      p_admissibility_criteria := ${admissibility_criteria !== undefined ? JSON.stringify(admissibility_criteria) : null}::jsonb,
+      p_profile := ${profile ? sql.json(profile) : null},
+      p_preferences := ${preferences ? sql.json(preferences) : null},
+      p_admissibility_criteria := ${admissibility_criteria !== undefined ? sql.json(admissibility_criteria) : null},
       p_outcome_tags := ${outcome_tags !== undefined ? outcome_tags : null}
     )`;
 
@@ -157,21 +157,17 @@ export async function handlePatchProfile(
     availability: updated.availability ?? null,
   });
 
-  // AC4 (E06S24): Fire-and-forget re-embedding via MATCHING_SERVICE — failure must NOT block profile update
+  // AC4 (E06S24, DEC-133): Fire-and-forget re-embedding via MATCHING_SERVICE RPC — failure must NOT block profile update
   if (env.MATCHING_SERVICE) {
     ctx.waitUntil(
-      env.MATCHING_SERVICE.fetch(new Request('https://matching/embed', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          expert_id: expertId,
-          profile: updated.profile ?? {},
-          rate_min: updated.rate_min ?? null,
-          rate_max: updated.rate_max ?? null,
-          availability: updated.availability ?? null,
-          outcome_tags: updated.outcome_tags ?? [],
-        }),
-      })).catch((err) => console.error('profile: MATCHING_SERVICE embed failed', err))
+      env.MATCHING_SERVICE.embed({
+        expert_id: expertId,
+        profile: updated.profile ?? {},
+        rate_min: updated.rate_min ?? null,
+        rate_max: updated.rate_max ?? null,
+        availability: updated.availability ?? null,
+        outcome_tags: updated.outcome_tags ?? [],
+      }).catch((err: unknown) => console.error('profile: MATCHING_SERVICE embed failed', err))
     );
   }
 

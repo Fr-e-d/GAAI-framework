@@ -26,6 +26,11 @@ id = "f6319960eb4348d8a3a8a375f5e42d9c"
 CORE_API_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
 TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 
+[[env.staging.services]]
+binding = "CORE_API"
+service = "callibrate-core-staging"
+entrypoint = "SatelliteRPC"
+
 # ── Production ─────────────────────────────────────────────────────────────────
 
 [env.production]
@@ -38,6 +43,11 @@ id = "3efd7935547146149495a9da3c2e8067"
 [env.production.vars]
 CORE_API_URL = "https://api.callibrate.io"
 TURNSTILE_SITE_KEY = "0x4AAAAAAA_PROD_SITE_KEY"
+
+[[env.production.services]]
+binding = "CORE_API"
+service = "callibrate-core-prod"
+entrypoint = "SatelliteRPC"
 
 # ── Secrets (set via wrangler secret put per env) ──────────────────────────────
 # SUPABASE_URL        — Supabase project URL
