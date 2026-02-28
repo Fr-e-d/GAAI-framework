@@ -38,6 +38,18 @@ export interface ExpertRow {
   score_updated_at: string | null;
   verified_at: string | null;
   outcome_tags: string[] | null; // E06S37: outcome-based profile tags
+  timezone: string; // E02S11: IANA timezone, NOT NULL DEFAULT 'UTC' at DB level
+}
+
+export interface ExpertAvailabilityRuleRow {
+  id: string;
+  expert_id: string;
+  day_of_week: number;
+  start_time: string; // 'HH:MM:SS' from postgres.js
+  end_time: string;   // 'HH:MM:SS' from postgres.js
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface BookingRow {

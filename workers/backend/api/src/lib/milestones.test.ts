@@ -43,6 +43,7 @@ function makeExpert(overrides: Partial<ExpertRow> = {}): ExpertRow {
     score_updated_at: null,
     spending_limit: null,
     verified_at: null,
+    timezone: 'UTC', // E02S11
     ...overrides,
   };
 }
