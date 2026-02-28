@@ -39,6 +39,7 @@ export interface ExpertRow {
   verified_at: string | null;
   outcome_tags: string[] | null; // E06S37: outcome-based profile tags
   timezone: string; // E02S11: IANA timezone, NOT NULL DEFAULT 'UTC' at DB level
+  booking_auto_confirm: boolean;  // E03S07: if false, requires expert approval
 }
 
 export interface ExpertAvailabilityRuleRow {
@@ -74,6 +75,7 @@ export interface BookingRow {
   scheduled_at: string | null;
   start_at: string | null;
   status: string | null;
+  confirmation_token: string | null;  // E03S07
 }
 
 export interface ProspectRow {
@@ -88,6 +90,7 @@ export interface ProspectRow {
   utm_content: string | null;
   utm_source: string | null;
   verified_at: string | null; // E06S39: set when OTP verification completes
+  no_show_count: number;  // E03S07
 }
 
 export interface MatchRow {

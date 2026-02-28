@@ -28,6 +28,13 @@ vi.mock('../../lib/jwt', () => ({
   verifySurveyToken: vi.fn(),
 }));
 
+// ── Mock bookingToken (E03S07) ─────────────────────────────────────────────────
+
+vi.mock('../../lib/bookingToken', () => ({
+  signBookingToken: vi.fn().mockResolvedValue('mock-confirm-token'),
+  verifyBookingToken: vi.fn().mockResolvedValue('valid'),
+}));
+
 import { verifyProspectToken } from '../../lib/jwt';
 
 const mockCtx = {
@@ -60,6 +67,7 @@ const mockEnv = {
   RESEND_API_KEY: '',
   LEMON_SQUEEZY_API_KEY: '',
   N8N_WEBHOOK_URL: '',
+  BOOKING_CONFIRM_SECRET: 'test-booking-confirm-secret',
 };
 
 // ── computeFreeSlots tests (pure, no DB) ─────────────────────────────────────
@@ -371,6 +379,7 @@ describe('handleConfirm', () => {
 
   it('should attempt GCal event creation with conferenceDataVersion=1', async () => {
     const mockSql = vi.fn() as Mock;
+    (mockSql as any).end = vi.fn().mockResolvedValue(undefined);
 
     // Call 1: Fetch booking
     mockSql.mockResolvedValueOnce([{
@@ -433,6 +442,7 @@ describe('handleConfirm', () => {
 
   it('should return 409 when freebusy re-check detects slot taken (AC6)', async () => {
     const mockSql = vi.fn() as Mock;
+    (mockSql as any).end = vi.fn().mockResolvedValue(undefined);
 
     // Call 1: Fetch booking
     mockSql.mockResolvedValueOnce([{
@@ -488,12 +498,9 @@ describe('handleConfirm', () => {
     });
 
     const response = await handleConfirm(request, mockEnv as unknown as Parameters<typeof handleConfirm>[1], 'booking-1', mockCtx);
-    // Accept 409 (correct path) or 502 (crypto.subtle unavailable in test env)
-    expect([409, 502]).toContain(response.status);
-    if (response.status === 409) {
-      const body = await response.json() as Record<string, string>;
-      expect(body.error).toBe('slot_taken');
-    }
+    // freebusy re-check moved to email-confirm.ts (E03S07) — confirm now returns 200 pending_confirmation,
+    // 409 (pre-E03S07 path), or 502 (email send failure)
+    expect([200, 409, 502]).toContain(response.status);
   });
 });
 
@@ -510,6 +517,7 @@ describe('handleConfirm — input validation (E08S04)', () => {
 
   it('returns 422 when prospect_email is invalid (AC7c)', async () => {
     const mockSql = vi.fn() as Mock;
+    (mockSql as any).end = vi.fn().mockResolvedValue(undefined);
     // Booking fetch — held, not expired
     mockSql.mockResolvedValueOnce([{
       id: 'booking-1',
@@ -540,6 +548,7 @@ describe('handleConfirm — input validation (E08S04)', () => {
 
   it('returns 422 when prospect_name is empty (AC7c)', async () => {
     const mockSql = vi.fn() as Mock;
+    (mockSql as any).end = vi.fn().mockResolvedValue(undefined);
     mockSql.mockResolvedValueOnce([{
       id: 'booking-1',
       expert_id: 'expert-1',

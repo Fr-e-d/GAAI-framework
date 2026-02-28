@@ -23,6 +23,10 @@ import { handleCancel } from './handlers/bookings/cancel';
 import { handleReschedule } from './handlers/bookings/reschedule';
 import { handleGetPrep } from './handlers/bookings/prep';
 import { handleScheduled } from './handlers/bookings/cron';
+import { handleEmailConfirm } from './handlers/bookings/email-confirm';
+import { handleEmailCancel } from './handlers/bookings/email-cancel';
+import { handleNoShow } from './handlers/bookings/no-show';
+import { handleConfirmationResend } from './handlers/bookings/confirmation-resend';
 import { handleVectorizeReindex } from './handlers/admin/vectorize';
 import { handleFlagLead } from './handlers/leads/flag';
 import { handleConfirmLead } from './handlers/leads/confirm';
@@ -216,6 +220,18 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       return handleGetPrep(request, env, prepMatch[1]);
     }
 
+    // GET /api/bookings/:id/email-confirm — public, no CORS (direct browser nav from email)
+    const emailConfirmMatch = pathname.match(/^\/api\/bookings\/([^/]+)\/email-confirm$/);
+    if (method === 'GET' && emailConfirmMatch && emailConfirmMatch[1]) {
+      return handleEmailConfirm(request, env, emailConfirmMatch[1], ctx);
+    }
+
+    // GET /api/bookings/:id/email-cancel — public, no CORS (direct browser nav from email)
+    const emailCancelMatch = pathname.match(/^\/api\/bookings\/([^/]+)\/email-cancel$/);
+    if (method === 'GET' && emailCancelMatch && emailCancelMatch[1]) {
+      return handleEmailCancel(request, env, emailCancelMatch[1], ctx);
+    }
+
     const corsResult = await handleCors(request, env);
     if (corsResult.preflight) return corsResult.preflight;
     if (!corsResult.allowed) return corsForbidden(corsResult.origin);
@@ -245,6 +261,22 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     const bookingDeleteMatch = pathname.match(/^\/api\/bookings\/([^/]+)$/);
     if (method === 'DELETE' && bookingDeleteMatch && bookingDeleteMatch[1]) {
       const response = await handleCancel(request, env, bookingDeleteMatch[1], ctx);
+      return addCorsHeaders(response, corsResult.origin);
+    }
+
+    // POST /api/bookings/:id/confirmation/resend — CORS-gated (called from satellite widget)
+    const resendMatch = pathname.match(/^\/api\/bookings\/([^/]+)\/confirmation\/resend$/);
+    if (method === 'POST' && resendMatch && resendMatch[1]) {
+      const response = await handleConfirmationResend(request, env, resendMatch[1]!, ctx);
+      return addCorsHeaders(response, corsResult.origin);
+    }
+
+    // POST /api/bookings/:id/no-show — expert authenticated
+    const noShowMatch = pathname.match(/^\/api\/bookings\/([^/]+)\/no-show$/);
+    if (method === 'POST' && noShowMatch && noShowMatch[1]) {
+      const authResult = await authenticate(request, env);
+      if (authResult.response) return authResult.response;
+      const response = await handleNoShow(request, env, authResult.user, noShowMatch[1]!, ctx);
       return addCorsHeaders(response, corsResult.origin);
     }
 

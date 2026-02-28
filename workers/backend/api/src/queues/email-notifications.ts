@@ -6,6 +6,7 @@ import { createSql } from '../lib/db';
 import type { ExpertRow, ProspectRow } from '../types/db';
 import { createServiceClient } from '../lib/supabase';
 import { signSurveyToken } from '../lib/jwt';
+import { buildReminderEmail } from '../lib/email';
 
 export async function consumeEmailNotifications(
   batch: MessageBatch<EmailNotificationMessage>,
@@ -42,9 +43,15 @@ export async function consumeEmailNotifications(
           break;
         case 'booking.cancelled':
         case 'booking.rescheduled':
+          break;
         case 'booking.reminder_prospect':
+          await sendReminderEmail('prospect', body, env);
+          break;
         case 'booking.reminder_expert':
-          // TODO(E06S16+): implement notification — stub acks for now
+          await sendReminderEmail('expert', body, env);
+          break;
+        case 'booking.expert_approval_request':
+          // Handled inline in email-confirm.ts — ack if queued
           break;
         case 'expert.billing.insufficient_balance':
           // TODO(E06S33+): implement insufficient balance email — stub acks for now
@@ -234,6 +241,65 @@ async function sendBookingConfirmedEnrichedEmail(
     env.EMAIL_FROM_DOMAIN || 'callibrate.io',
     env.EMAIL_REPLY_TO || 'support@callibrate.io'
   );
+}
+
+async function sendReminderEmail(
+  recipientType: 'prospect' | 'expert',
+  body: Extract<EmailNotificationMessage, { type: 'booking.reminder_prospect' | 'booking.reminder_expert' }>,
+  env: Env
+): Promise<void> {
+  const sql = createSql(env);
+  try {
+    const [booking] = await sql<{
+      start_at: string | null;
+      prospect_email: string | null;
+      prospect_name: string | null;
+      meeting_url: string | null;
+      expert_id: string | null;
+    }[]>`
+      SELECT start_at, prospect_email, prospect_name, meeting_url, expert_id
+      FROM bookings WHERE id = ${body.booking_id}`;
+
+    if (!booking?.start_at) throw new Error(`Booking not found: ${body.booking_id}`);
+
+    const [expert] = await sql<{ gcal_email: string | null; display_name: string | null }[]>`
+      SELECT gcal_email, display_name FROM experts WHERE id = ${booking.expert_id!}`;
+
+    if (!expert?.gcal_email) throw new Error(`Expert not found for booking: ${body.booking_id}`);
+
+    // Determine reminder type (j1 vs h1) based on how far before start_at we are
+    const hoursUntilStart = (new Date(booking.start_at).getTime() - Date.now()) / (1000 * 60 * 60);
+    const reminderType: 'j1' | 'h1' = hoursUntilStart >= 3 ? 'j1' : 'h1';
+
+    const { html, text } = buildReminderEmail({
+      recipientType,
+      expertName: expert.display_name ?? 'l\'expert',
+      prospectName: booking.prospect_name,
+      startAt: booking.start_at,
+      meetingUrl: booking.meeting_url,
+      reminderType,
+    });
+
+    const toEmail = recipientType === 'prospect' ? booking.prospect_email : expert.gcal_email;
+    if (!toEmail) throw new Error(`No email for ${recipientType} in booking ${body.booking_id}`);
+
+    const expertName = expert.display_name ?? 'l\'expert';
+    const subject = recipientType === 'prospect'
+      ? (reminderType === 'j1' ? `Rappel : votre appel avec ${expertName} est demain` : `Rappel : votre appel avec ${expertName} commence dans 1 heure`)
+      : (reminderType === 'j1' ? `Rappel : appel avec ${booking.prospect_name ?? 'un prospect'} demain` : `Rappel : appel avec ${booking.prospect_name ?? 'un prospect'} dans 1 heure`);
+
+    await sendResendEmail(
+      env.RESEND_API_KEY,
+      toEmail,
+      subject,
+      html,
+      text,
+      env.EMAIL_FROM_DOMAIN || 'callibrate.io',
+      env.EMAIL_REPLY_TO || 'support@callibrate.io',
+    );
+  } finally {
+    await sql.end();
+  }
 }
 
 async function sendSurveyEmail(

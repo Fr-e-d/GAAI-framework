@@ -3,6 +3,7 @@ import { createSql } from '../../lib/db';
 import { syncExpertPoolToD1 } from '../../cron/syncExpertPool';
 import { handleLsBillingCron } from '../../cron/lsBillingCron';
 import type { BookingRow, ExpertRow } from '../../types/db';
+import { captureEvent } from '../../lib/posthog';
 
 // AC13: scheduled() handler dispatches to sync function (AC4)
 export async function handleScheduled(controller: ScheduledController, env: Env): Promise<void> {
@@ -12,6 +13,8 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
     // AC4: sync expert pool to D1 every 5 minutes
     await syncExpertPoolToD1(env);
     await cleanupExpiredHolds(env);
+    await cleanupExpiredConfirmations(env);
+    await autoConfirmPendingExpertApproval(env);
   } else if (cron === '*/15 * * * *') {
     await dispatchReminders(env);
   } else if (cron === '0 * * * *') {
@@ -107,6 +110,71 @@ async function dispatchReminders(env: Env): Promise<void> {
     }
   }
 
+  } finally {
+    await sql.end();
+  }
+}
+
+// AC4 (E03S07): Expire pending_confirmation bookings older than 30 minutes
+async function cleanupExpiredConfirmations(env: Env): Promise<void> {
+  const sql = createSql(env);
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  try {
+    const expired = await sql<{ id: string; expert_id: string | null; prospect_id: string | null }[]>`
+      UPDATE bookings SET status = 'expired_no_confirmation', confirmation_token = NULL
+      WHERE status = 'pending_confirmation' AND created_at < ${cutoff}
+      RETURNING id, expert_id, prospect_id`;
+
+    for (const b of expired) {
+      captureEvent(env.POSTHOG_API_KEY, {
+        distinctId: `system`,
+        event: 'booking.expired_no_confirmation',
+        properties: { booking_id: b.id, expert_id: b.expert_id, prospect_id: b.prospect_id },
+      }).catch(() => {});
+    }
+
+    if (expired.length > 0) {
+      console.log(`cleanupExpiredConfirmations: expired ${expired.length} pending_confirmation bookings`);
+    }
+  } finally {
+    await sql.end();
+  }
+}
+
+// AC5 (E03S07): Auto-confirm pending_expert_approval bookings older than 24h
+async function autoConfirmPendingExpertApproval(env: Env): Promise<void> {
+  const sql = createSql(env);
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const confirmed = await sql<{ id: string; expert_id: string | null; prospect_id: string | null }[]>`
+      UPDATE bookings SET status = 'confirmed', confirmed_at = ${new Date().toISOString()}
+      WHERE status = 'pending_expert_approval' AND created_at < ${cutoff}
+      RETURNING id, expert_id, prospect_id`;
+
+    for (const b of confirmed) {
+      try {
+        await env.LEAD_BILLING.send({
+          type: 'booking.created',
+          booking_id: b.id,
+          expert_id: b.expert_id!,
+          prospect_id: b.prospect_id!,
+        });
+        await env.EMAIL_NOTIFICATIONS.send({
+          type: 'booking.confirmed',
+          booking_id: b.id,
+          expert_id: b.expert_id!,
+          prospect_id: b.prospect_id!,
+          meeting_url: '',
+          scheduled_at: '',
+        });
+      } catch (err) {
+        console.error('autoConfirmPendingExpertApproval: queue error for booking', b.id, err);
+      }
+    }
+
+    if (confirmed.length > 0) {
+      console.log(`autoConfirmPendingExpertApproval: confirmed ${confirmed.length} pending_expert_approval bookings`);
+    }
   } finally {
     await sql.end();
   }
