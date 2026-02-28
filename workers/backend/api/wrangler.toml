@@ -108,7 +108,7 @@ class_name = "BookingCompletedWorkflow"
 
 # Top-level (used by wrangler dev)
 [triggers]
-crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *"]
+crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *", "0 0 1 * *"]
 
 # ── Staging environment ───────────────────────────────────────────────────────
 
@@ -126,6 +126,10 @@ SURVEY_DELAY_38D_MS = "120000"
 # RESEND_API_KEY: set via: wrangler secret put RESEND_API_KEY --env staging  (E06S39: required for OTP email sending)
 # Staging acceleration: lead flag window = 1 minute (production default: 7 days)
 FLAG_WINDOW_MS = "60000"
+# E02S12: Direct booking secrets (set via wrangler secret put per env)
+# DIRECT_LINK_SECRET: set via: wrangler secret put DIRECT_LINK_SECRET --env staging
+# INTERNAL_API_KEY: set via: wrangler secret put INTERNAL_API_KEY --env staging
+# DIRECT_BOOKING_SECRET: set via: wrangler secret put DIRECT_BOOKING_SECRET --env staging
 
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
@@ -216,7 +220,7 @@ name = "booking-completed-workflow"
 class_name = "BookingCompletedWorkflow"
 
 [env.staging.triggers]
-crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *"]
+crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *", "0 0 1 * *"]
 
 # ── Production environment ────────────────────────────────────────────────────
 
@@ -318,4 +322,4 @@ name = "booking-completed-workflow"
 class_name = "BookingCompletedWorkflow"
 
 [env.production.triggers]
-crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *"]
+crons = ["*/5 * * * *", "*/15 * * * *", "0 * * * *", "0 0 1 * *"]

@@ -83,4 +83,12 @@ export interface Env {
   // Optional: defaults to 0.4 cents ($0.004) per extraction when absent.
   // Set in wrangler.toml [vars] or override per environment.
   EXTRACT_COST_CENTS?: string;
+
+  // E02S12: Direct booking link secrets (bound via wrangler secret put)
+  // DIRECT_LINK_SECRET: HMAC key for signing/verifying expert direct link tokens
+  // INTERNAL_API_KEY: Bearer token for internal Worker-to-Worker calls (landing → core)
+  // DIRECT_BOOKING_SECRET: HMAC key for signing magic-link JWTs in direct booking flow
+  DIRECT_LINK_SECRET: string;
+  INTERNAL_API_KEY: string;
+  DIRECT_BOOKING_SECRET: string;
 }

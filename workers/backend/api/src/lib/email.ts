@@ -171,6 +171,98 @@ export function buildReminderEmail(opts: {
   return { html, text };
 }
 
+// E02S12 AC16: Direct booking email confirmation (sent to prospect to confirm their email)
+export function buildDirectConfirmationEmail(opts: {
+  confirmUrl: string;
+  expiryHours: number;
+}): { html: string; text: string } {
+  const text = [
+    `Hello,`,
+    ``,
+    `You have submitted a booking request via an expert's direct link on Callibrate.`,
+    ``,
+    `Please confirm your email address by clicking the link below:`,
+    opts.confirmUrl,
+    ``,
+    `This link expires in ${opts.expiryHours} hours.`,
+    ``,
+    `If you did not submit this request, you can ignore this email.`,
+    ``,
+    `Powered by Callibrate`,
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Confirm your booking request</title></head>
+<body style="font-family:sans-serif;color:#111;max-width:480px;margin:0 auto;padding:24px;">
+  <p>Hello,</p>
+  <p>You have submitted a booking request via an expert&rsquo;s direct link on Callibrate.</p>
+  <p>Please confirm your email address to proceed:</p>
+  <p style="text-align:center;margin:24px 0;">
+    <a href="${opts.confirmUrl}" style="background:#4F46E5;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">
+      Confirm my booking request
+    </a>
+  </p>
+  <p style="color:#888;font-size:12px;">This link expires in ${opts.expiryHours} hours.</p>
+  <p style="color:#888;font-size:12px;">If you did not submit this request, you can ignore this email.</p>
+  <p style="margin-top:24px;font-size:12px;color:#888;">Powered by <a href="https://callibrate.io" style="color:#4F46E5;">Callibrate</a></p>
+</body>
+</html>`;
+
+  return { html, text };
+}
+
+// E02S12 AC17: Expert prep email for confirmed direct bookings
+export function buildDirectPrepEmail(opts: {
+  expertName: string;
+  requirementsBrief: string;
+  startAt: string;
+  prepUrl: string;
+}): { html: string; text: string } {
+  const dateStr = new Date(opts.startAt).toLocaleString('en-GB', {
+    timeZone: 'UTC',
+    weekday: 'long', day: 'numeric', month: 'long',
+    hour: '2-digit', minute: '2-digit'
+  });
+
+  const text = [
+    `Hello ${opts.expertName},`,
+    ``,
+    `A prospect has confirmed a booking via your direct link on Callibrate.`,
+    ``,
+    `Date: ${dateStr} (UTC)`,
+    ``,
+    `Requirements summary:`,
+    opts.requirementsBrief,
+    ``,
+    `View the full prep sheet: ${opts.prepUrl}`,
+    ``,
+    `Powered by Callibrate`,
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Direct booking confirmed</title></head>
+<body style="font-family:sans-serif;color:#111;max-width:480px;margin:0 auto;padding:24px;">
+  <p>Hello ${opts.expertName},</p>
+  <p>A prospect has confirmed a booking via your <strong>direct link</strong> on Callibrate.</p>
+  <p><strong>Date:</strong> ${dateStr} (UTC)</p>
+  <p><strong>Requirements summary:</strong></p>
+  <blockquote style="border-left:4px solid #4F46E5;padding:8px 16px;color:#444;background:#f9fafb;border-radius:0 4px 4px 0;">
+    ${opts.requirementsBrief.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+  </blockquote>
+  <p style="text-align:center;margin:24px 0;">
+    <a href="${opts.prepUrl}" style="background:#059669;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">
+      View full prep sheet
+    </a>
+  </p>
+  <p style="margin-top:24px;font-size:12px;color:#888;">Powered by <a href="https://callibrate.io" style="color:#4F46E5;">Callibrate</a></p>
+</body>
+</html>`;
+
+  return { html, text };
+}
+
 export function buildExpertApprovalEmail(opts: {
   expertName: string;
   prospectName: string;

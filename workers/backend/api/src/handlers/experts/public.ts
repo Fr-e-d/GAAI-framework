@@ -1,9 +1,11 @@
 // E06S38: GET /api/experts/public — anonymized public expert listing
 // E06S38: GET /api/experts/public/:slug — anonymized expert detail
+// E02S12: adds direct_link_url to slug detail response
 
 import { Env } from '../../types/env';
 import { createSql } from '../../lib/db';
 import { deriveQualityTier } from '../../lib/qualityTier';
+import { signDirectLinkToken } from '../../lib/directLinkToken';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
@@ -141,8 +143,9 @@ export async function handleGetPublicExpertBySlug(
     availability: string | null;
     outcome_tags: string[] | null;
     bio: string | null;
+    direct_link_nonce: string;
   }[]>`
-    SELECT id, headline, profile, rate_min, rate_max, composite_score, availability, outcome_tags, bio
+    SELECT id, headline, profile, rate_min, rate_max, composite_score, availability, outcome_tags, bio, direct_link_nonce
     FROM experts
     WHERE LEFT(id::text, 8) = ${shortHash}
   `;
@@ -163,6 +166,19 @@ export async function handleGetPublicExpertBySlug(
 
   const bioExcerpt = row.bio ? row.bio.substring(0, 200) : null;
 
+  // E02S12 AC2/AC5: Compute direct link URL using HMAC token.
+  // Guard: if DIRECT_LINK_SECRET is not set, return null (graceful degradation).
+  let directLinkUrl: string | null = null;
+  if (env.DIRECT_LINK_SECRET) {
+    try {
+      const token = await signDirectLinkToken(row.id, row.direct_link_nonce, env.DIRECT_LINK_SECRET);
+      directLinkUrl = `https://callibrate.io/book/${slug}?t=${token}`;
+    } catch {
+      // Fail-safe: do not expose the expert profile error; just omit the link
+      directLinkUrl = null;
+    }
+  }
+
   const detail = {
     slug: `exp-${row.id.substring(0, 8)}`,
     headline: row.headline,
@@ -177,6 +193,7 @@ export async function handleGetPublicExpertBySlug(
     bio_excerpt: bioExcerpt,
     availability_status: row.availability,
     outcome_tags: row.outcome_tags ?? [],
+    direct_link_url: directLinkUrl,
   };
 
   return new Response(JSON.stringify(detail), { status: 200, headers: JSON_HEADERS });

@@ -40,6 +40,10 @@ export interface ExpertRow {
   outcome_tags: string[] | null; // E06S37: outcome-based profile tags
   timezone: string; // E02S11: IANA timezone, NOT NULL DEFAULT 'UTC' at DB level
   booking_auto_confirm: boolean;  // E03S07: if false, requires expert approval
+  // E02S12: direct link token
+  direct_link_nonce: string;
+  direct_submissions_this_month: number;
+  direct_submissions_reset_at: string;
 }
 
 export interface ExpertAvailabilityRuleRow {
@@ -76,6 +80,7 @@ export interface BookingRow {
   start_at: string | null;
   status: string | null;
   confirmation_token: string | null;  // E03S07
+  lead_source: string | null;  // E02S12: 'direct' | 'callibrate' | null
 }
 
 export interface ProspectRow {

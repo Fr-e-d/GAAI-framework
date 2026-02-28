@@ -22,6 +22,7 @@ export default [
       route("gcal", "routes/dashboard.gcal.tsx"),
       route("billing", "routes/dashboard.billing.tsx"),
       route("analytics", "routes/dashboard.analytics.tsx"),
+      route("direct-link", "routes/dashboard.direct-link.tsx"),
     ]),
   ]),
 ] satisfies RouteConfig;

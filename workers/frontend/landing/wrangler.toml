@@ -3,11 +3,25 @@ main = "src/index.ts"
 compatibility_date = "2024-10-22"
 compatibility_flags = ["nodejs_compat"]
 
+# Top-level dev vars (wrangler dev only — not deployed)
+[vars]
+API_BASE_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
+# TURNSTILE_SITE_KEY: set via wrangler secret put (or .dev.vars for local)
+
 [env.staging]
 name = "callibrate-landing-staging"
+
+[env.staging.vars]
+API_BASE_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
+# TURNSTILE_SITE_KEY: set via: wrangler secret put TURNSTILE_SITE_KEY --env staging
+# INTERNAL_API_KEY: set via: wrangler secret put INTERNAL_API_KEY --env staging
+# POSTHOG_API_KEY: set via: wrangler secret put POSTHOG_API_KEY --env staging
 
 [env.production]
 name = "callibrate-landing-prod"
 
-# Secrets (set via wrangler secret put per env):
-# POSTHOG_API_KEY — PostHog project API key
+[env.production.vars]
+API_BASE_URL = "https://api.callibrate.io"
+# TURNSTILE_SITE_KEY: set via: wrangler secret put TURNSTILE_SITE_KEY --env production
+# INTERNAL_API_KEY: set via: wrangler secret put INTERNAL_API_KEY --env production
+# POSTHOG_API_KEY: set via: wrangler secret put POSTHOG_API_KEY --env production

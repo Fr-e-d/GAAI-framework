@@ -8,9 +8,19 @@ const BASE_SECURITY_HEADERS: Record<string, string> = {
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
 };
 
-// unsafe-inline required for PostHog snippet (inline script). No Turnstile on landing.
+// E02S12 AC3/AC8: CSP updated for expert profile + direct booking pages.
+// Added:
+//   script-src: challenges.cloudflare.com (Turnstile)
+//   connect-src: api.callibrate.io (direct booking form POST)
+//   frame-src: challenges.cloudflare.com (Turnstile iframe)
+// unsafe-inline required for PostHog snippet + inline page scripts.
 const HTML_CSP =
-  "default-src 'self'; script-src 'self' 'unsafe-inline' https://ph.callibrate.io; connect-src 'self' https://ph.callibrate.io; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'";
+  "default-src 'self'; " +
+  "script-src 'self' 'unsafe-inline' https://ph.callibrate.io https://challenges.cloudflare.com; " +
+  "connect-src 'self' https://ph.callibrate.io https://api.callibrate.io; " +
+  "img-src 'self' data: https:; " +
+  "style-src 'self' 'unsafe-inline'; " +
+  "frame-src https://challenges.cloudflare.com";
 
 export function applySecurityHeaders(response: Response): Response {
   const headers = new Headers(response.headers);

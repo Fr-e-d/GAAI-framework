@@ -42,6 +42,11 @@ import { handleGetBookings } from './handlers/experts/bookings';
 import { handleGetBilling } from './handlers/experts/billing';
 import { handleGetDashboard } from './handlers/experts/dashboard';
 import { handleGetPublicExperts, handleGetPublicExpertBySlug } from './handlers/experts/public';
+// E02S12: new handlers
+import { handleGetInternalExpertBySlug } from './handlers/experts/internal';
+import { handleGetDirectLinkInfo, handleRotateDirectLinkToken } from './handlers/experts/direct-link';
+import { handleDirectBookingSubmit } from './handlers/bookings/direct';
+import { handleDirectBookingEmailConfirm } from './handlers/bookings/direct-confirm';
 
 // CF Workflows — must be named exports so the runtime can locate the classes
 export { BookingConfirmedWorkflow } from './workflows/booking-confirmed.workflow';
@@ -364,6 +369,26 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     return handleGetPublicExpertBySlug(request, env, publicExpertMatch[1]);
   }
 
+  // ── E02S12: Internal expert route (Worker-to-Worker, INTERNAL_API_KEY auth) ─
+  // Must be BEFORE authenticated expert block — uses its own auth mechanism.
+  const internalExpertMatch = pathname.match(/^\/api\/experts\/internal\/([^/]+)$/);
+  if (method === 'GET' && internalExpertMatch && internalExpertMatch[1]) {
+    return handleGetInternalExpertBySlug(request, env, internalExpertMatch[1]);
+  }
+
+  // ── E02S12: Direct booking routes (unauthenticated — public, HMAC-gated) ──
+  // POST /api/bookings/direct/:slug — submit direct booking request
+  const directBookingMatch = pathname.match(/^\/api\/bookings\/direct\/([^/]+)$/);
+  if (method === 'POST' && directBookingMatch && directBookingMatch[1]) {
+    return handleDirectBookingSubmit(request, env, ctx, directBookingMatch[1]);
+  }
+
+  // GET /api/bookings/:id/direct-email-confirm — magic link email confirmation
+  const directEmailConfirmMatch = pathname.match(/^\/api\/bookings\/([^/]+)\/direct-email-confirm$/);
+  if (method === 'GET' && directEmailConfirmMatch && directEmailConfirmMatch[1]) {
+    return handleDirectBookingEmailConfirm(request, env, directEmailConfirmMatch[1], ctx);
+  }
+
   // ── Expert routes (authenticated) ───────────────────────────────────────
   if (pathname.startsWith('/api/experts/')) {
     const authResult = await authenticate(request, env);
@@ -420,6 +445,16 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     const dashboardMatch = pathname.match(/^\/api\/experts\/([^/]+)\/dashboard$/);
     if (method === 'GET' && dashboardMatch && dashboardMatch[1]) {
       return handleGetDashboard(request, env, user, dashboardMatch[1]);
+    }
+
+    // E02S12: direct link dashboard endpoints
+    const directLinkMatch = pathname.match(/^\/api\/experts\/([^/]+)\/direct-link$/);
+    if (directLinkMatch && directLinkMatch[1]) {
+      if (method === 'GET') return handleGetDirectLinkInfo(request, env, user, directLinkMatch[1]);
+    }
+    const directLinkRotateMatch = pathname.match(/^\/api\/experts\/([^/]+)\/direct-link\/rotate$/);
+    if (directLinkRotateMatch && directLinkRotateMatch[1]) {
+      if (method === 'PATCH') return handleRotateDirectLinkToken(request, env, user, directLinkRotateMatch[1]);
     }
 
     // E02S11: availability rules CRUD

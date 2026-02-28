@@ -18,6 +18,7 @@ import {
   Menu,
   X,
   LogOut,
+  Link2,
 } from "lucide-react";
 
 type LoaderData = { user: SessionUser };
@@ -58,6 +59,7 @@ const NAV_LINKS = [
   { to: "/dashboard/billing", label: "Facturation", icon: CreditCard, end: false },
   { to: "/dashboard/analytics", label: "Statistiques", icon: BarChart3, end: false },
   { to: "/dashboard/settings", label: "Paramètres", icon: Settings, end: false },
+  { to: "/dashboard/direct-link", label: "Lien direct", icon: Link2, end: false },
 ] as const;
 
 export default function DashboardLayout() {

@@ -45,6 +45,10 @@ function makeExpert(overrides: Partial<ExpertRow> = {}): ExpertRow {
     verified_at: null,
     timezone: 'UTC', // E02S11
     booking_auto_confirm: true, // E03S07
+    // E02S12: direct link fields
+    direct_link_nonce: 'default-test-nonce',
+    direct_submissions_this_month: 0,
+    direct_submissions_reset_at: new Date().toISOString(),
     ...overrides,
   };
 }

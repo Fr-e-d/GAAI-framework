@@ -20,6 +20,9 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
   } else if (cron === '0 * * * *') {
     // E06S33: hourly LS billing cron — auto-confirm leads + report usage
     await handleLsBillingCron(env);
+  } else if (cron === '0 0 1 * *') {
+    // E02S12 AC13: reset monthly direct submission quotas on the 1st of each month
+    await resetDirectSubmissions(env);
   } else {
     console.warn('handleScheduled: unknown cron', cron);
   }
@@ -115,14 +118,21 @@ async function dispatchReminders(env: Env): Promise<void> {
   }
 }
 
-// AC4 (E03S07): Expire pending_confirmation bookings older than 30 minutes
+// AC4 (E03S07): Expire pending_confirmation bookings older than 30 minutes.
+// E02S12 CRITICAL: Direct bookings (lead_source = 'direct') use a 24h magic link TTL.
+//   They must NOT be purged after 30 minutes — only after 24 hours.
 async function cleanupExpiredConfirmations(env: Env): Promise<void> {
   const sql = createSql(env);
-  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const cutoff30m = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const cutoff24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   try {
     const expired = await sql<{ id: string; expert_id: string | null; prospect_id: string | null }[]>`
       UPDATE bookings SET status = 'expired_no_confirmation', confirmation_token = NULL
-      WHERE status = 'pending_confirmation' AND created_at < ${cutoff}
+      WHERE status = 'pending_confirmation'
+        AND (
+          (lead_source IS DISTINCT FROM 'direct' AND created_at < ${cutoff30m})
+          OR (lead_source = 'direct' AND created_at < ${cutoff24h})
+        )
       RETURNING id, expert_id, prospect_id`;
 
     for (const b of expired) {
@@ -136,6 +146,21 @@ async function cleanupExpiredConfirmations(env: Env): Promise<void> {
     if (expired.length > 0) {
       console.log(`cleanupExpiredConfirmations: expired ${expired.length} pending_confirmation bookings`);
     }
+  } finally {
+    await sql.end();
+  }
+}
+
+// E02S12 AC13: Reset monthly direct submission quotas on the 1st of each month
+async function resetDirectSubmissions(env: Env): Promise<void> {
+  const sql = createSql(env);
+  try {
+    await sql`
+      UPDATE experts
+      SET direct_submissions_this_month = 0,
+          direct_submissions_reset_at = now()
+    `;
+    console.log('resetDirectSubmissions: reset monthly direct submission quotas for all experts');
   } finally {
     await sql.end();
   }
