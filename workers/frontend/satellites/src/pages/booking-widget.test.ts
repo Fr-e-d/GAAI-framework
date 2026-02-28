@@ -349,30 +349,29 @@ describe('getBookingWidgetStyles — AC7: success state', () => {
 });
 
 describe('getBookingWidgetScript — AC7: success state', () => {
-  it('includes renderSuccess function', () => {
-    expect(getBookingWidgetScript()).toContain('renderSuccess');
+  it('includes renderPendingConfirmation function', () => {
+    expect(getBookingWidgetScript()).toContain('renderPendingConfirmation');
   });
 
   it('includes bw-step-success in success HTML', () => {
     expect(getBookingWidgetScript()).toContain('bw-step-success');
   });
 
-  it('renders meeting_url as a link', () => {
+  it('renders confirmation_sent_to email', () => {
     const script = getBookingWidgetScript();
-    expect(script).toContain('meeting_url');
-    expect(script).toContain('bw-success-meet');
+    expect(script).toContain('confirmation_sent_to');
+    expect(script).toContain('bw-success-detail');
   });
 
-  it('renders prep_token as a prep link', () => {
+  it('includes resend button with countdown', () => {
     const script = getBookingWidgetScript();
-    expect(script).toContain('prep_token');
-    expect(script).toContain('bw-success-prep');
+    expect(script).toContain('bw-resend-btn');
+    expect(script).toContain('bw-countdown-sec');
   });
 
-  it('constructs prep URL from prep_token', () => {
+  it('calls resend confirmation endpoint', () => {
     const script = getBookingWidgetScript();
-    expect(script).toContain('/prep/');
-    expect(script).toContain('prepToken');
+    expect(script).toContain('/confirmation/resend');
   });
 
   it('includes bw-success-email-note in success HTML', () => {

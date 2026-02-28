@@ -30,6 +30,7 @@ import type { ProspectContext } from '../lib/admissibilityFilter';
 import { generateOtp, verifyOtpHash } from '../lib/otp';
 import { sendEmail, buildOtpEmail } from '../lib/email';
 import { preCheckEmail } from '../lib/emailValidation';
+import { deriveQualityTier } from '../lib/qualityTier';
 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -199,56 +200,76 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     return errorResponse('Validation failed', 422, { quiz_answers: 'must be an object' });
   }
 
+  console.log('[submit] START — satellite_id:', satellite_id);
+
+  // Phase 1: DB queries — open and close SQL connection BEFORE calling matching engine.
+  // CRITICAL: Service bindings share the parent's 6-connection limit.
+  // Keeping SQL open while calling MATCHING_SERVICE can exhaust the limit and cause deadlock.
   const sql = createSql(env);
-  // Ensure connection is released back to Hyperdrive pool after each request
-  try {
-
-  // Load satellite config
-  const [satellite] = await sql<Pick<SatelliteConfigRow, 'quiz_schema' | 'matching_weights'>[]>`
-    SELECT quiz_schema, matching_weights FROM satellite_configs WHERE id = ${satellite_id}`;
-
-  if (!satellite) return errorResponse('Satellite not found', 404);
-
-  // AC2: validate quiz_answers has all required keys from quiz_schema
-  const requiredKeys = extractRequiredKeys(satellite.quiz_schema);
-  const answers = quiz_answers as Record<string, unknown>;
-  const missingFields = requiredKeys.filter((k) => !(k in answers) || answers[k] === null || answers[k] === undefined || answers[k] === '');
-
-  if (missingFields.length > 0) {
-    return errorResponse('Validation failed', 422, { missing_fields: missingFields });
-  }
-
-  // Normalize quiz_answers → requirements JSONB
-  const requirements = normalizeRequirements(answers);
-
-  // AC3: create prospect row
-  const [prospect] = await sql<Pick<ProspectRow, 'id'>[]>`
-    INSERT INTO prospects (satellite_id, quiz_answers, requirements, status, utm_source, utm_campaign, utm_content)
-    VALUES (${satellite_id}, ${JSON.stringify(answers)}::jsonb, ${JSON.stringify(requirements)}::jsonb, 'anonymous', ${typeof utm_source === 'string' ? utm_source : null}, ${typeof utm_campaign === 'string' ? utm_campaign : null}, ${typeof utm_content === 'string' ? utm_content : null})
-    RETURNING id`;
-
-  if (!prospect) return errorResponse('Database error', 500);
-
-  // AC1/AC3: load expert pool from KV (with DB fallback)
-  const experts = await loadExpertPool(env);
-
-  // Resolve matching weights from satellite config or fall back to defaults
+  let satellite: Pick<SatelliteConfigRow, 'quiz_schema' | 'matching_weights'> | undefined;
+  let prospect: Pick<ProspectRow, 'id'> | undefined;
+  let requirements: ReturnType<typeof normalizeRequirements>;
+  let experts: Awaited<ReturnType<typeof loadExpertPool>>;
   let weights: MatchingWeights = DEFAULT_WEIGHTS;
-  if (satellite.matching_weights && typeof satellite.matching_weights === 'object' && !Array.isArray(satellite.matching_weights)) {
-    weights = satellite.matching_weights as unknown as MatchingWeights;
+
+  try {
+    console.log('[submit] querying satellite config...');
+    const [sat] = await sql<Pick<SatelliteConfigRow, 'quiz_schema' | 'matching_weights'>[]>`
+      SELECT quiz_schema, matching_weights FROM satellite_configs WHERE id = ${satellite_id}`;
+    satellite = sat;
+    if (!satellite) return errorResponse('Satellite not found', 404);
+    console.log('[submit] satellite found');
+
+    // AC2: validate quiz_answers has all required keys from quiz_schema
+    const requiredKeys = extractRequiredKeys(satellite.quiz_schema);
+    const answers = quiz_answers as Record<string, unknown>;
+    const missingFields = requiredKeys.filter((k) => !(k in answers) || answers[k] === null || answers[k] === undefined || answers[k] === '');
+    if (missingFields.length > 0) {
+      return errorResponse('Validation failed', 422, { missing_fields: missingFields });
+    }
+
+    // Normalize quiz_answers → requirements JSONB
+    requirements = normalizeRequirements(answers);
+
+    // AC3: create prospect row
+    console.log('[submit] inserting prospect...');
+    const [p] = await sql<Pick<ProspectRow, 'id'>[]>`
+      INSERT INTO prospects (satellite_id, quiz_answers, requirements, status, utm_source, utm_campaign, utm_content)
+      VALUES (${satellite_id}, ${JSON.stringify(answers)}::jsonb, ${JSON.stringify(requirements)}::jsonb, 'anonymous', ${typeof utm_source === 'string' ? utm_source : null}, ${typeof utm_campaign === 'string' ? utm_campaign : null}, ${typeof utm_content === 'string' ? utm_content : null})
+      RETURNING id`;
+    prospect = p;
+    if (!prospect) return errorResponse('Database error', 500);
+    console.log('[submit] prospect created:', prospect.id);
+
+    // AC1/AC3: load expert pool from KV (with DB fallback)
+    console.log('[submit] loading expert pool...');
+    experts = await loadExpertPool(env);
+    console.log('[submit] expert pool loaded, size:', experts.length);
+
+    if (satellite.matching_weights && typeof satellite.matching_weights === 'object' && !Array.isArray(satellite.matching_weights)) {
+      weights = satellite.matching_weights as unknown as MatchingWeights;
+    }
+  } finally {
+    // CLOSE SQL before calling matching engine to free the connection slot
+    console.log('[submit] closing SQL connection before service binding call...');
+    await sql.end();
+    console.log('[submit] SQL connection closed');
   }
 
+  // Phase 2: Call matching engine via service binding (SQL is now closed)
   // AC4 (E06S24): Delegate scoring to callibrate-matching via Service Binding (zero network hop)
   // AC6: Fallback to local deterministic scoring when MATCHING_SERVICE not bound
   if (env.MATCHING_SERVICE) {
     try {
+      console.log('[submit] calling MATCHING_SERVICE.fetch...');
       const matchResp = await env.MATCHING_SERVICE.fetch(
         new Request('https://matching/match', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prospect_id: prospect.id, satellite_id }),
+          body: JSON.stringify({ prospect_id: prospect!.id, satellite_id }),
         })
       );
+      console.log('[submit] MATCHING_SERVICE responded:', matchResp.status);
       if (matchResp.ok) {
         const matchBody = await matchResp.json() as {
           computed: number;
@@ -256,11 +277,12 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
           billing_excluded?: { expert_id: string; reason: string }[];
           admissibility_excluded?: { expert_id: string; reason: string }[];
         };
+        console.log('[submit] matching done, computed:', matchBody.computed);
         const billingExcluded = matchBody.billing_excluded ?? [];
         if (billingExcluded.length > 0) {
           const lpResult = calculateLeadPrice(
-            requirements.budget_range?.max ?? null,
-            { budget_max: requirements.budget_range?.max ?? null }
+            requirements!.budget_range?.max ?? null,
+            { budget_max: requirements!.budget_range?.max ?? null }
           );
           for (const ex of billingExcluded) {
             ctx.waitUntil(
@@ -285,19 +307,25 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
             })
           );
         }
-        const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
-        return jsonResponse({ prospect_id: prospect.id, token, token_expires_at: expiresAt });
+        const { token, expiresAt } = await signProspectToken(prospect!.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+        console.log('[submit] SUCCESS — prospect_id:', prospect!.id);
+        return jsonResponse({ prospect_id: prospect!.id, token, token_expires_at: expiresAt });
       }
-      console.error('prospect submit: MATCHING_SERVICE returned', matchResp.status, '— falling back to local scoring');
+      console.error('[submit] MATCHING_SERVICE returned', matchResp.status, '— falling back to local scoring');
     } catch (err) {
-      console.error('prospect submit: MATCHING_SERVICE.fetch failed, falling back to local scoring', err);
+      console.error('[submit] MATCHING_SERVICE.fetch failed, falling back to local scoring', err);
     }
   }
 
   // AC6 Fallback: local deterministic scoring (no Vectorize/AI — those bindings live in Matching Worker)
+  console.log('[submit] FALLBACK: local deterministic scoring');
+
+  // Re-open SQL connection for fallback INSERT queries
+  const sqlFallback = createSql(env);
+  try {
 
   // AC1: calculate leadPrice once
-  const budgetMax = requirements.budget_range?.max ?? null;
+  const budgetMax = requirements!.budget_range?.max ?? null;
   const lpResultFallback = calculateLeadPrice(budgetMax, { budget_max: budgetMax });
   const leadPrice = lpResultFallback.amount;
 
@@ -348,8 +376,8 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
 
   // AC7: all excluded → still return token (prospect was submitted successfully)
   if (eligible.length === 0) {
-    const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
-    return jsonResponse({ prospect_id: prospect.id, token, token_expires_at: expiresAt });
+    const { token, expiresAt } = await signProspectToken(prospect!.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+    return jsonResponse({ prospect_id: prospect!.id, token, token_expires_at: expiresAt });
   }
 
   const similarityMap = new Map<string, number>();
@@ -372,7 +400,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
 
       scoredResults.push({ score });
       return {
-        prospect_id: prospect.id,
+        prospect_id: prospect!.id,
         expert_id: expert.id,
         score,
         score_breakdown: breakdown as unknown as Json,
@@ -388,7 +416,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
 
     // AC3: INSERT top 20 scored results
     for (const row of top20Rows) {
-      await sql`
+      await sqlFallback`
         INSERT INTO matches (prospect_id, expert_id, score, score_breakdown, status, expires_at)
         VALUES (${row.prospect_id}, ${row.expert_id}, ${row.score}, ${JSON.stringify(row.score_breakdown)}::jsonb, ${row.status}, ${row.expires_at})
         ON CONFLICT DO NOTHING`;
@@ -411,28 +439,28 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
   });
 
   // Sign JWT token (24h TTL)
-  const { token, expiresAt } = await signProspectToken(prospect.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+  const { token, expiresAt } = await signProspectToken(prospect!.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
 
   ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
-    distinctId: `prospect:${prospect.id}`,
+    distinctId: `prospect:${prospect!.id}`,
     event: 'prospect.form_submitted',
     properties: {
       satellite_id,
       utm_source: typeof utm_source === 'string' ? utm_source : null,
       utm_campaign: typeof utm_campaign === 'string' ? utm_campaign : null,
       utm_content: typeof utm_content === 'string' ? utm_content : null,
-      quiz_field_count: Object.keys(answers).length,
+      quiz_field_count: Object.keys(quiz_answers as Record<string, unknown>).length,
     },
   }));
 
   return jsonResponse({
-    prospect_id: prospect.id,
+    prospect_id: prospect!.id,
     token,
     token_expires_at: expiresAt,
   });
 
   } finally {
-    ctx.waitUntil(sql.end());
+    ctx.waitUntil(sqlFallback.end());
   }
 }
 
@@ -496,6 +524,7 @@ export async function handleProspectMatches(
         rank: idx + 1,
         score: match.score ?? 0,
         score_breakdown: breakdown,
+        quality_tier: deriveQualityTier(expert?.composite_score ?? null),
         skills: profile.skills ?? [],
         industries: profile.industries ?? [],
         project_types: profile.project_types ?? [],

@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - staging
-      - main
+      - production
     paths:
       - "workers/frontend/dashboard/**"
 
@@ -37,7 +37,7 @@ jobs:
           workingDirectory: workers/frontend/dashboard
 
   deploy-production:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/production'
     runs-on: ubuntu-latest
     name: Deploy Dashboard to Production
     steps:
