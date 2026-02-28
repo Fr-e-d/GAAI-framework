@@ -1214,7 +1214,7 @@ items:
     epic: E06
     title: "Multi-project support: prospect ≠ project data model (DEC-124)"
     priority: medium
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S41.story.md
     dependencies: [E06S39, E03S08]
     notes: "DEC-124: Breaking data model change. New prospect_projects table (id, prospect_id FK, satellite_id, freetext, requirements JSONB, extraction_confidence JSONB, status, created_at). Migrate matches table to use project_id FK instead of prospect_id. Update all matching/billing endpoints. Flow for identified prospect (project 2+): freetext → match → full profiles immediately (no email gate, no OTP). Anti-abuse: max 5 active projects/prospect, 3 new/24h, duplicate detection (cosine similarity >85%). 'Autre projet?' CTA on results page. Billing remains at booking per DEC-14/30. Post-MVP because 1 prospect = 1 project suffices at launch."
