@@ -826,6 +826,7 @@ items:
     pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/61"
     pr_number: 61
     pr_status: merged
+    cost_usd: 11.11
     artefact: contexts/artefacts/stories/E03S04.story.md
     dependencies: [E03S06, E06S14, E03S05]
     notes: "Discovery 2026-02-27. 10 ACs. Server-rendered for SEO. Filtered by satellite vertical. Anonymized cards (tier, score, headline, skills, rate). Profile detail pages with dual CTAs ('Vérifier la compatibilité' → /match, 'Débloquer ce profil' → email gate). ⚠️ BLOCKING: requires GET /api/experts/public endpoint on Core API (E06S38 — to be created). Delivery must flag gap before starting."
