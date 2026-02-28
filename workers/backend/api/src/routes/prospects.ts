@@ -835,3 +835,84 @@ export async function handleOtpVerify(
 
   return jsonResponse({ verified: true, email: otpRecord.email });
 }
+
+// ── POST /api/prospects/create-from-directory ─────────────────────────────────
+// E03S04 AC4: Lightweight prospect creation for directory-sourced bookings.
+// Body: { email: string, expert_slug: string }
+// Response: { prospect_id: string, token: string, expert_id: string }
+// Creates a minimal identified prospect record so the booking widget can be used.
+// The caller stores prospect_id + token in sessionStorage and opens the booking widget.
+
+export async function handleCreateFromDirectory(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  // Rate limiting
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+
+  const { email, expert_slug } = body as Record<string, unknown>;
+
+  if (!email || typeof email !== 'string') {
+    return errorResponse('Missing required field: email', 422);
+  }
+  if (!isValidEmail(email)) {
+    return errorResponse('Invalid email format', 422);
+  }
+  if (!expert_slug || typeof expert_slug !== 'string') {
+    return errorResponse('Missing required field: expert_slug', 422);
+  }
+
+  // Validate slug format: exp-{8 hex chars}
+  if (!expert_slug.startsWith('exp-') || expert_slug.length < 12) {
+    return errorResponse('Invalid expert_slug format', 422);
+  }
+
+  const shortHash = expert_slug.substring(4);
+  const sql = createSql(env);
+
+  // Resolve expert by slug
+  const [expertRow] = await sql<{ id: string }[]>`
+    SELECT id FROM experts WHERE LEFT(id::text, 8) = ${shortHash} LIMIT 1
+  `;
+
+  if (!expertRow) {
+    return errorResponse('Expert not found', 404);
+  }
+
+  const expertId = expertRow.id;
+
+  // Create minimal identified prospect record
+  const [prospectRow] = await sql<{ id: string }[]>`
+    INSERT INTO prospects (satellite_id, email, status, quiz_answers, requirements)
+    VALUES (NULL, ${email}, 'identified', NULL, NULL)
+    RETURNING id
+  `;
+
+  if (!prospectRow) {
+    return errorResponse('Failed to create prospect', 500);
+  }
+
+  const prospectId = prospectRow.id;
+
+  // Issue a prospect:identify token (same audience as identify flow — booking widget uses it)
+  const { token } = await signProspectToken(prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:identify');
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospectId}`,
+    event: 'prospect.created_from_directory',
+    properties: { expert_id: expertId, expert_slug },
+  }));
+
+  return jsonResponse({ prospect_id: prospectId, token, expert_id: expertId });
+}

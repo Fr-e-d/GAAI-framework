@@ -11,6 +11,8 @@ import { renderPrivacyPolicy } from './pages/privacy';
 import { renderTermsOfService } from './pages/terms';
 import { renderRobotsTxt } from './pages/robots';
 import { renderSitemapXml } from './pages/sitemap';
+import { renderExpertsDirectoryPage } from './pages/experts-directory';
+import { renderExpertProfilePage } from './pages/experts-profile';
 
 type AppEnv = {
   Bindings: Env;
@@ -115,9 +117,10 @@ app.get('/robots.txt', (c) => {
 
 // ── sitemap.xml ──────────────────────────────────────────────────────────────
 
-app.get('/sitemap.xml', (c) => {
+app.get('/sitemap.xml', async (c) => {
   const config = c.get('config');
-  return new Response(renderSitemapXml(config), {
+  const sitemapXml = await renderSitemapXml(config, c.env.CORE_API_URL);
+  return new Response(sitemapXml, {
     status: 200,
     headers: {
       'Content-Type': 'application/xml',
@@ -180,6 +183,47 @@ app.get('/results', (c) => {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store',
+    },
+  });
+});
+
+// ── Expert directory (/experts) — AC1, AC2, AC3, AC6, AC7, AC8, AC9 ──────────
+
+app.get('/experts', async (c) => {
+  const config = c.get('config');
+  const html = await renderExpertsDirectoryPage(config, c.env.POSTHOG_API_KEY, c.env.CORE_API_URL);
+  return new Response(html, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600',
+    },
+  });
+});
+
+// ── Expert profile page (/experts/:slug) — AC4, AC7, AC8, AC11 ───────────────
+
+app.get('/experts/:slug', async (c) => {
+  const config = c.get('config');
+  const slug = c.req.param('slug');
+  const { html, status } = await renderExpertProfilePage(
+    config,
+    c.env.POSTHOG_API_KEY,
+    c.env.CORE_API_URL,
+    slug,
+  );
+  if (status === 404) {
+    const notFoundHtml = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Expert introuvable</title><meta name="robots" content="noindex"></head><body><p>Expert introuvable. <a href="/experts">Retour au répertoire</a></p></body></html>`;
+    return new Response(notFoundHtml, {
+      status: 404,
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+  return new Response(html, {
+    status,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': status === 200 ? 'public, max-age=300, stale-while-revalidate=3600' : 'no-store',
     },
   });
 });

@@ -6,7 +6,7 @@ import { authenticate } from './middleware/auth';
 import { handleRegister } from './handlers/experts/register';
 import { handleGetProfile, handlePatchProfile } from './handlers/experts/profile';
 import { handleSatelliteConfig } from './routes/satellites';
-import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify } from './routes/prospects';
+import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify, handleCreateFromDirectory } from './routes/prospects';
 import { handleCors, addCorsHeaders, corsForbidden } from './lib/cors';
 import { handleGcalAuthUrl, handleGcalStatus, handleGcalDisconnect, handleGcalCallback } from './handlers/experts/gcal';
 import { handleLsWebhook } from './handlers/webhooks/lemonsqueezy';
@@ -165,6 +165,12 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     // POST /api/prospects/submit
     if (method === 'POST' && pathname === '/api/prospects/submit') {
       const response = await handleProspectSubmit(request, env, ctx);
+      return addCorsHeaders(response, corsResult.origin);
+    }
+
+    // POST /api/prospects/create-from-directory — E03S04 AC4
+    if (method === 'POST' && pathname === '/api/prospects/create-from-directory') {
+      const response = await handleCreateFromDirectory(request, env, ctx);
       return addCorsHeaders(response, corsResult.origin);
     }
 
