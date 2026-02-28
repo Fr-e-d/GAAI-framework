@@ -1256,6 +1256,7 @@ items:
     pr_number: 59
     pr_status: "merged"
     completed_at: "2026-02-28T13:21:20+0000"
+    cost_usd: 4.17
     artefact: contexts/artefacts/stories/E09S03.story.md
     dependencies: []
     notes: "callibrate-matching has 10 source files and zero tests. Add vitest + test files for score.ts, pricing.ts, expertPool.ts. Focus on pure functions first. 9 ACs."
