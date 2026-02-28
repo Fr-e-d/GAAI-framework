@@ -1160,7 +1160,7 @@ items:
     epic: E02
     title: "Expert public profile page — SEO + direct booking link (DEC-131)"
     priority: medium
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E02S12.story.md
     dependencies: [E02S09, E06S38, E02S10, E02S11, E06S11]
     notes: "DEC-131: Expert direct traffic model. callibrate.io/experts/:slug — 2 modes. Standard (indexed, anonymized, SEO): max-snippet:150, JSON-LD Person sans contact, robots.txt bloque PerplexityBot/GPTBot/OAI-SearchBot/Google-Extended/anthropic-ai sur /experts/*. Direct (?ref=direct, noindex): profil complet, freetext + extraction + booking + magic link email (remplace OTP). Quota 100 soumissions/mois. DB: bookings.lead_source + experts.direct_submissions_this_month + monthly cron reset. Dashboard: direct link copy button + usage stats. E06S38 DONE (PR#42 merged). Dépend de E02S09 (callibrate.io landing Worker)."
