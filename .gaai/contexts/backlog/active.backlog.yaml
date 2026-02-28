@@ -1155,7 +1155,7 @@ items:
     epic: E03
     title: "Booking confirmation email + reminders + no-show tracking (DEC-127)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E03S07.story.md
     dependencies: [E03S06, E06S39]
     notes: "DEC-127: After prospect selects a slot, send confirmation email (confirm/cancel buttons, TTL 30min). If not confirmed within 30min → slot released, booking cancelled. Automated reminders: J-1 (24h before) + H-1 (1h before) by email. No-show tracking: counter per prospect in DB. After 2 no-shows → flag prospect, require prepayment for future bookings. Depends on E06S39 for email sending infrastructure (Resend/SES)."
