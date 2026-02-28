@@ -1095,7 +1095,11 @@ items:
     epic: E06
     title: "Email OTP verification service (DEC-121/DEC-122)"
     priority: critical
-    status: in_progress
+    status: done
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/53"
+    pr_number: 53
+    pr_status: "merged"
+    completed_at: "2026-02-28T10:36:32+00:00"
     artefact: contexts/artefacts/stories/E06S39.story.md
     dependencies: []
     notes: "DEC-121: OTP inline 6 digits (Calendly pattern). DEC-122: MX check + disposable email blacklist. New lib/otp.ts (generate, hash, TTL 10min, validate) + lib/email.ts (Resend/SES integration). New endpoints POST /api/prospects/{id}/otp/send + POST /api/prospects/{id}/otp/verify. Modify POST /api/prospects/{id}/identify to require verified OTP. Rate limits: 3 sends/email/24h, 5 attempts/session. Pre-checks: syntax + MX record + disposable blacklist. Blocks E03S03 email gate integrity."
