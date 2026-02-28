@@ -239,7 +239,7 @@ if not field_found:
 
     # Insertion order: after the last delivery-metadata field present,
     # or after status: if none exist
-    DELIVERY_FIELDS = ['status', 'ai_cost_usd', 'human_md_estimate', 'human_cost_usd', 'started_at', 'completed_at', 'pr_url', 'pr_number', 'pr_status']
+    DELIVERY_FIELDS = ['status', 'cost_usd', 'human_md_estimate', 'human_cost_usd', 'started_at', 'completed_at', 'pr_url', 'pr_number', 'pr_status']
     insert_after = -1
     for i in range(block_start + 1, block_end):
         fm = re.match(r'^\s+(\w+):', lines[i])
