@@ -73,9 +73,9 @@ export async function handleMatchCompute(request: Request, env: Env, ctx: Execut
     try {
       matchBody = await env.MATCHING_SERVICE.match({
         prospect_id,
-        satellite_id,
+        satellite_id: typeof satellite_id === 'string' ? satellite_id : '',
         project_id: typeof project_id === 'string' && project_id ? project_id : null,
-      }) as typeof matchBody;
+      });
     } catch (err) {
       console.error('[matches] RPC match() failed:', err);
       return errorResponse('Matching service error', 502);

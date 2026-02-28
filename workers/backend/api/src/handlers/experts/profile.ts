@@ -162,11 +162,11 @@ export async function handlePatchProfile(
     ctx.waitUntil(
       env.MATCHING_SERVICE.embed({
         expert_id: expertId,
-        profile: updated.profile ?? {},
+        profile: (updated.profile ?? {}) as Record<string, unknown>,
         rate_min: updated.rate_min ?? null,
         rate_max: updated.rate_max ?? null,
         availability: updated.availability ?? null,
-        outcome_tags: updated.outcome_tags ?? [],
+        outcome_tags: (updated.outcome_tags ?? []) as string[],
       }).catch((err: unknown) => console.error('profile: MATCHING_SERVICE embed failed', err))
     );
   }
