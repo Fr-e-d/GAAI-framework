@@ -80,6 +80,8 @@ export async function handleRegister(
 
   const sql = createSql(env);
 
+  try {
+
   // AC4: Check normalized_email uniqueness before insert
   if (normalized) {
     const existing = await sql<{ id: string }[]>`
@@ -180,4 +182,8 @@ export async function handleRegister(
       headers: { 'Content-Type': 'application/json' },
     }
   );
+
+  } finally {
+    ctx.waitUntil(sql.end());
+  }
 }

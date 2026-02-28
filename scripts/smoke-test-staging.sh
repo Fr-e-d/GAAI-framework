@@ -56,6 +56,7 @@ FAILURES=0
 EXPERT_ID=""
 PROSPECT_ID=""
 JWT=""
+FLOW_TOKEN=""
 
 # Temp file for curl response bodies (avoids macOS head -n -1 issues)
 TMP_FILE=$(mktemp /tmp/smoke_test_XXXXXX.json)
@@ -237,9 +238,15 @@ do_post "$CORE_URL/api/extract" \
   '{"text":"Je cherche un expert n8n pour automatiser mon CRM, budget 5k euros"}'
 
 if [[ "$RESP_CODE" == "200" ]]; then
+  # Capture flow_token for AC7 (E06S40: extract → flow_token → submit chain)
+  FLOW_TOKEN=$(echo "$RESP_BODY" | grep -o '"flow_token":"[^"]*"' | cut -d'"' -f4 || true)
   if echo "$RESP_BODY" | grep -qE '"skills_needed"|"budget_range"|"timeline"'; then
     pass "AC6: AI extraction — HTTP 200 | structured ProspectRequirements returned"
-    note "response: $RESP_BODY"
+    if [[ -n "$FLOW_TOKEN" ]]; then
+      note "flow_token captured (${#FLOW_TOKEN} chars) — will chain to AC7"
+    else
+      note "WARNING: no flow_token in response — AC7 will fail"
+    fi
   else
     pass "AC6: AI extraction — HTTP 200 | $RESP_BODY"
   fi
@@ -253,32 +260,40 @@ fi
 # ── AC7: Prospect submit ──────────────────────────────────────────────────────
 
 info "AC7: POST /api/prospects/submit"
-# Required quiz fields for 'default' satellite: challenge, budget_range, timeline, languages
-SUBMIT_PAYLOAD="{
-  \"satellite_id\": \"$SATELLITE_ID\",
-  \"cf-turnstile-response\": \"$TURNSTILE_TOKEN\",
-  \"quiz_answers\": {
-    \"challenge\": \"Automate CRM workflows using n8n for lead qualification\",
-    \"budget_range\": {\"min\": 3000, \"max\": 8000},
-    \"timeline\": \"3_months\",
-    \"languages\": [\"en\", \"fr\"],
-    \"skills_needed\": [\"n8n\", \"python\", \"automation\"],
-    \"industry\": \"saas\",
-    \"company_size\": \"2_10\"
-  }
-}"
 
-do_post "$CORE_URL/api/prospects/submit" "$SUBMIT_PAYLOAD"
-
-if [[ "$RESP_CODE" == "200" || "$RESP_CODE" == "201" ]]; then
-  PROSPECT_ID=$(echo "$RESP_BODY" | grep -o '"prospect_id":"[^"]*"' | cut -d'"' -f4 || true)
-  pass "AC7: Prospect submitted — HTTP $RESP_CODE | prospect_id=$PROSPECT_ID"
-elif [[ "$RESP_CODE" == "422" ]]; then
-  fail "AC7: Prospect submit — HTTP 422 | $RESP_BODY"
-  note "422 = Turnstile failed or quiz validation error"
-  note "Check: TURNSTILE_SECRET_KEY='1x0000000000000000000000000000000AA' in staging vars"
+if [[ -z "$FLOW_TOKEN" ]]; then
+  fail "AC7: Prospect submit — SKIPPED (no flow_token from AC6 extract)"
+  note "flow_token is required since E06S40. AC6 must succeed first."
 else
-  fail "AC7: Prospect submit — HTTP $RESP_CODE | $RESP_BODY"
+  # Required quiz fields for 'default' satellite: challenge, budget_range, timeline, languages
+  # flow_token from AC6 extract is required (E06S40: anti-gaming HMAC chain)
+  SUBMIT_PAYLOAD="{
+    \"satellite_id\": \"$SATELLITE_ID\",
+    \"cf-turnstile-response\": \"$TURNSTILE_TOKEN\",
+    \"flow_token\": \"$FLOW_TOKEN\",
+    \"quiz_answers\": {
+      \"challenge\": \"Automate CRM workflows using n8n for lead qualification\",
+      \"budget_range\": {\"min\": 3000, \"max\": 8000},
+      \"timeline\": \"3_months\",
+      \"languages\": [\"en\", \"fr\"],
+      \"skills_needed\": [\"n8n\", \"python\", \"automation\"],
+      \"industry\": \"saas\",
+      \"company_size\": \"2_10\"
+    }
+  }"
+
+  do_post "$CORE_URL/api/prospects/submit" "$SUBMIT_PAYLOAD"
+
+  if [[ "$RESP_CODE" == "200" || "$RESP_CODE" == "201" ]]; then
+    PROSPECT_ID=$(echo "$RESP_BODY" | grep -o '"prospect_id":"[^"]*"' | cut -d'"' -f4 || true)
+    pass "AC7: Prospect submitted — HTTP $RESP_CODE | prospect_id=$PROSPECT_ID"
+  elif [[ "$RESP_CODE" == "422" ]]; then
+    fail "AC7: Prospect submit — HTTP 422 | $RESP_BODY"
+    note "422 = Turnstile failed or quiz validation error"
+    note "Check: TURNSTILE_SECRET_KEY='1x0000000000000000000000000000000AA' in staging vars"
+  else
+    fail "AC7: Prospect submit — HTTP $RESP_CODE | $RESP_BODY"
+  fi
 fi
 
 # ── AC8: GET matches ──────────────────────────────────────────────────────────
