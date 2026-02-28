@@ -86,13 +86,18 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     return errorResponse('prospect_id is required', 422);
   }
 
+  console.log('[matching] handleMatch START', { prospect_id, satellite_id });
+  console.log('[matching] creating SQL connection...');
   const sql = createSql(env);
+  console.log('[matching] SQL connection created, connectionString length:', env.HYPERDRIVE?.connectionString?.length ?? 'NO HYPERDRIVE');
 
   try {
 
   // Load prospect requirements
+  console.log('[matching] querying prospect...');
   const [prospect] = await sql<Pick<ProspectRow, 'id' | 'requirements' | 'satellite_id'>[]>`
     SELECT id, requirements, satellite_id FROM prospects WHERE id = ${prospect_id}`;
+  console.log('[matching] prospect query done, found:', !!prospect);
   if (!prospect) return errorResponse('Prospect not found', 404);
 
   // Resolve matching weights (satellite override or default)
@@ -110,7 +115,9 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
   }
 
   // Load expert pool (Cache API L1 → D1 → Hyperdrive)
+  console.log('[matching] loading expert pool...');
   const expertPool = await loadExpertPool(env);
+  console.log('[matching] expert pool loaded, size:', expertPool.length);
   if (expertPool.length === 0) {
     return jsonResponse({ computed: 0, top_matches: [] });
   }
@@ -125,12 +132,15 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     skills: requirements.skills_needed ?? [],
   });
   const leadPrice = leadPriceResult.amount;
+  console.log('[matching] leadPrice:', leadPrice, 'budgetMax:', budgetMax);
 
   // AC2–AC4: load billing data and apply filter (live Hyperdrive queries)
   const poolExpertIds = expertPool.map((e) => e.id);
+  console.log('[matching] querying billing data for', poolExpertIds.length, 'experts...');
   const billingRows = await sql<
     { id: string; credit_balance: number; max_lead_price: number | null; spending_limit: number | null }[]
   >`SELECT id, credit_balance, max_lead_price, spending_limit FROM experts WHERE id = ANY(${poolExpertIds})`;
+  console.log('[matching] billing rows:', billingRows.length);
 
   const monthStart = new Date();
   monthStart.setUTCDate(1);
@@ -153,6 +163,7 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     if (existing) existing.monthly_spend = row.monthly_spend;
   }
 
+  console.log('[matching] spend rows done, building billing map...');
   // Apply billing filter
   const billingExcluded: BillingExclusion[] = [];
   const eligible = expertPool.filter((expert) => {
@@ -172,6 +183,8 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     return true;
   });
 
+  console.log('[matching] billing filter done, eligible:', eligible.length, 'excluded:', billingExcluded.length);
+
   // AC7: all experts excluded → return empty results (HTTP 200)
   if (eligible.length === 0) {
     return jsonResponse({ computed: 0, top_matches: [], billing_excluded: billingExcluded });
@@ -182,15 +195,19 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
   let similarityMap = new Map<string, number>();
 
   try {
+    console.log('[matching] starting Vectorize pre-filter (AI embedding)...');
     const embeddingText = buildProspectEmbeddingText(requirements);
     const embeddingResult = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
       text: [embeddingText],
     }) as { data: number[][] };
     const vector = embeddingResult.data[0];
 
+    console.log('[matching] AI embedding done, vector length:', vector?.length ?? 0);
     if (vector && vector.length > 0) {
       const topK = 100; // cap candidates — D1 outcome embeddings load bounded to ~6 MB regardless of pool size
+      console.log('[matching] querying Vectorize (topK:', topK, ')...');
       similarityMap = await queryVectorize(env, vector, topK);
+      console.log('[matching] Vectorize results:', similarityMap.size);
       if (similarityMap.size > 0) {
         const candidateIds = new Set(similarityMap.keys());
         const filtered = eligible.filter((e) => candidateIds.has(e.id));
@@ -199,10 +216,12 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     }
   } catch (err) {
     // Vectorize unavailable — fall back to deterministic scoring over full eligible pool
-    console.error('matching: Vectorize query failed, falling back to deterministic scoring', err);
+    console.error('[matching] Vectorize query failed, falling back to deterministic scoring', err);
     candidates = eligible;
     similarityMap = new Map();
   }
+
+  console.log('[matching] candidates after Vectorize filter:', candidates.length);
 
   // AC9/E06S37: Compute outcome alignment using pre-computed expert tag embeddings from D1.
   // Expert embeddings are stored at profile-save time (/embed, /admin/reindex) — never at match time.
@@ -222,7 +241,10 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     }
   }
 
+  console.log('[matching] outcome alignment done, map size:', outcomeAlignmentMap.size);
+
   // Score each candidate
+  console.log('[matching] scoring', candidates.length, 'candidates...');
   const scored = candidates.map((expert) => {
     const profile: ExpertProfile = {
       ...((expert.profile ?? {}) as ExpertProfile),
@@ -246,9 +268,13 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
   scored.sort((a, b) => b.matchScore.score - a.matchScore.score);
   const top20 = scored.slice(0, 20);
 
+  console.log('[matching] scoring done, top20:', top20.length, 'topScore:', top20[0]?.matchScore.score ?? 0);
+
   // Upsert matches (delete old, insert fresh)
   if (top20.length > 0) {
+    console.log('[matching] deleting old matches...');
     await sql`DELETE FROM matches WHERE prospect_id = ${prospect_id}`;
+    console.log('[matching] inserting', top20.length, 'matches...');
     for (const { expert, matchScore } of top20) {
       await sql`
         INSERT INTO matches (prospect_id, expert_id, score, score_breakdown, status, expires_at)
@@ -256,6 +282,8 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
         ON CONFLICT DO NOTHING`;
     }
   }
+
+  console.log('[matching] all inserts done, elapsed:', Date.now() - startTime, 'ms');
 
   // Analytics
   const allScores = scored.map((s) => s.matchScore.score);
@@ -288,6 +316,7 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     };
   });
 
+  console.log('[matching] handleMatch COMPLETE, total elapsed:', Date.now() - startTime, 'ms, returning', topMatches.length, 'matches');
   return jsonResponse({ computed: top20.length, top_matches: topMatches, billing_excluded: billingExcluded });
 
   } finally {

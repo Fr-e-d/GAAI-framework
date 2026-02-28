@@ -6,7 +6,7 @@ import type { Env } from '../types/env';
 // prepare: false — required for Supabase PgBouncer pooler (port 6543, transaction mode).
 // PgBouncer transaction mode does not support named prepared statements.
 export function createSql(env: Env) {
-  return postgres(env.HYPERDRIVE.connectionString, { max: 1, prepare: false });
+  return postgres(env.HYPERDRIVE.connectionString, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 5 });
 }
 
 export type SqlClient = ReturnType<typeof createSql>;

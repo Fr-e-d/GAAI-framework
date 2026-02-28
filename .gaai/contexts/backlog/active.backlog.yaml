@@ -818,9 +818,14 @@ items:
     epic: E03
     title: "Expert directory + profile pages (/experts, /experts/:slug)"
     priority: medium
-    status: in_progress
+    status: done
+    started_at: "2026-02-28T13:50:57+01:00"
+    completed_at: "2026-02-28T14:07:49+01:00"
     human_md_estimate: 3.7
     human_cost_usd: 2590
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/61"
+    pr_number: 61
+    pr_status: merged
     artefact: contexts/artefacts/stories/E03S04.story.md
     dependencies: [E03S06, E06S14, E03S05]
     notes: "Discovery 2026-02-27. 10 ACs. Server-rendered for SEO. Filtered by satellite vertical. Anonymized cards (tier, score, headline, skills, rate). Profile detail pages with dual CTAs ('Vérifier la compatibilité' → /match, 'Débloquer ce profil' → email gate). ⚠️ BLOCKING: requires GET /api/experts/public endpoint on Core API (E06S38 — to be created). Delivery must flag gap before starting."
@@ -1310,3 +1315,39 @@ items:
     artefact: contexts/artefacts/stories/E09S06.story.md
     dependencies: [E09S04, E09S05]
     notes: "Playwright headless tests for satellite prospect funnel (E03S01-S03, E03S06) and expert dashboard (E02S01-S08). Chromium-only. New CI job with continue-on-error: true (soft failure initially). Screenshot artifacts on failure. 13 ACs."
+
+  - id: E09S07
+    epic: E09
+    title: "Fix broken satellite booking-widget tests (pipeline blocker)"
+    priority: critical
+    status: done
+    completed_at: "2026-02-28T15:00:00+01:00"
+    human_md_estimate: 0.2
+    human_cost_usd: 140
+    artefact: contexts/artefacts/stories/E09S07.story.md
+    dependencies: []
+    notes: "DONE 2026-02-28. 4 tests in booking-widget.test.ts updated to match renderPendingConfirmation refactor (was renderSuccess). 326/326 satellite tests PASS."
+
+  - id: E09S08
+    epic: E09
+    title: "Production deploy test gates for satellite and posthog-proxy"
+    priority: high
+    status: done
+    completed_at: "2026-02-28T15:00:00+01:00"
+    human_md_estimate: 0.2
+    human_cost_usd: 140
+    artefact: contexts/artefacts/stories/E09S08.story.md
+    dependencies: [E09S07]
+    notes: "DONE 2026-02-28. Added tsc --noEmit + vitest run to deploy-satellite and deploy-posthog-proxy jobs in deploy-production.yml. Now matches deploy-staging.yml pattern."
+
+  - id: E09S09
+    epic: E09
+    title: "Fix main vs production branch inconsistency in deploy workflows"
+    priority: medium
+    status: done
+    completed_at: "2026-02-28T15:00:00+01:00"
+    human_md_estimate: 0.1
+    human_cost_usd: 70
+    artefact: contexts/artefacts/stories/E09S09.story.md
+    dependencies: []
+    notes: "DONE 2026-02-28. deploy-dashboard.yml and deploy-landing.yml updated: 'main' → 'production' in branch triggers and if conditions. 'main' branch doesn't exist — production deploys for dashboard/landing were silently broken."

@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - staging
-      - main
+      - production
     paths:
       - "workers/frontend/landing/**"
 
@@ -34,7 +34,7 @@ jobs:
           workingDirectory: workers/frontend/landing
 
   deploy-production:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/production'
     runs-on: ubuntu-latest
     name: Deploy Landing to Production
     steps:
