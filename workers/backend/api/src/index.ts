@@ -104,10 +104,21 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     return handleMatchGet(request, env, prospectId);
   }
 
-  // ── AI Extraction ────────────────────────────────────────────────────────
-  // POST /api/extract
-  if (method === 'POST' && pathname === '/api/extract') {
-    return handleExtract(request, env, ctx);
+  // ── AI Extraction (CORS-gated — called browser-side from satellite pages) ──
+  if (pathname === '/api/extract') {
+    const corsResult = await handleCors(request, env);
+    if (corsResult.preflight) return corsResult.preflight;
+    if (!corsResult.allowed) return corsForbidden(corsResult.origin);
+
+    if (method === 'POST') {
+      const response = await handleExtract(request, env, ctx);
+      return addCorsHeaders(response, corsResult.origin);
+    }
+
+    return addCorsHeaders(
+      new Response(JSON.stringify({ error: 'Not Found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }),
+      corsResult.origin,
+    );
   }
 
   // ── GCal OAuth callback (unauthenticated — Google redirects here) ─────────

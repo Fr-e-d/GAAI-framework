@@ -187,6 +187,13 @@ app.get('/results', (c) => {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const response = await app.fetch(request, env, ctx);
-    return applySecurityHeaders(response);
+    // Inject core API origin into CSP connect-src (covers staging *.workers.dev URLs)
+    let coreOrigin: string | undefined;
+    try {
+      coreOrigin = new URL(env.CORE_API_URL).origin;
+    } catch {
+      // invalid URL — skip extra connect-src
+    }
+    return applySecurityHeaders(response, coreOrigin);
   },
 };

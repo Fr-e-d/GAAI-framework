@@ -11,7 +11,7 @@ id = "f6319960eb4348d8a3a8a375f5e42d9c"
 
 [vars]
 CORE_API_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
-TURNSTILE_SITE_KEY = "0x4AAAAAAA_STAGING_SITE_KEY"
+TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 
 # ── Staging ────────────────────────────────────────────────────────────────────
 
@@ -24,7 +24,7 @@ id = "f6319960eb4348d8a3a8a375f5e42d9c"
 
 [env.staging.vars]
 CORE_API_URL = "https://callibrate-core-staging.frederic-geens-consulting.workers.dev"
-TURNSTILE_SITE_KEY = "0x4AAAAAAA_STAGING_SITE_KEY"
+TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 
 # ── Production ─────────────────────────────────────────────────────────────────
 

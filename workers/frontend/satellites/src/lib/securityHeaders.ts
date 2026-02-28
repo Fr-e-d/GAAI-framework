@@ -13,17 +13,20 @@ const BASE_SECURITY_HEADERS: Record<string, string> = {
 // unsafe-inline required for PostHog snippet (inline script). Tighten post-MVP with nonce-based CSP.
 // connect-src includes https://*.callibrate.io to allow client-side fetch() to Core API from /match.
 // E03S02: Added Cloudflare Turnstile domains to script-src and frame-src for /confirm Turnstile widget.
-const HTML_CSP =
-  "default-src 'self'; script-src 'self' 'unsafe-inline' https://ph.callibrate.io https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://ph.callibrate.io https://*.callibrate.io; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'";
+// buildCsp accepts an optional extraConnectSrc (e.g. staging workers.dev core API origin).
+function buildCsp(extraConnectSrc?: string): string {
+  const connectExtra = extraConnectSrc ? ` ${extraConnectSrc}` : '';
+  return `default-src 'self'; script-src 'self' 'unsafe-inline' https://ph.callibrate.io https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://ph.callibrate.io https://*.callibrate.io${connectExtra}; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'`;
+}
 
-export function applySecurityHeaders(response: Response): Response {
+export function applySecurityHeaders(response: Response, extraConnectSrc?: string): Response {
   const headers = new Headers(response.headers);
   for (const [key, value] of Object.entries(BASE_SECURITY_HEADERS)) {
     headers.set(key, value);
   }
   const ct = headers.get('Content-Type') ?? '';
   if (ct.includes('text/html')) {
-    headers.set('Content-Security-Policy', HTML_CSP);
+    headers.set('Content-Security-Policy', buildCsp(extraConnectSrc));
   }
   return new Response(response.body, {
     status: response.status,
