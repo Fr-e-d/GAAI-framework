@@ -2,6 +2,7 @@ import { Env } from '../../types/env';
 import { createSql } from '../../lib/db';
 import { syncExpertPoolToD1 } from '../../cron/syncExpertPool';
 import { handleLsBillingCron } from '../../cron/lsBillingCron';
+import { handleGdprCron } from '../../cron/gdprCron';
 import type { BookingRow, ExpertRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
 
@@ -20,6 +21,7 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
   } else if (cron === '0 * * * *') {
     // E06S33: hourly LS billing cron — auto-confirm leads + report usage
     await handleLsBillingCron(env);
+    await handleGdprCron(env); // E06S42: GDPR data retention
   } else if (cron === '0 0 1 * *') {
     // E02S12 AC13: reset monthly direct submission quotas on the 1st of each month
     await resetDirectSubmissions(env);
