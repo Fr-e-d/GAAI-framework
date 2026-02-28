@@ -72,6 +72,10 @@ items:
     human_cost_usd: 1800
     started_at: "2026-02-24T17:00:00+01:00"
     completed_at: "2026-02-24T18:00:00+01:00"
+    pr_number: 30
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/30"
+    pr_status: "merged"
+    cost_usd: 4.24
     artefact: contexts/artefacts/stories/E01S05.story.md
     dependencies: []
     notes: "DONE 2026-02-24. QA PASS. Content ACs met: flagship post (~2,190 words EN), distribution assets (HN+Reddit+X thread), cadence framework. Visual creation + publication are human-executed. PR#30 squash-merged → staging. Human actions required: create 3 visuals (NotebookLM), set up Substack, publish sequence J1-J2."
@@ -251,6 +255,10 @@ items:
     status: done
     human_md_estimate: 2.3
     human_cost_usd: 1610
+    pr_number: 6
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/6"
+    pr_status: "merged"
+    cost_usd: 6.95
     artefact: contexts/artefacts/stories/E06S16.story.md
     dependencies: [E06S06]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. BookingConfirmedWorkflow + BookingCompletedWorkflow. step.sleep acceleration (SURVEY_DELAY_7D_MS / SURVEY_DELAY_38D_MS). signSurveyToken (30d JWT). N8N_WEBHOOK_URL removed. [[workflows]] top-level only. 82/82 vitest tests. PR#6 open. ⚠️ Human action required: (1) set staging secrets SURVEY_DELAY_7D_MS + SURVEY_DELAY_38D_MS, (2) create CF Workflows in dashboard before deploying to staging, (3) deploy to prod via tag v0.6.16. Unblocks E06S17."
@@ -262,6 +270,10 @@ items:
     status: done
     human_md_estimate: 2.0
     human_cost_usd: 1400
+    pr_number: 7
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/7"
+    pr_status: "merged"
+    cost_usd: 6.96
     artefact: contexts/artefacts/stories/E06S17.story.md
     dependencies: [E06S09, E06S16]
     notes: "DONE 2026-02-23. QA PASS (107/107 vitest, tsc clean). PR #7 open → staging. ⚠️ Pre-deploy: E06S16 must be updated to use env.SURVEY_TOKEN_SECRET (currently uses PROSPECT_TOKEN_SECRET). Both PRs must be merged together."
@@ -277,6 +289,10 @@ items:
     status: done
     human_md_estimate: 4.3
     human_cost_usd: 3010
+    pr_number: 8
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/8"
+    pr_status: "merged"
+    cost_usd: 1.35
     artefact: contexts/artefacts/stories/E06S18.story.md
     dependencies: []
     notes: "DEC-66. Foundation story — all scalable matching stories depend on this. Install postgres v3.4.4+, Hyperdrive binding, Smart Placement, migrate ALL 48 DB queries from Supabase JS to postgres.js tagged templates. Fix B1 (prospects.ts top-20 only) + B2 (matches.ts use loadExpertPool). Keep Supabase JS for auth only. Human action: create Hyperdrive config + provide ID."
@@ -290,6 +306,10 @@ items:
     status: done
     human_md_estimate: 1.9
     human_cost_usd: 1330
+    pr_number: 9
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/9"
+    pr_status: "merged"
+    cost_usd: 5.6
     artefact: contexts/artefacts/stories/E06S20.story.md
     dependencies: [E06S18]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 8 ACs met. RATE_LIMITER binding (30 req/60s). verifyTurnstile() on POST /api/prospects/submit. Rate limiting on all 3 public prospect endpoints. 88/88 vitest tests. PR#9 open. ⚠️ Human action required: (1) wrangler rate-limit create for each env + update namespace_id in wrangler.toml, (2) wrangler secret put TURNSTILE_SECRET_KEY --env production, (3) Create Turnstile site key in CF Dashboard, (4) deploy to prod via tag v0.6.20."
@@ -301,6 +321,10 @@ items:
     status: done
     human_md_estimate: 2.3
     human_cost_usd: 1610
+    pr_number: 10
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/10"
+    pr_status: "merged"
+    cost_usd: 5.95
     artefact: contexts/artefacts/stories/E06S21.story.md
     dependencies: [E06S18]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 9 ACs met. Workers AI @cf/baai/bge-base-en-v1.5 + Vectorize expert-profiles (768 dims, cosine). upsertExpertEmbedding fire-and-forget via ctx.waitUntil. Registration + profile PATCH trigger embedding. POST /api/admin/vectorize/reindex (service-key auth). Metadata: expert_id, rate_min, rate_max, availability (nulls omitted — VectorizeVectorMetadataValue does not accept null). 93/93 vitest tests. PR#10 open. ⚠️ Human action required: (1) npx wrangler vectorize create expert-profiles --dimensions=768 --metric=cosine, (2) deploy to prod via tag v0.6.21. Unblocks E06S22."
@@ -312,6 +336,10 @@ items:
     status: done
     human_md_estimate: 2.3
     human_cost_usd: 1610
+    pr_number: 11
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/11"
+    pr_status: "merged"
+    cost_usd: 5.56
     artefact: contexts/artefacts/stories/E06S22.story.md
     dependencies: [E06S21, E06S18]
     notes: "DEC-62. Vectorize pre-filter (top-100 candidates) + blend: 0.7×exact + 0.3×vector. Graceful fallback to deterministic-only if Vectorize unavailable. 'machine learning' matches 'deep learning'."
@@ -323,6 +351,10 @@ items:
     status: done
     human_md_estimate: 3.1
     human_cost_usd: 2170
+    pr_number: 12
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/12"
+    pr_status: "merged"
+    cost_usd: 8.61
     artefact: contexts/artefacts/stories/E06S23.story.md
     dependencies: [E06S18]
     notes: "DEC-61. D1 expert-pool-edge + Cache API L1 (60s TTL). Read chain: Cache API → D1 → Hyperdrive fallback. KV eliminated from expert pool read path. Cron */5 sync via Hyperdrive. Absorbs former E06S19 (Cache API L1). Human action: create D1 database."
@@ -337,6 +369,10 @@ items:
     human_cost_usd: 2170
     started_at: "2026-02-23T17:05:05+01:00"
     completed_at: "2026-02-23T20:00:00+01:00"
+    pr_number: 16
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/16"
+    pr_status: "merged"
+    cost_usd: 14.08
     artefact: contexts/artefacts/stories/E06S24.story.md
     dependencies: [E06S22, E06S23, E06S18]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 8 ACs met. callibrate-matching Worker at workers/matching/ (Hyperdrive + EXPERT_POOL KV + EXPERT_DB D1 + AI + Vectorize + Analytics Engine). Core delegates via MATCHING_SERVICE?: Fetcher Service Binding. Routes: POST /match (full pipeline), POST /embed (fire-and-forget), POST /admin/reindex (batch). AC6: local deterministic fallback when binding undefined. AC7: Core wrangler.toml no longer declares D1/AI/Vectorize. 107/107 vitest tests. PR#16 open → staging. ⚠️ Human action required: (1) cd workers/matching && npm install, (2) deploy Matching Worker BEFORE Core (callibrate-matching-staging must exist before Core binding resolves), (3) reuse existing Hyperdrive/KV/D1/Vectorize IDs in workers/matching/wrangler.toml."
@@ -351,6 +387,10 @@ items:
     human_cost_usd: 1610
     started_at: "2026-02-23T17:05:47+01:00"
     completed_at: "2026-02-23T17:40:00+01:00"
+    pr_number: 14
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/14"
+    pr_status: "merged"
+    cost_usd: 7.6
     artefact: contexts/artefacts/stories/E06S25.story.md
     dependencies: [E06S23, E06S21]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 7 ACs met. ExpertPoolDO singleton — batches D1 + Vectorize writes with 5s alarm window. notifyExpertPoolDO fire-and-forget via ctx.waitUntil (AC5 non-blocking). register.ts + profile.ts wired. wrangler.toml: AI + Vectorize + DO [[migrations]] for all 3 envs. DO auto-provisioned on first deploy. 114/114 vitest tests. PR#14 open. ⚠️ Merge order: E06S21 → E06S23 → E06S25. ⚠️ vectorize.ts trivial conflict with E06S21 (identical file — keep one)."
@@ -362,6 +402,10 @@ items:
     status: done
     human_md_estimate: 0.7
     human_cost_usd: 490
+    pr_number: 13
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/13"
+    pr_status: "merged"
+    cost_usd: 3.19
     artefact: contexts/artefacts/stories/E06S26.story.md
     dependencies: [E06S18]
     notes: "DEC-65. Analytics Engine dataset matching-metrics. Fire-and-forget writeDataPoint(). Tracks latency, cache hits, pool size, scoring quality. No-op if binding missing. Human action: create dataset."
@@ -380,6 +424,10 @@ items:
     human_cost_usd: 560
     started_at: "2026-02-23T17:05:05+01:00"
     completed_at: "2026-02-23T17:45:00+01:00"
+    pr_number: 15
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/15"
+    pr_status: "merged"
+    cost_usd: 4.02
     artefact: contexts/artefacts/stories/E07S01.story.md
     dependencies: []
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 10 ACs met. callibrate-posthog-proxy Worker at workers/posthog-proxy/ (Hono + TypeScript). POST /ingest/* → eu.i.posthog.com. GET /static/* → eu-assets.i.posthog.com. POST /decide/* → eu.i.posthog.com. Host header rewritten. CORS *.callibrate.io. No API keys stored. 16/16 vitest tests. PR#15 open → staging. ⚠️ Human action required: (1) create PostHog EU Cloud account + project (EU region), (2) DNS ph.callibrate.io CNAME → Worker, (3) extend CLOUDFLARE_API_TOKEN scope to include callibrate-posthog-proxy*, (4) deploy to staging: cd workers/posthog-proxy && npx wrangler deploy --env staging. Unblocks E07S02, E07S03."
@@ -394,6 +442,10 @@ items:
     human_cost_usd: 630
     started_at: "2026-02-23T17:05:05+01:00"
     completed_at: "2026-02-23T18:30:00+01:00"
+    pr_number: 17
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/17"
+    pr_status: "merged"
+    cost_usd: 6.25
     artefact: contexts/artefacts/stories/E07S02.story.md
     dependencies: [E07S01]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. PostHog JS stub in <head> (async SDK load) + page_view + satellite.cta_clicked in <body>. Cookieless (persistence:memory), autocapture, session replay. tracking_enabled BOOLEAN NOT NULL DEFAULT true migration. XSS-safe JSON.stringify interpolation. tsc clean. PR#17 open → staging. ⚠️ Human action required: (1) wrangler secret put POSTHOG_API_KEY --env staging, (2) ensure ph.callibrate.io proxy deployed (E07S01 PR merged), (3) purge KV cache for active satellites, (4) deploy to prod via tag."
@@ -408,6 +460,9 @@ items:
     human_cost_usd: 1260
     started_at: "2026-02-23T19:12:00+01:00"
     completed_at: "2026-02-23T19:22:00+01:00"
+    pr_number: 18
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/18"
+    pr_status: "merged"
     artefact: contexts/artefacts/stories/E07S03.story.md
     dependencies: [E07S01]
     notes: "posthog-node SDK in callibrate-core. 15 events across prospect/booking/expert/survey funnels + LLM extraction. captureImmediate() + ctx.waitUntil(). Event naming: object.action snake_case. Internal traffic filtering. Human action: POSTHOG_API_KEY secret for core worker. PR #18 → staging."
@@ -422,6 +477,10 @@ items:
     ai_cost_usd: 7.69
     human_md_estimate: 0.9
     human_cost_usd: 630
+    pr_number: 19
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/19"
+    pr_status: "merged"
+    cost_usd: 3.88
     artefact: contexts/artefacts/stories/E07S04.story.md
     dependencies: [E07S02, E07S03]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 8 ACs met. scripts/posthog-setup-dashboards.ts + scripts/tsconfig.json. 3 dashboards: Prospect Conversion Funnel (5-step funnel + satellite_id breakdown), Expert Activation Funnel (4-step), Business Overview (4 TRENDS insights). Idempotent. TSC clean. PR#19 open → staging. ⚠️ Human action required: (1) generate PostHog Personal API Key at https://eu.posthog.com/settings/user-api-keys, (2) run: POSTHOG_PERSONAL_API_KEY=phx_xxx POSTHOG_PROJECT_ID=yyy npx tsx scripts/posthog-setup-dashboards.ts"
@@ -436,6 +495,10 @@ items:
     ai_cost_usd: 4.00
     human_md_estimate: 1.1
     human_cost_usd: 770
+    pr_number: 20
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/20"
+    pr_status: "merged"
+    cost_usd: 4.0
     artefact: contexts/artefacts/stories/E07S05.story.md
     dependencies: [E07S02, E07S03]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 13 ACs met. PostHog EU MCP server in .mcp.json (mcp-remote → mcp-eu.posthog.com, POSTHOG_PERSONAL_API_KEY auth). GAAI analytics-query skill (SKILL-CRS-020) with 5 analysis patterns, query-templates.md + interpretation-guide.md. skills-index.yaml regenerated (37 skills). discovery.agent.md updated. PR#20 open → staging. ⚠️ Human action required: (1) Set POSTHOG_PERSONAL_API_KEY='Bearer phx_xxx' in shell profile, (2) Create PostHog EU account + Personal API Key with MCP Server preset."
@@ -449,6 +512,7 @@ items:
     human_cost_usd: 405
     started_at: "2026-02-23T22:00:00+01:00"
     completed_at: "2026-02-26T18:30:00+01:00"
+    cost_usd: 1.29
     artefact: contexts/artefacts/stories/E07S06.story.md
     dependencies: [E07S05, E06S27]
     notes: "DONE 2026-02-26. AC1-AC6 founder+agent (compte EU, projet 131035, API keys, dashboards script). AC7 pending restart Claude Code. AC8 CNAME ph.callibrate.io actif. AC9 proxy smoke POST /i/v0/e/ → 200 OK (fix: catch-all POST route added to proxy, commit 22e3801). AC10 expert.registered → 201 (Hyperdrive password reset required). Proxy bug fix deployed staging+prod. Hyperdrive staging password updated."
@@ -465,6 +529,10 @@ items:
     human_cost_usd: 1470
     started_at: "2026-02-23T22:00:00+01:00"
     completed_at: "2026-02-23T23:59:00+01:00"
+    pr_number: 24
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/24"
+    pr_status: "merged"
+    cost_usd: 6.93
     artefact: contexts/artefacts/stories/E06S27.story.md
     dependencies: []
     notes: "DONE 2026-02-23. QA PASS (partial delivery). AC2/AC3/AC5/AC7/AC9/AC10 delivered. D1 staging+prod created + schema applied. Vectorize expert-profiles created. posthog-proxy deployed to staging. wrangler.toml fully updated (core + matching + posthog-proxy) with real IDs. Smoke test HTTP 200. PR#24 open → staging. ⚠️ Founder actions required post-merge: AC1 (Hyperdrive — DB password needed, see PLACEHOLDER comments), AC4 (CF Workflows dashboard), AC6 (workers/matching deploy after AC1), AC8 (CF API token scope). ⚠️ wrangler.toml merge conflict expected when code PRs (E06S18-E06S25) are merged — keep real D1 IDs from this PR."
@@ -479,6 +547,10 @@ items:
     human_cost_usd: 420
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T00:30:00+01:00"
+    pr_number: 25
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/25"
+    pr_status: "merged"
+    cost_usd: 3.81
     artefact: contexts/artefacts/stories/E06S28.story.md
     dependencies: [E06S27]
     notes: "DONE 2026-02-24. QA PASS. All 10 ACs met. AC3: SURVEY_DELAY_7D_MS=60000 + SURVEY_DELAY_38D_MS=120000 in wrangler.toml [env.staging.vars]. AC4: Fixed survey token bug — email-notifications.ts used PROSPECT_TOKEN_SECRET to sign survey JWTs; changed to SURVEY_TOKEN_SECRET. Also fixed pre-existing jwt.ts duplicate signSurveyToken export (E06S16/E06S17 merge artifact). AC5-AC7: Satellite staging now has SUPABASE_URL + SUPABASE_ANON_KEY + POSTHOG_API_KEY. AC8: No change needed (no Turnstile form in satellite HTML). AC9: 13 secrets on core staging. AC10: 4 secrets on satellite staging. 111/111 vitest PASS. PR#25 open → staging."
@@ -493,6 +565,10 @@ items:
     human_cost_usd: 700
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T10:00:00+01:00"
+    pr_number: 26
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/26"
+    pr_status: "merged"
+    cost_usd: 7.57
     artefact: contexts/artefacts/stories/E06S29.story.md
     dependencies: [E06S27, E06S28]
     notes: "DONE 2026-02-24. QA PASS (first cycle). All 9 automated ACs met. scripts/smoke-test-staging.sh created — idempotent, macOS-compatible, covers AC1–AC9. Staging fully operational: health 200, satellite 302, expert register/profile/gcal-url, AI extract, prospect submit, match retrieval (empty pool OK), availability graceful fallback (422 gcal_not_connected). Pre-seeded smoke-runner@callibrate.io user (Supabase admin SQL). PR#26 open → staging. AC10–AC11 (CF Dashboard Analytics) + AC12 (PostHog) are founder-executed visual checks."
@@ -507,6 +583,10 @@ items:
     ai_cost_usd: 2.76
     human_md_estimate: 2.1
     human_cost_usd: 1470
+    pr_number: 22
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/22"
+    pr_status: "merged"
+    cost_usd: 2.76
     artefact: contexts/artefacts/stories/E06S30.story.md
     dependencies: []
     notes: "DONE 2026-02-23. QA PASS. AC1 + AC2 delivered: /privacy (GDPR Privacy Policy) and /terms (Terms of Service) added as static routes in satellite worker, before config middleware. tsc clean. PR#22 open → staging. ⚠️ Founder action required: (1) Add CF routes callibrate.io/privacy* + callibrate.io/terms* → callibrate-satellite-{staging,prod}, (2) Complete AC3–AC9: Google Search Console domain verification + OAuth consent screen + verification form submission. AC10–AC11 await Google approval (4–6 weeks)."
@@ -524,6 +604,10 @@ items:
     human_cost_usd: 1400
     started_at: "2026-02-23T22:55:00+01:00"
     completed_at: "2026-02-23T23:15:00+01:00"
+    pr_number: 21
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/21"
+    pr_status: "merged"
+    cost_usd: 2.7
     artefact: contexts/artefacts/stories/E06S31.story.md
     dependencies: []
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. DB migration: experts billing cols + credit_transactions table (RLS + index) + leads lifecycle cols + extended status CHECK + leads(status,created_at) index. calculateLeadPrice pure fn (DEC-67, 8 cells, centimes). 104/104 vitest tests. PR#21 open → staging. Unblocks E06S32, E06S33, E06S34."
@@ -538,6 +622,10 @@ items:
     human_cost_usd: 2240
     started_at: "2026-02-23T23:30:00+01:00"
     completed_at: "2026-02-24T00:00:00+01:00"
+    pr_number: 23
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/23"
+    pr_status: "merged"
+    cost_usd: 7.87
     artefact: contexts/artefacts/stories/E06S32.story.md
     dependencies: [E06S31]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. lead-billing consumer rewritten: prospect fetch + calculateLeadPrice (DEC-67) + debit_lead_credit RPC (atomic PostgreSQL function). AC2: insufficient_balance → EMAIL_NOTIFICATIONS. AC3: atomicity via Supabase RPC (E06S18 not yet merged — equivalent ACID via plpgsql SECURITY DEFINER). POST /api/leads/:id/flag (7-day window, restore_lead_credit RPC) + POST /api/leads/:id/confirm. LS checkout code removed. 118/118 vitest tests. PR#23 open → staging. ⚠️ Human action required: (1) Apply migration 20260223100001_lead_credit_rpc.sql to Supabase staging, (2) Merge PR#21 (E06S31) before PR#23."
@@ -552,6 +640,10 @@ items:
     human_cost_usd: 2310
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T00:00:00+01:00"
+    pr_number: 27
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/27"
+    pr_status: "merged"
+    cost_usd: 11.29
     artefact: contexts/artefacts/stories/E06S33.story.md
     dependencies: [E06S31]
     notes: "DONE 2026-02-24. QA PASS (1 remediation cycle). All 13 ACs met. POST /api/webhooks/lemonsqueezy (HMAC-SHA256, KV idempotency). subscription_created: UPDATE experts (ls_subscription_id, ls_subscription_status, ls_subscription_item_id) + 100€ welcome credit. subscription_updated: status mapping. subscription_payment_failed: past_due + email notification. Hourly cron: auto-confirm leads past FLAG_WINDOW_MS + LS usage-records reporting. DB migration: ls_subscription_item_id column. 23/23 vitest tests. PR#27 open → staging. ⚠️ Human action required: (1) wrangler secret put LEMON_SQUEEZY_WEBHOOK_SECRET --env staging/production, (2) Configure LS webhook (subscription_created/updated/payment_failed), (3) Create LS product with usage-based pricing (see SETUP.md), (4) deploy via tag."
@@ -566,6 +658,10 @@ items:
     human_cost_usd: 1680
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T00:00:00+01:00"
+    pr_number: 28
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/28"
+    pr_status: "merged"
+    cost_usd: 10.31
     artefact: contexts/artefacts/stories/E06S34.story.md
     dependencies: [E06S31]
     notes: "DONE 2026-02-24. QA PASS (first cycle). All 11 ACs met. applyBillingFilters pure fn + loadBillingData Hyperdrive helper (src/lib/billingFilter.ts). Live billing queries (credit_balance, max_lead_price, spending_limit from experts + monthly spend from credit_transactions). Applied in both matching paths (MATCHING_SERVICE + Core fallback) for both POST /api/matches/compute and POST /api/prospects/submit (AC8). Matching Worker returns billing_excluded in response; Core queues expert.billing.lead_missed notifications via ctx.waitUntil(). 19 new billingFilter tests + 255/260 vitest pass. PR#28 open → staging. ⚠️ Human action required: deploy to prod via tag."
@@ -581,6 +677,9 @@ items:
     human_cost_usd: 1610
     started_at: "2026-02-24T14:00:00+01:00"
     completed_at: "2026-02-24T03:00:00+01:00"
+    pr_number: 29
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/29"
+    pr_status: "merged"
     artefact: contexts/artefacts/stories/E06S35.story.md
     dependencies: []
     notes: "DONE 2026-02-24. QA PASS (first cycle). All 15 ACs met. Monorepo restructure: Core API → workers/backend/api/, matching → workers/backend/matching-engine/, posthog-proxy → workers/backend/posthog-proxy/, satellite → workers/frontend/satellites/. npm workspaces orchestrator at root. Single package-lock.json. All 3 GH Actions workflows updated. SETUP.md + GAAI memory updated. 260/260 vitest + tsc clean (all 4 workers). git mv preserves history. PR#29 squash-merged → staging."
@@ -595,6 +694,10 @@ items:
     status: done
     human_md_estimate: 2.4
     human_cost_usd: 1680
+    pr_number: 31
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/31"
+    pr_status: "merged"
+    cost_usd: 6.01
     artefact: contexts/artefacts/stories/E06S36.story.md
     dependencies: [E06S34, E06S02]
     notes: "Discovery-informed. admissibility_criteria JSONB (methodology, verticals, stack overlap, duration). applyAdmissibilityFilters() after billing, before scoring. Follows E06S34 architecture. Field data: 'modular or nothing' (heyiamnickk), 'card on file' (MachadoEsq)."
@@ -608,6 +711,10 @@ items:
     human_cost_usd: 1680
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T18:47:00+01:00"
+    pr_number: 32
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/32"
+    pr_status: "merged"
+    cost_usd: 9.28
     artefact: contexts/artefacts/stories/E06S37.story.md
     dependencies: [E06S22, E06S12, E06S02]
     notes: "Discovery-informed. outcome_tags TEXT[] on experts + desired_outcomes in extraction + scoreOutcomeAlignment() scoring dimension (Workers AI semantic, weight 0.10). Field data: 'stopped selling workflows, started selling found time' (Littlecutsie)."
@@ -624,6 +731,10 @@ items:
     status: done
     human_md_estimate: 2.2
     human_cost_usd: 1540
+    pr_number: 39
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/39"
+    pr_status: "merged"
+    cost_usd: 6.98
     artefact: contexts/artefacts/stories/E03S01.story.md
     dependencies: [E06S14, E06S08]
     notes: "Discovery 2026-02-27. 10 ACs. /match route on satellite Worker — branded textarea + POST /api/extract + loading state + client-side transition to E03S02. Design tokens from config.theme. PostHog events. SEO meta. Mobile-responsive. CORE_API_URL injected at render time. No Turnstile on this step."
@@ -638,6 +749,10 @@ items:
     ai_cost_usd: null
     human_md_estimate: 2.6
     human_cost_usd: 1820
+    pr_number: 40
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/40"
+    pr_status: "merged"
+    cost_usd: 8.38
     artefact: contexts/artefacts/stories/E03S02.story.md
     dependencies: [E03S01]
     notes: "Discovery 2026-02-27. 11 ACs. Displays extracted fields with confidence indicators. Low-confidence → targeted questions (max 3). All fields editable via 'Modifier'. Turnstile (interaction-only) + POST /api/prospects/submit → sync matching (DEC-40) → JWT. quiz_answers accepts pre-extracted requirements directly (normalizeRequirements picks known fields). PR #40 merged 2026-02-27."
@@ -649,6 +764,10 @@ items:
     status: done
     human_md_estimate: 3.6
     human_cost_usd: 2520
+    pr_number: 41
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/41"
+    pr_status: "merged"
+    cost_usd: 8.13
     artefact: contexts/artefacts/stories/E03S03.story.md
     dependencies: [E03S02]
     notes: "Discovery 2026-02-27. 12 ACs. GET /api/prospects/:id/matches → anonymized cards (rank badge, score breakdown, tier, skills, rate range). Top-3 prominent (DEC-25). Email gate: single field → POST /identify → full profiles revealed (name, bio, headline). 'Réserver un appel' CTA → E03S06 booking widget. noindex/nofollow. ⚠️ Ignores deprecated booking_url (Cal.com) — uses E03S06 widget."
@@ -660,6 +779,7 @@ items:
     status: done
     human_md_estimate: 0.5
     human_cost_usd: 350
+    cost_usd: 2.05
     artefact: contexts/artefacts/stories/E03S05.story.md
     dependencies: [E06S14]
     notes: "DEC-53. robots.txt and sitemap.xml generated dynamically by the satellite Worker (E06S14), CF-edge-cached 24h — functionally equivalent to static. AC2 (Astro build-time) superseded by E06S14 AC6. SEO bots: full access. AI training bots blocked. AI answer/search bots: platform pages allowed, /experts/ blocked. Manual founder action: Cloudflare AI Training Bots → Block on all pages."
@@ -699,6 +819,10 @@ items:
     human_cost_usd: 1470
     started_at: "2026-02-24T19:15:00+01:00"
     completed_at: "2026-02-24T19:30:00+01:00"
+    pr_number: 33
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/33"
+    pr_status: "merged"
+    cost_usd: 4.31
     artefact: contexts/artefacts/stories/E08S01.story.md
     dependencies: []
     notes: "DONE 2026-02-24. QA PASS (first cycle). All 8 ACs met. 320/320 vitest. tsc clean. Random 32-byte hex state token in SESSIONS KV (oauth-state:{token} → {expert_id, code_verifier}, TTL 600s). PKCE: code_verifier (RFC 7636, 43 chars base64url) + code_challenge (BASE64URL(SHA-256)). Callback: KV lookup + immediate delete + code_verifier in token exchange. PR#33 squash-merged → staging. SEC-AUDIT-001 SEC-01 (CRITICAL) + SEC-03 (HIGH) remediated."
@@ -712,6 +836,10 @@ items:
     human_cost_usd: 1330
     started_at: "2026-02-24T20:00:00+01:00"
     completed_at: "2026-02-24T20:54:00+01:00"
+    pr_number: 34
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/34"
+    pr_status: "merged"
+    cost_usd: 7.22
     artefact: contexts/artefacts/stories/E08S02.story.md
     dependencies: []
     notes: "DONE 2026-02-24. QA PASS (8/8 ACs verified). securityHeaders middleware (X-Content-Type-Options, X-Frame-Options, HSTS, Referrer-Policy, Permissions-Policy) applied on Core API + Satellite + PostHog Proxy. CSP on satellite HTML. JSON-LD XSS escape (\\u003c). POST Content-Type guard (415). PR#34 squash-merged → staging. SEC-AUDIT-001 SEC-04 (HIGH) + SEC-05 (HIGH) + SEC-17 (LOW) remediated."
@@ -725,6 +853,9 @@ items:
     human_cost_usd: 1400
     started_at: "2026-02-25T00:40:00+01:00"
     completed_at: "2026-02-25T00:50:00+01:00"
+    pr_number: 37
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/37"
+    pr_status: "merged"
     artefact: contexts/artefacts/stories/E08S03.story.md
     dependencies: []
     notes: "DONE 2026-02-25. QA PASS (re-delivery, first attempt failed). All 7 ACs met. AC1: verifyProspectToken(token, prospect_id, PROSPECT_TOKEN_SECRET, 'prospect:identify'). AC2: KV-based rate limit (5 holds/h/IP via SESSIONS). AC3: DB check max 3 active holds/prospect → 409 max_holds_reached. AC4: expert_id existence check → 404. AC5: ISO-8601 + future + end>start → 422. AC6: 8 new tests (403×2, 429, 409 max_holds, 422×2, 404 expert). AC7: tsc clean (4 workers). 342/342 vitest. SEC-AUDIT-001 SEC-02 (CRITICAL) remediated."
@@ -738,6 +869,10 @@ items:
     human_cost_usd: 980
     started_at: "2026-02-24T20:00:00+01:00"
     completed_at: "2026-02-24T21:03:00+01:00"
+    pr_number: 35
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/35"
+    pr_status: "merged"
+    cost_usd: 5.28
     artefact: contexts/artefacts/stories/E08S04.story.md
     dependencies: []
     notes: "DONE 2026-02-24. QA PASS (first cycle). All 8 ACs met. ADMIN_API_KEY in Env + handleVectorizeReindex. HMAC-based timing-safe comparison (as CryptoKey cast for TS). Zod ConfirmBodySchema (email+name→422) + RescheduleBodySchema (datetime+temporal→422). 331/331 vitest. PR#35 squash-merged → staging. ⚠️ Human action required: openssl rand -hex 32 | npx wrangler secret put ADMIN_API_KEY --env staging (and production at launch)."
@@ -751,6 +886,10 @@ items:
     human_cost_usd: 1610
     started_at: "2026-02-24T20:06:00+01:00"
     completed_at: "2026-02-24T21:35:00+01:00"
+    pr_number: 36
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/36"
+    pr_status: "merged"
+    cost_usd: 8.05
     artefact: contexts/artefacts/stories/E08S05.story.md
     dependencies: [E08S01]
     notes: "DONE 2026-02-24. QA PASS (first cycle). All 12 ACs met. 354/354 vitest. tsc clean (4 workers). JWT iss/aud claims + audience validation + survey TTL 30d→7d. TURNSTILE_SECRET_KEY removed from staging vars. localConnectionString removed from both wrangler.toml files. CORS uses ANON_KEY. KNOWN_VERTICALS allowlist in extract.ts. DB-backed L2 webhook idempotency (webhook_events). Ownership assertions in debit/restore RPCs. 3 new Supabase migrations. PR#36 squash-merged → staging. SEC-AUDIT-001 SEC-08→SEC-16 remediated. ⚠️ Human action required: (1) wrangler secret put TURNSTILE_SECRET_KEY --env staging, (2) apply 3 migrations to Supabase staging, (3) deploy to prod via tag."
@@ -773,6 +912,10 @@ items:
     human_cost_usd: 2590
     started_at: "2026-02-27T19:00:00+01:00"
     completed_at: "2026-02-27T20:36:00+01:00"
+    pr_number: 42
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/42"
+    pr_status: "merged"
+    cost_usd: 13.92
     artefact: contexts/artefacts/stories/E06S38.story.md
     dependencies: []
     notes: "Discovery 2026-02-27. 28 ACs. 6 GET + 1 POST: /experts/:id/leads (paginated, status filter), /experts/:id/bookings (period filter), /experts/:id/billing (credit balance + transactions), /experts/:id/dashboard (aggregate stats + monthly_history 6 months), /experts/public (anonymized listing for directory), /experts/public/:slug (detail), POST /experts/leads/:id/evaluate (score 1-10 + notes + conversion). JWT + ownership for dashboard endpoints. No auth for public. Hyperdrive + postgres.js. Also unblocks E03S04 (directory). PR #42 merged."
@@ -786,6 +929,9 @@ items:
     human_cost_usd: 2800
     started_at: "2026-02-27T20:00:00+01:00"
     completed_at: "2026-02-27T21:15:00+01:00"
+    pr_number: 43
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/43"
+    pr_status: "merged"
     cost_usd: 13.83
     artefact: contexts/artefacts/stories/E02S01.story.md
     dependencies: []
@@ -799,6 +945,10 @@ items:
     human_md_estimate: 3.6
     human_cost_usd: 2520
     completed_at: "2026-02-27"
+    pr_number: 44
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/44"
+    pr_status: "merged"
+    cost_usd: 8.24
     artefact: contexts/artefacts/stories/E02S02.story.md
     dependencies: [E02S01, E06S03, E06S10]
     notes: "Discovery 2026-02-27. 14 ACs. Signup (Supabase Auth signUp + POST /api/experts/register). Login + forgot password. 4-step wizard: basic info, expertise (skills/verticals/rate/outcome_tags), preferences (career_stage/work_mode/availability/budget/project_stage/languages/geo/industries → preferences JSONB), GCal (optional). Incomplete detection → forced redirect to /onboarding. Delivered 2026-02-27. PR #44 merged to staging."
@@ -812,6 +962,10 @@ items:
     human_cost_usd: 1540
     started_at: "2026-02-27T21:00:00+01:00"
     completed_at: "2026-02-27T22:10:00+01:00"
+    pr_number: 45
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/45"
+    pr_status: "merged"
+    cost_usd: 7.14
     artefact: contexts/artefacts/stories/E02S03.story.md
     dependencies: [E02S01, E06S03, E06S36, E06S37]
     notes: "Discovery 2026-02-27. 10 ACs. View/edit all profile fields in sections: identité, expertise, positionnement marché, critères d'admissibilité (E06S36), GCal link. Section-level saves via PATCH profile. Zod validation. Toast notifications. PR #45 merged to staging 2026-02-27."
@@ -825,6 +979,10 @@ items:
     human_cost_usd: 1330
     started_at: "2026-02-27T21:00:00+01:00"
     completed_at: "2026-02-27T22:19:00+01:00"
+    pr_number: 46
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/46"
+    pr_status: "merged"
+    cost_usd: 6.42
     artefact: contexts/artefacts/stories/E02S04.story.md
     dependencies: [E02S01, E06S10, E06S11]
     notes: "Discovery 2026-02-27. 10 ACs. Connection status (connected email or 'non connecté'). Connect → OAuth flow via gcal/auth-url. Disconnect with confirmation. Next 5 availability slots preview when connected. Refresh status after callback. PR #46 merged to staging 2026-02-27."
@@ -838,6 +996,10 @@ items:
     human_cost_usd: 2170
     started_at: "2026-02-27T21:30:00+01:00"
     completed_at: "2026-02-27T22:45:00+01:00"
+    pr_number: 47
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/47"
+    pr_status: "merged"
+    cost_usd: 6.35
     artefact: contexts/artefacts/stories/E02S05.story.md
     dependencies: [E02S01, E06S38, E06S32]
     notes: "DONE 2026-02-27. QA PASS (19/19 tests, tsc clean). Lead pipeline at /dashboard/leads. Status filter tabs (URL-driven). Lead table with confirm/flag actions. Detail dialog with prospect requirements, booking info, flag countdown, evaluate form. AC11 (Realtime) deferred. PR #47 squash-merged → staging."
@@ -851,6 +1013,10 @@ items:
     human_cost_usd: 1540
     started_at: "2026-02-27T22:00:00+01:00"
     completed_at: "2026-02-27T23:15:00+01:00"
+    pr_number: 48
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/48"
+    pr_status: "merged"
+    cost_usd: 7.64
     artefact: contexts/artefacts/stories/E02S06.story.md
     dependencies: [E02S01, E06S38, E06S11]
     notes: "DONE 2026-02-27. QA PASS (13/13 tests, tsc clean). Period tabs (upcoming/past, URL-driven). Booking cards with UTC-locked datetime, prospect, meeting URL + copy, status badge. Detail dialog with prospect context and actions. Cancel (DELETE + optional reason) + reschedule (POST + auto-computed +20min). apiDeleteWithBody added. routes.ts: leads + bookings registered. PR #48 squash-merged → staging."
@@ -864,6 +1030,10 @@ items:
     human_cost_usd: 2100
     started_at: "2026-02-27T22:00:00+01:00"
     completed_at: "2026-02-27T23:40:00+01:00"
+    pr_number: 49
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/49"
+    pr_status: "merged"
+    cost_usd: 10.12
     artefact: contexts/artefacts/stories/E02S07.story.md
     dependencies: [E02S01, E06S38, E06S33, E06S34]
     notes: "DONE 2026-02-27. QA PASS (13/13 tests, tsc clean). Credit balance hero card (green/red). Lemon.js overlay activation (LS_CHECKOUT_URL env). Subscription status badge (active/past_due/cancelled). LS customer portal management link (LS_CUSTOMER_PORTAL_URL env). Monthly spending progress bar (orange >80%, red ≥100%). Transaction history table (paginated 20/page). Max lead price + spending limit controls (EUR input → centimes PATCH). PostHog events: billing_viewed, spending_control_updated. AC10 deferred (billing_excluded_leads backend gap). PR #49 squash-merged → staging."
@@ -875,6 +1045,10 @@ items:
     status: done
     human_md_estimate: 3.0
     human_cost_usd: 2100
+    pr_number: 50
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/50"
+    pr_status: "merged"
+    cost_usd: 7.51
     artefact: contexts/artefacts/stories/E02S08.story.md
     dependencies: [E02S01, E06S38, E06S09]
     notes: "Discovery 2026-02-27. 12 ACs. Vue d'ensemble (dashboard index — summary cards + monthly trend). Composite score hero with tier badge. Radar chart (5 components). Per-component detail cards with improvement tips. Monthly leads stacked bar chart. Conversion metrics cards. Empty state for new experts. recharts."
@@ -888,6 +1062,10 @@ items:
     human_cost_usd: 1470
     started_at: "2026-02-27T23:05:00+01:00"
     completed_at: "2026-02-28T00:30:00+01:00"
+    pr_number: 51
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/51"
+    pr_status: "merged"
+    cost_usd: 7.47
     artefact: contexts/artefacts/stories/E02S09.story.md
     dependencies: []
     notes: "DONE 2026-02-28. QA PASS (first cycle). All 15 ACs met. 44/44 vitest. tsc clean. Page weight 16.2KB. PR#51 squash-merged → staging. Deploy Landing CI green. ⚠️ Human action required: wrangler secret put POSTHOG_API_KEY --env staging (and production at launch)."

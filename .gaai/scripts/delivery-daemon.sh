@@ -652,6 +652,10 @@ on_exit() {
   # Kill child processes (claude, tee)
   kill \$(jobs -p) 2>/dev/null || true
 
+  # Extract cost from delivery log (runs unconditionally)
+  local DELIVERY_COST=""
+  DELIVERY_COST=\$(tail -20 "$delivery_log" 2>/dev/null | grep '"type":"result"' | tail -1 | python3 -c "import json,sys;d=json.load(sys.stdin);c=d.get('total_cost_usd',0);print(round(c,2) if c else '')" 2>/dev/null) || DELIVERY_COST=""
+
   rm -f "\$LOCK_FILE" "$wrapper"
   if [[ \$EXIT_CODE -ne 0 ]]; then
     # Check if the delivery already marked the story as done
@@ -661,24 +665,54 @@ on_exit() {
     current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
     if [[ "\$current_status" == "done" ]]; then
       echo "[WRAPPER] Story $story_id already done — ignoring non-zero exit code (\$EXIT_CODE)."
+      # Fall through to cost-only block below
     else
       echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
       (
         if command -v flock &>/dev/null; then
           flock "$STAGING_LOCK" bash -c "
+            [[ -n \$DELIVERY_COST ]] && '$SCHEDULER' --set-field '$story_id' cost_usd \$DELIVERY_COST '$BACKLOG' 2>/dev/null
             '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
             git add '$BACKLOG_REL' 2>/dev/null
             git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
             git push origin '$TARGET_BRANCH' --quiet 2>&1
           "
         else
+          [[ -n "\$DELIVERY_COST" ]] && '$SCHEDULER' --set-field '$story_id' cost_usd "\$DELIVERY_COST" '$BACKLOG' 2>/dev/null
           '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
           git add '$BACKLOG_REL' 2>/dev/null
           git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
           git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
         fi
       ) || echo "[WRAPPER] Warning: could not mark $story_id as failed (will be caught by staleness detection)"
+      return
     fi
+  fi
+
+  # Cost-only block: runs for EXIT_CODE==0 or done-but-nonzero-exit
+  if [[ -n "\$DELIVERY_COST" ]]; then
+    cd "$PROJECT_DIR"
+    [[ \$EXIT_CODE -eq 0 ]] && git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
+    echo "[WRAPPER] Recording cost_usd=\$DELIVERY_COST for $story_id..."
+    (
+      if command -v flock &>/dev/null; then
+        flock "$STAGING_LOCK" bash -c "
+          '$SCHEDULER' --set-field '$story_id' cost_usd \$DELIVERY_COST '$BACKLOG' 2>/dev/null || true
+          git add '$BACKLOG_REL' 2>/dev/null
+          git diff --cached --quiet 2>/dev/null || {
+            git commit -m 'chore($story_id): cost_usd [delivery-wrapper]' --quiet 2>/dev/null
+            git push origin '$TARGET_BRANCH' --quiet 2>&1
+          }
+        "
+      else
+        '$SCHEDULER' --set-field '$story_id' cost_usd "\$DELIVERY_COST" '$BACKLOG' 2>/dev/null || true
+        git add '$BACKLOG_REL' 2>/dev/null
+        git diff --cached --quiet 2>/dev/null || {
+          git commit -m 'chore($story_id): cost_usd [delivery-wrapper]' --quiet 2>/dev/null
+          git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+        }
+      fi
+    ) || echo "[WRAPPER] Warning: could not write cost_usd for $story_id"
   fi
 }
 trap on_exit EXIT INT TERM
@@ -763,6 +797,10 @@ on_exit() {
   # Kill child processes (claude, tee)
   kill \$(jobs -p) 2>/dev/null || true
 
+  # Extract cost from delivery log (runs unconditionally)
+  local DELIVERY_COST=""
+  DELIVERY_COST=\$(tail -20 "$delivery_log" 2>/dev/null | grep '"type":"result"' | tail -1 | python3 -c "import json,sys;d=json.load(sys.stdin);c=d.get('total_cost_usd',0);print(round(c,2) if c else '')" 2>/dev/null) || DELIVERY_COST=""
+
   rm -f "\$LOCK_FILE" "$wrapper"
   if [[ \$EXIT_CODE -ne 0 ]]; then
     # Check if the delivery already marked the story as done
@@ -773,15 +811,33 @@ on_exit() {
     current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
     if [[ "\$current_status" == "done" ]]; then
       echo "[WRAPPER] Story $story_id already done — ignoring non-zero exit code (\$EXIT_CODE)."
+      # Fall through to cost-only block below
     else
       echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
       (
+        [[ -n "\$DELIVERY_COST" ]] && '$SCHEDULER' --set-field '$story_id' cost_usd "\$DELIVERY_COST" '$BACKLOG' 2>/dev/null
         '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
         git add '$BACKLOG_REL' 2>/dev/null
         git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
         git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
       ) || echo "[WRAPPER] Warning: could not mark $story_id as failed"
+      return
     fi
+  fi
+
+  # Cost-only block: runs for EXIT_CODE==0 or done-but-nonzero-exit
+  if [[ -n "\$DELIVERY_COST" ]]; then
+    cd "$PROJECT_DIR"
+    [[ \$EXIT_CODE -eq 0 ]] && git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
+    echo "[WRAPPER] Recording cost_usd=\$DELIVERY_COST for $story_id..."
+    (
+      '$SCHEDULER' --set-field '$story_id' cost_usd "\$DELIVERY_COST" '$BACKLOG' 2>/dev/null || true
+      git add '$BACKLOG_REL' 2>/dev/null
+      git diff --cached --quiet 2>/dev/null || {
+        git commit -m 'chore($story_id): cost_usd [delivery-wrapper]' --quiet 2>/dev/null
+        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+      }
+    ) || echo "[WRAPPER] Warning: could not write cost_usd for $story_id"
   fi
 }
 trap on_exit EXIT INT TERM

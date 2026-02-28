@@ -197,15 +197,24 @@ flock .gaai/.delivery-locks/.staging.lock bash -c '
 '
 ```
 
-**8c. Mark Story done + cleanup worktree:**
+**8c. Mark Story done + record PR + cleanup worktree:**
 
 ```bash
+# Capture PR metadata (after merge, before cleanup)
+PR_URL=$(gh pr view story/{id} --json url -q .url 2>/dev/null || echo "")
+PR_NUMBER=$(gh pr view story/{id} --json number -q .number 2>/dev/null || echo "")
+PR_STATE=$(gh pr view story/{id} --json state -q .state 2>/dev/null || echo "merged")
+
 # Remove worktree (but keep story branch — needed for the PR)
 git worktree remove ../{id}-workspace
 
-# Update backlog
+# Update backlog: status + PR reference + completed_at
 flock .gaai/.delivery-locks/.staging.lock bash -c '
   git pull origin staging
+  [[ -n "'"$PR_URL"'" ]] && scripts/backlog-scheduler.sh --set-field {id} pr_url "'"$PR_URL"'" contexts/backlog/active.backlog.yaml
+  [[ -n "'"$PR_NUMBER"'" ]] && scripts/backlog-scheduler.sh --set-field {id} pr_number "'"$PR_NUMBER"'" contexts/backlog/active.backlog.yaml
+  [[ -n "'"$PR_STATE"'" ]] && scripts/backlog-scheduler.sh --set-field {id} pr_status "'"$PR_STATE"'" contexts/backlog/active.backlog.yaml
+  scripts/backlog-scheduler.sh --set-field {id} completed_at "'"$(date -u +%Y-%m-%dT%H:%M:%S%z)"'" contexts/backlog/active.backlog.yaml
   scripts/backlog-scheduler.sh --set-status {id} done contexts/backlog/active.backlog.yaml
   git add .gaai/contexts/backlog/active.backlog.yaml
   git commit -m "chore({id}): done [delivery]"
@@ -214,6 +223,7 @@ flock .gaai/.delivery-locks/.staging.lock bash -c '
 ```
 
 > **Note:** The story branch is NOT deleted. It stays on origin for the PR. GitHub can auto-delete branches after PR merge (configure in repo Settings → General → "Automatically delete head branches").
+> **Note:** `cost_usd` is NOT set here — it is automatically captured by the delivery wrapper's `on_exit()` handler after the Claude session ends (see `delivery-daemon.sh`).
 
 Move completed Story to `contexts/backlog/done/{YYYY-MM}.done.yaml`.
 

@@ -6,7 +6,7 @@ tags:
   - decisions
   - governance
 created_at: 2026-02-19
-updated_at: 2026-02-27
+updated_at: 2026-02-28
 ---
 
 # Decision Log
@@ -20,6 +20,60 @@ updated_at: 2026-02-27
 >
 > **Compacted 2026-02-27:** DEC-60 to DEC-89 (plus DEC-2026-02-23-01, DEC-2026-02-23-02) archived.
 > Full text → `archive/decisions-60-89.archive.md` | Summary → `summaries/decisions-60-89.summary.md`
+
+---
+
+### DEC-118 — Expert availability: hybrid model (Callibrate rules + GCal conflict filter)
+
+**Context:** Experts need to indicate when they're available for prospect calls. Four approaches evaluated: (A) GCal as sole source of truth — rejected because "free in calendar" ≠ "available for Callibrate calls"; (B) Callibrate dashboard as sole source — rejected because bidirectional sync with GCal is a nightmare; (C) External Calendly/Cal.com link — rejected because we lose availability data for the matching engine and the prospect leaves our platform; (D) Hybrid — Callibrate availability rules + GCal read-only conflict check.
+
+**Decision:** Option D — Hybrid. Three progressive layers:
+- **Layer 1 (signup, mandatory):** Expert defines weekly recurring rules via dashboard — day_of_week + start_time + end_time (e.g., "Jeudi 14:00–17:00"). Stored in `expert_availability_rules` table. Sufficient for matching engine. No GCal required.
+- **Layer 2 (post-signup, encouraged):** Expert connects GCal via OAuth. Callibrate READS busy/free (FreeBusy API) to filter out conflicts. Callibrate WRITES confirmed bookings to expert's GCal. No availability blocks created in GCal — separation of intent (Callibrate) vs. conflict (GCal).
+- **Layer 3 (optional):** Override rules for specific dates ("pas dispo semaine du 15 mars").
+- **Booking formula:** `Slots shown = (Callibrate rules ∩ GCal free time) − existing bookings`. If GCal not connected, show rule-based slots + manual confirmation by expert.
+- **Sync rules:** GCal is read-only for conflicts, write-only for bookings. Push notifications (webhook) detect if expert deletes a Callibrate booking from GCal → flag/cancel. If expert revokes GCal access → fallback to Layer 1 + manual confirmation. No bidirectional sync ever.
+- **Data model:** `expert_availability_rules(expert_id, day_of_week 0-6, start_time, end_time, is_active, created_at, updated_at)`. All times stored relative to expert timezone, converted to UTC at query time.
+
+**Files:** No codebase files yet — architectural decision for E03 implementation.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-117 — Expert credits: milestone-based progressive release (3 paliers)
+
+**Context:** New experts receive 100€ of free credits upon registration. Three release strategies evaluated: (A) All-at-once at completion threshold — simple but no intermediate reward, expert at 3/4 fields has done 75% of work for 0€; (B) Progressive per-field — dopamine loop but micro-amounts feel cheap/manipulative, high implementation complexity; (C) Milestone-based with 2-3 meaningful paliers — best of both worlds.
+
+**Decision:** Option C — 3 milestones mapped to platform value:
+- **Milestone 1 "Matchable"** (name + bio 50+ chars + 3+ skill tags) → **40€** — expert is indexable by the matching engine.
+- **Milestone 2 "Bookable"** (availability rules defined) → **40€** — expert can receive bookings.
+- **Milestone 3 "Trustworthy"** (photo OR portfolio/external link) → **20€** — expert converts better.
+- **Anti-gaming:** 3 immutable timestamps (`milestone_identity_unlocked_at`, `milestone_bookable_unlocked_at`, `milestone_trust_unlocked_at`). Once SET, never reset. Expert can delete and re-complete fields without re-triggering credit. Check: `IF milestone_X_unlocked_at IS NULL AND conditions met THEN SET + credit`.
+- **Anti-multi-account:** Combine with email normalization (strip `+tag`, normalize Gmail dots), disposable email blacklist, and 72h activation delay. Phone verification deferred to post-MVP volume.
+
+**Files:** No codebase files yet — architectural decision for E03 implementation.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-116 — Expert profile: mandatory fields, public vs. internal, no hourly rate gate
+
+**Context:** Evaluated which expert profile fields should be mandatory (gate for credit milestones), which should be optional (nudge), and which should be prospect-facing vs. matching-only. Key insight: minimize friction at signup — only require what the matching engine needs to function.
+
+**Decision:**
+- **Mandatory (bloquant):** (1) Display name, (2) Bio/headline min 50 chars, (3) 3+ skill tags from predefined list, (4) Availability preferences (weekly recurring rules — see DEC-118).
+- **Encouraged (soft-required, nudge):** Photo, fourchette tarifaire indicative (range, pas exact — e.g. €50-100/h), portfolio/liens externes, connexion GCal, langues parlées.
+- **Hourly rate explicitly NOT mandatory.** Expert adapts pricing to project complexity; published rates create anchoring that hurts both expert and platform. Optional range field only.
+- **Public-facing (prospect sees):** Display name, bio, skill tags, photo, portfolio, tarif range (if set), "prochaine dispo" (computed label, not raw rules), langues, région/timezone.
+- **Matching-only (internal):** Exact availability rules (Jeudi 14h-17h), GCal connection status, matching score, vector embedding, email, normalized email, profile completion %, credit balance, account age, acceptance/response rate, IP/device fingerprint.
+- **Expert-only (dashboard):** Personal stats (views, bookings, conversion), detailed availability rules, milestone credits progress, profile completion score.
+- **Matching score NEVER shown to prospect.** Order of results is sufficient. Show contextual match reasons instead ("Spécialisé en n8n + Python, disponible cette semaine").
+
+**Files:** No codebase files yet — architectural decision for E03 implementation.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
 
 ---
 
