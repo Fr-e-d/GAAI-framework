@@ -1133,7 +1133,11 @@ items:
     epic: E02
     title: "Expert availability: weekly recurring rules (DEC-118)"
     priority: high
-    status: in_progress
+    status: done
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/56"
+    pr_number: 56
+    pr_status: "merged"
+    completed_at: "2026-02-28T12:20:27+00:00"
     artefact: contexts/artefacts/stories/E02S11.story.md
     dependencies: [E02S01, E06S10, E06S11]
     notes: "DEC-118: Hybrid model — Callibrate rules + GCal conflict filter. New table expert_availability_rules (expert_id, day_of_week 0-6, start_time, end_time, is_active, created_at, updated_at). CRUD API endpoints. Dashboard UI: day/time selector for weekly recurring slots (e.g., 'Jeudi 14:00-17:00'). Integration with booking engine: available slots = (Callibrate rules ∩ GCal free time) - existing bookings. If GCal not connected: show rule-based slots + manual confirmation. Times stored relative to expert timezone. Prerequisite for Milestone 2 'Bookable' (DEC-117)."
