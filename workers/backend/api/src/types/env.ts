@@ -77,4 +77,9 @@ export interface Env {
 
   // Analytics Engine (optional — no-op if binding missing)
   MATCHING_ANALYTICS?: AnalyticsEngineDataset;
+
+  // Circuit breaker cost-per-extraction in cents (E06S40 AC8)
+  // Optional: defaults to 0.4 cents ($0.004) per extraction when absent.
+  // Set in wrangler.toml [vars] or override per environment.
+  EXTRACT_COST_CENTS?: string;
 }

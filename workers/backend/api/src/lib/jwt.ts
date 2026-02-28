@@ -6,6 +6,11 @@
 // Also used for survey token sign/verify (E06S17):
 //   signSurveyToken / verifySurveyToken — uses SURVEY_TOKEN_SECRET (distinct from
 //   PROSPECT_TOKEN_SECRET). Payload: { booking_id, prospect_id, exp, iss, aud } (7d TTL).
+//
+// Also used for flow token sign/verify (E06S40 AC11):
+//   signFlowToken / verifyFlowToken — uses PROSPECT_TOKEN_SECRET.
+//   Payload: { extraction_id, exp, iss, aud: 'extract:flow' }. TTL: 30 minutes.
+//   isValidProspectToken — verifies any prospect JWT without matching prospect_id (for AC9).
 
 function toBase64Url(data: Uint8Array | ArrayBuffer): string {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
@@ -174,4 +179,97 @@ export async function verifySurveyToken(
   if (typeof claims.booking_id !== 'string' || typeof claims.prospect_id !== 'string') return null;
 
   return { booking_id: claims.booking_id, prospect_id: claims.prospect_id };
+}
+
+// ── Flow token — sign / verify (E06S40 AC11) ──────────────────────────────────
+// Proves client went through a legitimate extraction → confirmation → submit flow.
+// Secret: PROSPECT_TOKEN_SECRET (reused — distinct audiences prevent cross-token use).
+// Payload: { extraction_id, exp, iss, aud: 'extract:flow' }. TTL: 30 minutes (1800s).
+
+export async function signFlowToken(extractionId: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const exp = Math.floor(Date.now() / 1000) + 1800; // 30 minutes
+
+  const header = toBase64Url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
+  const payload = toBase64Url(
+    encoder.encode(JSON.stringify({ extraction_id: extractionId, exp, iss: 'callibrate', aud: 'extract:flow' })),
+  );
+  const signingInput = `${header}.${payload}`;
+
+  const key = await importHmacKey(secret, 'sign');
+  const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(signingInput));
+
+  return `${signingInput}.${toBase64Url(signatureBuffer)}`;
+}
+
+// Returns the extraction_id if valid, null otherwise.
+export async function verifyFlowToken(token: string, secret: string): Promise<{ extraction_id: string } | null> {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  const [header, payload, sig] = parts as [string, string, string];
+  const signingInput = `${header}.${payload}`;
+
+  let signatureBytes: Uint8Array;
+  try {
+    signatureBytes = fromBase64Url(sig);
+  } catch {
+    return null;
+  }
+
+  const key = await importHmacKey(secret, 'verify');
+  const encoder = new TextEncoder();
+
+  const valid = await crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(signingInput));
+  if (!valid) return null;
+
+  let claims: { extraction_id?: string; exp?: number; aud?: string };
+  try {
+    claims = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
+  } catch {
+    return null;
+  }
+
+  if (claims.exp === undefined || claims.exp < Math.floor(Date.now() / 1000)) return null;
+  if (claims.aud !== 'extract:flow') return null;
+  if (typeof claims.extraction_id !== 'string') return null;
+
+  return { extraction_id: claims.extraction_id };
+}
+
+// ── isValidProspectToken ───────────────────────────────────────────────────────
+// Verifies any prospect JWT (signature + TTL only — no prospect_id matching).
+// Used by AC9: if the caller holds a valid session token, they are identified and exempt
+// from the extraction count limit.
+
+export async function isValidProspectToken(token: string, secret: string): Promise<boolean> {
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+
+  const [header, payload, sig] = parts as [string, string, string];
+  const signingInput = `${header}.${payload}`;
+
+  let signatureBytes: Uint8Array;
+  try {
+    signatureBytes = fromBase64Url(sig);
+  } catch {
+    return false;
+  }
+
+  const key = await importHmacKey(secret, 'verify');
+  const encoder = new TextEncoder();
+
+  const valid = await crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(signingInput));
+  if (!valid) return false;
+
+  let claims: { exp?: number };
+  try {
+    claims = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
+  } catch {
+    return false;
+  }
+
+  if (claims.exp === undefined || claims.exp < Math.floor(Date.now() / 1000)) return false;
+
+  return true;
 }
