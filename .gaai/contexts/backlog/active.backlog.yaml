@@ -1248,7 +1248,11 @@ items:
     epic: E03
     title: "Return visit: cookie auth + magic link (DEC-128)"
     priority: low
-    status: in_progress
+    status: done
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/67"
+    pr_number: 67
+    pr_status: "merged"
+    completed_at: "2026-02-28T16:38:35Z"
     artefact: contexts/artefacts/stories/E03S10.story.md
     dependencies: [E06S39, E03S03]
     notes: "DEC-128: After OTP verification, store auth token in cookie/localStorage (TTL 7 days). Prospect returns on same device → results displayed directly. Magic link in confirmation email (JWT, TTL 7 days) for cross-device/cleared cookies. Single prospect_auth_token — cookie stores client-side, magic link embeds in URL. After 7 days → re-identify required. Post-MVP — low volume at launch."
