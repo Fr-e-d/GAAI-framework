@@ -1191,7 +1191,11 @@ items:
     epic: E03
     title: "Funnel restructure: merge confirmation into results page (DEC-123)"
     priority: medium
-    status: in_progress
+    status: done
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/63"
+    pr_number: 63
+    pr_status: "merged"
+    completed_at: "2026-02-28T15:34:44Z"
     artefact: contexts/artefacts/stories/E03S08.story.md
     dependencies: [E03S01, E03S02, E03S03, E06S39]
     notes: "DEC-123: Merge E03S02 (confirmation) into E03S03 (results) — 2 pages instead of 3. Page 2 becomes: extraction summary as collapsible/editable section at top + confirmation questions for low-confidence fields inline + match results (anonymized) + email + OTP gate + full profiles. If ready_to_match: extraction AND matching run in pipeline on submit, zero intermediate clicks. If prospect edits any field: re-match via AJAX, no reload. Post-MVP because the 3-page flow works — this is a UX optimization. Depends on E06S39 (OTP must be integrated into Page 2)."
@@ -1357,3 +1361,41 @@ items:
     artefact: contexts/artefacts/stories/E09S09.story.md
     dependencies: []
     notes: "DONE 2026-02-28. deploy-dashboard.yml and deploy-landing.yml updated: 'main' → 'production' in branch triggers and if conditions. 'main' branch doesn't exist — production deploys for dashboard/landing were silently broken."
+
+  # ── EPIC E10: .gaai OSS — Framework Extraction & Publication ────────────────
+  # DEC-132: .gaai OSS published before Callibrate live. Early access / alpha.
+  # Supersedes DEC-72 (former gate: Gate 2 PASS).
+  # Target: mid-March 2026. No Show HN (reserved for Callibrate + .gaai combined).
+
+  - id: E10S01
+    epic: E10
+    title: "Extract .gaai framework from Callibrate monorepo into standalone repo"
+    priority: high
+    status: ready
+    human_md_estimate: 1.5
+    human_cost_usd: 1050
+    artefact: contexts/artefacts/stories/E10S01.story.md
+    dependencies: []
+    notes: "DEC-132. Create new GitHub repo. Copy .gaai/ structure. Remove all Callibrate-specific content: stories, decisions, memory, backlog, artefacts. Remove premium skills (content-production domain). Remove all secrets/PII references. Keep: agents, core skills, rules, orchestration, daemon, slash commands, sub-agents. Verify clean: no callibrate string in output repo."
+
+  - id: E10S02
+    epic: E10
+    title: "Write README + Getting Started for .gaai OSS"
+    priority: high
+    status: ready
+    human_md_estimate: 1.0
+    human_cost_usd: 700
+    artefact: contexts/artefacts/stories/E10S02.story.md
+    dependencies: [E10S01]
+    notes: "DEC-132. README: what is .gaai, why it exists, 3-line install, getting started (bootstrap a new project in 15 min). Generic use case (not Callibrate). Include: architecture diagram (text), core concepts (agents, skills, memory, backlog, rules), link to CLAUDE.md convention. No marketing language."
+
+  - id: E10S03
+    epic: E10
+    title: "Add LICENSE (ELv2), CI, and publish .gaai OSS repo as public alpha"
+    priority: high
+    status: ready
+    human_md_estimate: 0.5
+    human_cost_usd: 350
+    artefact: contexts/artefacts/stories/E10S03.story.md
+    dependencies: [E10S02]
+    notes: "DEC-132, DEC-105. ELv2 licence file + header convention. CI: lint + basic validation (YAML schema check on backlog, markdown lint on agents/skills). GitHub repo settings: description, topics (ai-governance, claude-code, ai-agents, mcp), alpha tag in repo description. Publish as public. No announcement — BIP content handles distribution."
