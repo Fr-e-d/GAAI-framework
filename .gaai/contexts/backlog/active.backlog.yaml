@@ -1109,7 +1109,7 @@ items:
     epic: E06
     title: "Input pre-validation & abuse prevention (DEC-120/DEC-122)"
     priority: high
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S40.story.md
     dependencies: []
     notes: "DEC-120: 6-layer bot protection. DEC-122: abuse prevention. Server-side: gibberish detection (regex patterns, min 3 distinct words) before LLM call. Honeypot field + timing check (<3s = bot). Repeated submission prevention: cookie-based (1 free extraction, then email required) + IP rate limit (3 extractions/IP/24h without email). Flow token signé (HMAC, TTL 30min) from extraction to submit — prevents direct API calls with fabricated data. Tiered rate limiting per Cloudflare best practices (4/min → challenge, 10/10min → block, exceed → block 24h). Hard spending cap documentation ($50/day at LLM provider). Max output tokens 500 on extraction."
