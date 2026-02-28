@@ -727,3 +727,53 @@ The script is **idempotent** — running it multiple times is safe. If a dashboa
 | Prospect Conversion Funnel | FUNNELS | 5 steps, breakdown: `satellite_id`, 14-day window, 30d range |
 | Expert Activation Funnel | FUNNELS | 4 steps, 30-day window, 30d range |
 | Business Overview | TRENDS (×4) | Daily counts + formula-based conversion rate |
+
+---
+
+## LLM Provider Spending Caps (E06S40 AC7 — MANDATORY)
+
+> **Non-negotiable operational control.** Without spending caps, a single bot attack can generate thousands of dollars in LLM API charges in hours. The application's circuit breaker (E06S40 AC8) provides a $10/hour soft limit, but **provider-level caps are the hard backstop**.
+
+### Why This Is Required
+
+The `POST /api/extract` endpoint calls OpenAI for every submission (cost ~$0.002–0.004/request). A real incident in 2024 cost one company **$12,000 in a weekend** from an unprotected LLM endpoint. The application has layered defenses (input validation, honeypot, rate limiting, circuit breaker), but provider caps are the ultimate safety net.
+
+### OpenAI Spending Caps
+
+1. Log in to [platform.openai.com](https://platform.openai.com)
+2. Navigate to **Settings → Billing → Usage limits**
+3. Set:
+   - **Monthly budget limit:** $500 (hard cap — API returns 429 when exceeded)
+   - **Email notification threshold:** $50 (triggers email alert)
+4. Click **Save**
+
+> **Verification:** After setting the cap, confirm it shows the correct amount. OpenAI enforces this at the API key organization level.
+
+### Anthropic (Claude) Spending Caps
+
+If using Claude (Workers AI or Anthropic direct):
+
+1. Log in to [console.anthropic.com](https://console.anthropic.com)
+2. Navigate to **Settings → Billing → Spend limits**
+3. Set:
+   - **Monthly spend limit:** $500
+   - **Alert threshold:** $50
+4. Click **Save**
+
+### Cloudflare Workers AI
+
+Workers AI is billed via Cloudflare account billing. Set spending limits via:
+
+1. Cloudflare Dashboard → **Account → Billing → Spending Limits**
+2. Set a monthly cap appropriate to your usage
+
+### Application-Level Circuit Breaker (AC8)
+
+In addition to provider caps, the application enforces a **$10/hour** soft limit via KV-based cost accumulator. The cost-per-extraction is configurable via the `EXTRACT_COST_CENTS` env var (default: `0.4` = $0.004/extraction).
+
+To override the default cost estimate (e.g., if your model/prompt changes costs):
+
+```toml
+# wrangler.toml [env.staging.vars] or [env.production.vars]
+EXTRACT_COST_CENTS = "0.8"  # if using a more expensive model
+```

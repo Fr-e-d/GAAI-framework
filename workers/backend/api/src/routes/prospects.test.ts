@@ -3,7 +3,7 @@ import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, ha
 import type { Env } from '../types/env';
 
 vi.mock('../lib/db', () => ({
-  createSql: vi.fn(() => Object.assign((() => []) as unknown as ReturnType<typeof import('../lib/db').createSql>, { begin: vi.fn() })),
+  createSql: vi.fn(() => Object.assign((() => []) as unknown as ReturnType<typeof import('../lib/db').createSql>, { begin: vi.fn(), end: vi.fn().mockResolvedValue(undefined) })),
 }));
 
 const mockCtx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
@@ -80,9 +80,12 @@ describe('handleProspectSubmit — Turnstile validation', () => {
   });
 
   it('returns 422 when cf-turnstile-response is absent from body (AC4)', async () => {
+    const { signFlowToken } = await import('../lib/jwt');
+    const flow_token = await signFlowToken('extraction-001', 'test-secret-32-chars-long-padding!!');
     const request = makeSubmitRequest({
       satellite_id: 'sat-1',
       quiz_answers: {},
+      flow_token,
     });
     const response = await handleProspectSubmit(request, makeMockEnv(), mockCtx);
     expect(response.status).toBe(422);
@@ -92,10 +95,13 @@ describe('handleProspectSubmit — Turnstile validation', () => {
   });
 
   it('returns 422 when cf-turnstile-response is an empty string (AC4)', async () => {
+    const { signFlowToken } = await import('../lib/jwt');
+    const flow_token = await signFlowToken('extraction-002', 'test-secret-32-chars-long-padding!!');
     const request = makeSubmitRequest({
       satellite_id: 'sat-1',
       quiz_answers: {},
       'cf-turnstile-response': '',
+      flow_token,
     });
     const response = await handleProspectSubmit(request, makeMockEnv(), mockCtx);
     expect(response.status).toBe(422);
@@ -115,10 +121,13 @@ describe('handleProspectSubmit — Turnstile validation', () => {
       return postgrestResponse({});
     });
 
+    const { signFlowToken } = await import('../lib/jwt');
+    const flow_token = await signFlowToken('extraction-003', 'test-secret-32-chars-long-padding!!');
     const request = makeSubmitRequest({
       satellite_id: 'sat-1',
       quiz_answers: {},
       'cf-turnstile-response': 'invalid-token',
+      flow_token,
     });
     const response = await handleProspectSubmit(request, makeMockEnv(), mockCtx);
     expect(response.status).toBe(422);
@@ -135,10 +144,13 @@ describe('handleProspectSubmit — Turnstile validation', () => {
       return postgrestResponse({});
     });
 
+    const { signFlowToken } = await import('../lib/jwt');
+    const flow_token = await signFlowToken('extraction-004', 'test-secret-32-chars-long-padding!!');
     const request = makeSubmitRequest({
       satellite_id: 'sat-1',
       quiz_answers: {},
       'cf-turnstile-response': 'some-token',
+      flow_token,
     });
     const response = await handleProspectSubmit(request, makeMockEnv(), mockCtx);
     expect(response.status).toBe(422);
@@ -158,10 +170,14 @@ describe('handleProspectSubmit — Turnstile validation', () => {
       return postgrestResponse(null, 200);
     });
 
+    const { signFlowToken } = await import('../lib/jwt');
+    const flow_token = await signFlowToken('extraction-abc', 'test-secret-32-chars-long-padding!!');
+
     const request = makeSubmitRequest({
       satellite_id: 'sat-1',
       quiz_answers: {},
       'cf-turnstile-response': '1x0000000000000000000000000000000AA',
+      flow_token,
     });
     const response = await handleProspectSubmit(request, makeMockEnv(), mockCtx);
     // Must NOT be a Turnstile 422
@@ -213,10 +229,14 @@ describe('handleProspectSubmit — Rate Limiting', () => {
       RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: true }) },
     });
 
+    const { signFlowToken } = await import('../lib/jwt');
+    const flow_token = await signFlowToken('extraction-xyz', env.PROSPECT_TOKEN_SECRET);
+
     const request = makeSubmitRequest({
       satellite_id: 'sat-1',
       quiz_answers: {},
       'cf-turnstile-response': 'valid-token',
+      flow_token,
     });
     const response = await handleProspectSubmit(request, env, mockCtx);
     expect(response.status).not.toBe(429);

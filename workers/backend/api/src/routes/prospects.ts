@@ -17,7 +17,7 @@ import {
   type ScoreBreakdown,
 } from '../types/matching';
 import { scoreMatch, applyReliabilityModifier } from '../matching/score';
-import { signProspectToken, verifyProspectToken } from '../lib/jwt';
+import { signProspectToken, verifyProspectToken, verifyFlowToken } from '../lib/jwt';
 import { loadExpertPool } from '../lib/expertPool';
 import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
 import { createSql } from '../lib/db';
@@ -154,11 +154,24 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     utm_campaign?: unknown;
     utm_content?: unknown;
     'cf-turnstile-response'?: unknown;
+    flow_token?: unknown; // AC11 (E06S40): signed token from POST /api/extract
   };
   try {
     body = await request.json();
   } catch {
     return errorResponse('Invalid JSON body', 400);
+  }
+
+  // AC11 (E06S40): Flow token required — proves client went through legitimate extraction flow.
+  // Check Authorization header first, then body field `flow_token`.
+  const authHeader = request.headers.get('Authorization');
+  const rawFlowToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : body['flow_token'];
+  if (typeof rawFlowToken !== 'string' || !rawFlowToken) {
+    return errorResponse('invalid_flow_token', 403);
+  }
+  const flowTokenValid = await verifyFlowToken(rawFlowToken, env.PROSPECT_TOKEN_SECRET);
+  if (!flowTokenValid) {
+    return errorResponse('invalid_flow_token', 403);
   }
 
   // AC4: Turnstile token required
@@ -363,7 +376,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
         expert_id: expert.id,
         score,
         score_breakdown: breakdown as unknown as Json,
-        status: 'active',
+        status: 'pending',
         expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       };
     });

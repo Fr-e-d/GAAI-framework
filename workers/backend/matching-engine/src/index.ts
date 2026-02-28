@@ -88,6 +88,8 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
 
   const sql = createSql(env);
 
+  try {
+
   // Load prospect requirements
   const [prospect] = await sql<Pick<ProspectRow, 'id' | 'requirements' | 'satellite_id'>[]>`
     SELECT id, requirements, satellite_id FROM prospects WHERE id = ${prospect_id}`;
@@ -250,7 +252,7 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     for (const { expert, matchScore } of top20) {
       await sql`
         INSERT INTO matches (prospect_id, expert_id, score, score_breakdown, status, expires_at)
-        VALUES (${prospect_id}, ${expert.id}, ${matchScore.score}, ${JSON.stringify(matchScore.breakdown)}::jsonb, 'active', ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()})
+        VALUES (${prospect_id}, ${expert.id}, ${matchScore.score}, ${JSON.stringify(matchScore.breakdown)}::jsonb, 'pending', ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()})
         ON CONFLICT DO NOTHING`;
     }
   }
@@ -287,6 +289,10 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
   });
 
   return jsonResponse({ computed: top20.length, top_matches: topMatches, billing_excluded: billingExcluded });
+
+  } finally {
+    ctx.waitUntil(sql.end());
+  }
 }
 
 // ── POST /embed ───────────────────────────────────────────────────────────────
@@ -347,9 +353,14 @@ async function handleEmbed(request: Request, env: MatchingEnv, ctx: ExecutionCon
 async function handleAdminReindex(request: Request, env: MatchingEnv, ctx: ExecutionContext): Promise<Response> {
   const sql = createSql(env);
 
-  const experts = await sql<Pick<ExpertRow, 'id' | 'profile' | 'rate_min' | 'rate_max' | 'availability' | 'outcome_tags'>[]>`
-    SELECT id, profile, rate_min, rate_max, availability, outcome_tags FROM experts
-    WHERE availability != 'unavailable'`;
+  let experts: Pick<ExpertRow, 'id' | 'profile' | 'rate_min' | 'rate_max' | 'availability' | 'outcome_tags'>[];
+  try {
+    experts = await sql<Pick<ExpertRow, 'id' | 'profile' | 'rate_min' | 'rate_max' | 'availability' | 'outcome_tags'>[]>`
+      SELECT id, profile, rate_min, rate_max, availability, outcome_tags FROM experts
+      WHERE availability != 'unavailable'`;
+  } finally {
+    await sql.end();
+  }
 
   const total = experts.length;
 

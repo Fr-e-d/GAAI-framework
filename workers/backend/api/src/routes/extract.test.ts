@@ -13,16 +13,47 @@ const mockCtx = {
   passThroughOnException: vi.fn(),
 } as unknown as ExecutionContext;
 
+// ── Mock KV (in-memory, test-isolated) ────────────────────────────────────────
+
+function makeMockKv(initial: Record<string, string> = {}): KVNamespace {
+  const store = new Map<string, string>(Object.entries(initial));
+  return {
+    get: vi.fn(async (key: string) => store.get(key) ?? null),
+    put: vi.fn(async (key: string, value: string) => { store.set(key, value); }),
+    delete: vi.fn(async (key: string) => { store.delete(key); }),
+    list: vi.fn(),
+    getWithMetadata: vi.fn(),
+  } as unknown as KVNamespace;
+}
+
+// ── Mock Rate Limiter (always allows by default) ───────────────────────────────
+
+function makeMockRateLimiter(allow = true): RateLimit {
+  return {
+    limit: vi.fn().mockResolvedValue({ success: allow }),
+  } as unknown as RateLimit;
+}
+
 // ── Mock Env ──────────────────────────────────────────────────────────────────
 
-const mockEnv = {
-  SUPABASE_URL: 'https://test.supabase.co',
-  SUPABASE_ANON_KEY: 'test-anon-key',
-  SUPABASE_SERVICE_KEY: 'test-service-key',
-  OPENAI_API_KEY: 'test-openai-key',
-} as unknown as Env;
+function makeMockEnv(overrides: Partial<Env> = {}): Env {
+  return {
+    SUPABASE_URL: 'https://test.supabase.co',
+    SUPABASE_ANON_KEY: 'test-anon-key',
+    SUPABASE_SERVICE_KEY: 'test-service-key',
+    OPENAI_API_KEY: 'test-openai-key',
+    PROSPECT_TOKEN_SECRET: 'test-secret-32-chars-minimum-len',
+    SESSIONS: makeMockKv(),
+    RATE_LIMITER: makeMockRateLimiter(),
+    ...overrides,
+  } as unknown as Env;
+}
 
-// ── Realistic 150-word freetext (AC10) ────────────────────────────────────────
+// Fresh mockEnv per test — checkExtractRateLimit writes to SESSIONS KV on every call,
+// so a shared env would cause counter overflow across tests.
+let mockEnv: Env = makeMockEnv();
+
+// ── Realistic 150-word freetext ────────────────────────────────────────────────
 
 const REALISTIC_FREETEXT = `
 We are a mid-size e-commerce company with around 80 employees based in France. We're struggling with
@@ -38,7 +69,7 @@ before our busy season in 3 months. We work primarily in French but the system s
 customers too.
 `.trim();
 
-// ── Mock OpenAI tool_calls response (all 7 fields present, all confidence > 0.5) ─
+// ── Mock OpenAI responses ─────────────────────────────────────────────────────
 
 const MOCK_HIGH_CONFIDENCE_RESPONSE = {
   id: 'chatcmpl-test',
@@ -88,8 +119,6 @@ const MOCK_HIGH_CONFIDENCE_RESPONSE = {
   usage: { prompt_tokens: 120, completion_tokens: 200, total_tokens: 320 },
 };
 
-// ── Mock OpenAI response with low-confidence fields ───────────────────────────
-
 const MOCK_LOW_CONFIDENCE_RESPONSE = {
   id: 'chatcmpl-test2',
   object: 'chat.completion',
@@ -117,12 +146,12 @@ const MOCK_LOW_CONFIDENCE_RESPONSE = {
                 },
                 confidence: {
                   challenge: 0.8,
-                  skills_needed: 0.6,  // low
-                  industry: 0.5,       // low
-                  budget_range: 0.1,   // low
-                  timeline: 0.1,       // low
-                  company_size: 0.1,   // low
-                  languages: 0.4,      // low
+                  skills_needed: 0.6,
+                  industry: 0.5,
+                  budget_range: 0.1,
+                  timeline: 0.1,
+                  company_size: 0.1,
+                  languages: 0.4,
                 },
                 confirmation_questions: [
                   { field: 'budget_range', question: 'What is your budget range for this project (in EUR)?', options: ['< 5k€', '5–15k€', '15–50k€', '50k€+'] },
@@ -147,6 +176,7 @@ const MOCK_LOW_CONFIDENCE_RESPONSE = {
 describe('handleExtract — POST /api/extract', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
+    mockEnv = makeMockEnv(); // Reset KV state between tests
   });
 
   afterEach(() => {
@@ -189,6 +219,214 @@ describe('handleExtract — POST /api/extract', () => {
     expect(body.details.text).toMatch(/2000/);
   });
 
+  it('AC2 — returns 422 with invalid_input when text is keyboard mashing', async () => {
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa help me please now here' }),
+    });
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(422);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('invalid_input');
+  });
+
+  it('AC2 — returns 422 with invalid_input when text is lorem ipsum', async () => {
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod.' }),
+    });
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(422);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('invalid_input');
+  });
+
+  // ── AC3: Honeypot ──────────────────────────────────────────────────────────
+
+  it('AC3 — returns 200 fake response when honeypot _hp field is non-empty (bot silencing)', async () => {
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: REALISTIC_FREETEXT,
+        _hp: 'bot-filled-this',
+      }),
+    });
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ready_to_match: boolean; needs_confirmation: string[] };
+    expect(body.ready_to_match).toBe(false);
+    expect(body.needs_confirmation).toHaveLength(0);
+    // Fake response — fetch should NOT have been called (no LLM cost)
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('AC3 — allows request when _hp is empty string (real user)', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(MOCK_HIGH_CONFIDENCE_RESPONSE), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: REALISTIC_FREETEXT, _hp: '' }),
+    });
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(200);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+  });
+
+  // ── AC4: Timing check ──────────────────────────────────────────────────────
+
+  it('AC4 — returns 200 fake response when _ts is < 3000ms ago (bot silencing)', async () => {
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: REALISTIC_FREETEXT,
+        _ts: Date.now() - 500, // 0.5s — way too fast
+      }),
+    });
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(200);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('AC4 — allows request when _ts is > 3000ms ago (normal human timing)', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(MOCK_HIGH_CONFIDENCE_RESPONSE), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: REALISTIC_FREETEXT, _ts: Date.now() - 5000 }),
+    });
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(200);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC4 — allows request when _ts is missing (backwards compat)', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(MOCK_HIGH_CONFIDENCE_RESPONSE), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: REALISTIC_FREETEXT }),
+    });
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(200);
+  });
+
+  // ── AC8: Circuit breaker ────────────────────────────────────────────────────
+
+  it('AC8 — returns 503 when hourly cost exceeds $10 (1000 cents)', async () => {
+    const hourKey = `extract-cost:${new Date().toISOString().slice(0, 13)}`;
+    const env = makeMockEnv({ SESSIONS: makeMockKv({ [hourKey]: '1000' }) });
+
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: REALISTIC_FREETEXT }),
+    });
+    const res = await handleExtract(req, env, mockCtx);
+    expect(res.status).toBe(503);
+    const body = await res.json() as { error: string; retry_after: number };
+    expect(body.error).toBe('service_overloaded');
+    expect(body.retry_after).toBe(300);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('AC8 — allows request when hourly cost is below threshold (999 cents)', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(MOCK_HIGH_CONFIDENCE_RESPONSE), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    const hourKey = `extract-cost:${new Date().toISOString().slice(0, 13)}`;
+    const env = makeMockEnv({ SESSIONS: makeMockKv({ [hourKey]: '999' }) });
+
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: REALISTIC_FREETEXT }),
+    });
+    const res = await handleExtract(req, env, mockCtx);
+    expect(res.status).toBe(200);
+  });
+
+  // ── AC9: Extraction count (cookie-based) ───────────────────────────────────
+
+  it('AC9 — returns 403 identification_required when extraction count cookie >= 1', async () => {
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': '_extract_count=1',
+      },
+      body: JSON.stringify({ text: REALISTIC_FREETEXT }),
+    });
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(403);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('identification_required');
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('AC9 — allows first extraction and sets _extract_count cookie', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(MOCK_HIGH_CONFIDENCE_RESPONSE), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: REALISTIC_FREETEXT }),
+    });
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get('Set-Cookie');
+    expect(setCookie).toContain('_extract_count=1');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Lax');
+  });
+
+  it('AC9 — IP fallback: returns 403 when IP has >= 3 extractions without identification', async () => {
+    const env = makeMockEnv({
+      SESSIONS: makeMockKv({ 'extract-ip:1.2.3.4': '3' }),
+    });
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '1.2.3.4',
+      },
+      body: JSON.stringify({ text: REALISTIC_FREETEXT }),
+    });
+    const res = await handleExtract(req, env, mockCtx);
+    expect(res.status).toBe(403);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('identification_required');
+  });
+
+  // ── AC11: Flow token included in successful extraction response ─────────────
+
+  it('AC11 — successful extraction includes flow_token in response', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(MOCK_HIGH_CONFIDENCE_RESPONSE), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    const req = new Request('https://api.callibrate.io/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: REALISTIC_FREETEXT }),
+    });
+    const res = await handleExtract(req, mockEnv, mockCtx);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { flow_token: string; requirements: unknown };
+    expect(typeof body.flow_token).toBe('string');
+    // JWT format: 3 base64url segments separated by dots
+    expect(body.flow_token.split('.').length).toBe(3);
+  });
+
   // ── AC10: Integration test — realistic 150-word description ────────────────
 
   it('AC10 — extracts all 7 fields with ≥5 having confidence > 0.5', async () => {
@@ -215,7 +453,6 @@ describe('handleExtract — POST /api/extract', () => {
       ready_to_match: boolean;
     };
 
-    // AC4: All 7 fields present in requirements
     expect(body.requirements).toHaveProperty('challenge');
     expect(body.requirements).toHaveProperty('skills_needed');
     expect(body.requirements).toHaveProperty('industry');
@@ -224,16 +461,14 @@ describe('handleExtract — POST /api/extract', () => {
     expect(body.requirements).toHaveProperty('company_size');
     expect(body.requirements).toHaveProperty('languages');
 
-    // AC10: At least 5 fields with confidence > 0.5
     const highConfidenceFields = Object.values(body.confidence).filter((c) => c > 0.5);
     expect(highConfidenceFields.length).toBeGreaterThanOrEqual(5);
 
-    // AC3: Response shape
     expect(Array.isArray(body.needs_confirmation)).toBe(true);
     expect(typeof body.ready_to_match).toBe('boolean');
   });
 
-  // ── AC3 + AC6: ready_to_match = true when all confidence ≥ 0.7 ─────────────
+  // ── AC6: ready_to_match + confirmation_questions ────────────────────────────
 
   it('AC6 — ready_to_match is true and no confirmation_questions when all confidence ≥ 0.7', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
@@ -261,8 +496,6 @@ describe('handleExtract — POST /api/extract', () => {
     expect(body.confirmation_questions).toBeUndefined();
   });
 
-  // ── AC3 + AC5: needs_confirmation + questions when confidence < 0.7 ─────────
-
   it('AC5 — includes confirmation_questions (max 3) for low-confidence fields', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify(MOCK_LOW_CONFIDENCE_RESPONSE), {
@@ -274,7 +507,7 @@ describe('handleExtract — POST /api/extract', () => {
     const req = new Request('https://api.callibrate.io/api/extract', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'I want to build a chatbot.' }),
+      body: JSON.stringify({ text: 'I want to build a chatbot for my company to handle orders.' }),
     });
 
     const res = await handleExtract(req, mockEnv, mockCtx);
@@ -289,16 +522,13 @@ describe('handleExtract — POST /api/extract', () => {
     expect(body.needs_confirmation.length).toBeGreaterThan(0);
     expect(body.confirmation_questions).toBeDefined();
     expect(body.confirmation_questions.length).toBeLessThanOrEqual(3);
-    // All questions target low-confidence fields
     const lowConfidenceSet = new Set(body.needs_confirmation);
     for (const q of body.confirmation_questions) {
       expect(lowConfidenceSet.has(q.field)).toBe(true);
     }
   });
 
-  // ── AC8: OpenAI API errors propagate as 502 ──────────────────────────────────
-
-  it('AC8 — returns 502 when OpenAI API returns non-200', async () => {
+  it('AC8 (OpenAI error) — returns 502 when OpenAI API returns non-200', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ error: { message: 'Invalid API key' } }), {
         status: 401,
@@ -309,14 +539,12 @@ describe('handleExtract — POST /api/extract', () => {
     const req = new Request('https://api.callibrate.io/api/extract', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'I want AI automation for my company.' }),
+      body: JSON.stringify({ text: 'I want AI automation for my company processes and workflows.' }),
     });
 
     const res = await handleExtract(req, mockEnv, mockCtx);
     expect(res.status).toBe(502);
   });
-
-  // ── AC2: tool_calls not returned → 500 ──────────────────────────────────────
 
   it('AC2 — returns 500 when OpenAI returns no tool_calls', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
@@ -335,14 +563,12 @@ describe('handleExtract — POST /api/extract', () => {
     const req = new Request('https://api.callibrate.io/api/extract', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Build me an AI.' }),
+      body: JSON.stringify({ text: 'Build me an AI automation system for my business now.' }),
     });
 
     const res = await handleExtract(req, mockEnv, mockCtx);
     expect(res.status).toBe(500);
   });
-
-  // ── AC5/AC6/AC7 (E06S37): desired_outcomes extraction ──────────────────────
 
   it('AC5 (E06S37) — extracts desired_outcomes when present in LLM response', async () => {
     const responseWithOutcomes = {
@@ -394,7 +620,6 @@ describe('handleExtract — POST /api/extract', () => {
       ready_to_match: boolean;
     };
 
-    // AC5: desired_outcomes extracted and present in requirements
     expect(Array.isArray(body.requirements.desired_outcomes)).toBe(true);
     expect(body.requirements.desired_outcomes).toHaveLength(2);
     expect(body.requirements.desired_outcomes![0]).toBe('save time on customer support');
@@ -422,7 +647,6 @@ describe('handleExtract — POST /api/extract', () => {
       ready_to_match: boolean;
     };
 
-    // AC7: existing extractions without desired_outcomes are valid — no error, ready_to_match still works
     expect(body.requirements.desired_outcomes).toBeUndefined();
     expect(typeof body.ready_to_match).toBe('boolean');
   });
