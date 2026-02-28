@@ -1205,7 +1205,7 @@ items:
     epic: E03
     title: "Freetext input UX: persistent hint text (DEC-119)"
     priority: low
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E03S09.story.md
     dependencies: [E03S01]
     notes: "DEC-119: Replace current textarea guidance with persistent hint text between label and textarea (not placeholder). 'Quelques pistes pour nous aider : votre problème ou objectif · les outils concernés · votre budget approximatif · vos délais'. Conversational tone. Language matches satellite config. Client-side soft warning if < 50 chars. Standard UX pattern (Material Design, GOV.UK). Small change — can be bundled with E03S08 or delivered standalone."
