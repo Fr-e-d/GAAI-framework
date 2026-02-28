@@ -1239,6 +1239,7 @@ items:
     pr_number: 66
     pr_status: "merged"
     completed_at: "2026-02-28T16:19:04Z"
+    cost_usd: 6.5
     artefact: contexts/artefacts/stories/E06S42.story.md
     dependencies: [E06S39]
     notes: "DEC-129: Cron job to purge freetext + extraction data for prospects who never provided email (24h threshold). OTP codes hard-deleted after TTL (10min). Codes stored hashed, never cleartext. Consent messaging on E03S01 submit button (link to privacy policy + 'En soumettant, vous acceptez notre politique de confidentialité'). Identified prospects: standard retention (commercial relationship + 3 years). Low priority — minimal data volume at launch."
