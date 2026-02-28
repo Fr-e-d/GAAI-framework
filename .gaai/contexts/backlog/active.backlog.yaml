@@ -1191,7 +1191,7 @@ items:
     epic: E03
     title: "Funnel restructure: merge confirmation into results page (DEC-123)"
     priority: medium
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E03S08.story.md
     dependencies: [E03S01, E03S02, E03S03, E06S39]
     notes: "DEC-123: Merge E03S02 (confirmation) into E03S03 (results) — 2 pages instead of 3. Page 2 becomes: extraction summary as collapsible/editable section at top + confirmation questions for low-confidence fields inline + match results (anonymized) + email + OTP gate + full profiles. If ready_to_match: extraction AND matching run in pipeline on submit, zero intermediate clicks. If prospect edits any field: re-match via AJAX, no reload. Post-MVP because the 3-page flow works — this is a UX optimization. Depends on E06S39 (OTP must be integrated into Page 2)."
