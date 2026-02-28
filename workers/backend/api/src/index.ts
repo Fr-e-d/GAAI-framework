@@ -34,6 +34,7 @@ import { handleCallExperienceSurvey } from './handlers/surveys/call-experience';
 import { handleProjectSatisfactionSurvey } from './handlers/surveys/project-satisfaction';
 import { handleLeadEvaluation } from './handlers/evaluations/lead';
 import { applySecurityHeaders } from './lib/securityHeaders';
+import { cleanupPendingSql } from './lib/db';
 // E06S38: Dashboard API endpoints
 import { handleGetLeads, handleEvaluateLead } from './handlers/experts/leads';
 // E02S11: Availability rules CRUD
@@ -498,8 +499,23 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const response = await routeRequest(request, env, ctx);
-    return applySecurityHeaders(response);
+    try {
+      const response = await routeRequest(request, env, ctx);
+      return applySecurityHeaders(response);
+    } catch (err) {
+      console.error('[fatal] unhandled error in routeRequest:', err);
+      const origin = request.headers.get('Origin');
+      const errorResponse = new Response(JSON.stringify({ error: 'Internal Server Error' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const withCors = origin ? addCorsHeaders(errorResponse, origin) : errorResponse;
+      return applySecurityHeaders(withCors);
+    } finally {
+      // Safety net: close ALL SQL connections created during this request.
+      // Prevents Hyperdrive pool exhaustion from handlers that forget sql.end().
+      cleanupPendingSql(ctx);
+    }
   },
 
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
