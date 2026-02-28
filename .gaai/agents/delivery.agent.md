@@ -262,19 +262,28 @@ Escalation target:
 
 ---
 
-## Cost & Duration Tracking
+## Cost, Duration & PR Tracking
 
 Every delivery session must update the following fields on the Story's backlog entry:
 
-| Field | When to set | Format |
-|-------|-------------|--------|
-| `started_at` | When marking `in_progress` (first session only) | ISO 8601 datetime with timezone |
-| `completed_at` | When marking `done` (QA PASS) | ISO 8601 datetime with timezone |
-| `cost_usd` | Post-session (cumulative across sessions) | Number — Claude Code `costUSD` value |
+| Field | When to set | Set by | Format |
+|-------|-------------|--------|--------|
+| `started_at` | When marking `in_progress` (first session only) | Delivery Agent | ISO 8601 datetime with timezone |
+| `completed_at` | When marking `done` (Step 8c) | Delivery Agent | ISO 8601 datetime with timezone |
+| `ai_cost_usd` | Post-session (automatic) | Wrapper `on_exit()` | Number — extracted from delivery log |
+| `human_md_estimate` | Set once post-delivery (post-hoc estimation) | Discovery Agent | Float — man-days a senior human would need (±25%) |
+| `human_cost_usd` | Set once post-delivery (post-hoc estimation) | Discovery Agent | Float — human_md_estimate × domain rate (tech: $700/day, gtm: $450/day) |
+| `pr_url` | After PR merge (Step 8c) | Delivery Agent | GitHub PR URL |
+| `pr_number` | After PR merge (Step 8c) | Delivery Agent | Integer |
+| `pr_status` | After PR merge (Step 8c) | Delivery Agent | `merged` / `open` / `escalated` |
 
-**`cost_usd` source:** The Claude Code CLI `/cost` command shows cumulative session cost at any time. The value displayed at session end (`costUSD` = `total_cost_usd`) is the authoritative total for that session. The Delivery Agent cannot capture it automatically — it must be entered post-session by the human operator (or via a post-session hook). If a Story spans multiple sessions, sum all session costs.
+**`ai_cost_usd` source:** Automatically extracted from `.gaai/.delivery-logs/{id}.log` by the delivery wrapper's `on_exit()` handler (see `scripts/delivery-daemon.sh`). The wrapper reads the `total_cost_usd` field from the JSONL `result` event written at session end. If a Story spans multiple sessions, the last session's cost is recorded (the delivery log is truncated on each run).
 
-These fields enable tracking total AI delivery time and API-equivalent cost vs Max subscription pricing.
+**`human_md_estimate` / `human_cost_usd` source:** Post-hoc estimation by a senior engineer reviewing the story ACs and codebase. Confidence ±25%. These fields document the AI leverage ratio (ai_cost_usd vs human_cost_usd) and are not required for delivery — they are set in batch after estimation sessions.
+
+**PR fields:** Captured by the Delivery Agent in Step 8c of `workflows/delivery-loop.workflow.md` using `gh pr view`. Written to the backlog via `scripts/backlog-scheduler.sh --set-field` before committing the `done` status.
+
+These fields enable tracking total AI delivery cost, PR traceability, and delivery pipeline health.
 
 ---
 

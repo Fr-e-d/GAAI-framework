@@ -5,9 +5,14 @@
 #   - Must have a corresponding artefact with acceptance criteria
 #   - Keep under ~20 items; archive completed items to done/
 #   - Only Discovery may add items; only Delivery may update status
-#   - cost_usd: cumulative API-equivalent cost per story (Claude Code costUSD, entered post-session)
+#   - ai_cost_usd: cumulative AI API cost per story (Claude Code costUSD, entered post-session)
+#   - human_md_estimate: estimated senior human engineer effort in man-days (±25%, post-hoc, tech: $700/day, gtm: $450/day)
+#   - human_cost_usd: human_md_estimate × domain market rate, in USD
 #   - started_at: ISO 8601 datetime when delivery began (first session)
 #   - completed_at: ISO 8601 datetime when delivery ended (QA PASS, story marked done)
+#   - pr_url: GitHub PR URL (set by Delivery Agent after merge)
+#   - pr_number: GitHub PR number (set by Delivery Agent after merge)
+#   - pr_status: PR state — merged / open / escalated (set by Delivery Agent after merge)
 
 items:
 
@@ -18,6 +23,8 @@ items:
     title: "Community listening to sharpen promise language"
     priority: high
     status: in_progress
+    human_md_estimate: 0.9
+    human_cost_usd: 405
     artefact: contexts/artefacts/stories/E01S01.story.md
     dependencies: []
     notes: "Founder-executed. AC1-AC3 done (Reddit observation, 109 comments, 15 posts, 13 hypotheses — 9 validated, 3 indirect). AC4 DONE (promise draft — DEC-102). Pending: founder review + formal close."
@@ -27,6 +34,8 @@ items:
     title: "Expert-side Hand Raiser campaign (X + Discord + Communities)"
     priority: high
     status: failed
+    human_md_estimate: 2.2
+    human_cost_usd: 990
     started_at: "2026-02-26T10:00:00+01:00"
     artefact: contexts/artefacts/stories/E01S02.story.md
     dependencies: [E01S01]
@@ -37,6 +46,8 @@ items:
     title: "Prospect-side Hand Raiser campaign (LinkedIn + X + Facebook)"
     priority: high
     status: deferred
+    human_md_estimate: 1.7
+    human_cost_usd: 765
     artefact: contexts/artefacts/stories/E01S03.story.md
     dependencies: [E01S01]
     notes: "DEFERRED — même contrainte que E01S02. LinkedIn activé au lancement produit. Gate: ≥15 qualified prospect hand raisers."
@@ -46,6 +57,8 @@ items:
     title: "Validate M0 gates and lock promise language"
     priority: high
     status: refined
+    human_md_estimate: 0.5
+    human_cost_usd: 225
     artefact: contexts/artefacts/stories/E01S04.story.md
     dependencies: [E01S02, E01S03]
     notes: "M0 close. Both gates must be met. Updates memory + decisions log. Unblocks E02+E03."
@@ -55,6 +68,8 @@ items:
     title: "Launch Build in Public — flagship post + ongoing content cadence"
     priority: high
     status: done
+    human_md_estimate: 4.0
+    human_cost_usd: 1800
     started_at: "2026-02-24T17:00:00+01:00"
     completed_at: "2026-02-24T18:00:00+01:00"
     artefact: contexts/artefacts/stories/E01S05.story.md
@@ -69,6 +84,8 @@ items:
     title: "Project bootstrap — Supabase + Cloudflare Workers + Queues + KV"
     priority: high
     status: done
+    human_md_estimate: 1.9
+    human_cost_usd: 1330
     artefact: contexts/artefacts/stories/E06S01.story.md
     dependencies: []
     notes: "DONE 2026-02-19. QA PASS. AC1/2/6/7 PASS. AC3/4/5/8 DEFERRED(human — wrangler login + provisioning commands in SETUP.md). Unblocks E06S02, E06S08."
@@ -78,6 +95,8 @@ items:
     title: "Database schema & migrations"
     priority: high
     status: done
+    human_md_estimate: 2.0
+    human_cost_usd: 1400
     artefact: contexts/artefacts/stories/E06S02.story.md
     dependencies: [E06S01]
     notes: "DONE 2026-02-20. QA PASS. All 14 ACs met. 9 tables + GIN indexes + RLS + TypeScript types + seed. Unblocks E06S03, E06S05, E06S07, E06S08."
@@ -87,6 +106,8 @@ items:
     title: "Auth middleware & Expert registration + profile API"
     priority: high
     status: done
+    human_md_estimate: 2.3
+    human_cost_usd: 1610
     artefact: contexts/artefacts/stories/E06S03.story.md
     dependencies: [E06S02]
     notes: "DONE 2026-02-20. QA PASS. All 10 ACs met. JWT middleware + register + GET/PATCH profile + JSONB merge RPC + rate limiting. PR#2 open (auth/security — PR required). Unblocks E06S04."
@@ -96,6 +117,8 @@ items:
     title: "Cal.com managed users integration + webhook endpoint"
     priority: high
     status: cancelled
+    human_md_estimate: 3.1
+    human_cost_usd: 2170
     artefact: contexts/artefacts/stories/E06S04.story.md
     dependencies: [E06S03]
     notes: "SUPERSEDED 2026-02-20 by DEC-41. Cal.com Platform fermée aux nouveaux signups depuis 15/12/2025. Remplacée par E06S10 (Google Calendar OAuth layer) + E06S11 (Booking engine). Les colonnes cal_* en DB sont conservées sans nettoyage jusqu'au post-MVP."
@@ -105,6 +128,8 @@ items:
     title: "Matching engine scoring function + match API"
     priority: high
     status: done
+    human_md_estimate: 2.5
+    human_cost_usd: 1750
     artefact: contexts/artefacts/stories/E06S05.story.md
     dependencies: [E06S02]
     notes: "DONE 2026-02-20. QA PASS (1 remediation cycle). All 12 ACs met. scoreMatch() pure function + POST /api/matches/compute + GET /api/matches/:prospect_id. 5 vitest tests PASS. DEC-33 cleanup (MATCHING_JOBS). Unblocks E06S07."
@@ -114,6 +139,8 @@ items:
     title: "Async queue workers — email, lead-billing"
     priority: high
     status: done
+    human_md_estimate: 3.2
+    human_cost_usd: 2240
     artefact: contexts/artefacts/stories/E06S06.story.md
     dependencies: [E06S03, E06S10, E06S05]
     notes: "DONE 2026-02-21. QA PASS. All 9 ACs met. email-notifications consumer (expert.registered → Resend, booking.confirmed → Resend×2 + n8n, booking.completed → n8n) + lead-billing consumer (booking.created → leads INSERT + LS checkout + leads UPDATE). Idempotency via SESSIONS KV. Exponential backoff retry (1s/4s/16s). DB migration: leads.booking_id UNIQUE. 49/49 vitest tests PASS. ⚠️ DEC-59: n8n webhooks (AC7/AC10) à remplacer par CF Workflows via E06S16. ⚠️ DEC-68: lead-billing consumer révisé via E06S31 (schema) + E06S32 (credit debit) + E06S33 (LS subscription + cron) + E06S34 (matching enforcement). Unblocks E06S09, E06S11, E06S16."
@@ -123,6 +150,8 @@ items:
     title: "Satellite funnel API"
     priority: high
     status: done
+    human_md_estimate: 3.1
+    human_cost_usd: 2170
     artefact: contexts/artefacts/stories/E06S07.story.md
     dependencies: [E06S02, E06S05]
     notes: "DONE 2026-02-20. QA PASS (1 remediation cycle — CORS 403 headers). All 10 ACs met. GET satellite config + POST prospect submit (sync scoreMatch + KV expert pool) + GET anonymized matches (JWT-gated) + POST identify (full profiles + booking_url). JWT via Web Crypto API. CORS *.callibrate.io + satellite DB domains. EXPERT_POOL KV placeholder IDs (SETUP.md) + DB fallback. PROSPECT_TOKEN_SECRET secret required."
@@ -132,6 +161,8 @@ items:
     title: "AI freetext extraction service (project description → structured JSONB)"
     priority: high
     status: done
+    human_md_estimate: 2.3
+    human_cost_usd: 1610
     artefact: contexts/artefacts/stories/E06S08.story.md
     dependencies: [E06S01, E06S02]
     notes: "DONE 2026-02-20. QA PASS. All 10 ACs met. POST /api/extract + claude-haiku-4-5-20251001 + CF AI Gateway + tool_use schema + satellite vertical context (AC9) + 8 vitest tests PASS. Extends ProspectRequirements with challenge?, company_size?. Unblocks satellite funnel (E06S07 integration) and future ML improvements."
@@ -141,6 +172,8 @@ items:
     title: "Expert composite score computation worker"
     priority: high
     status: done
+    human_md_estimate: 2.4
+    human_cost_usd: 1680
     artefact: contexts/artefacts/stories/E06S09.story.md
     dependencies: [E06S02, E06S06]
     notes: "DONE 2026-02-21. QA PASS. All 11 ACs met. score-computation queue consumer (call_experience×0.35 + trust×0.20 + satisfaction×0.20 + hire_rate×0.10 + recency×0.15). Triggered by all 3 feedback events. KV idempotency. Two-step join (matchIds→bookingIds) for survey queries. 71/71 vitest tests PASS. ⚠️ Human action required: create 4 CF queues (callibrate-core-queue-score-computation-staging/-dlq/-prod/-dlq) before staging smoke tests. Post-delivery correction (2026-02-22): trust_score criteria replaced (aspirational JSONB → MVP-available data: bio, headline, gcal_connected, skills>=3). total_leads hardcoded 0 → actual DB query in expertPool.ts + matches.ts."
@@ -150,6 +183,8 @@ items:
     title: "Google Calendar OAuth layer (replaces E06S04)"
     priority: high
     status: done
+    human_md_estimate: 3.2
+    human_cost_usd: 2240
     artefact: contexts/artefacts/stories/E06S10.story.md
     dependencies: [E06S03]
     notes: "DONE 2026-02-20. QA PASS (1 remediation — AC4: connected derived from gcal_refresh_token presence, not boolean). All 10 ACs met. Auth URL + callback + token storage (AES-256-GCM) + refreshGcalToken utility + status + disconnect. PR#4 merged. Smoke tests PASS. Unblocks E06S11. ⚠️ Google sensitive scope review (calendar.events) must be initiated by founder — pre-go-live blocker."
@@ -159,6 +194,8 @@ items:
     title: "Booking engine — availability, create, cancel, reschedule"
     priority: high
     status: done
+    human_md_estimate: 6.3
+    human_cost_usd: 4410
     artefact: contexts/artefacts/stories/E06S11.story.md
     dependencies: [E06S10, E06S06]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 14 ACs met. freebusy availability + computeFreeSlots (pure fn) + hold (10min TTL) + confirm (GCal events.insert + conferenceDataVersion=1 Meet link + AC6 race guard) + cancel + reschedule + cron cleanup (*/5) + reminders (*/15 J-1/H-1) + prep endpoint (token-gated) + schema migration (14 bookings cols + 2 experts cols). 79/79 vitest tests. PR#5 squash-merged. ⚠️ Human action required: deploy to prod via tag v0.6.11."
@@ -168,6 +205,8 @@ items:
     title: "Migrate /api/extract from Anthropic to GPT-4o-mini"
     priority: high
     status: done
+    human_md_estimate: 0.9
+    human_cost_usd: 630
     artefact: contexts/artefacts/stories/E06S12.story.md
     dependencies: [E06S08]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 8 ACs met. gpt-4o-mini via OpenAI Chat Completions + function calling. ANTHROPIC_API_KEY + CLOUDFLARE_AI_GATEWAY_URL removed. OPENAI_API_KEY added. Same external contract. 79/79 vitest tests. Staging smoke tests PASS. ⚠️ Human action required: deploy to prod via tag v0.6.12. ⚠️ Set OPENAI_API_KEY staging secret: npx wrangler secret put OPENAI_API_KEY --env staging"
@@ -177,6 +216,8 @@ items:
     title: "satellite_configs schema extension — brand, content & theme columns"
     priority: high
     status: done
+    human_md_estimate: 0.8
+    human_cost_usd: 560
     artefact: contexts/artefacts/stories/E06S13.story.md
     dependencies: [E06S02]
     notes: "DEC-53. Pure DB migration. Adds: theme JSONB (design tokens), brand JSONB, content JSONB (meta/copy — unique per satellite), structured_data JSONB (JSON-LD), active BOOLEAN DEFAULT false, updated_at. Updates 'default' seed row. Regenerates TypeScript types. Unblocks E06S14."
@@ -186,6 +227,8 @@ items:
     title: "Satellite Worker — multi-tenant scaffold"
     priority: high
     status: done
+    human_md_estimate: 3.1
+    human_cost_usd: 2170
     artefact: contexts/artefacts/stories/E06S14.story.md
     dependencies: [E06S13]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 14 ACs met. New callibrate-satellite CF Worker at workers/satellite/ (Hono + TypeScript). Hostname routing → satellite_configs KV cache (TTL 3600s) → Supabase REST fallback → design token injection → HTML render → CF edge cache. Routes: GET / (branded landing), /robots.txt (E03S05 spec), /sitemap.xml, /health, POST /admin/cache/purge (x-admin-secret). Unknown hostname → 302 callibrate.io. SETUP.md + GitHub Actions updated. Unblocks all E03 stories. ⚠️ Human action required: (1) provision KV namespaces (callibrate-satellite-kv-config-staging/-prod), (2) set satellite secrets (SUPABASE_URL, SUPABASE_ANON_KEY, ADMIN_SECRET), (3) update CF API token scope to include callibrate-satellite-*, (4) deploy to prod via tag v0.6.14."
@@ -195,6 +238,8 @@ items:
     title: "Email deliverability hardening — subdomain, DMARC, reply-to, plain text"
     priority: high
     status: done
+    human_md_estimate: 0.8
+    human_cost_usd: 560
     artefact: contexts/artefacts/stories/E06S15.story.md
     dependencies: [E06S06]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 10 ACs met. AC1-AC3 founder (DNS/Resend/DMARC). AC4-AC10 delivery: sendResendEmail() uses env.EMAIL_FROM_DOMAIN (send.callibrate.io) + reply_to env.EMAIL_REPLY_TO + plain text fallback all 3 email types. Env interface + wrangler.toml vars. SETUP.md updated. 79/79 vitest tests PASS. ⚠️ Human action required: deploy to prod via tag v0.6.15."
@@ -204,6 +249,8 @@ items:
     title: "Replace n8n webhooks with CF Workflows (booking.confirmed + booking.completed)"
     priority: high
     status: done
+    human_md_estimate: 2.3
+    human_cost_usd: 1610
     artefact: contexts/artefacts/stories/E06S16.story.md
     dependencies: [E06S06]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 11 ACs met. BookingConfirmedWorkflow + BookingCompletedWorkflow. step.sleep acceleration (SURVEY_DELAY_7D_MS / SURVEY_DELAY_38D_MS). signSurveyToken (30d JWT). N8N_WEBHOOK_URL removed. [[workflows]] top-level only. 82/82 vitest tests. PR#6 open. ⚠️ Human action required: (1) set staging secrets SURVEY_DELAY_7D_MS + SURVEY_DELAY_38D_MS, (2) create CF Workflows in dashboard before deploying to staging, (3) deploy to prod via tag v0.6.16. Unblocks E06S17."
@@ -213,6 +260,8 @@ items:
     title: "Survey submission endpoints (feedback loop activation)"
     priority: high
     status: done
+    human_md_estimate: 2.0
+    human_cost_usd: 1400
     artefact: contexts/artefacts/stories/E06S17.story.md
     dependencies: [E06S09, E06S16]
     notes: "DONE 2026-02-23. QA PASS (107/107 vitest, tsc clean). PR #7 open → staging. ⚠️ Pre-deploy: E06S16 must be updated to use env.SURVEY_TOKEN_SECRET (currently uses PROSPECT_TOKEN_SECRET). Both PRs must be merged together."
@@ -226,6 +275,8 @@ items:
     title: "Hyperdrive + postgres.js + Smart Placement + bug fixes (foundation)"
     priority: high
     status: done
+    human_md_estimate: 4.3
+    human_cost_usd: 3010
     artefact: contexts/artefacts/stories/E06S18.story.md
     dependencies: []
     notes: "DEC-66. Foundation story — all scalable matching stories depend on this. Install postgres v3.4.4+, Hyperdrive binding, Smart Placement, migrate ALL 48 DB queries from Supabase JS to postgres.js tagged templates. Fix B1 (prospects.ts top-20 only) + B2 (matches.ts use loadExpertPool). Keep Supabase JS for auth only. Human action: create Hyperdrive config + provide ID."
@@ -237,6 +288,8 @@ items:
     title: "Security hardening — Rate Limiting binding + Turnstile"
     priority: high
     status: done
+    human_md_estimate: 1.9
+    human_cost_usd: 1330
     artefact: contexts/artefacts/stories/E06S20.story.md
     dependencies: [E06S18]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 8 ACs met. RATE_LIMITER binding (30 req/60s). verifyTurnstile() on POST /api/prospects/submit. Rate limiting on all 3 public prospect endpoints. 88/88 vitest tests. PR#9 open. ⚠️ Human action required: (1) wrangler rate-limit create for each env + update namespace_id in wrangler.toml, (2) wrangler secret put TURNSTILE_SECRET_KEY --env production, (3) Create Turnstile site key in CF Dashboard, (4) deploy to prod via tag v0.6.20."
@@ -246,6 +299,8 @@ items:
     title: "Vectorize infrastructure + embedding pipeline"
     priority: high
     status: done
+    human_md_estimate: 2.3
+    human_cost_usd: 1610
     artefact: contexts/artefacts/stories/E06S21.story.md
     dependencies: [E06S18]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 9 ACs met. Workers AI @cf/baai/bge-base-en-v1.5 + Vectorize expert-profiles (768 dims, cosine). upsertExpertEmbedding fire-and-forget via ctx.waitUntil. Registration + profile PATCH trigger embedding. POST /api/admin/vectorize/reindex (service-key auth). Metadata: expert_id, rate_min, rate_max, availability (nulls omitted — VectorizeVectorMetadataValue does not accept null). 93/93 vitest tests. PR#10 open. ⚠️ Human action required: (1) npx wrangler vectorize create expert-profiles --dimensions=768 --metric=cosine, (2) deploy to prod via tag v0.6.21. Unblocks E06S22."
@@ -255,6 +310,8 @@ items:
     title: "Semantic scoring integration"
     priority: high
     status: done
+    human_md_estimate: 2.3
+    human_cost_usd: 1610
     artefact: contexts/artefacts/stories/E06S22.story.md
     dependencies: [E06S21, E06S18]
     notes: "DEC-62. Vectorize pre-filter (top-100 candidates) + blend: 0.7×exact + 0.3×vector. Graceful fallback to deterministic-only if Vectorize unavailable. 'machine learning' matches 'deep learning'."
@@ -264,6 +321,8 @@ items:
     title: "D1 edge serving + Cache API L1 + Cron sync (absorbs E06S19)"
     priority: high
     status: done
+    human_md_estimate: 3.1
+    human_cost_usd: 2170
     artefact: contexts/artefacts/stories/E06S23.story.md
     dependencies: [E06S18]
     notes: "DEC-61. D1 expert-pool-edge + Cache API L1 (60s TTL). Read chain: Cache API → D1 → Hyperdrive fallback. KV eliminated from expert pool read path. Cron */5 sync via Hyperdrive. Absorbs former E06S19 (Cache API L1). Human action: create D1 database."
@@ -273,7 +332,9 @@ items:
     title: "Service Bindings — Worker split"
     priority: high
     status: done
-    cost_usd: 14.08
+    ai_cost_usd: 14.08
+    human_md_estimate: 3.1
+    human_cost_usd: 2170
     started_at: "2026-02-23T17:05:05+01:00"
     completed_at: "2026-02-23T20:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S24.story.md
@@ -285,7 +346,9 @@ items:
     title: "Durable Objects — expert pool write coordinator"
     priority: high
     status: done
-    cost_usd: 7.60
+    ai_cost_usd: 7.60
+    human_md_estimate: 2.3
+    human_cost_usd: 1610
     started_at: "2026-02-23T17:05:47+01:00"
     completed_at: "2026-02-23T17:40:00+01:00"
     artefact: contexts/artefacts/stories/E06S25.story.md
@@ -297,6 +360,8 @@ items:
     title: "Analytics Engine — matching observability"
     priority: high
     status: done
+    human_md_estimate: 0.7
+    human_cost_usd: 490
     artefact: contexts/artefacts/stories/E06S26.story.md
     dependencies: [E06S18]
     notes: "DEC-65. Analytics Engine dataset matching-metrics. Fire-and-forget writeDataPoint(). Tracks latency, cache hits, pool size, scoring quality. No-op if binding missing. Human action: create dataset."
@@ -310,7 +375,9 @@ items:
     title: "PostHog reverse proxy CF Worker"
     priority: high
     status: done
-    cost_usd: 4.02
+    ai_cost_usd: 4.02
+    human_md_estimate: 0.8
+    human_cost_usd: 560
     started_at: "2026-02-23T17:05:05+01:00"
     completed_at: "2026-02-23T17:45:00+01:00"
     artefact: contexts/artefacts/stories/E07S01.story.md
@@ -322,7 +389,9 @@ items:
     title: "Satellite client-side instrumentation (prospect UX tracking)"
     priority: high
     status: done
-    cost_usd: 6.25
+    ai_cost_usd: 6.25
+    human_md_estimate: 0.9
+    human_cost_usd: 630
     started_at: "2026-02-23T17:05:05+01:00"
     completed_at: "2026-02-23T18:30:00+01:00"
     artefact: contexts/artefacts/stories/E07S02.story.md
@@ -334,7 +403,9 @@ items:
     title: "Core API server-side event capture (prospect + expert funnels)"
     priority: high
     status: done
-    cost_usd: 5.50
+    ai_cost_usd: 5.50
+    human_md_estimate: 1.8
+    human_cost_usd: 1260
     started_at: "2026-02-23T19:12:00+01:00"
     completed_at: "2026-02-23T19:22:00+01:00"
     artefact: contexts/artefacts/stories/E07S03.story.md
@@ -348,7 +419,9 @@ items:
     status: done
     started_at: "2026-02-23T00:00:00+01:00"
     completed_at: "2026-02-23T00:00:00+01:00"
-    cost_usd: 7.69
+    ai_cost_usd: 7.69
+    human_md_estimate: 0.9
+    human_cost_usd: 630
     artefact: contexts/artefacts/stories/E07S04.story.md
     dependencies: [E07S02, E07S03]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 8 ACs met. scripts/posthog-setup-dashboards.ts + scripts/tsconfig.json. 3 dashboards: Prospect Conversion Funnel (5-step funnel + satellite_id breakdown), Expert Activation Funnel (4-step), Business Overview (4 TRENDS insights). Idempotent. TSC clean. PR#19 open → staging. ⚠️ Human action required: (1) generate PostHog Personal API Key at https://eu.posthog.com/settings/user-api-keys, (2) run: POSTHOG_PERSONAL_API_KEY=phx_xxx POSTHOG_PROJECT_ID=yyy npx tsx scripts/posthog-setup-dashboards.ts"
@@ -360,7 +433,9 @@ items:
     status: done
     started_at: "2026-02-23T20:00:00+01:00"
     completed_at: "2026-02-23T20:30:00+01:00"
-    cost_usd: 4.00
+    ai_cost_usd: 4.00
+    human_md_estimate: 1.1
+    human_cost_usd: 770
     artefact: contexts/artefacts/stories/E07S05.story.md
     dependencies: [E07S02, E07S03]
     notes: "DONE 2026-02-23. QA PASS (first cycle). All 13 ACs met. PostHog EU MCP server in .mcp.json (mcp-remote → mcp-eu.posthog.com, POSTHOG_PERSONAL_API_KEY auth). GAAI analytics-query skill (SKILL-CRS-020) with 5 analysis patterns, query-templates.md + interpretation-guide.md. skills-index.yaml regenerated (37 skills). discovery.agent.md updated. PR#20 open → staging. ⚠️ Human action required: (1) Set POSTHOG_PERSONAL_API_KEY='Bearer phx_xxx' in shell profile, (2) Create PostHog EU account + Personal API Key with MCP Server preset."
@@ -370,6 +445,8 @@ items:
     title: "PostHog EU — compte + dashboards + MCP (founder setup)"
     priority: high
     status: done
+    human_md_estimate: 0.9
+    human_cost_usd: 405
     started_at: "2026-02-23T22:00:00+01:00"
     completed_at: "2026-02-26T18:30:00+01:00"
     artefact: contexts/artefacts/stories/E07S06.story.md
@@ -383,7 +460,9 @@ items:
     title: "Staging — Provisionnement infra CF (Hyperdrive + D1 + Vectorize + Workflows + Rate Limiter + Workers)"
     priority: critical
     status: done
-    cost_usd: 6.93
+    ai_cost_usd: 6.93
+    human_md_estimate: 2.1
+    human_cost_usd: 1470
     started_at: "2026-02-23T22:00:00+01:00"
     completed_at: "2026-02-23T23:59:00+01:00"
     artefact: contexts/artefacts/stories/E06S27.story.md
@@ -395,7 +474,9 @@ items:
     title: "Staging — Secrets manquants (Core + Satellite + Turnstile)"
     priority: critical
     status: done
-    cost_usd: 3.81
+    ai_cost_usd: 3.81
+    human_md_estimate: 0.6
+    human_cost_usd: 420
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T00:30:00+01:00"
     artefact: contexts/artefacts/stories/E06S28.story.md
@@ -407,7 +488,9 @@ items:
     title: "Staging — Smoke test end-to-end"
     priority: critical
     status: done
-    cost_usd: 7.57
+    ai_cost_usd: 7.57
+    human_md_estimate: 1.0
+    human_cost_usd: 700
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T10:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S29.story.md
@@ -421,7 +504,9 @@ items:
     status: done
     started_at: "2026-02-23T22:00:00+01:00"
     completed_at: "2026-02-23T23:59:00+01:00"
-    cost_usd: 2.76
+    ai_cost_usd: 2.76
+    human_md_estimate: 2.1
+    human_cost_usd: 1470
     artefact: contexts/artefacts/stories/E06S30.story.md
     dependencies: []
     notes: "DONE 2026-02-23. QA PASS. AC1 + AC2 delivered: /privacy (GDPR Privacy Policy) and /terms (Terms of Service) added as static routes in satellite worker, before config middleware. tsc clean. PR#22 open → staging. ⚠️ Founder action required: (1) Add CF routes callibrate.io/privacy* + callibrate.io/terms* → callibrate-satellite-{staging,prod}, (2) Complete AC3–AC9: Google Search Console domain verification + OAuth consent screen + verification form submission. AC10–AC11 await Google approval (4–6 weeks)."
@@ -434,7 +519,9 @@ items:
     title: "Credit billing schema + lead pricing function (DEC-67/68)"
     priority: high
     status: done
-    cost_usd: 2.70
+    ai_cost_usd: 2.70
+    human_md_estimate: 2.0
+    human_cost_usd: 1400
     started_at: "2026-02-23T22:55:00+01:00"
     completed_at: "2026-02-23T23:15:00+01:00"
     artefact: contexts/artefacts/stories/E06S31.story.md
@@ -446,7 +533,9 @@ items:
     title: "Lead-billing consumer — credit debit + flag/restore (DEC-68)"
     priority: high
     status: done
-    cost_usd: 7.87
+    ai_cost_usd: 7.87
+    human_md_estimate: 3.2
+    human_cost_usd: 2240
     started_at: "2026-02-23T23:30:00+01:00"
     completed_at: "2026-02-24T00:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S32.story.md
@@ -458,7 +547,9 @@ items:
     title: "LS usage-based subscription + welcome credit + usage reporting cron (DEC-68)"
     priority: high
     status: done
-    cost_usd: 11.29
+    ai_cost_usd: 11.29
+    human_md_estimate: 3.3
+    human_cost_usd: 2310
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T00:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S33.story.md
@@ -470,7 +561,9 @@ items:
     title: "Balance / max_lead_price / spending_limit enforcement at matching (DEC-67/68)"
     priority: high
     status: done
-    cost_usd: 10.31
+    ai_cost_usd: 10.31
+    human_md_estimate: 2.4
+    human_cost_usd: 1680
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T00:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S34.story.md
@@ -484,6 +577,8 @@ items:
     title: "Monorepo restructure — move Core API into workers/backend/api/"
     priority: medium
     status: done
+    human_md_estimate: 2.3
+    human_cost_usd: 1610
     started_at: "2026-02-24T14:00:00+01:00"
     completed_at: "2026-02-24T03:00:00+01:00"
     artefact: contexts/artefacts/stories/E06S35.story.md
@@ -498,6 +593,8 @@ items:
     title: "Expert admissibility criteria — non-budget matching filters (DEC-80)"
     priority: medium
     status: done
+    human_md_estimate: 2.4
+    human_cost_usd: 1680
     artefact: contexts/artefacts/stories/E06S36.story.md
     dependencies: [E06S34, E06S02]
     notes: "Discovery-informed. admissibility_criteria JSONB (methodology, verticals, stack overlap, duration). applyAdmissibilityFilters() after billing, before scoring. Follows E06S34 architecture. Field data: 'modular or nothing' (heyiamnickk), 'card on file' (MachadoEsq)."
@@ -507,6 +604,8 @@ items:
     title: "Outcome-based expert profiles + extraction enhancement (DEC-81)"
     priority: medium
     status: done
+    human_md_estimate: 2.4
+    human_cost_usd: 1680
     started_at: "2026-02-24T00:00:00+01:00"
     completed_at: "2026-02-24T18:47:00+01:00"
     artefact: contexts/artefacts/stories/E06S37.story.md
@@ -523,6 +622,8 @@ items:
     title: "Prospect freetext input page (/match)"
     priority: high
     status: done
+    human_md_estimate: 2.2
+    human_cost_usd: 1540
     artefact: contexts/artefacts/stories/E03S01.story.md
     dependencies: [E06S14, E06S08]
     notes: "Discovery 2026-02-27. 10 ACs. /match route on satellite Worker — branded textarea + POST /api/extract + loading state + client-side transition to E03S02. Design tokens from config.theme. PostHog events. SEO meta. Mobile-responsive. CORE_API_URL injected at render time. No Turnstile on this step."
@@ -534,7 +635,9 @@ items:
     status: done
     started_at: "2026-02-27T17:51:33+01:00"
     completed_at: "2026-02-27T19:20:34+01:00"
-    cost_usd: null
+    ai_cost_usd: null
+    human_md_estimate: 2.6
+    human_cost_usd: 1820
     artefact: contexts/artefacts/stories/E03S02.story.md
     dependencies: [E03S01]
     notes: "Discovery 2026-02-27. 11 ACs. Displays extracted fields with confidence indicators. Low-confidence → targeted questions (max 3). All fields editable via 'Modifier'. Turnstile (interaction-only) + POST /api/prospects/submit → sync matching (DEC-40) → JWT. quiz_answers accepts pre-extracted requirements directly (normalizeRequirements picks known fields). PR #40 merged 2026-02-27."
@@ -544,6 +647,8 @@ items:
     title: "Match results display + email gate + full profile reveal"
     priority: high
     status: done
+    human_md_estimate: 3.6
+    human_cost_usd: 2520
     artefact: contexts/artefacts/stories/E03S03.story.md
     dependencies: [E03S02]
     notes: "Discovery 2026-02-27. 12 ACs. GET /api/prospects/:id/matches → anonymized cards (rank badge, score breakdown, tier, skills, rate range). Top-3 prominent (DEC-25). Email gate: single field → POST /identify → full profiles revealed (name, bio, headline). 'Réserver un appel' CTA → E03S06 booking widget. noindex/nofollow. ⚠️ Ignores deprecated booking_url (Cal.com) — uses E03S06 widget."
@@ -553,6 +658,8 @@ items:
     title: "Crawler access policy — SEO/GEO protection for satellite sites"
     priority: medium
     status: done
+    human_md_estimate: 0.5
+    human_cost_usd: 350
     artefact: contexts/artefacts/stories/E03S05.story.md
     dependencies: [E06S14]
     notes: "DEC-53. robots.txt and sitemap.xml generated dynamically by the satellite Worker (E06S14), CF-edge-cached 24h — functionally equivalent to static. AC2 (Astro build-time) superseded by E06S14 AC6. SEO bots: full access. AI training bots blocked. AI answer/search bots: platform pages allowed, /experts/ blocked. Manual founder action: Cloudflare AI Training Bots → Block on all pages."
@@ -562,6 +669,8 @@ items:
     title: "Inline booking widget (availability → hold → confirm)"
     priority: high
     status: in_progress
+    human_md_estimate: 5.2
+    human_cost_usd: 3640
     artefact: contexts/artefacts/stories/E03S06.story.md
     dependencies: [E03S03, E06S11]
     notes: "Discovery 2026-02-27. 12 ACs. Reusable inline widget — no modal, no redirect. Calendar view (14 days) → 20-min time slots (local TZ) → instant hold (10min TTL with countdown) → name/email/desc form → confirm → success (Meet link + prep page). Email pre-filled if already identified. Keyboard accessible. Mobile week view. Used by E03S03 + E03S04. ⚠️ prospect_id required — directory path (E03S04) needs lightweight prospect creation. Previous delivery failed due to transient Anthropic API 500 (2026-02-28, 45 turns, $3.97, zero code committed). Reset to refined for retry."
@@ -571,6 +680,8 @@ items:
     title: "Expert directory + profile pages (/experts, /experts/:slug)"
     priority: medium
     status: refined
+    human_md_estimate: 3.7
+    human_cost_usd: 2590
     artefact: contexts/artefacts/stories/E03S04.story.md
     dependencies: [E03S06, E06S14, E03S05]
     notes: "Discovery 2026-02-27. 10 ACs. Server-rendered for SEO. Filtered by satellite vertical. Anonymized cards (tier, score, headline, skills, rate). Profile detail pages with dual CTAs ('Vérifier la compatibilité' → /match, 'Débloquer ce profil' → email gate). ⚠️ BLOCKING: requires GET /api/experts/public endpoint on Core API (E06S38 — to be created). Delivery must flag gap before starting."
@@ -584,6 +695,8 @@ items:
     title: "OAuth security — CSRF state token + PKCE (SEC-01, SEC-03)"
     priority: critical
     status: done
+    human_md_estimate: 2.1
+    human_cost_usd: 1470
     started_at: "2026-02-24T19:15:00+01:00"
     completed_at: "2026-02-24T19:30:00+01:00"
     artefact: contexts/artefacts/stories/E08S01.story.md
@@ -595,6 +708,8 @@ items:
     title: "Security headers middleware + XSS fix (SEC-04, SEC-05, SEC-17)"
     priority: high
     status: done
+    human_md_estimate: 1.9
+    human_cost_usd: 1330
     started_at: "2026-02-24T20:00:00+01:00"
     completed_at: "2026-02-24T20:54:00+01:00"
     artefact: contexts/artefacts/stories/E08S02.story.md
@@ -606,6 +721,8 @@ items:
     title: "Booking hold authentication + rate limiting (SEC-02)"
     priority: critical
     status: done
+    human_md_estimate: 2.0
+    human_cost_usd: 1400
     started_at: "2026-02-25T00:40:00+01:00"
     completed_at: "2026-02-25T00:50:00+01:00"
     artefact: contexts/artefacts/stories/E08S03.story.md
@@ -617,6 +734,8 @@ items:
     title: "Admin auth hardening + booking input validation (SEC-06, SEC-07)"
     priority: high
     status: done
+    human_md_estimate: 1.4
+    human_cost_usd: 980
     started_at: "2026-02-24T20:00:00+01:00"
     completed_at: "2026-02-24T21:03:00+01:00"
     artefact: contexts/artefacts/stories/E08S04.story.md
@@ -628,6 +747,8 @@ items:
     title: "JWT claims hardening + secrets hygiene + defense-in-depth (SEC-08→SEC-16)"
     priority: medium
     status: done
+    human_md_estimate: 2.3
+    human_cost_usd: 1610
     started_at: "2026-02-24T20:06:00+01:00"
     completed_at: "2026-02-24T21:35:00+01:00"
     artefact: contexts/artefacts/stories/E08S05.story.md
@@ -648,6 +769,8 @@ items:
     title: "Dashboard read API endpoints (4 new GET routes + public expert listing)"
     priority: high
     status: done
+    human_md_estimate: 3.7
+    human_cost_usd: 2590
     started_at: "2026-02-27T19:00:00+01:00"
     completed_at: "2026-02-27T20:36:00+01:00"
     artefact: contexts/artefacts/stories/E06S38.story.md
@@ -659,8 +782,11 @@ items:
     title: "Dashboard scaffold (React Router v7 + CF Workers + Supabase Auth + shadcn/ui)"
     priority: high
     status: done
+    human_md_estimate: 4.0
+    human_cost_usd: 2800
     started_at: "2026-02-27T20:00:00+01:00"
     completed_at: "2026-02-27T21:15:00+01:00"
+    cost_usd: 13.83
     artefact: contexts/artefacts/stories/E02S01.story.md
     dependencies: []
     notes: "Discovery 2026-02-27 (DEC-113). 18 ACs. React Router v7 framework mode (SSR) + @cloudflare/vite-plugin. Cookie-based Supabase Auth (PKCE). Auth layout loader (server-side redirect). Dashboard shell (responsive sidebar). TailwindCSS 4 + shadcn/ui. API client (typed fetch to callibrate-core). GH Actions deploy workflow. Workspace: workers/frontend/dashboard/. Deployed staging PR #43."
@@ -670,6 +796,8 @@ items:
     title: "Expert signup + onboarding wizard (4 steps)"
     priority: high
     status: done
+    human_md_estimate: 3.6
+    human_cost_usd: 2520
     completed_at: "2026-02-27"
     artefact: contexts/artefacts/stories/E02S02.story.md
     dependencies: [E02S01, E06S03, E06S10]
@@ -680,6 +808,8 @@ items:
     title: "Profile management page"
     priority: high
     status: done
+    human_md_estimate: 2.2
+    human_cost_usd: 1540
     started_at: "2026-02-27T21:00:00+01:00"
     completed_at: "2026-02-27T22:10:00+01:00"
     artefact: contexts/artefacts/stories/E02S03.story.md
@@ -691,6 +821,8 @@ items:
     title: "Google Calendar connection page"
     priority: high
     status: done
+    human_md_estimate: 1.9
+    human_cost_usd: 1330
     started_at: "2026-02-27T21:00:00+01:00"
     completed_at: "2026-02-27T22:19:00+01:00"
     artefact: contexts/artefacts/stories/E02S04.story.md
@@ -702,6 +834,8 @@ items:
     title: "Lead pipeline page + actions (confirm, flag, evaluate)"
     priority: high
     status: done
+    human_md_estimate: 3.1
+    human_cost_usd: 2170
     started_at: "2026-02-27T21:30:00+01:00"
     completed_at: "2026-02-27T22:45:00+01:00"
     artefact: contexts/artefacts/stories/E02S05.story.md
@@ -713,6 +847,8 @@ items:
     title: "Bookings page (upcoming/past, cancel/reschedule)"
     priority: high
     status: done
+    human_md_estimate: 2.2
+    human_cost_usd: 1540
     started_at: "2026-02-27T22:00:00+01:00"
     completed_at: "2026-02-27T23:15:00+01:00"
     artefact: contexts/artefacts/stories/E02S06.story.md
@@ -724,6 +860,8 @@ items:
     title: "Billing & subscription page (credits, LS activation, spending controls)"
     priority: high
     status: done
+    human_md_estimate: 3.0
+    human_cost_usd: 2100
     started_at: "2026-02-27T22:00:00+01:00"
     completed_at: "2026-02-27T23:40:00+01:00"
     artefact: contexts/artefacts/stories/E02S07.story.md
@@ -735,6 +873,8 @@ items:
     title: "Analytics page (composite score, charts, conversion metrics)"
     priority: high
     status: done
+    human_md_estimate: 3.0
+    human_cost_usd: 2100
     artefact: contexts/artefacts/stories/E02S08.story.md
     dependencies: [E02S01, E06S38, E06S09]
     notes: "Discovery 2026-02-27. 12 ACs. Vue d'ensemble (dashboard index — summary cards + monthly trend). Composite score hero with tier badge. Radar chart (5 components). Per-component detail cards with improvement tips. Monthly leads stacked bar chart. Conversion metrics cards. Empty state for new experts. recharts."
@@ -744,6 +884,8 @@ items:
     title: "callibrate.io expert landing page (CF Worker + Hono)"
     priority: high
     status: done
+    human_md_estimate: 2.1
+    human_cost_usd: 1470
     started_at: "2026-02-27T23:05:00+01:00"
     completed_at: "2026-02-28T00:30:00+01:00"
     artefact: contexts/artefacts/stories/E02S09.story.md

@@ -21,7 +21,7 @@ inputs:
   - impl-report or micro-delivery-report (if available)
   - qa-report (if available)
   - decision log entries referenced by the story
-  - backlog entry (status, dates, cost_usd)
+  - backlog entry (status, dates, ai_cost_usd, human_md_estimate, human_cost_usd)
   - current project metrics (test count, story count, decision count)
 outputs:
   - contexts/artefacts/content/drafts/{id}-thread.md (X/Twitter thread draft)
@@ -73,7 +73,7 @@ Load the minimum context needed:
 
 ```
 1. Read the completed story artefact → extract Context, User Story, AC count
-2. Read the backlog entry → extract started_at, completed_at, cost_usd
+2. Read the backlog entry → extract started_at, completed_at, ai_cost_usd, human_cost_usd
 3. Read referenced DEC- entries (from story notes) → extract Context + Decision + Rationale
 4. Count current project metrics:
    - Total stories done (grep status: done in backlog)

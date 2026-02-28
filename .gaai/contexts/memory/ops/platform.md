@@ -128,9 +128,11 @@ Le détail technique (robots.txt, sitemap) est implémenté dans chaque satellit
 
 ## Coûts de développement
 
-### Claude API — Delivery (24 stories mesurées + 1 estimée, 24/02/2026)
+> **Schema backlog :** `ai_cost_usd` = coût AI réel (Claude Code, extrait des delivery logs). `human_md_estimate` = estimation man-days équivalent humain senior (±25%, post-hoc). `human_cost_usd` = human_md_estimate × taux marché ($700/day tech, $450/day gtm). Champs documentés dans `active.backlog.yaml`.
 
-**Source :** `.gaai/.delivery-logs/*.log` (JSONL) — champ `result.total_cost_usd` par story.
+### Claude AI — Delivery (24 stories mesurées + 1 estimée, 24/02/2026)
+
+**Source :** `.gaai/.delivery-logs/*.log` (JSONL) — champ `result.total_cost_usd` par story (→ champ `ai_cost_usd` dans le backlog).
 **Outil :** `.gaai/skills/cross/cost-analysis/references/extract-costs.sh` (SKILL-CRS-022).
 
 | Métrique | Valeur |
