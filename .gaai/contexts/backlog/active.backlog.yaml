@@ -798,6 +798,17 @@ items:
     dependencies: [E03S03, E06S11]
     notes: "Discovery 2026-02-27. 12 ACs. Reusable inline widget — no modal, no redirect. Calendar view (14 days) → 20-min time slots (local TZ) → instant hold (10min TTL with countdown) → name/email/desc form → confirm → success (Meet link + prep page). Email pre-filled if already identified. Keyboard accessible. Mobile week view. Used by E03S03 + E03S04. ⚠️ prospect_id required — directory path (E03S04) needs lightweight prospect creation. Previous delivery failed due to transient Anthropic API 500 (2026-02-28, 45 turns, $3.97, zero code committed). Reset to refined for retry."
 
+  - id: E03S11
+    epic: E03
+    title: "Prospect waiting state — credible feedback & resilient errors"
+    priority: medium
+    status: refined
+    human_md_estimate: 0.8
+    human_cost_usd: 560
+    artefact: contexts/artefacts/stories/E03S11.story.md
+    dependencies: [E03S02, E03S03]
+    notes: "Discovery 2026-02-28. 7 ACs. Three gaps: (A) /confirm loading message too small/muted for a high-stakes action, (B) /results 202-computing gives no reassurance during 10s+ waits, (C) error states are generic dead ends with no fallback path. Approach: honest feedback (no fake progress steppers or rotating messages — evaluated and rejected), silent first retry on /results, specific error messages per type, /experts fallback link on all error states. PostHog error tracking. Low effort — text/style + one retry mechanism, no new APIs."
+
   - id: E03S04
     epic: E03
     title: "Expert directory + profile pages (/experts, /experts/:slug)"
@@ -1072,3 +1083,111 @@ items:
     artefact: contexts/artefacts/stories/E02S09.story.md
     dependencies: []
     notes: "DONE 2026-02-28. QA PASS (first cycle). All 15 ACs met. 44/44 vitest. tsc clean. Page weight 16.2KB. PR#51 squash-merged → staging. Deploy Landing CI green. ⚠️ Human action required: wrangler secret put POSTHOG_API_KEY --env staging (and production at launch)."
+
+  # ── NEW STORIES — DEC-116 to DEC-129 (2026-02-28) ──────────────────────────
+  # MVP-critical stories: E06S39, E06S40, E02S10, E02S11, E03S07
+  # Post-MVP stories: E03S08, E03S09, E06S41, E06S42, E06S43
+  # Governance: DEC-130 (Decision Consistency Gate applied to agents/rules/skills)
+
+  # ── MVP-CRITICAL ────────────────────────────────────────────────────────────
+
+  - id: E06S39
+    epic: E06
+    title: "Email OTP verification service (DEC-121/DEC-122)"
+    priority: critical
+    status: draft
+    artefact: contexts/artefacts/stories/E06S39.story.md
+    dependencies: []
+    notes: "DEC-121: OTP inline 6 digits (Calendly pattern). DEC-122: MX check + disposable email blacklist. New lib/otp.ts (generate, hash, TTL 10min, validate) + lib/email.ts (Resend/SES integration). New endpoints POST /api/prospects/{id}/otp/send + POST /api/prospects/{id}/otp/verify. Modify POST /api/prospects/{id}/identify to require verified OTP. Rate limits: 3 sends/email/24h, 5 attempts/session. Pre-checks: syntax + MX record + disposable blacklist. Blocks E03S03 email gate integrity."
+
+  - id: E06S40
+    epic: E06
+    title: "Input pre-validation & abuse prevention (DEC-120/DEC-122)"
+    priority: high
+    status: draft
+    artefact: contexts/artefacts/stories/E06S40.story.md
+    dependencies: []
+    notes: "DEC-120: 6-layer bot protection. DEC-122: abuse prevention. Server-side: gibberish detection (regex patterns, min 3 distinct words) before LLM call. Honeypot field + timing check (<3s = bot). Repeated submission prevention: cookie-based (1 free extraction, then email required) + IP rate limit (3 extractions/IP/24h without email). Flow token signé (HMAC, TTL 30min) from extraction to submit — prevents direct API calls with fabricated data. Tiered rate limiting per Cloudflare best practices (4/min → challenge, 10/10min → block, exceed → block 24h). Hard spending cap documentation ($50/day at LLM provider). Max output tokens 500 on extraction."
+
+  - id: E02S10
+    epic: E02
+    title: "Expert profile mandatory fields + credit milestones (DEC-116/DEC-117)"
+    priority: high
+    status: draft
+    artefact: contexts/artefacts/stories/E02S10.story.md
+    dependencies: [E02S02, E02S03, E02S07]
+    notes: "DEC-116: 4 mandatory fields (display_name, bio 50+ chars, 3+ skill tags, availability rules). DEC-117: 3 milestones (Matchable 40€, Bookable 40€, Trustworthy 20€). Add 3 immutable timestamp columns to experts table. Validation on profile save: check mandatory fields, set milestone timestamps if conditions met + NULL check (once set, never reset). Credit allocation on milestone unlock. Dashboard: profile completion progress bar + milestones status display. Anti-gaming: email normalization (strip +tag, Gmail dots), disposable blacklist check at expert signup, 72h activation delay for credits."
+
+  - id: E02S11
+    epic: E02
+    title: "Expert availability: weekly recurring rules (DEC-118)"
+    priority: high
+    status: draft
+    artefact: contexts/artefacts/stories/E02S11.story.md
+    dependencies: [E02S01, E06S10, E06S11]
+    notes: "DEC-118: Hybrid model — Callibrate rules + GCal conflict filter. New table expert_availability_rules (expert_id, day_of_week 0-6, start_time, end_time, is_active, created_at, updated_at). CRUD API endpoints. Dashboard UI: day/time selector for weekly recurring slots (e.g., 'Jeudi 14:00-17:00'). Integration with booking engine: available slots = (Callibrate rules ∩ GCal free time) - existing bookings. If GCal not connected: show rule-based slots + manual confirmation. Times stored relative to expert timezone. Prerequisite for Milestone 2 'Bookable' (DEC-117)."
+
+  - id: E03S07
+    epic: E03
+    title: "Booking confirmation email + reminders + no-show tracking (DEC-127)"
+    priority: high
+    status: draft
+    artefact: contexts/artefacts/stories/E03S07.story.md
+    dependencies: [E03S06, E06S39]
+    notes: "DEC-127: After prospect selects a slot, send confirmation email (confirm/cancel buttons, TTL 30min). If not confirmed within 30min → slot released, booking cancelled. Automated reminders: J-1 (24h before) + H-1 (1h before) by email. No-show tracking: counter per prospect in DB. After 2 no-shows → flag prospect, require prepayment for future bookings. Depends on E06S39 for email sending infrastructure (Resend/SES)."
+
+  # ── POST-MVP ────────────────────────────────────────────────────────────────
+
+  - id: E03S08
+    epic: E03
+    title: "Funnel restructure: merge confirmation into results page (DEC-123)"
+    priority: medium
+    status: draft
+    artefact: contexts/artefacts/stories/E03S08.story.md
+    dependencies: [E03S01, E03S02, E03S03, E06S39]
+    notes: "DEC-123: Merge E03S02 (confirmation) into E03S03 (results) — 2 pages instead of 3. Page 2 becomes: extraction summary as collapsible/editable section at top + confirmation questions for low-confidence fields inline + match results (anonymized) + email + OTP gate + full profiles. If ready_to_match: extraction AND matching run in pipeline on submit, zero intermediate clicks. If prospect edits any field: re-match via AJAX, no reload. Post-MVP because the 3-page flow works — this is a UX optimization. Depends on E06S39 (OTP must be integrated into Page 2)."
+
+  - id: E03S09
+    epic: E03
+    title: "Freetext input UX: persistent hint text (DEC-119)"
+    priority: low
+    status: draft
+    artefact: contexts/artefacts/stories/E03S09.story.md
+    dependencies: [E03S01]
+    notes: "DEC-119: Replace current textarea guidance with persistent hint text between label and textarea (not placeholder). 'Quelques pistes pour nous aider : votre problème ou objectif · les outils concernés · votre budget approximatif · vos délais'. Conversational tone. Language matches satellite config. Client-side soft warning if < 50 chars. Standard UX pattern (Material Design, GOV.UK). Small change — can be bundled with E03S08 or delivered standalone."
+
+  - id: E06S41
+    epic: E06
+    title: "Multi-project support: prospect ≠ project data model (DEC-124)"
+    priority: medium
+    status: draft
+    artefact: contexts/artefacts/stories/E06S41.story.md
+    dependencies: [E06S39, E03S08]
+    notes: "DEC-124: Breaking data model change. New prospect_projects table (id, prospect_id FK, satellite_id, freetext, requirements JSONB, extraction_confidence JSONB, status, created_at). Migrate matches table to use project_id FK instead of prospect_id. Update all matching/billing endpoints. Flow for identified prospect (project 2+): freetext → match → full profiles immediately (no email gate, no OTP). Anti-abuse: max 5 active projects/prospect, 3 new/24h, duplicate detection (cosine similarity >85%). 'Autre projet?' CTA on results page. Billing remains at booking per DEC-14/30. Post-MVP because 1 prospect = 1 project suffices at launch."
+
+  - id: E06S42
+    epic: E06
+    title: "GDPR data retention: purge abandoned funnels + OTP cleanup (DEC-129)"
+    priority: low
+    status: draft
+    artefact: contexts/artefacts/stories/E06S42.story.md
+    dependencies: [E06S39]
+    notes: "DEC-129: Cron job to purge freetext + extraction data for prospects who never provided email (24h threshold). OTP codes hard-deleted after TTL (10min). Codes stored hashed, never cleartext. Consent messaging on E03S01 submit button (link to privacy policy + 'En soumettant, vous acceptez notre politique de confidentialité'). Identified prospects: standard retention (commercial relationship + 3 years). Low priority — minimal data volume at launch."
+
+  - id: E03S10
+    epic: E03
+    title: "Return visit: cookie auth + magic link (DEC-128)"
+    priority: low
+    status: draft
+    artefact: contexts/artefacts/stories/E03S10.story.md
+    dependencies: [E06S39, E03S03]
+    notes: "DEC-128: After OTP verification, store auth token in cookie/localStorage (TTL 7 days). Prospect returns on same device → results displayed directly. Magic link in confirmation email (JWT, TTL 7 days) for cross-device/cleared cookies. Single prospect_auth_token — cookie stores client-side, magic link embeds in URL. After 7 days → re-identify required. Post-MVP — low volume at launch."
+
+  - id: E06S43
+    epic: E06
+    title: "AI agent API endpoints + MCP server foundation (DEC-126)"
+    priority: low
+    status: draft
+    artefact: contexts/artefacts/stories/E06S43.story.md
+    dependencies: [E06S39, E06S41]
+    notes: "DEC-126: Dedicated API for AI agents (/api/v1/agent/*). Agent auth via API key tied to verified prospect (prospect creates key from dashboard). Endpoints: extract, match (anonymized), request_reveal (triggers human email), request_booking (triggers human confirmation). Rate limiting per API key. MCP server publishing Callibrate tools (callibrate_describe_project, callibrate_find_experts, callibrate_request_reveal, callibrate_request_booking). Monitor Visa TAP and Skyfire KYA protocols for agent identity standards. First-mover advantage — no marketplace has done this. Post-MVP — requires multi-project support (E06S41) and email infra (E06S39)."
