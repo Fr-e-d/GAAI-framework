@@ -441,8 +441,8 @@ export async function handleProspectMatches(
     return errorResponse('Forbidden', 403);
   }
 
-  // AC4: validate token
-  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:matches');
+  // AC4: validate token — prospect:submit is the session token for the full funnel (matches + identify)
+  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
   if (!tokenValid) {
     return errorResponse('Forbidden', 403);
   }
@@ -526,12 +526,12 @@ export async function handleProspectIdentify(
 
   const { email, token } = body;
 
-  // AC7: validate token
+  // AC7: validate token — prospect:submit is the session token for the full funnel (matches + identify)
   if (typeof token !== 'string' || !token) {
     return errorResponse('Forbidden', 403);
   }
 
-  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:identify');
+  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
   if (!tokenValid) {
     return errorResponse('Forbidden', 403);
   }
