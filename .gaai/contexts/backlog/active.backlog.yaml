@@ -809,6 +809,7 @@ items:
     pr_number: 60
     pr_status: "merged"
     completed_at: "2026-02-28T13:48:10+00:00"
+    cost_usd: 7.47
     artefact: contexts/artefacts/stories/E03S11.story.md
     dependencies: [E03S02, E03S03]
     notes: "Discovery 2026-02-28. 7 ACs. Three gaps: (A) /confirm loading message too small/muted for a high-stakes action, (B) /results 202-computing gives no reassurance during 10s+ waits, (C) error states are generic dead ends with no fallback path. Approach: honest feedback (no fake progress steppers or rotating messages — evaluated and rejected), silent first retry on /results, specific error messages per type, /experts fallback link on all error states. PostHog error tracking. Low effort — text/style + one retry mechanism, no new APIs."
