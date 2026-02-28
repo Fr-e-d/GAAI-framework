@@ -1311,7 +1311,7 @@ items:
     epic: E09
     title: "Matching-engine CI/CD pipeline in deploy-staging.yml"
     priority: high
-    status: failed
+    status: refined
     human_md_estimate: 0.5
     human_cost_usd: 350
     cost_usd: 0.69
@@ -1397,7 +1397,7 @@ items:
     epic: E10
     title: "Extract .gaai framework from Callibrate monorepo into standalone repo"
     priority: high
-    status: ready
+    status: refined
     human_md_estimate: 1.5
     human_cost_usd: 1050
     artefact: contexts/artefacts/stories/E10S01.story.md
@@ -1408,7 +1408,7 @@ items:
     epic: E10
     title: "Write README + Getting Started for .gaai OSS"
     priority: high
-    status: ready
+    status: refined
     human_md_estimate: 1.0
     human_cost_usd: 700
     artefact: contexts/artefacts/stories/E10S02.story.md
@@ -1419,7 +1419,7 @@ items:
     epic: E10
     title: "Add LICENSE (ELv2), CI, and publish .gaai OSS repo as public alpha"
     priority: high
-    status: ready
+    status: refined
     human_md_estimate: 0.5
     human_cost_usd: 350
     artefact: contexts/artefacts/stories/E10S03.story.md
