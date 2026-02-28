@@ -1249,9 +1249,13 @@ items:
     epic: E09
     title: "Matching-engine unit test suite"
     priority: high
-    status: in_progress
+    status: done
     human_md_estimate: 1.5
     human_cost_usd: 1050
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/59"
+    pr_number: 59
+    pr_status: "merged"
+    completed_at: "2026-02-28T13:21:20+0000"
     artefact: contexts/artefacts/stories/E09S03.story.md
     dependencies: []
     notes: "callibrate-matching has 10 source files and zero tests. Add vitest + test files for score.ts, pricing.ts, expertPool.ts. Focus on pure functions first. 9 ACs."
