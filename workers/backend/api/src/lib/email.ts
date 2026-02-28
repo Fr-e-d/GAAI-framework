@@ -347,3 +347,86 @@ export function buildMagicLinkEmail(opts: {
 
   return { html, text };
 }
+
+// ── E06S43: Agent confirmation email builders ────────────────────────────────
+
+export function buildAgentRevealEmail(opts: {
+  expertName: string;
+  projectSummary: string;
+  confirmUrl: string;
+  refuseUrl: string;
+}): { html: string; text: string } {
+  const summary =
+    opts.projectSummary.length > 100
+      ? opts.projectSummary.slice(0, 97) + '…'
+      : opts.projectSummary;
+
+  const text = [
+    'Votre assistant IA souhaite consulter le profil d\'un expert pour votre projet.',
+    '',
+    `Expert : ${opts.expertName}`,
+    `Projet : ${summary}`,
+    '',
+    'Confirmez ou refusez cet accès :',
+    `Confirmer : ${opts.confirmUrl}`,
+    `Refuser : ${opts.refuseUrl}`,
+    '',
+    'Ce lien est valide 24 heures.',
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><title>Votre assistant IA demande accès à un profil</title></head>
+<body style="font-family:sans-serif;color:#111;max-width:480px;margin:0 auto;padding:24px;">
+  <p>Votre assistant IA souhaite consulter le profil d'un expert pour votre projet.</p>
+  <table style="border:1px solid #eee;border-radius:4px;padding:12px;width:100%;margin-bottom:16px;">
+    <tr><td style="color:#666;font-size:12px;">Expert</td><td style="font-weight:600;">${opts.expertName}</td></tr>
+    <tr><td style="color:#666;font-size:12px;">Projet</td><td>${summary}</td></tr>
+  </table>
+  <p>
+    <a href="${opts.confirmUrl}" style="display:inline-block;background:#111;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;margin-right:8px;">Confirmer l'accès</a>
+    <a href="${opts.refuseUrl}" style="display:inline-block;background:#fff;color:#111;border:1px solid #ccc;padding:10px 20px;border-radius:4px;text-decoration:none;">Refuser</a>
+  </p>
+  <p style="color:#888;font-size:12px;">Ce lien est valide 24 heures.</p>
+</body>
+</html>`;
+
+  return { html, text };
+}
+
+export function buildAgentBookingEmail(opts: {
+  expertName: string;
+  projectSummary: string;
+  bookingLink: string;
+}): { html: string; text: string } {
+  const summary =
+    opts.projectSummary.length > 100
+      ? opts.projectSummary.slice(0, 97) + '…'
+      : opts.projectSummary;
+
+  const text = [
+    'Votre assistant IA souhaite réserver un appel avec un expert.',
+    '',
+    `Expert : ${opts.expertName}`,
+    `Projet : ${summary}`,
+    '',
+    `Choisissez un créneau : ${opts.bookingLink}`,
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><title>Votre assistant IA souhaite réserver un appel</title></head>
+<body style="font-family:sans-serif;color:#111;max-width:480px;margin:0 auto;padding:24px;">
+  <p>Votre assistant IA souhaite réserver un appel avec un expert pour votre projet.</p>
+  <table style="border:1px solid #eee;border-radius:4px;padding:12px;width:100%;margin-bottom:16px;">
+    <tr><td style="color:#666;font-size:12px;">Expert</td><td style="font-weight:600;">${opts.expertName}</td></tr>
+    <tr><td style="color:#666;font-size:12px;">Projet</td><td>${summary}</td></tr>
+  </table>
+  <p>
+    <a href="${opts.bookingLink}" style="display:inline-block;background:#111;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;">Choisir un créneau</a>
+  </p>
+</body>
+</html>`;
+
+  return { html, text };
+}

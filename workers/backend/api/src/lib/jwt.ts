@@ -436,3 +436,67 @@ export async function isValidProspectToken(token: string, secret: string): Promi
 
   return true;
 }
+
+// ── E06S43: Reveal confirmation tokens ─────────────────────────────────────────
+
+/**
+ * Sign a reveal confirmation token for agent-initiated profile reveals.
+ * TTL: 24h. Audience: 'agent:reveal:confirm'.
+ */
+export async function signRevealConfirmToken(
+  matchId: string,
+  prospectId: string,
+  secret: string,
+): Promise<string> {
+  const encoder = new TextEncoder();
+  const exp = Math.floor(Date.now() / 1000) + 86400; // 24h
+
+  const header = toBase64Url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
+  const payload = toBase64Url(
+    encoder.encode(
+      JSON.stringify({
+        match_id: matchId,
+        prospect_id: prospectId,
+        exp,
+        iss: 'callibrate',
+        aud: 'agent:reveal:confirm',
+      }),
+    ),
+  );
+  const signingInput = `${header}.${payload}`;
+
+  const key = await importHmacKey(secret, 'sign');
+  const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(signingInput));
+  return `${signingInput}.${toBase64Url(signatureBuffer)}`;
+}
+
+/**
+ * Verify a reveal confirmation token.
+ * Returns { match_id, prospect_id } on success, null on any failure.
+ */
+export async function verifyRevealConfirmToken(
+  token: string,
+  secret: string,
+): Promise<{ match_id: string; prospect_id: string } | null> {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    const [headerB64, payloadB64, sigB64] = parts as [string, string, string];
+    const encoder = new TextEncoder();
+    const signingInput = `${headerB64}.${payloadB64}`;
+
+    const key = await importHmacKey(secret, 'verify');
+    const sigBytes = Uint8Array.from(atob(sigB64.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+    const valid = await crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(signingInput));
+    if (!valid) return null;
+
+    const payloadJson = JSON.parse(atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/')));
+    if (payloadJson.aud !== 'agent:reveal:confirm') return null;
+    if (payloadJson.exp < Math.floor(Date.now() / 1000)) return null;
+
+    return { match_id: payloadJson.match_id, prospect_id: payloadJson.prospect_id };
+  } catch {
+    return null;
+  }
+}

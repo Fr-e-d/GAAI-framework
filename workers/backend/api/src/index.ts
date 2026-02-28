@@ -48,6 +48,11 @@ import { handleGetInternalExpertBySlug } from './handlers/experts/internal';
 import { handleGetDirectLinkInfo, handleRotateDirectLinkToken } from './handlers/experts/direct-link';
 import { handleDirectBookingSubmit } from './handlers/bookings/direct';
 import { handleDirectBookingEmailConfirm } from './handlers/bookings/direct-confirm';
+// E06S43: Agent API + MCP
+import { handleCreateAgentKey, handleRevokeAgentKey, handleListAgentKeys } from './routes/agentKeys';
+import { handleAgentExtract, handleAgentMatch, handleAgentRevealRequest, handleAgentRevealConfirm, handleAgentRevealRefuse, handleAgentRevealStatus, handleAgentBookingRequest } from './routes/agent';
+import { handleMcp } from './routes/mcp';
+import { agentAuth } from './middleware/agentAuth';
 
 // CF Workflows — must be named exports so the runtime can locate the classes
 export { BookingConfirmedWorkflow } from './workflows/booking-confirmed.workflow';
@@ -222,6 +227,28 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       // POST /api/prospects/:id/magic-link/resend — E03S10 (AC8)
       if (method === 'POST' && pathname === `/api/prospects/${prospectId}/magic-link/resend`) {
         const response = await handleMagicLinkResend(request, env, prospectId, ctx);
+        return addCorsHeaders(response, corsResult.origin);
+      }
+
+      // E06S43: Agent API key management routes
+      // GET /api/prospects/:id/agent-keys
+      if (method === 'GET' && pathname === `/api/prospects/${prospectId}/agent-keys`) {
+        const response = await handleListAgentKeys(request, env, prospectId);
+        return addCorsHeaders(response, corsResult.origin);
+      }
+
+      // POST /api/prospects/:id/agent-keys
+      if (method === 'POST' && pathname === `/api/prospects/${prospectId}/agent-keys`) {
+        const response = await handleCreateAgentKey(request, env, prospectId, ctx);
+        return addCorsHeaders(response, corsResult.origin);
+      }
+
+      // DELETE /api/prospects/:id/agent-keys/:keyId
+      const agentKeyDeleteMatch = pathname.match(
+        new RegExp(`^\\/api\\/prospects\\/${prospectId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/agent-keys\\/([^/]+)$`)
+      );
+      if (method === 'DELETE' && agentKeyDeleteMatch && agentKeyDeleteMatch[1]) {
+        const response = await handleRevokeAgentKey(request, env, prospectId, agentKeyDeleteMatch[1]);
         return addCorsHeaders(response, corsResult.origin);
       }
     }
@@ -531,6 +558,64 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       status: 404,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  // ── E06S43: Agent reveal confirmation routes (GET — called from email links) ──
+  // These are unauthenticated GET handlers — users click links in emails
+  if (method === 'GET' && pathname === '/api/agent/reveal/confirm') {
+    return handleAgentRevealConfirm(request, env, ctx);
+  }
+
+  if (method === 'GET' && pathname === '/api/agent/reveal/refuse') {
+    return handleAgentRevealRefuse(request, env, ctx);
+  }
+
+  // ── E06S43: Agent API routes (agent API key authenticated) ───────────────────
+  if (pathname.startsWith('/api/agent/')) {
+    const authResult = await agentAuth(request, env, ctx);
+    if (authResult.response) return authResult.response;
+
+    const agentCtx = {
+      prospect_id: authResult.prospect_id,
+      key_id: authResult.key_id,
+      key_hash: authResult.key_hash,
+    };
+
+    // POST /api/agent/extract
+    if (method === 'POST' && pathname === '/api/agent/extract') {
+      return handleAgentExtract(request, env, ctx, agentCtx);
+    }
+
+    // POST /api/agent/match
+    if (method === 'POST' && pathname === '/api/agent/match') {
+      return handleAgentMatch(request, env, ctx, agentCtx);
+    }
+
+    // POST /api/agent/reveal
+    if (method === 'POST' && pathname === '/api/agent/reveal') {
+      return handleAgentRevealRequest(request, env, ctx, agentCtx);
+    }
+
+    // GET /api/agent/reveal/:matchId/status
+    const revealStatusMatch = pathname.match(/^\/api\/agent\/reveal\/([^/]+)\/status$/);
+    if (method === 'GET' && revealStatusMatch && revealStatusMatch[1]) {
+      return handleAgentRevealStatus(request, env, agentCtx, revealStatusMatch[1]);
+    }
+
+    // POST /api/agent/booking
+    if (method === 'POST' && pathname === '/api/agent/booking') {
+      return handleAgentBookingRequest(request, env, ctx, agentCtx);
+    }
+
+    return new Response(JSON.stringify({ error: 'Not Found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // ── E06S43: MCP JSON-RPC server ───────────────────────────────────────────────
+  if (method === 'POST' && pathname === '/mcp') {
+    return handleMcp(request, env, ctx);
   }
 
   return new Response(JSON.stringify({ error: 'Not Found' }), {

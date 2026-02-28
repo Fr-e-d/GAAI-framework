@@ -198,3 +198,14 @@ export interface ProspectProjectRow {
   created_at: string | null;
   updated_at: string | null;
 }
+
+// E06S43: agent API keys
+export interface ProspectApiKeyRow {
+  id: string;
+  prospect_id: string;
+  key_hash: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
