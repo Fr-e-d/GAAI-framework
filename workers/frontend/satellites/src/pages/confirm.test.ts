@@ -331,3 +331,68 @@ describe('renderConfirmPage — Budget range (AC3)', () => {
     expect(html).toContain('q-budget-min');
   });
 });
+
+// ── Group 7: E03S11 — AC1 loading msg, AC4 error specificity, AC7 error tracking ─
+describe('renderConfirmPage — E03S11 (AC1, AC4, AC7)', () => {
+  it('AC1: loading-msg uses body text color (#1a1a2e), not muted grey', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    expect(html).toContain('color: #1a1a2e');
+  });
+
+  it('AC1: loading-msg does not override font-size to reduced size in CSS block', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    // The loading-msg CSS block should not contain font-size: 0.875rem
+    const loadingMsgBlock = html.substring(html.indexOf('#loading-msg'), html.indexOf('#confirm-error'));
+    expect(loadingMsgBlock).not.toContain('font-size: 0.875rem');
+  });
+
+  it('AC1: loading-msg element appears after confirm-btn in HTML', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    expect(html.indexOf('id="loading-msg"')).toBeGreaterThan(html.indexOf('id="confirm-btn"'));
+  });
+
+  it('AC1: loading message text matches AC spec', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    expect(html).toContain('Recherche en cours parmi nos experts qualifi');
+  });
+
+  it('AC4: catch-all error is specific connection failure message', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    expect(html).toContain('La connexion au serveur a');
+  });
+
+  it('AC4: catch-all error does not use old generic message', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    expect(html).not.toContain('Une erreur est survenue. Veuillez r');
+  });
+
+  it('AC7: includes satellite.matching_error event', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    expect(html).toContain('satellite.matching_error');
+  });
+
+  it('AC7: includes error_type property in matching_error event', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    expect(html).toContain('error_type');
+  });
+
+  it('AC7: includes page:confirm property', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    expect(html).toContain("page:'confirm'");
+  });
+
+  it('AC7: includes validation_422 error type', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    expect(html).toContain('validation_422');
+  });
+
+  it('AC7: includes rate_limit_429 error type', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    expect(html).toContain('rate_limit_429');
+  });
+
+  it('AC7: includes turnstile error type', () => {
+    const html = renderConfirmPage(baseConfig, '', 'https://api.example.com', 'site-key');
+    expect(html).toContain("'turnstile'");
+  });
+});

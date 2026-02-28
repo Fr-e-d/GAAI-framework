@@ -86,9 +86,9 @@ describe('renderResultsPage — Computing state (AC2)', () => {
     expect(html).toContain('id="computing-msg"');
   });
 
-  it('includes "Calcul des correspondances" text', () => {
+  it('includes "Nous affinons les correspondances" text (AC2 E03S11)', () => {
     const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
-    expect(html).toContain('Calcul des correspondances');
+    expect(html).toContain('Nous affinons les correspondances');
   });
 
   it('includes MAX_RETRIES constant equal to 3', () => {
@@ -106,9 +106,9 @@ describe('renderResultsPage — Computing state (AC2)', () => {
     expect(html).toContain('id="no-available-msg"');
   });
 
-  it('includes "Aucun expert disponible" fallback text', () => {
+  it('includes computing timeout fallback text (AC6 E03S11)', () => {
     const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
-    expect(html).toContain('Aucun expert disponible');
+    expect(html).toContain('Le calcul des correspondances prend plus de temps');
   });
 });
 
@@ -512,5 +512,88 @@ describe('renderResultsPage — Logo rendering', () => {
   it('does not render logo img when theme is null', () => {
     const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
     expect(html).not.toContain('<img');
+  });
+});
+
+// ── Group 12: E03S11 — AC2, AC3, AC5, AC6, AC7 ────────────────────────────────
+describe('renderResultsPage — E03S11 (AC2, AC3, AC5, AC6, AC7)', () => {
+  it('AC2: includes computing-msg-text id for dynamic updates', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('id="computing-msg-text"');
+  });
+
+  it('AC2: includes waitStart variable for elapsed time tracking', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('waitStart');
+  });
+
+  it('AC2: includes 10000ms threshold for extended wait message', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('10000');
+  });
+
+  it('AC2: includes extended wait reassurance message', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('Cela prend un peu plus de temps');
+  });
+
+  it('AC3: includes networkErrorRetried variable for silent retry', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('networkErrorRetried');
+  });
+
+  it('AC3: includes 2000ms silent retry delay', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('2000');
+  });
+
+  it('AC3: networkErrorRetried resets on retry-btn click', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('networkErrorRetried=false');
+  });
+
+  it('AC5: includes network-specific error message', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('Connexion interrompue');
+  });
+
+  it('AC5: includes server-specific error message', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('Nos serveurs sont moment');
+  });
+
+  it('AC5: includes fetch-error-browse secondary link element', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('id="fetch-error-browse"');
+  });
+
+  it('AC6: includes email promise in computing timeout fallback', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('r\u00e9sultats par email');
+  });
+
+  it('AC6: includes secondary directory link in computing timeout fallback', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('parcourir le r');
+  });
+
+  it('AC7: includes satellite.matching_error event', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('satellite.matching_error');
+  });
+
+  it('AC7: includes computing_timeout error type', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('computing_timeout');
+  });
+
+  it('AC7: includes server_5xx error type', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('server_5xx');
+  });
+
+  it('AC7: includes page:results property', () => {
+    const html = renderResultsPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain("page:'results'");
   });
 });

@@ -243,8 +243,7 @@ export function renderConfirmPage(
       cursor: not-allowed;
     }
     #loading-msg {
-      color: #555;
-      font-size: 0.875rem;
+      color: #1a1a2e;
       margin-top: 0.75rem;
       text-align: center;
     }
@@ -294,8 +293,8 @@ export function renderConfirmPage(
       <a href="/match" class="back-link" id="back-link">← Retour</a>
       <div id="confirm-error" role="alert" aria-live="assertive" style="display:none"></div>
       <div id="cf-turnstile-container" style="display:none"></div>
-      <div id="loading-msg" style="display:none" aria-live="polite">Recherche d'experts en cours\u2026</div>
       <button type="button" id="confirm-btn">Confirmer et trouver mes experts</button>
+      <div id="loading-msg" style="display:none" aria-live="polite">Recherche en cours parmi nos experts qualifi\u00e9s</div>
     </div>
   </main>
   ${posthogBodyScript}
@@ -569,7 +568,7 @@ export function renderConfirmPage(
         sitekey:window.__SAT__.turnstileSiteKey,
         appearance:'interaction-only',
         callback:function(token){
-          loadingMsg.textContent='Recherche d\u2019experts en cours\u2026';
+          loadingMsg.textContent='Recherche en cours parmi nos experts qualifi\u00e9s';
           doSubmit(token);
         },
         'error-callback':function(){
@@ -634,6 +633,20 @@ export function renderConfirmPage(
       confirmBtn.textContent='Confirmer et trouver mes experts';
       setFormReadonly(false);
       loadingMsg.style.display='none';
+      // AC7: PostHog matching_error event
+      var errorType='network';
+      if(status===422)errorType='validation_422';
+      else if(status===429)errorType='rate_limit_429';
+      else if(status==='turnstile_error'||status==='turnstile_timeout')errorType='turnstile';
+      if(typeof posthog!=='undefined'){
+        posthog.capture('satellite.matching_error',{
+          satellite_id:window.__SAT__.satelliteId,
+          prospect_id:null,
+          error_type:errorType,
+          page:'confirm',
+          retry_count:0
+        });
+      }
       if(status===422){
         var msg='Les donn\u00e9es saisies sont invalides.';
         if(data&&data.error)msg=data.error;
@@ -648,7 +661,7 @@ export function renderConfirmPage(
           turnstileContainer.style.display='none';
         }
       }else{
-        showError('Une erreur est survenue. Veuillez r\u00e9essayer.');
+        showError('La connexion au serveur a \u00e9chou\u00e9. V\u00e9rifiez votre connexion internet et r\u00e9essayez.');
       }
     }
 

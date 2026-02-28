@@ -204,7 +204,7 @@ export function renderResultsPage(
     </div>
     <!-- AC2: Computing state -->
     <div id="computing-msg" style="display:none" aria-live="polite">
-      <p>Calcul des correspondances en cours...</p>
+      <p id="computing-msg-text">Nous affinons les correspondances, quelques secondes\u2026</p>
     </div>
     <!-- AC3+AC4: Match cards (filled by JS) -->
     <div id="matches-container" style="display:none" aria-label="Experts correspondants"></div>
@@ -216,14 +216,16 @@ export function renderResultsPage(
         <a href="/experts" class="no-matches-btn no-matches-btn--secondary">Parcourir le répertoire</a>
       </div>
     </div>
-    <!-- AC2: No experts available fallback -->
+    <!-- AC6: Computing timeout fallback -->
     <div id="no-available-msg" style="display:none">
-      <p>Aucun expert disponible pour le moment. Nous vous contacterons quand un expert correspondra à vos besoins.</p>
+      <p>Le calcul des correspondances prend plus de temps que pr\u00e9vu. Vous recevrez vos r\u00e9sultats par email d\u00e8s qu\u2019ils sont pr\u00eats.</p>
+      <a href="/experts" style="display:inline-block;margin-top:1rem;color:#6b7280;font-size:0.9375rem;text-decoration:none">En attendant, parcourir le r\u00e9pertoire</a>
     </div>
     <!-- Fetch error -->
     <div id="fetch-error" style="display:none" role="alert">
       <p id="fetch-error-msg">Une erreur est survenue.</p>
-      <button type="button" id="retry-btn">Réessayer</button>
+      <button type="button" id="retry-btn">R\u00e9essayer</button>
+      <a href="/experts" id="fetch-error-browse" style="display:block;margin-top:0.5rem;font-size:0.875rem;color:#6b7280;text-decoration:none">Parcourir le r\u00e9pertoire d\u2019experts</a>
     </div>
     <!-- AC5: Email gate -->
     <section id="email-gate-section" style="display:none" aria-label="Débloquer les profils complets">
@@ -241,6 +243,8 @@ export function renderResultsPage(
     var token=null;
     var retryCount=0;
     var MAX_RETRIES=3;
+    var waitStart=0;
+    var networkErrorRetried=false;
     var isIdentifying=false;
     var matchesData=null;
     var CRITERIA_LABELS={skills:'Comp\u00e9tences',industry:'Secteur',budget:'Budget',timeline:'Calendrier',languages:'Langues'};
@@ -260,6 +264,7 @@ export function renderResultsPage(
       hideEl('fetch-error');
       showEl('matches-loading');
       retryCount=0;
+      networkErrorRetried=false;
       fetchMatches();
     });
 
@@ -289,22 +294,53 @@ export function renderResultsPage(
           top_score:matchesData[0]?matchesData[0].overall_score:null
         });
       })
-      .catch(function(){
+      .catch(function(err){
+        if(!networkErrorRetried){
+          networkErrorRetried=true;
+          hideEl('computing-msg');
+          setTimeout(function(){fetchMatches();},2000);
+          return;
+        }
         hideEl('matches-loading');
-        document.getElementById('fetch-error-msg').textContent='Une erreur est survenue.';
+        hideEl('computing-msg');
+        var isServer=err&&err.status&&err.status>=500;
+        var errorMsg=isServer
+          ?'Nos serveurs sont momentan\u00e9ment indisponibles. R\u00e9essayez dans quelques instants.'
+          :'Connexion interrompue. V\u00e9rifiez votre connexion et r\u00e9essayez.';
+        var errorType=isServer?'server_5xx':'network';
+        document.getElementById('fetch-error-msg').textContent=errorMsg;
         showEl('fetch-error');
+        firePostHog('satellite.matching_error',{
+          satellite_id:window.__SAT__.satelliteId,
+          prospect_id:prospect_id,
+          error_type:errorType,
+          page:'results',
+          retry_count:1
+        });
       });
     }
 
     // AC2: Handle 202 computing state with exponential backoff
     function handle202(data){
+      if(retryCount===0){waitStart=Date.now();}
       if(retryCount>=MAX_RETRIES){
         hideEl('matches-loading');
         hideEl('computing-msg');
         showEl('no-available-msg');
+        firePostHog('satellite.matching_error',{
+          satellite_id:window.__SAT__.satelliteId,
+          prospect_id:prospect_id,
+          error_type:'computing_timeout',
+          page:'results',
+          retry_count:retryCount
+        });
         return;
       }
       hideEl('matches-loading');
+      var msgEl=document.getElementById('computing-msg-text');
+      if(msgEl&&Date.now()-waitStart>10000){
+        msgEl.textContent='Cela prend un peu plus de temps que pr\u00e9vu. Votre recherche est en cours.';
+      }
       showEl('computing-msg');
       var base=(data&&data.estimated_seconds?data.estimated_seconds*1000:3000);
       var delay=base*Math.pow(2,retryCount);
