@@ -23,6 +23,62 @@ updated_at: 2026-02-28
 
 ---
 
+### DEC-131 — Expert direct traffic: page profil hébergée (mode direct) remplace le widget JS embed
+
+**Context:** Durant la session Discovery 2026-02-28, un widget JS embeddable sur le site de l'expert a été proposé pour permettre aux experts de recevoir des leads depuis leur propre site tout en générant des backlinks SEO vers callibrate.io. Après analyse comparative (industry standards, modèle de coût, UX, compatibilité stack), le concept de widget embed a été abandonné au profit d'une approche plus simple : la page profil hébergée sur callibrate.io avec un mode direct.
+
+**Problèmes identifiés avec le widget JS embed :**
+- Complexité technique élevée (CORS cross-origin, CSS scoping, JS snippet, nouveau layer de sécurité)
+- La protection bot nécessitait une infrastructure nouvelle (CORS whitelist par domaine expert) absente du stack
+- Même valeur SEO atteignable via un simple lien HTML depuis le site de l'expert
+- E03S04 (page profil) couvre déjà le besoin — le widget embed est redondant
+
+**Decision :**
+
+**1. Widget JS embed abandonné.** Aucun snippet embeddable ne sera développé. E03S04 (page profil expert) est le point d'entrée unique pour le trafic expert-originated.
+
+**2. Mode direct sur la page profil.** Le paramètre `?ref=direct` active un rendu minimaliste de la page `/experts/{slug}` :
+- Sans navigation globale callibrate.io
+- Sans suggestions d'autres experts (pas de sidebar, pas de "Also available")
+- Sans fil d'Ariane directory
+- Contenu : profil expert + formulaire freetext + booking widget + attribution "Powered by Callibrate"
+- L'expert partage **toujours** la variante `callibrate.io/experts/{slug}?ref=direct` (pas l'URL directory générique)
+
+**3. Sources valides pour le lien direct :** site portfolio de l'expert, blog, Google Business Profile, bio LinkedIn, profil Reddit, Discord — tout support où l'expert est présent.
+
+**4. Valeur SEO réelle par source :**
+- Sites web (HTML `<a href>` sans `rel="nofollow"`) → backlink dofollow éditorial vers callibrate.io — valeur réelle
+- Réseaux sociaux (LinkedIn, Reddit, Discord) → `nofollow` par défaut — brand mentions uniquement (SEO-001 AKU-015), pas de link equity
+
+**5. Pricing des leads expert-originated :** Bookings issus du trafic `?ref=direct` = **gratuits dans le quota mensuel**. Aucun billing trigger. Rationale : l'expert a fait le travail d'acquisition — Callibrate a fourni l'infrastructure de qualification + scheduling uniquement. Quota : 100 soumissions/mois par expert (canal direct + tous canaux expert-originated confondus). Au-delà du quota : message "Calendrier complet, prenez contact directement" — pas d'erreur bloquante.
+
+**6. Cas limite — rebond vers un autre expert :** Si le prospect arrive en mode direct (expert A) et finit par booker un expert B après navigation : tarif standard DEC-67 s'applique (Callibrate a fourni la valeur de découverte). Attribution via `ref` + `src={expert_slug}` dans l'URL.
+
+**7. Email validation en mode direct :** L'OTP inline (DEC-121) est remplacé par un **email de confirmation avec lien magique** (click-to-confirm, TTL 24h). Rationale : il n'y a pas de billing trigger en mode direct, donc l'OTP haute-friction n'est pas justifié. MX check + disposable email blacklist restent actifs. Logique DEC-129 (purge abandoned 24h) s'applique.
+
+**8. Bot protection :** DEC-120 s'applique intégralement sans modification. Le trafic est sur callibrate.io — aucune nouvelle infrastructure de sécurité requise. Avantage structurel majeur vs widget embed.
+
+**9. Données et analytics :**
+- `lead_source: 'direct'` sur le booking record (nouveau champ)
+- Extraction requirements → alimente les signaux de profil expert (skills manquants, calibration prix)
+- Dashboard expert : section "Demandes via votre lien direct" (budget médian, stack mentionnée, type de projet)
+- Pas d'intégration au composite_score avant validation empirique de la corrélation qualité
+
+**10. E03S06 non affecté.** E03S06 (inline booking widget sur satellite sites) sert les prospects qui naviguent le funnel satellite — contexte entièrement différent. Inchangé.
+
+**11. Crédit DEC-117 non affecté.** Le lien direct est une feature gratuite disponible dès M1 (Matchable). Ce n'est pas un milestone supplémentaire — aucun crédit n'y est attaché.
+
+**Impact artefacts :**
+- `E03S04.story.md` : ajouter AC11 — rendu mode direct (`?ref=direct`) : supprime navigation globale + suggestions autres experts + fil d'Ariane. Ajouter AC12 — quota mensuel : vérification `direct_submissions_this_month` avant extraction LLM, retour gracieux si dépassé. Ajouter PostHog event `expert.direct_booking_submitted` (expert_slug, src_channel, quota_remaining).
+- Nouveau champ DB : `bookings.lead_source ENUM('callibrate', 'direct')` (ou `TEXT` pour extensibilité future)
+- Nouveau compteur DB : `experts.direct_submissions_this_month INT DEFAULT 0` + reset cron mensuel
+
+**Fichiers :** `.gaai/contexts/artefacts/stories/E03S04.story.md`
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
 ### DEC-130 — Decision Consistency Gate: mandatory memory-retrieve before recording decisions
 
 **Context:** During a Discovery session (2026-02-28), the agent proposed DEC-125 (billing at reveal) which directly contradicted DEC-14/DEC-30/DEC-68 (billing at booking). Root cause: the agent reasoned from first principles without retrieving existing decisions. The contradiction was caught by the human, not by any automated governance check. This exposed a structural gap — no agent or sub-agent was required to verify decision consistency before recording.
