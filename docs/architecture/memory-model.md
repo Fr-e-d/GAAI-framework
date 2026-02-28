@@ -35,7 +35,7 @@ This matters because:
 ## Memory Structure
 
 ```
-.gaai/contexts/memory/
+.gaai/project/contexts/memory/
 ├── index.md              ← memory map, always maintained
 ├── _template.md          ← template for new entries
 ├── project/              ← semantic memory (loaded every session)
@@ -131,7 +131,7 @@ memory-snapshot → archived before risky work
 
 ## Memory Scope and Boundaries
 
-Memory is **project-level** — it lives in `.gaai/contexts/memory/` alongside your code.
+Memory is **project-level** — it lives in `.gaai/project/contexts/memory/` alongside your code.
 
 This means:
 - Memory is versioned in git

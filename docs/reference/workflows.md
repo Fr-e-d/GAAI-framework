@@ -17,7 +17,7 @@ Workflows describe how the pieces of GAAI connect. They are prose documents with
 
 ## Context Bootstrap Workflow
 
-**File:** `.gaai/workflows/context-bootstrap.workflow.md`
+**File:** `.gaai/core/workflows/context-bootstrap.workflow.md`
 
 **Purpose:** Initialize GAAI on an existing codebase. Run once.
 
@@ -37,7 +37,7 @@ Workflows describe how the pieces of GAAI connect. They are prose documents with
 
 ## Delivery Loop Workflow
 
-**File:** `.gaai/workflows/delivery-loop.workflow.md`
+**File:** `.gaai/core/workflows/delivery-loop.workflow.md`
 
 **Purpose:** Execute governed Stories using the Orchestrator model — evaluate complexity, compose a sub-agent team, coordinate handoffs, and close the Story.
 
@@ -80,7 +80,7 @@ coordinate-handoffs
 
 ## Discovery to Delivery Handoff
 
-**File:** `.gaai/workflows/discovery-to-delivery.workflow.md`
+**File:** `.gaai/core/workflows/discovery-to-delivery.workflow.md`
 
 **Purpose:** Formal handoff protocol between Discovery and Delivery tracks.
 
@@ -102,7 +102,7 @@ If any condition fails: return to Discovery.
 
 ## Emergency Rollback Workflow
 
-**File:** `.gaai/workflows/emergency-rollback.workflow.md`
+**File:** `.gaai/core/workflows/emergency-rollback.workflow.md`
 
 **Purpose:** Recover when Delivery produces incorrect or dangerous output.
 

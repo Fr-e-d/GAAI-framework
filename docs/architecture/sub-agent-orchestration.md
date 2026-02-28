@@ -1,6 +1,6 @@
 # Sub-Agent Orchestration — Architecture Design
 
-**Status:** v2.0 design target. Not adopted in v1.0.
+**Status:** v3.0 design target. Not adopted in v2.0.0.0.
 
 This document defines the target architecture for sub-agent orchestration in the Delivery track. It is the authoritative design reference for when implementation begins.
 
@@ -19,7 +19,7 @@ Four principles drive every decision in this document:
 
 ## Why Delivery Agent Must Be Orchestrator-Only
 
-The current v1.0 model gives the Delivery Agent both orchestration skills and execution skills. This creates ambiguity: the agent decides at runtime whether to orchestrate or execute directly. That decision is a source of drift — and it means the agent's available skill set is the union of two roles, making its context larger than necessary for either.
+The current v2.0 model gives the Delivery Agent both orchestration skills and execution skills. This creates ambiguity: the agent decides at runtime whether to orchestrate or execute directly. That decision is a source of drift — and it means the agent's available skill set is the union of two roles, making its context larger than necessary for either.
 
 **If Delivery can both orchestrate and execute:**
 - Its skills are the superset of orchestrator + executor roles
@@ -120,7 +120,7 @@ Specialists are not spawned by the Planning sub-agent or the QA sub-agent — on
 Specialists are declared in a file-based registry. The registry is part of the GAAI framework — not dynamic configuration, not code.
 
 ```yaml
-# .gaai/contexts/specialists.registry.yaml
+# .gaai/core/contexts/specialists.registry.yaml
 - id: db-migration
   triggers: [schema change, migration, ALTER TABLE, database]
   skills: [implement]
@@ -187,9 +187,9 @@ Every sub-agent, without exception, follows this four-step lifecycle:
 Each phase produces a typed artefact:
 
 ```
-.gaai/contexts/artefacts/plans/{id}.execution-plan.md     ← Planning handoff
-.gaai/contexts/artefacts/reports/{id}.impl-report.md       ← Implementation handoff
-.gaai/contexts/artefacts/reports/{id}.qa-report.md         ← QA handoff
+.gaai/project/contexts/artefacts/plans/{id}.execution-plan.md     ← Planning handoff
+.gaai/project/contexts/artefacts/reports/{id}.impl-report.md       ← Implementation handoff
+.gaai/project/contexts/artefacts/reports/{id}.qa-report.md         ← QA handoff
 ```
 
 These are not temporary files. They are durable artefacts — traceable, reviewable, auditable. The QA sub-agent reads the impl-report as part of its context bundle. The orchestrator reads the qa-report to determine the next action.
@@ -233,21 +233,21 @@ Sub-agent orchestration requires the AI tool to support spawning isolated contex
 | Windsurf | No | No equivalent mechanism |
 | Other tools | Varies | Depends on tool capabilities |
 
-**Consequence:** In v2.0, sub-agent orchestration will be a Claude Code-first feature. On Cursor and Windsurf, the Delivery Agent falls back to the v1.0 sequential model. This is a deliberate trade-off — not a violation of the tool-agnostic principle, but an acknowledgment that the principle has a capability floor.
+**Consequence:** In v3.0, sub-agent orchestration will be a Claude Code-first feature. On Cursor and Windsurf, the Delivery Agent falls back to the v2.0 sequential model. This is a deliberate trade-off — not a violation of the tool-agnostic principle, but an acknowledgment that the principle has a capability floor.
 
 The fallback is explicit in `compat/COMPAT.md`.
 
 ---
 
-## Orchestrator Skill Set (v2.0)
+## Orchestrator Skill Set (v3.0)
 
 The Delivery Orchestrator's available skills are strictly limited to coordination:
 
-**Keeps from v1.0:**
+**Keeps from v2.0:**
 - `context-building` — assembles context bundles for sub-agents
 - `memory-retrieve` — loads relevant memory before composing team
 
-**New in v2.0:**
+**New in v3.0:**
 - `evaluate-story` — determines complexity tier and team composition
 - `compose-team` — reads specialists.registry, selects appropriate sub-agents
 - `coordinate-handoffs` — validates artefacts, sequences phases, manages retries
@@ -265,16 +265,16 @@ The orchestrator's context window stays small. It never needs to know how to wri
 
 ## Current Position
 
-**Not adopted in v1.0.** The sequential delivery model ships as-is.
+**Not adopted in v2.0.0.** The sequential delivery model ships as-is.
 
-**Designated v2.0 design target.** This document is the implementation specification. When the trigger conditions are met, implementation begins from this spec — not from a fresh design discussion.
+**Designated v3.0 design target.** This document is the implementation specification. When the trigger conditions are met, implementation begins from this spec — not from a fresh design discussion.
 
-**Trigger conditions for v2.0 adoption:**
+**Trigger conditions for v3.0 adoption:**
 1. Claude Code Task agents reach stable API (current status: available but evolving)
 2. Real-world evidence that Stories consistently benefit from phase isolation (context pressure, QA failure rates)
 3. The specialist registry pattern is validated against real project patterns
 
-**What does NOT change between v1.0 and v2.0:**
+**What does NOT change between v2.0 and v3.0:**
 - The backlog as sole authorization mechanism
 - The file-based artefact model
 - The ephemeral agent lifecycle
@@ -286,4 +286,4 @@ The orchestration topology changes. The governance model does not.
 
 → [Design Decisions](design-decisions.md)
 → [Roadmap](../contributing/roadmap.md)
-→ [Delivery Agent](../../.gaai/agents/delivery.agent.md)
+→ [Delivery Agent](../../.gaai/core/agents/delivery.agent.md)

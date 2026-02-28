@@ -22,7 +22,7 @@ GAAI uses this spec for all its skills. The result: any tool that supports agent
 ### Directory structure
 
 ```
-.gaai/skills/
+.gaai/core/skills/
 ├── discovery/
 │   ├── discovery-high-level-plan/
 │   │   └── SKILL.md
@@ -119,7 +119,7 @@ These fields are GAAI-specific. The base spec only requires `name` and `descript
 
 To add a skill to GAAI:
 
-1. Create a directory: `.gaai/skills/{category}/{skill-name}/`
+1. Create a directory: `.gaai/core/skills/{category}/{skill-name}/`
 2. Create `SKILL.md` with required frontmatter
 3. Add the skill to `README.skills.md` (the master index)
 4. Reference the skill in the appropriate agent file (`agents/{agent}.agent.md`)
@@ -128,5 +128,5 @@ See the `create-skill` skill for a guided workflow (when available — see roadm
 
 ---
 
-→ [Skills Index](../../.gaai/skills/README.skills.md)
+→ [Skills Index](../../.gaai/core/skills/README.skills.md)
 → [Design Decisions](design-decisions.md)

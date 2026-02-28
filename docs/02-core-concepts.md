@@ -40,7 +40,7 @@ This asymmetry is why Discovery and Delivery have different agents, different au
 
 The backlog is not a to-do list. It is the **only authority** that permits the Delivery Agent to act.
 
-- Location: `.gaai/contexts/backlog/active.backlog.yaml`
+- Location: `.gaai/project/contexts/backlog/active.backlog.yaml`
 - Format: YAML (one file for all active items)
 - States: `draft` → `needs-refinement` → `refined` → `in-progress` → `done`
 
@@ -77,7 +77,7 @@ This matters because:
 - Context pollution leads to drift and contradictions
 - Explicit selection makes agent behavior predictable and auditable
 
-Memory lives in `.gaai/contexts/memory/`. The structure — project context, decisions log, patterns, summaries — is defined in `.gaai/contexts/memory/README.memory.md`. You can add domain-specific memory files; agents select them explicitly using `memory-retrieve`.
+Memory lives in `.gaai/project/contexts/memory/`. The structure — project context, decisions log, patterns, summaries — is defined in `.gaai/project/contexts/memory/README.memory.md`. You can add domain-specific memory files; agents select them explicitly using `memory-retrieve`.
 
 ---
 

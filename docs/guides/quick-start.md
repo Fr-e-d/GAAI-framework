@@ -27,7 +27,7 @@ Your AI needs context about your project before it can help.
 ```
 
 **Other tools:**
-> "Read `.gaai/agents/bootstrap.agent.md`, then follow `.gaai/workflows/context-bootstrap.workflow.md`."
+> "Read `.gaai/core/agents/bootstrap.agent.md`, then follow `.gaai/core/workflows/context-bootstrap.workflow.md`."
 
 The Bootstrap Agent will scan your codebase, extract architecture decisions, and fill in your memory files. It will tell you when it's done:
 
@@ -45,7 +45,7 @@ Skip Bootstrap. Go straight to Discovery:
 ```
 
 **Other tools:**
-> "Read `.gaai/agents/discovery.agent.md`. I'm starting a new project: [describe your idea]. Help me define the first Epics and Stories."
+> "Read `.gaai/core/agents/discovery.agent.md`. I'm starting a new project: [describe your idea]. Help me define the first Epics and Stories."
 
 The Discovery Agent will ask questions about your project — what it does, who it's for, what constraints apply — and use your answers to seed the project memory automatically. No manual file editing required.
 
@@ -65,7 +65,7 @@ The Discovery Agent's job: take your rough idea and turn it into clear, executab
 ```
 
 **Other tools:**
-> "Read `.gaai/agents/discovery.agent.md`. I want to build [your idea]. Help me create the first Epics and Stories."
+> "Read `.gaai/core/agents/discovery.agent.md`. I want to build [your idea]. Help me create the first Epics and Stories."
 
 ### What to say
 
@@ -105,7 +105,7 @@ When Stories are `refined`, they're ready. One command delivers them.
 ```
 
 **Other tools:**
-> "Read `.gaai/agents/delivery.agent.md` and `.gaai/workflows/delivery-loop.workflow.md`. Execute the next ready backlog item."
+> "Read `.gaai/core/agents/delivery.agent.md` and `.gaai/core/workflows/delivery-loop.workflow.md`. Execute the next ready backlog item."
 
 ### What happens automatically
 
@@ -150,26 +150,26 @@ Everything else is handled automatically.
 ```
 
 **Other tools:**
-> "Read `.gaai/contexts/backlog/active.backlog.yaml` and give me a summary."
+> "Read `.gaai/project/contexts/backlog/active.backlog.yaml` and give me a summary."
 
 ---
 
 ## Manage Your Backlog Directly
 
-The backlog scheduler gives you four views into `.gaai/contexts/backlog/active.backlog.yaml`:
+The backlog scheduler gives you four views into `.gaai/project/contexts/backlog/active.backlog.yaml`:
 
 ```bash
 # What should be worked on next?
-.gaai/scripts/backlog-scheduler.sh --next active.backlog.yaml
+.gaai/core/scripts/backlog-scheduler.sh --next active.backlog.yaml
 
 # What's ready right now? (sorted by priority, then complexity)
-.gaai/scripts/backlog-scheduler.sh --list active.backlog.yaml
+.gaai/core/scripts/backlog-scheduler.sh --list active.backlog.yaml
 
 # What's blocked and why? (full dependency tree)
-.gaai/scripts/backlog-scheduler.sh --graph active.backlog.yaml
+.gaai/core/scripts/backlog-scheduler.sh --graph active.backlog.yaml
 
 # Are any high-priority items blocked by lower-priority dependencies?
-.gaai/scripts/backlog-scheduler.sh --conflicts active.backlog.yaml
+.gaai/core/scripts/backlog-scheduler.sh --conflicts active.backlog.yaml
 ```
 
 **When to use each:**
@@ -230,7 +230,7 @@ Skip Discovery (bugs go directly to Delivery).
 Add a backlog item manually:
 
 ```yaml
-# in .gaai/contexts/backlog/active.backlog.yaml
+# in .gaai/project/contexts/backlog/active.backlog.yaml
 - id: BL-042
   title: Fix race condition in order processing
   status: refined
@@ -267,6 +267,6 @@ You ←→ Discovery Agent       (what to build — human-facing)
 
 ## What's Next
 
-- Refine your rules in `.gaai/contexts/rules/` — this is how you teach GAAI your team's conventions
+- Refine your rules in `.gaai/core/contexts/rules/` — this is how you teach GAAI your team's conventions
 - Read [Core Concepts](../02-core-concepts.md) to understand why the framework is designed this way
 - Read [Senior Engineer Guide](senior-engineer-guide.md) for governance customization and CI integration

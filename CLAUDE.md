@@ -2,7 +2,7 @@
 
 This file is for contributors working **on this repository itself** (fixing bugs, updating docs, improving scripts).
 
-If you are a **user** looking to use GAAI in your project, read `.gaai/GAAI.md` instead — or run `install.sh`.
+If you are a **user** looking to use GAAI in your project, read `.gaai/core/GAAI.md` instead — or run `install.sh`.
 
 ---
 
@@ -23,48 +23,46 @@ This repo contains:
 - **Never break `.gaai/` integrity.** The health check script (`scripts/health-check.sh` inside `.gaai/`) must always pass.
 - **Never rename skill directories.** Skill directory names are part of the agentskills.io spec and are referenced in agent files.
 - **Never rename rule files.** Rule filenames are referenced in agent files and compat adapters.
-- **Keep compat adapters thin.** Files in `.gaai/compat/` must reference canonical `.gaai/` files — never duplicate content.
+- **Keep compat adapters thin.** Files in `.gaai/core/compat/` must reference canonical `.gaai/` files — never duplicate content.
 - **Preserve naming conventions.** `README.{type}.md`, `{name}.{type}.md`, `{name}.{type}.yaml` — see plan for full convention table.
 
 ### File Structure
 
 ```
 .gaai/
-├── GAAI.md                        ← Master orientation (entry point for users)
-├── VERSION                        ← Semantic version string
-├── agents/
-│   ├── README.agents.md
-│   ├── discovery.agent.md
-│   ├── delivery.agent.md
-│   └── bootstrap.agent.md
-├── skills/
-│   ├── README.skills.md
-│   ├── discovery/{skill-name}/SKILL.md  (6 skills)
-│   ├── delivery/{skill-name}/SKILL.md   (9 skills)
-│   └── cross/{skill-name}/SKILL.md      (16 skills)
-├── contexts/
-│   ├── README.contexts.md
-│   ├── rules/         ← 6 rule files
-│   ├── memory/        ← README + memory file templates
-│   ├── backlog/       ← README + YAML templates
-│   └── artefacts/     ← README + artefact templates
-├── workflows/
-│   ├── README.workflows.md
-│   └── *.workflow.md  (4 workflow files)
-├── scripts/
-│   ├── README.scripts.md
-│   └── *.sh           (5 bash scripts)
-└── compat/
-    ├── COMPAT.md
-    ├── claude-code/
-    ├── cursor/
-    └── windsurf/
+└── core/
+    ├── GAAI.md                        ← Master orientation (entry point for users)
+    ├── VERSION                        ← Semantic version string (2.0.0)
+    ├── agents/
+    │   ├── README.agents.md
+    │   ├── discovery.agent.md
+    │   ├── delivery.agent.md
+    │   └── bootstrap.agent.md
+    ├── skills/
+    │   ├── README.skills.md
+    │   ├── discovery/{skill-name}/SKILL.md  (6 skills)
+    │   ├── delivery/{skill-name}/SKILL.md   (9 skills)
+    │   └── cross/{skill-name}/SKILL.md      (22 skills)
+    ├── contexts/
+    │   └── rules/         ← 8 framework rule files
+    ├── scaffolding/       ← templates for .gaai/project/ (created by installer)
+    ├── workflows/
+    │   ├── README.workflows.md
+    │   └── *.workflow.md  (4 workflow files)
+    ├── scripts/
+    │   ├── README.scripts.md
+    │   └── *.sh           (5 bash scripts)
+    └── compat/
+        ├── COMPAT.md
+        ├── claude-code/
+        ├── cursor/
+        └── windsurf/
 ```
 
 ### Running the Health Check
 
 ```bash
-bash .gaai/scripts/health-check.sh
+bash .gaai/core/scripts/health-check.sh
 ```
 
 This validates:
@@ -94,7 +92,7 @@ Prefixes: `fix`, `docs`, `scripts`, `compat`, `chore`
 
 ## What NOT to Do
 
-- Do not add new skills to `.gaai/skills/` (this is a "Fork & Own" framework — users add skills in their own fork)
+- Do not add new skills to `.gaai/core/skills/` (this is a "Fork & Own" framework — users add skills in their own fork)
 - Do not modify the philosophy or operating rules without a serious reason
 - Do not add external dependencies to bash scripts
 - Do not break backward compatibility of YAML frontmatter formats

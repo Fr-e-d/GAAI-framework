@@ -8,9 +8,9 @@ Three agents. Each has a distinct role, authority level, and skill set.
 
 | Agent | Track | Authority | Human-facing? | File |
 |---|---|---|---|---|
-| Discovery | Discovery | Propose + validate | Yes | `.gaai/agents/discovery.agent.md` |
-| Delivery | Delivery | Orchestrate | No | `.gaai/agents/delivery.agent.md` |
-| Bootstrap | Cross | Initialize | Yes (first session only) | `.gaai/agents/bootstrap.agent.md` |
+| Discovery | Discovery | Propose + validate | Yes | `.gaai/core/agents/discovery.agent.md` |
+| Delivery | Delivery | Orchestrate | No | `.gaai/core/agents/delivery.agent.md` |
+| Bootstrap | Cross | Initialize | Yes (first session only) | `.gaai/core/agents/bootstrap.agent.md` |
 
 For the complete agent specification — skills, authority rules, activation conditions — read the agent file directly. The files are the source of truth.
 
@@ -18,7 +18,7 @@ For the complete agent specification — skills, authority rules, activation con
 
 ## Discovery Agent
 
-**File:** `.gaai/agents/discovery.agent.md`
+**File:** `.gaai/core/agents/discovery.agent.md`
 
 **Role:** Decide what should be built and why.
 
@@ -31,7 +31,7 @@ For the complete agent specification — skills, authority rules, activation con
 
 **Activated by:**
 - Claude Code: `/gaai-discover`
-- Other tools: "Read `.gaai/agents/discovery.agent.md`. I want to build [idea]."
+- Other tools: "Read `.gaai/core/agents/discovery.agent.md`. I want to build [idea]."
 
 **Output:** Artefacts (Epics, Stories, PRDs) + backlog items with `status: refined`
 
@@ -39,7 +39,7 @@ For the complete agent specification — skills, authority rules, activation con
 
 ## Delivery Agent (Orchestrator)
 
-**File:** `.gaai/agents/delivery.agent.md`
+**File:** `.gaai/core/agents/delivery.agent.md`
 
 **Role:** Orchestrate specialized sub-agents to turn validated Stories into working software. Does not implement, plan, or test directly.
 
@@ -47,7 +47,7 @@ For the complete agent specification — skills, authority rules, activation con
 
 **Activated by:**
 - Claude Code: `/gaai-deliver`
-- Other tools: "Read `.gaai/agents/delivery.agent.md` and `.gaai/workflows/delivery-loop.workflow.md`. Execute the next ready backlog item."
+- Other tools: "Read `.gaai/core/agents/delivery.agent.md` and `.gaai/core/workflows/delivery-loop.workflow.md`. Execute the next ready backlog item."
 
 **Sub-agents spawned:**
 
@@ -83,7 +83,7 @@ Tier 2/3: Planning → Implementation → QA
 
 ## Bootstrap Agent
 
-**File:** `.gaai/agents/bootstrap.agent.md`
+**File:** `.gaai/core/agents/bootstrap.agent.md`
 
 **Role:** Initialize GAAI on an existing codebase. Run once.
 
@@ -91,7 +91,7 @@ Tier 2/3: Planning → Implementation → QA
 
 **Activated by:**
 - Claude Code: `/gaai-bootstrap`
-- Other tools: "Read `.gaai/agents/bootstrap.agent.md`, then follow `.gaai/workflows/context-bootstrap.workflow.md`."
+- Other tools: "Read `.gaai/core/agents/bootstrap.agent.md`, then follow `.gaai/core/workflows/context-bootstrap.workflow.md`."
 
 **Output:** Populated `contexts/memory/` files, initial `contexts/rules/` structure
 
@@ -135,5 +135,5 @@ See [Sub-Agent Orchestration](../architecture/sub-agent-orchestration.md) for th
 
 ---
 
-→ [Skills Index](../../.gaai/skills/README.skills.md)
+→ [Skills Index](../../.gaai/core/skills/README.skills.md)
 → [Workflows Reference](workflows.md)

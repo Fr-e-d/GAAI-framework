@@ -42,9 +42,9 @@ Once you have GAAI in your project, adapt it:
 
 ### High-value customizations
 
-**`contexts/memory/memory/project/context.md`** — fill this in completely. This is the single most impactful thing you can do.
+**`contexts/memory/project/context.md`** — fill this in completely. This is the single most impactful thing you can do.
 
-**`contexts/memory/memory/patterns/conventions.md`** — add your team's coding conventions, naming rules, testing approach.
+**`contexts/memory/patterns/conventions.md`** — add your team's coding conventions, naming rules, testing approach.
 
 **`contexts/rules/orchestration.rules.md`** — tighten agent authority to match your risk tolerance.
 
@@ -58,7 +58,7 @@ Once you have GAAI in your project, adapt it:
 
 **Modify skills** — adapt skill content to match your project's conventions. The SKILL.md format stays the same; the content is yours.
 
-**Add skills** — GAAI ships 31 skills. Your project may need more. Follow the `SKILL.md` format (agentskills.io spec) and add to the appropriate category.
+**Add skills** — GAAI ships 37 skills. Your project may need more. Follow the `SKILL.md` format (agentskills.io spec) and add to the appropriate category.
 
 ---
 
@@ -77,7 +77,7 @@ Most value from GAAI is in the structure and conventions — not in constantly f
 
 ## What We Ask
 
-GAAI is ELv2 licensed. You can use, modify, and fork freely. The only restriction: you cannot offer GAAI as a competing hosted/managed service.
+GAAI is ELv2 licensed. You can do anything with your fork — the only restriction is you may not offer it as a competing hosted or managed service.
 
 If you find bugs or documentation errors in the upstream framework, please report them at [GitHub Issues](https://github.com/gaai-framework/gaai-framework/issues).
 

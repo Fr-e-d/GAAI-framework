@@ -2,7 +2,7 @@
 
 Bash utilities for automation, validation, and maintenance.
 
-**Location:** `.gaai/scripts/`
+**Location:** `.gaai/core/scripts/`
 
 All scripts are self-contained. They require bash 3.2+ and no external dependencies (except `backlog-scheduler.sh` which uses Python 3 for YAML parsing).
 
@@ -13,7 +13,7 @@ All scripts are self-contained. They require bash 3.2+ and no external dependenc
 **Purpose:** Validate `.gaai/` folder integrity. Use in CI or before any session.
 
 ```bash
-bash .gaai/scripts/health-check.sh
+bash .gaai/core/scripts/health-check.sh
 ```
 
 **Checks:**
@@ -31,7 +31,7 @@ bash .gaai/scripts/health-check.sh
 **Use in CI:**
 ```yaml
 - name: Validate GAAI structure
-  run: bash .gaai/scripts/health-check.sh
+  run: bash .gaai/core/scripts/health-check.sh
 ```
 
 ---
@@ -42,16 +42,16 @@ bash .gaai/scripts/health-check.sh
 
 ```bash
 # Select next ready item (default)
-bash .gaai/scripts/backlog-scheduler.sh .gaai/contexts/backlog/active.backlog.yaml
+bash .gaai/core/scripts/backlog-scheduler.sh .gaai/project/contexts/backlog/active.backlog.yaml
 
 # List all ready items sorted by priority
-bash .gaai/scripts/backlog-scheduler.sh --list .gaai/contexts/backlog/active.backlog.yaml
+bash .gaai/core/scripts/backlog-scheduler.sh --list .gaai/project/contexts/backlog/active.backlog.yaml
 
 # Show dependency graph for all active items
-bash .gaai/scripts/backlog-scheduler.sh --graph .gaai/contexts/backlog/active.backlog.yaml
+bash .gaai/core/scripts/backlog-scheduler.sh --graph .gaai/project/contexts/backlog/active.backlog.yaml
 
 # Detect priority conflicts (high-priority items blocked by low-priority dependencies)
-bash .gaai/scripts/backlog-scheduler.sh --conflicts .gaai/contexts/backlog/active.backlog.yaml
+bash .gaai/core/scripts/backlog-scheduler.sh --conflicts .gaai/project/contexts/backlog/active.backlog.yaml
 ```
 
 **Modes:**
@@ -79,7 +79,7 @@ bash .gaai/scripts/backlog-scheduler.sh --conflicts .gaai/contexts/backlog/activ
 **Purpose:** Print a formatted context summary at session start.
 
 ```bash
-bash .gaai/scripts/context-bootstrap.sh
+bash .gaai/core/scripts/context-bootstrap.sh
 ```
 
 **Output:**
@@ -97,7 +97,7 @@ Used by `/gaai-status` to generate the status report.
 **Purpose:** Validate that all backlog artefact references point to real files.
 
 ```bash
-bash .gaai/scripts/artefact-sync.sh
+bash .gaai/core/scripts/artefact-sync.sh
 ```
 
 **Checks:**
@@ -112,7 +112,7 @@ bash .gaai/scripts/artefact-sync.sh
 **Use in CI for traceability:**
 ```yaml
 - name: Validate artefact references
-  run: bash .gaai/scripts/artefact-sync.sh
+  run: bash .gaai/core/scripts/artefact-sync.sh
 ```
 
 ---
@@ -122,10 +122,10 @@ bash .gaai/scripts/artefact-sync.sh
 **Purpose:** Export current memory state to a timestamped archive.
 
 ```bash
-bash .gaai/scripts/memory-snapshot.sh
+bash .gaai/core/scripts/memory-snapshot.sh
 ```
 
-**Output:** Creates `.gaai/contexts/memory/snapshots/YYYY-MM-DD_{timestamp}/` with copies of all memory files.
+**Output:** Creates `.gaai/project/contexts/memory/snapshots/YYYY-MM-DD_{timestamp}/` with copies of all memory files.
 
 **When to use:**
 - Before risky architectural work

@@ -32,7 +32,7 @@
 ## Reference
 
 - [Agents](reference/agents.md)
-- [Skills Index](../.gaai/skills/README.skills.md)
+- [Skills Index](../.gaai/core/skills/README.skills.md)
 - [Contexts](reference/contexts.md)
 - [Workflows](reference/workflows.md)
 - [Scripts](reference/scripts.md)

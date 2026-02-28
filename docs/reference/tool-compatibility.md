@@ -15,7 +15,7 @@ GAAI works with any AI coding tool that can read files. This document covers set
 | Antigravity | ❌ | Via `AGENTS.md` | Manual | `AGENTS.md` |
 | Cursor | ❌ | Via `.mdc` always-active | Via `.mdc` reference | `.cursor/rules/*.mdc` |
 | Windsurf | ❌ | Via `AGENTS.md` | Manual | `AGENTS.md` |
-| Any other | ❌ | Manual | Manual | Read `.gaai/GAAI.md` directly |
+| Any other | ❌ | Manual | Manual | Read `.gaai/core/GAAI.md` directly |
 
 **Claude Code** has the deepest integration. All other tools provide full GAAI capability via manual activation — the framework works identically, the difference is convenience.
 
@@ -47,13 +47,13 @@ The deployed `CLAUDE.md` is a thin adapter that:
 - References `.gaai/` as the canonical source (not duplicating content)
 - Lists available slash commands
 
-To customize: edit `CLAUDE.md` in your project root. The framework source is at `.gaai/compat/claude-code.md`.
+To customize: edit `CLAUDE.md` in your project root. The framework source is at `.gaai/core/compat/claude-code.md`.
 
 ### Manual activation (without slash commands)
 
 ```
-"Read .gaai/agents/discovery.agent.md. I want to build [idea]."
-"Read .gaai/agents/delivery.agent.md and .gaai/workflows/delivery-loop.workflow.md. Execute the next ready backlog item."
+"Read .gaai/core/agents/discovery.agent.md. I want to build [idea]."
+"Read .gaai/core/agents/delivery.agent.md and .gaai/core/workflows/delivery-loop.workflow.md. Execute the next ready backlog item."
 ```
 
 ---
@@ -67,21 +67,21 @@ These tools use `AGENTS.md` for context loading. Setup is identical across all o
 After `bash install.sh` (select "Other" at the tool prompt):
 - `AGENTS.md` is deployed to your project root
 
-Or manually: copy `.gaai/compat/windsurf.md` to `AGENTS.md` in your project root.
+Or manually: copy `.gaai/core/compat/windsurf.md` to `AGENTS.md` in your project root.
 
 ### Activating agents
 
 **Discovery:**
-> "Read `.gaai/agents/discovery.agent.md`. I want to build [idea]."
+> "Read `.gaai/core/agents/discovery.agent.md`. I want to build [idea]."
 
 **Delivery:**
-> "Read `.gaai/agents/delivery.agent.md` and `.gaai/workflows/delivery-loop.workflow.md`. Execute the next ready backlog item."
+> "Read `.gaai/core/agents/delivery.agent.md` and `.gaai/core/workflows/delivery-loop.workflow.md`. Execute the next ready backlog item."
 
 **Bootstrap:**
-> "Read `.gaai/agents/bootstrap.agent.md`, then follow `.gaai/workflows/context-bootstrap.workflow.md`."
+> "Read `.gaai/core/agents/bootstrap.agent.md`, then follow `.gaai/core/workflows/context-bootstrap.workflow.md`."
 
 **Status:**
-> "Read `.gaai/contexts/backlog/active.backlog.yaml` and give me a summary."
+> "Read `.gaai/project/contexts/backlog/active.backlog.yaml` and give me a summary."
 
 All memory, rules, backlog, and artefact files are read directly from `.gaai/`. No additional setup required.
 
@@ -98,7 +98,7 @@ After `bash install.sh`:
 
 ### What the .mdc file does
 
-The `gaai.mdc` file (from `.gaai/compat/cursor.mdc`):
+The `gaai.mdc` file (from `.gaai/core/compat/cursor.mdc`):
 - Establishes agent identity at session start
 - Lists the 5 operating rules
 - References key `.gaai/` paths
@@ -107,13 +107,13 @@ The `gaai.mdc` file (from `.gaai/compat/cursor.mdc`):
 ### Activating agents in Cursor
 
 **Discovery:**
-> "Read `.gaai/agents/discovery.agent.md`. I want to build [idea]."
+> "Read `.gaai/core/agents/discovery.agent.md`. I want to build [idea]."
 
 **Delivery:**
-> "Read `.gaai/agents/delivery.agent.md` and `.gaai/workflows/delivery-loop.workflow.md`. Execute the next ready backlog item."
+> "Read `.gaai/core/agents/delivery.agent.md` and `.gaai/core/workflows/delivery-loop.workflow.md`. Execute the next ready backlog item."
 
 **Bootstrap:**
-> "Read `.gaai/agents/bootstrap.agent.md`, then follow `.gaai/workflows/context-bootstrap.workflow.md`."
+> "Read `.gaai/core/agents/bootstrap.agent.md`, then follow `.gaai/core/workflows/context-bootstrap.workflow.md`."
 
 ### Customizing rules in Cursor
 
@@ -132,7 +132,7 @@ After `bash install.sh`:
 
 ### What AGENTS.md does
 
-The `AGENTS.md` file (from `.gaai/compat/windsurf.md`):
+The `AGENTS.md` file (from `.gaai/core/compat/windsurf.md`):
 - Establishes agent roles
 - Lists the 5 operating rules
 - Provides key paths and manual invocation templates
@@ -147,7 +147,7 @@ Same manual prompt format as Cursor above.
 
 For any tool that supports reading project files:
 
-1. Copy the relevant content from `.gaai/compat/claude-code.md` or `.gaai/compat/windsurf.md` as a system prompt or instructions file for your tool
+1. Copy the relevant content from `.gaai/core/compat/claude-code.md` or `.gaai/core/compat/windsurf.md` as a system prompt or instructions file for your tool
 2. Use manual prompts to activate agents
 
 The framework functions correctly regardless of how it's activated — the files are the system. The compat adapters only make activation more convenient.

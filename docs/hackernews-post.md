@@ -16,7 +16,7 @@ A single `.gaai/` folder you drop into any project.
 your-project/
 └── .gaai/
     ├── agents/      ← Discovery + Delivery + Bootstrap
-    ├── skills/      ← 31 pure execution units
+    ├── skills/      ← 37 pure execution units
     ├── contexts/    ← rules, memory, backlog, artefacts
     ├── workflows/   ← delivery loop, bootstrap, handoffs
     ├── scripts/     ← bash utilities
@@ -152,10 +152,10 @@ cp -r GAAI-framework/.gaai/ your-project/
 ```
 
 **Existing codebase** — run Bootstrap:
-> "Read `.gaai/agents/bootstrap.agent.md` and follow `.gaai/workflows/context-bootstrap.workflow.md`."
+> "Read `.gaai/core/agents/bootstrap.agent.md` and follow `.gaai/core/workflows/context-bootstrap.workflow.md`."
 
 **New project** — go straight to Discovery:
-> "Read `.gaai/agents/discovery.agent.md`. I'm starting a new project: [your idea]. Help me define the first Stories."
+> "Read `.gaai/core/agents/discovery.agent.md`. I'm starting a new project: [your idea]. Help me define the first Stories."
 
 First working Story in under 30 minutes.
 

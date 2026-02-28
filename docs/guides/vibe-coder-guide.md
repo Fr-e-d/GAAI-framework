@@ -29,7 +29,7 @@ This shows you:
 For a quick look at what's ready to work on right now:
 
 ```bash
-.gaai/scripts/backlog-scheduler.sh --list .gaai/contexts/backlog/active.backlog.yaml
+.gaai/core/scripts/backlog-scheduler.sh --list .gaai/project/contexts/backlog/active.backlog.yaml
 ```
 
 Example:
@@ -52,7 +52,7 @@ Activate Discovery:
 
 **Claude Code:** `/gaai-discover`
 
-**Other tools:** "Read `.gaai/agents/discovery.agent.md`. I want to build [your idea]."
+**Other tools:** "Read `.gaai/core/agents/discovery.agent.md`. I want to build [your idea]."
 
 Then just describe what you want. Be as rough as you like:
 
@@ -72,7 +72,7 @@ Activate Delivery:
 
 **Claude Code:** `/gaai-deliver`
 
-**Other tools:** "Read `.gaai/agents/delivery.agent.md`. Execute the next ready backlog item."
+**Other tools:** "Read `.gaai/core/agents/delivery.agent.md`. Execute the next ready backlog item."
 
 Then go do something else. The Delivery Agent runs the full loop:
 - Plans
@@ -116,7 +116,7 @@ GAAI remembers what matters. But it only knows what you tell it.
 
 After a significant session, capture what was decided:
 
-**Claude Code:** tell your AI: "Extract decisions from this session and update `.gaai/contexts/memory/decisions/_log.md`."
+**Claude Code:** tell your AI: "Extract decisions from this session and update `.gaai/project/contexts/memory/decisions/_log.md`."
 
 Or just let the Discovery and Delivery Agents do it automatically — they invoke `decision-extraction` when something notable is decided.
 

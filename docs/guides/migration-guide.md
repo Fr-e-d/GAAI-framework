@@ -13,7 +13,7 @@ This is the most common starting point. You've been prompting your AI directly �
 | Before | After |
 |---|---|
 | "Write me a login page" | Discovery turns intent into Stories first |
-| Context in the chat window | Memory in `.gaai/contexts/memory/` |
+| Context in the chat window | Memory in `.gaai/project/contexts/memory/` |
 | AI decides what to build | Backlog authorizes what gets built |
 | Prompt → code directly | Prompt → Discovery → Backlog → Delivery |
 | Decisions lost between sessions | Decisions in `memory/decisions/_log.md` |
@@ -31,9 +31,9 @@ bash install.sh
 The Bootstrap Agent reads your existing codebase and builds initial memory. This is the hardest manual step with ad-hoc prompting — there may be no existing structure to extract from.
 
 If Bootstrap finds little to extract, fill in these files manually:
-- `contexts/memory/memory/project/context.md` — what the project is, who it's for
-- `contexts/memory/memory/patterns/conventions.md` — how code is written in this project (naming, testing, structure)
-- `contexts/memory/memory/decisions/_log.md` — major decisions already made
+- `contexts/memory/project/context.md` — what the project is, who it's for
+- `contexts/memory/patterns/conventions.md` — how code is written in this project (naming, testing, structure)
+- `contexts/memory/decisions/_log.md` — major decisions already made
 
 **Step 3 — Formalize your backlog**
 
@@ -53,7 +53,7 @@ If you've been managing AI behavior through `.cursorrules`, `.cursor/rules/`, cu
 
 ### What changes
 
-Your rules become explicit files in `.gaai/contexts/rules/`. The advantage: they're versioned, reviewable, and structured with clear loading priority.
+Your rules become explicit files in `.gaai/core/contexts/rules/`. The advantage: they're versioned, reviewable, and structured with clear loading priority.
 
 ### How to migrate
 
@@ -62,8 +62,8 @@ Your rules become explicit files in `.gaai/contexts/rules/`. The advantage: they
 **Step 2 — Extract your rules**
 
 Your existing rules file may be a mix of:
-- Project context (→ goes to `contexts/memory/memory/project/context.md`)
-- Coding conventions (→ goes to `contexts/memory/memory/patterns/conventions.md`)
+- Project context (→ goes to `contexts/memory/project/context.md`)
+- Coding conventions (→ goes to `contexts/memory/patterns/conventions.md`)
 - Governance rules (→ goes to a custom `contexts/rules/project.rules.md`)
 - Tool instructions (→ stays in the compat layer)
 
@@ -71,9 +71,9 @@ Have your AI help: "Read my existing rules file and categorize each rule by whet
 
 **Step 3 — Deploy the compat adapter**
 
-Copy the right adapter from `.gaai/compat/` to replace your old config:
-- Cursor: `.gaai/compat/cursor.mdc` → `.cursor/rules/gaai.mdc`
-- Claude Code: `.gaai/compat/claude-code.md` → `CLAUDE.md`
+Copy the right adapter from `.gaai/core/compat/` to replace your old config:
+- Cursor: `.gaai/core/compat/cursor.mdc` → `.cursor/rules/gaai.mdc`
+- Claude Code: `.gaai/core/compat/claude-code.md` → `CLAUDE.md`
 
 **Step 4 — Bootstrap and verify**
 

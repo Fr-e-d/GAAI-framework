@@ -8,7 +8,7 @@ This guide covers: rules customization, memory architecture, CI integration, and
 
 ## What You Control
 
-GAAI's behavior is entirely driven by files in `.gaai/contexts/rules/`. Every constraint, every allowed action, every escalation condition — all in text. You read and modify them directly.
+GAAI's behavior is entirely driven by files in `.gaai/core/contexts/rules/`. Every constraint, every allowed action, every escalation condition — all in text. You read and modify them directly.
 
 The framework enforces what you write. Nothing more.
 
@@ -17,7 +17,7 @@ The framework enforces what you write. Nothing more.
 ## Rules Architecture
 
 ```
-.gaai/contexts/rules/
+.gaai/core/contexts/rules/
 ├── README.rules.md           ← loading priority and index
 ├── orchestration.rules.md    ← agent authority and forbidden patterns
 ├── skills.rules.md           ← skill activation rules
@@ -37,7 +37,7 @@ The framework enforces what you write. Nothing more.
 
 ### 1. Add project-specific conventions
 
-Edit `contexts/memory/memory/patterns/conventions.md`. This is where you capture conventions that should influence agent behavior:
+Edit `contexts/memory/patterns/conventions.md`. This is where you capture conventions that should influence agent behavior:
 
 ```markdown
 ## Code Style
@@ -62,7 +62,7 @@ The Delivery Agent loads `memory/patterns/conventions.md` when it builds executi
 If your project has domain constraints (regulatory, security, architecture), add a custom rules file:
 
 ```
-.gaai/contexts/rules/your-domain.rules.md
+.gaai/core/contexts/rules/your-domain.rules.md
 ```
 
 Reference it in `README.rules.md` so agents know to load it.
@@ -109,7 +109,7 @@ The Delivery Agent must refuse to proceed without a validated Story artefact for
 GAAI uses three memory files by default. You can extend this.
 
 ```
-.gaai/contexts/memory/
+.gaai/project/contexts/memory/
 ├── memory/project/context.md     ← always loaded (project fundamentals)
 ├── memory/decisions/_log.md   ← append-only decision log
 ├── memory/patterns/conventions.md    ← conventions and preferences
@@ -156,7 +156,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate .gaai/ integrity
-        run: bash .gaai/scripts/health-check.sh
+        run: bash .gaai/core/scripts/health-check.sh
 ```
 
 The health check validates:
@@ -173,7 +173,7 @@ Exit 0 = pass. Exit 1 = fail with report.
 ```bash
 # .git/hooks/pre-commit
 #!/bin/bash
-bash .gaai/scripts/health-check.sh
+bash .gaai/core/scripts/health-check.sh
 ```
 
 Blocks commits that break framework integrity.
@@ -210,7 +210,7 @@ The `backlog-scheduler.sh` script provides governance-focused views of the backl
 
 ```bash
 # Priority conflicts: high-priority items blocked by lower-priority dependencies
-.gaai/scripts/backlog-scheduler.sh --conflicts active.backlog.yaml
+.gaai/core/scripts/backlog-scheduler.sh --conflicts active.backlog.yaml
 ```
 
 Example output:
@@ -229,7 +229,7 @@ Run `--conflicts` during sprint planning or priority reviews to catch misalignme
 
 ```bash
 # Full dependency graph — which items are blocked and by what
-.gaai/scripts/backlog-scheduler.sh --graph active.backlog.yaml
+.gaai/core/scripts/backlog-scheduler.sh --graph active.backlog.yaml
 ```
 
 Add `--conflicts` to CI alongside `health-check.sh` if your team wants automated priority governance:
@@ -237,9 +237,9 @@ Add `--conflicts` to CI alongside `health-check.sh` if your team wants automated
 ```yaml
 # .github/workflows/validate-structure.yml
 - run: |
-    bash .gaai/scripts/health-check.sh
-    bash .gaai/scripts/backlog-scheduler.sh --conflicts \
-      .gaai/contexts/backlog/active.backlog.yaml || true
+    bash .gaai/core/scripts/health-check.sh
+    bash .gaai/core/scripts/backlog-scheduler.sh --conflicts \
+      .gaai/project/contexts/backlog/active.backlog.yaml || true
 ```
 
 ### Artefact traceability
@@ -247,7 +247,7 @@ Add `--conflicts` to CI alongside `health-check.sh` if your team wants automated
 Run `artefact-sync.sh` to validate that every backlog item with an artefact reference points to a real file:
 
 ```bash
-bash .gaai/scripts/artefact-sync.sh
+bash .gaai/core/scripts/artefact-sync.sh
 ```
 
 Use this in CI if traceability is required.
@@ -268,7 +268,7 @@ Memory grows. Keep it useful.
 **Snapshot before risky work:**
 
 ```bash
-bash .gaai/scripts/memory-snapshot.sh
+bash .gaai/core/scripts/memory-snapshot.sh
 ```
 
 Creates a timestamped archive of the current memory state. Roll back to it if needed.
