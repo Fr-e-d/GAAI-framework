@@ -37,7 +37,7 @@ The framework enforces what you write. Nothing more.
 
 ### 1. Add project-specific conventions
 
-Edit `contexts/memory/memory/patterns/conventions.md`. This is where you capture conventions that should influence agent behavior:
+Edit `contexts/memory/patterns/conventions.md`. This is where you capture conventions that should influence agent behavior:
 
 ```markdown
 ## Code Style

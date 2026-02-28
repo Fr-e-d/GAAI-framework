@@ -69,7 +69,7 @@ Why GAAI is structured the way it is. Each decision is an Architecture Decision 
 - A community skill marketplace creates governance risk: untrusted skills get ingested into production workflows
 - User projects have wildly different conventions and domains — shared skills would be too generic to be useful
 - Fork & Own means the framework serves the project, not the community
-- MIT license: users can do anything with their fork
+- ELv2 license: users can do anything with their fork except offer it as a competing hosted service
 
 **Trade-off accepted:** No ecosystem effect. No skill sharing between projects. This is acceptable for v1.0.
 

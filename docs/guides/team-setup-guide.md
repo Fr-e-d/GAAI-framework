@@ -13,16 +13,17 @@ GAAI's memory and backlog are files in your repo. This is intentional — it mak
 ## What Goes in Git
 
 **Always commit:**
-- `.gaai/core/contexts/rules/` — all rule files
-- `.gaai/project/contexts/memory/memory/project/context.md` — project fundamentals
-- `.gaai/project/contexts/memory/memory/patterns/conventions.md` — conventions
-- `.gaai/project/contexts/backlog/active.backlog.yaml` — current backlog
-- `.gaai/project/contexts/backlog/done/` — completed work archive
-- `.gaai/project/contexts/artefacts/` — all artefact files
-- `.gaai/core/agents/`, `.gaai/core/skills/`, `.gaai/core/workflows/` — framework files
+- `.gaai/project/` — all project-specific data:
+  - `contexts/rules/` — project rule overrides
+  - `contexts/memory/project/context.md` — project fundamentals
+  - `contexts/memory/patterns/conventions.md` — conventions
+  - `contexts/backlog/active.backlog.yaml` — current backlog
+  - `contexts/backlog/done/` — completed work archive
+  - `contexts/artefacts/` — all artefact files
+- `.gaai/core/` — framework files (managed via git subtree sync)
 
 **Consider carefully:**
-- `.gaai/project/contexts/memory/memory/decisions/_log.md` — accumulates quickly; commit on milestones, not every session
+- `.gaai/project/contexts/memory/decisions/_log.md` — accumulates quickly; commit on milestones, not every session
 
 **Do not commit:**
 - Session notes or draft artefacts that haven't passed validation
@@ -144,8 +145,8 @@ When a new engineer joins:
 1. Clone the repo (they get `.gaai/` automatically)
 2. Run: `bash .gaai/core/scripts/health-check.sh` — verifies framework integrity
 3. Read: `.gaai/core/GAAI.md` — 5 minutes
-4. Read: `.gaai/project/contexts/memory/memory/project/context.md` — project context
-5. Read: `.gaai/project/contexts/memory/memory/patterns/conventions.md` — team conventions
+4. Read: `.gaai/project/contexts/memory/project/context.md` — project context
+5. Read: `.gaai/project/contexts/memory/patterns/conventions.md` — team conventions
 6. First task: pick a `refined` Story from the backlog, run Delivery
 
 The memory files are the onboarding documentation. Keep them accurate.

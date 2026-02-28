@@ -163,7 +163,7 @@ Full docs: [github.com/Fr-e-d/GAAI-framework](https://github.com/Fr-e-d/GAAI-fra
 
 ---
 
-*MIT licensed. Markdown + YAML + bash. No SDK.*
+*ELv2 licensed. Markdown + YAML + bash. No SDK.*
 
 ---
 

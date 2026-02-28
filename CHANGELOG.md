@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] - 2026-02-28
+
+### Changed
+- Restructured `.gaai/` into `core/` (framework) + `project/` (user data via scaffolding)
+- License changed from MIT to ELv2 (Elastic License 2.0)
+- Install.sh updated for core/project split with scaffolding system
+- Added git subtree support for syncing framework updates into consumer projects
+- 37 skills across Discovery (6), Delivery (9), and Cross (22) categories
+- Added AGENTS.md adapters for OpenCode, Codex CLI, Gemini CLI, Antigravity
+
+---
+
 ## [1.0.0] - 2026-02-18
 
 ### Added

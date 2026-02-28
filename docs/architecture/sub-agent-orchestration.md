@@ -120,7 +120,7 @@ Specialists are not spawned by the Planning sub-agent or the QA sub-agent — on
 Specialists are declared in a file-based registry. The registry is part of the GAAI framework — not dynamic configuration, not code.
 
 ```yaml
-# .gaai/contexts/specialists.registry.yaml
+# .gaai/core/contexts/specialists.registry.yaml
 - id: db-migration
   triggers: [schema change, migration, ALTER TABLE, database]
   skills: [implement]

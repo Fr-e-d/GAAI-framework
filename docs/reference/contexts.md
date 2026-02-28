@@ -1,18 +1,24 @@
 # Contexts Reference
 
-The `.gaai/contexts/` directory contains everything that constrains and informs agent behavior: rules, memory, backlog, and artefacts.
+Contexts contain everything that constrains and informs agent behavior: rules, memory, backlog, and artefacts. In v2.0.0, contexts are split across two locations:
+
+- `.gaai/core/contexts/` — framework-level rules and specialist registry
+- `.gaai/project/contexts/` — project-specific rules, memory, backlog, artefacts
 
 ---
 
 ## Structure
 
 ```
-.gaai/contexts/
-├── rules/                 ← what agents may and may not do
+.gaai/core/contexts/
+├── rules/                 ← framework rule files (8 files)
+└── specialists.registry.yaml  ← domain specialists for Tier 3 delivery
+
+.gaai/project/contexts/
+├── rules/                 ← project-specific rule overrides
 ├── memory/                ← durable project knowledge
 ├── backlog/               ← execution authorization queue
-├── artefacts/             ← evidence and traceability
-└── specialists.registry.yaml  ← domain specialists for Tier 3 delivery
+└── artefacts/             ← evidence and traceability
 ```
 
 Each subdirectory has a `README.{type}.md` that is the source of truth for that area. Read those files — not this one — for authoritative structure, formats, and governance rules.
@@ -89,7 +95,7 @@ Templates for each artefact type are in `contexts/artefacts/_template.*.md`.
 
 ## Specialists Registry
 
-**Location:** `.gaai/contexts/specialists.registry.yaml`
+**Location:** `.gaai/core/contexts/specialists.registry.yaml`
 
 Defines domain-specific sub-agents available for Tier 3 delivery. The Implementation Sub-Agent reads this file, matches trigger keywords from the execution plan, and spawns matching specialists.
 

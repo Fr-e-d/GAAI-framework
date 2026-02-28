@@ -66,7 +66,7 @@ When it's done, you'll see: `✅ Bootstrap PASS — context ready.`
 
 No existing codebase to scan. Go straight to Discovery.
 
-Fill in `.gaai/project/contexts/memory/memory/project/context.md` with your project's basic context.
+Fill in `.gaai/project/contexts/memory/project/context.md` with your project's basic context.
 
 Then activate Discovery:
 
@@ -109,7 +109,7 @@ At any time:
 ## What's Next
 
 - Add more Stories through Discovery
-- Customize rules in `.gaai/core/contexts/rules/`
+- Customize rules in `.gaai/project/contexts/rules/`
 - Review the skills catalog: `.gaai/core/skills/README.skills.md`
 - Read [Core Concepts](02-core-concepts.md) for deeper understanding
 

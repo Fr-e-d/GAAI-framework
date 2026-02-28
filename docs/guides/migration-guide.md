@@ -31,9 +31,9 @@ bash install.sh
 The Bootstrap Agent reads your existing codebase and builds initial memory. This is the hardest manual step with ad-hoc prompting — there may be no existing structure to extract from.
 
 If Bootstrap finds little to extract, fill in these files manually:
-- `contexts/memory/memory/project/context.md` — what the project is, who it's for
-- `contexts/memory/memory/patterns/conventions.md` — how code is written in this project (naming, testing, structure)
-- `contexts/memory/memory/decisions/_log.md` — major decisions already made
+- `contexts/memory/project/context.md` — what the project is, who it's for
+- `contexts/memory/patterns/conventions.md` — how code is written in this project (naming, testing, structure)
+- `contexts/memory/decisions/_log.md` — major decisions already made
 
 **Step 3 — Formalize your backlog**
 
@@ -62,8 +62,8 @@ Your rules become explicit files in `.gaai/core/contexts/rules/`. The advantage:
 **Step 2 — Extract your rules**
 
 Your existing rules file may be a mix of:
-- Project context (→ goes to `contexts/memory/memory/project/context.md`)
-- Coding conventions (→ goes to `contexts/memory/memory/patterns/conventions.md`)
+- Project context (→ goes to `contexts/memory/project/context.md`)
+- Coding conventions (→ goes to `contexts/memory/patterns/conventions.md`)
 - Governance rules (→ goes to a custom `contexts/rules/project.rules.md`)
 - Tool instructions (→ stays in the compat layer)
 
