@@ -33,7 +33,7 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 
 ## Process
 
-1. Read the Story template at `contexts/artefacts/_template.story.md`. Read the parent Epic file. Derive story IDs using the parent Epic ID prefix (e.g., Epic E01 produces stories E01S01, E01S02, etc.).
+1. Read the Story template at `contexts/artefacts/stories/_template.story.md`. Read the parent Epic file. Derive story IDs using the parent Epic ID prefix (e.g., Epic E01 produces stories E01S01, E01S02, etc.).
 2. Write from the user's perspective
 3. Focus on behavior, not UI or technology
 4. Keep stories small and independent
@@ -46,7 +46,7 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 
 ## Outputs
 
-Template: `contexts/artefacts/_template.story.md`
+Template: `contexts/artefacts/stories/_template.story.md`
 
 Produces files at `contexts/artefacts/stories/{id}.story.md`:
 
