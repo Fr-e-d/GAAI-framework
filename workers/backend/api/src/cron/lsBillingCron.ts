@@ -26,14 +26,18 @@ async function autoConfirmLeads(env: Env): Promise<void> {
   const windowMs = parseInt(env.FLAG_WINDOW_MS ?? String(7 * 24 * 60 * 60 * 1000));
   const cutoff = new Date(Date.now() - windowMs).toISOString();
 
-  const confirmed = await sql<{ id: string }[]>`
-    UPDATE leads
-    SET status = 'confirmed', confirmed_at = now()
-    WHERE status = 'pending' AND created_at < ${cutoff}
-    RETURNING id`;
+  try {
+    const confirmed = await sql<{ id: string }[]>`
+      UPDATE leads
+      SET status = 'confirmed', confirmed_at = now()
+      WHERE status = 'pending' AND created_at < ${cutoff}
+      RETURNING id`;
 
-  if (confirmed.length > 0) {
-    console.log(`autoConfirmLeads: confirmed ${confirmed.length} leads`, confirmed.map(r => r.id));
+    if (confirmed.length > 0) {
+      console.log(`autoConfirmLeads: confirmed ${confirmed.length} leads`, confirmed.map(r => r.id));
+    }
+  } finally {
+    await sql.end();
   }
 }
 
@@ -42,33 +46,37 @@ async function autoConfirmLeads(env: Env): Promise<void> {
 async function reportUsage(env: Env): Promise<void> {
   const sql = createSql(env);
 
-  // Find leads with status='confirmed' AND usage_reported_at IS NULL
-  // Join with experts to get ls_subscription_item_id
-  const leads = await sql<LeadForUsage[]>`
-    SELECT
-      l.id,
-      l.amount,
-      l.expert_id,
-      e.ls_subscription_item_id
-    FROM leads l
-    JOIN experts e ON e.id = l.expert_id
-    WHERE l.status = 'confirmed'
-      AND l.usage_reported_at IS NULL
-      AND e.ls_subscription_item_id IS NOT NULL`;
+  try {
+    // Find leads with status='confirmed' AND usage_reported_at IS NULL
+    // Join with experts to get ls_subscription_item_id
+    const leads = await sql<LeadForUsage[]>`
+      SELECT
+        l.id,
+        l.amount,
+        l.expert_id,
+        e.ls_subscription_item_id
+      FROM leads l
+      JOIN experts e ON e.id = l.expert_id
+      WHERE l.status = 'confirmed'
+        AND l.usage_reported_at IS NULL
+        AND e.ls_subscription_item_id IS NOT NULL`;
 
-  for (const lead of leads) {
-    try {
-      await reportLeadUsage(lead, env);
-      // AC7: On success — UPDATE lead SET status='usage_reported', usage_reported_at=now()
-      await sql`
-        UPDATE leads
-        SET status = 'usage_reported', usage_reported_at = now()
-        WHERE id = ${lead.id}`;
-      console.log('reportUsage: reported usage for lead', lead.id);
-    } catch (err) {
-      // AC8: On failure — leave status='confirmed', log error. Retry on next cron run.
-      console.error('reportUsage: failed to report usage for lead', lead.id, err);
+    for (const lead of leads) {
+      try {
+        await reportLeadUsage(lead, env);
+        // AC7: On success — UPDATE lead SET status='usage_reported', usage_reported_at=now()
+        await sql`
+          UPDATE leads
+          SET status = 'usage_reported', usage_reported_at = now()
+          WHERE id = ${lead.id}`;
+        console.log('reportUsage: reported usage for lead', lead.id);
+      } catch (err) {
+        // AC8: On failure — leave status='confirmed', log error. Retry on next cron run.
+        console.error('reportUsage: failed to report usage for lead', lead.id, err);
+      }
     }
+  } finally {
+    await sql.end();
   }
 }
 

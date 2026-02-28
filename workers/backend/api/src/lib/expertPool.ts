@@ -47,43 +47,47 @@ export async function loadExpertPool(env: Env): Promise<ExpertPoolEntry[]> {
 async function loadFromHyperdrive(env: Env): Promise<ExpertPoolEntry[]> {
   const sql = createSql(env);
 
-  const expertRows = await sql<
-    Pick<ExpertRow, 'id' | 'profile' | 'preferences' | 'rate_min' | 'rate_max' | 'composite_score'>[]
-  >`SELECT id, profile, preferences, rate_min, rate_max, composite_score
-    FROM experts WHERE availability != 'unavailable'`;
+  try {
+    const expertRows = await sql<
+      Pick<ExpertRow, 'id' | 'profile' | 'preferences' | 'rate_min' | 'rate_max' | 'composite_score'>[]
+    >`SELECT id, profile, preferences, rate_min, rate_max, composite_score
+      FROM experts WHERE availability != 'unavailable'`;
 
-  if (expertRows.length === 0) return [];
+    if (expertRows.length === 0) return [];
 
-  const expertIds = expertRows.map((e) => e.id);
-  const leadRows = await sql<{ expert_id: string }[]>`
-    SELECT expert_id FROM leads WHERE expert_id = ANY(${expertIds})`;
+    const expertIds = expertRows.map((e) => e.id);
+    const leadRows = await sql<{ expert_id: string }[]>`
+      SELECT expert_id FROM leads WHERE expert_id = ANY(${expertIds})`;
 
-  const leadCountMap = new Map<string, number>();
-  for (const row of leadRows) {
-    if (row.expert_id) {
-      leadCountMap.set(row.expert_id, (leadCountMap.get(row.expert_id) ?? 0) + 1);
+    const leadCountMap = new Map<string, number>();
+    for (const row of leadRows) {
+      if (row.expert_id) {
+        leadCountMap.set(row.expert_id, (leadCountMap.get(row.expert_id) ?? 0) + 1);
+      }
     }
-  }
 
-  const pool: ExpertPoolEntry[] = expertRows.map((e) => ({
-    id: e.id,
-    profile: e.profile,
-    preferences: e.preferences,
-    rate_min: e.rate_min,
-    rate_max: e.rate_max,
-    composite_score: e.composite_score,
-    total_leads: leadCountMap.get(e.id) ?? 0,
-  }));
+    const pool: ExpertPoolEntry[] = expertRows.map((e) => ({
+      id: e.id,
+      profile: e.profile,
+      preferences: e.preferences,
+      rate_min: e.rate_min,
+      rate_max: e.rate_max,
+      composite_score: e.composite_score,
+      total_leads: leadCountMap.get(e.id) ?? 0,
+    }));
 
-  // AC11: write-back to Cache API and D1 on both-miss path
-  await writeCachePool(pool);
-  if (env.EXPERT_DB) {
-    try {
-      await upsertToD1(env.EXPERT_DB, pool);
-    } catch {
-      // D1 write failure is non-blocking
+    // AC11: write-back to Cache API and D1 on both-miss path
+    await writeCachePool(pool);
+    if (env.EXPERT_DB) {
+      try {
+        await upsertToD1(env.EXPERT_DB, pool);
+      } catch {
+        // D1 write failure is non-blocking
+      }
     }
-  }
 
-  return pool;
+    return pool;
+  } finally {
+    await sql.end();
+  }
 }

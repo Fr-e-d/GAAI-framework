@@ -449,54 +449,58 @@ export async function handleProspectMatches(
 
   const sql = createSql(env);
 
-  // AC5: load all matches for prospect, ordered by score DESC
-  const matches = await sql<Pick<MatchRow, 'id' | 'expert_id' | 'score' | 'score_breakdown'>[]>`
-    SELECT id, expert_id, score, score_breakdown FROM matches
-    WHERE prospect_id = ${prospectId} AND status != 'expired'
-    ORDER BY score DESC`;
+  try {
+    // AC5: load all matches for prospect, ordered by score DESC
+    const matches = await sql<Pick<MatchRow, 'id' | 'expert_id' | 'score' | 'score_breakdown'>[]>`
+      SELECT id, expert_id, score, score_breakdown FROM matches
+      WHERE prospect_id = ${prospectId} AND status != 'expired'
+      ORDER BY score DESC`;
 
-  // Matching is synchronous (E06S24) — token is only issued after matching completes.
-  // 0 matches means no experts are available, not "still computing".
-  if (!matches || matches.length === 0) {
-    return jsonResponse({ matches: [] });
+    // Matching is synchronous (E06S24) — token is only issued after matching completes.
+    // 0 matches means no experts are available, not "still computing".
+    if (!matches || matches.length === 0) {
+      return jsonResponse({ matches: [] });
+    }
+
+    // Load expert profiles for anonymized fields
+    const expertIds = matches.map((m) => m.expert_id).filter((id): id is string => Boolean(id));
+    const experts = await sql<Pick<ExpertRow, 'id' | 'composite_score' | 'profile' | 'rate_min' | 'rate_max'>[]>`
+      SELECT id, composite_score, profile, rate_min, rate_max FROM experts WHERE id = ANY(${expertIds})`;
+
+    const expertMap = new Map(experts.map((e) => [e.id, e]));
+
+    // AC5: anonymized expert cards — no display_name, avatar_url, cal_username
+    const anonymizedMatches = matches.map((match, idx) => {
+      const expert = expertMap.get(match.expert_id ?? '');
+      const profile = (expert?.profile ?? {}) as ExpertProfile;
+      const breakdown = (match.score_breakdown ?? {}) as unknown as ScoreBreakdown;
+
+      return {
+        rank: idx + 1,
+        score: match.score ?? 0,
+        score_breakdown: breakdown,
+        skills: profile.skills ?? [],
+        industries: profile.industries ?? [],
+        project_types: profile.project_types ?? [],
+        languages: profile.languages ?? [],
+        rate_min: expert?.rate_min ?? null,
+        rate_max: expert?.rate_max ?? null,
+      };
+    });
+
+    ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+      distinctId: `prospect:${prospectId}`,
+      event: 'prospect.matches_viewed',
+      properties: {
+        match_count: anonymizedMatches.length,
+        top_score: anonymizedMatches[0]?.score ?? 0,
+      },
+    }));
+
+    return jsonResponse({ matches: anonymizedMatches });
+  } finally {
+    ctx.waitUntil(sql.end());
   }
-
-  // Load expert profiles for anonymized fields
-  const expertIds = matches.map((m) => m.expert_id).filter((id): id is string => Boolean(id));
-  const experts = await sql<Pick<ExpertRow, 'id' | 'composite_score' | 'profile' | 'rate_min' | 'rate_max'>[]>`
-    SELECT id, composite_score, profile, rate_min, rate_max FROM experts WHERE id = ANY(${expertIds})`;
-
-  const expertMap = new Map(experts.map((e) => [e.id, e]));
-
-  // AC5: anonymized expert cards — no display_name, avatar_url, cal_username
-  const anonymizedMatches = matches.map((match, idx) => {
-    const expert = expertMap.get(match.expert_id ?? '');
-    const profile = (expert?.profile ?? {}) as ExpertProfile;
-    const breakdown = (match.score_breakdown ?? {}) as unknown as ScoreBreakdown;
-
-    return {
-      rank: idx + 1,
-      score: match.score ?? 0,
-      score_breakdown: breakdown,
-      skills: profile.skills ?? [],
-      industries: profile.industries ?? [],
-      project_types: profile.project_types ?? [],
-      languages: profile.languages ?? [],
-      rate_min: expert?.rate_min ?? null,
-      rate_max: expert?.rate_max ?? null,
-    };
-  });
-
-  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
-    distinctId: `prospect:${prospectId}`,
-    event: 'prospect.matches_viewed',
-    properties: {
-      match_count: anonymizedMatches.length,
-      top_score: anonymizedMatches[0]?.score ?? 0,
-    },
-  }));
-
-  return jsonResponse({ matches: anonymizedMatches });
 }
 
 // ── POST /api/prospects/:id/identify ──────────────────────────────────────────
@@ -539,70 +543,74 @@ export async function handleProspectIdentify(
 
   const sql = createSql(env);
 
-  // AC8: check if prospect already identified
-  const [prospect] = await sql<Pick<ProspectRow, 'id' | 'email'>[]>`
-    SELECT id, email FROM prospects WHERE id = ${prospectId}`;
+  try {
+    // AC8: check if prospect already identified
+    const [prospect] = await sql<Pick<ProspectRow, 'id' | 'email'>[]>`
+      SELECT id, email FROM prospects WHERE id = ${prospectId}`;
 
-  if (!prospect) return errorResponse('Prospect not found', 404);
+    if (!prospect) return errorResponse('Prospect not found', 404);
 
-  if (prospect.email !== null) {
-    return errorResponse('Prospect already identified', 409);
+    if (prospect.email !== null) {
+      return errorResponse('Prospect already identified', 409);
+    }
+
+    // AC7: update prospect with email + status
+    await sql`UPDATE prospects SET email = ${email}, status = 'identified' WHERE id = ${prospectId}`;
+
+    // Load matches to get expert_ids, sorted by score DESC
+    const matches = await sql<Pick<MatchRow, 'expert_id' | 'score'>[]>`
+      SELECT expert_id, score FROM matches
+      WHERE prospect_id = ${prospectId} AND status != 'expired'
+      ORDER BY score DESC`;
+
+    const expertIds = matches
+      .map((m) => m.expert_id)
+      .filter((id): id is string => Boolean(id));
+
+    if (expertIds.length === 0) {
+      return jsonResponse({ experts: [] });
+    }
+
+    // AC7: load full expert profiles
+    const expertRows = await sql<Pick<ExpertRow, 'id' | 'display_name' | 'headline' | 'bio' | 'profile' | 'rate_min' | 'rate_max' | 'cal_username'>[]>`
+      SELECT id, display_name, headline, bio, profile, rate_min, rate_max, cal_username FROM experts WHERE id = ANY(${expertIds})`;
+
+    const expertMap = new Map(expertRows.map((e) => [e.id, e]));
+    const matchScoreMap = new Map(matches.map((m) => [m.expert_id ?? '', m.score ?? 0]));
+
+    // AC7: full profiles with booking_url
+    const expertProfiles = expertIds
+      .map((expertId) => {
+        const expert = expertMap.get(expertId);
+        if (!expert) return null;
+        const profile = (expert.profile ?? {}) as ExpertProfile;
+
+        return {
+          display_name: expert.display_name,
+          headline: expert.headline,
+          bio: expert.bio,
+          skills: profile.skills ?? [],
+          industries: profile.industries ?? [],
+          rate_min: expert.rate_min,
+          rate_max: expert.rate_max,
+          score: matchScoreMap.get(expertId) ?? 0,
+          // TODO(DEC-41): cal_username → Google Calendar booking (E06S10/E06S11)
+          booking_url: expert.cal_username
+            ? `https://cal.com/${expert.cal_username}/intro-call`
+            : null,
+        };
+      })
+      .filter(Boolean);
+
+    const emailDomain = email.split('@')[1] ?? 'unknown';
+    ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+      distinctId: `prospect:${prospectId}`,
+      event: 'prospect.identified',
+      properties: { email_domain: emailDomain },
+    }));
+
+    return jsonResponse({ experts: expertProfiles });
+  } finally {
+    ctx.waitUntil(sql.end());
   }
-
-  // AC7: update prospect with email + status
-  await sql`UPDATE prospects SET email = ${email}, status = 'identified' WHERE id = ${prospectId}`;
-
-  // Load matches to get expert_ids, sorted by score DESC
-  const matches = await sql<Pick<MatchRow, 'expert_id' | 'score'>[]>`
-    SELECT expert_id, score FROM matches
-    WHERE prospect_id = ${prospectId} AND status != 'expired'
-    ORDER BY score DESC`;
-
-  const expertIds = matches
-    .map((m) => m.expert_id)
-    .filter((id): id is string => Boolean(id));
-
-  if (expertIds.length === 0) {
-    return jsonResponse({ experts: [] });
-  }
-
-  // AC7: load full expert profiles
-  const expertRows = await sql<Pick<ExpertRow, 'id' | 'display_name' | 'headline' | 'bio' | 'profile' | 'rate_min' | 'rate_max' | 'cal_username'>[]>`
-    SELECT id, display_name, headline, bio, profile, rate_min, rate_max, cal_username FROM experts WHERE id = ANY(${expertIds})`;
-
-  const expertMap = new Map(expertRows.map((e) => [e.id, e]));
-  const matchScoreMap = new Map(matches.map((m) => [m.expert_id ?? '', m.score ?? 0]));
-
-  // AC7: full profiles with booking_url
-  const expertProfiles = expertIds
-    .map((expertId) => {
-      const expert = expertMap.get(expertId);
-      if (!expert) return null;
-      const profile = (expert.profile ?? {}) as ExpertProfile;
-
-      return {
-        display_name: expert.display_name,
-        headline: expert.headline,
-        bio: expert.bio,
-        skills: profile.skills ?? [],
-        industries: profile.industries ?? [],
-        rate_min: expert.rate_min,
-        rate_max: expert.rate_max,
-        score: matchScoreMap.get(expertId) ?? 0,
-        // TODO(DEC-41): cal_username → Google Calendar booking (E06S10/E06S11)
-        booking_url: expert.cal_username
-          ? `https://cal.com/${expert.cal_username}/intro-call`
-          : null,
-      };
-    })
-    .filter(Boolean);
-
-  const emailDomain = email.split('@')[1] ?? 'unknown';
-  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
-    distinctId: `prospect:${prospectId}`,
-    event: 'prospect.identified',
-    properties: { email_domain: emailDomain },
-  }));
-
-  return jsonResponse({ experts: expertProfiles });
 }

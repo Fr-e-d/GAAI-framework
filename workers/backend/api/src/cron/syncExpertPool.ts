@@ -79,5 +79,7 @@ export async function syncExpertPoolToD1(env: Env): Promise<void> {
   } catch (err) {
     // AC12: sync failure is non-fatal — read path falls back to Hyperdrive automatically
     console.error('syncExpertPoolToD1 error:', err);
+  } finally {
+    await sql.end();
   }
 }
