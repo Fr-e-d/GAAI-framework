@@ -36,7 +36,7 @@ Read the active agent definition before acting:
 | Rules | `.gaai/core/contexts/rules/orchestration.rules.md` |
 | Skills index | `.gaai/core/skills/README.skills.md` |
 | Active backlog | `.gaai/project/contexts/backlog/active.backlog.yaml` |
-| Project memory | `.gaai/project/contexts/memory/project/context.md` |
+| Project memory | `.gaai/project/contexts/memory/memory/project/context.md` |
 
 ---
 

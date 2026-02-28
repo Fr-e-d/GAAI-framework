@@ -4,7 +4,7 @@ Launch or inspect the GAAI Delivery Daemon.
 
 ## What This Does
 
-Runs `.gaai/scripts/delivery-daemon.sh` with the options parsed from the command argument.
+Runs `.gaai/core/scripts/delivery-daemon.sh` with the options parsed from the command argument.
 
 ## Usage
 
@@ -23,7 +23,7 @@ Parse the argument string passed to this command (may be empty).
 Then run the daemon using the Bash tool:
 
 ```bash
-cd /path/to/project && .gaai/scripts/delivery-daemon.sh <args>
+cd /path/to/project && .gaai/core/scripts/delivery-daemon.sh <args>
 ```
 
 Use the actual project root (the directory containing `.gaai/`). Pass all arguments as-is to the script.
@@ -32,8 +32,8 @@ Use the actual project root (the directory containing `.gaai/`). Pass all argume
 
 **All other invocations (including no argument):** the daemon runs as a blocking foreground process and polls continuously until `Ctrl+C`. Inform the user:
 - On macOS: each delivery opens a new Terminal.app window
-- Logs: `.gaai/.delivery-logs/<STORY_ID>.log`
-- Monitor: `tail -f .gaai/.delivery-logs/<STORY_ID>.log`
+- Logs: `.gaai/project/contexts/backlog/.delivery-logs/<STORY_ID>.log`
+- Monitor: `tail -f .gaai/project/contexts/backlog/.delivery-logs/<STORY_ID>.log`
 - Stop: `Ctrl+C` (active deliveries keep running independently)
 
 **Prerequisite check:** before launching, verify `~/.claude/settings.json` contains `"skipDangerousModePermissionPrompt": true`. If missing, show the setup command and stop:

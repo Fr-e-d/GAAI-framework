@@ -23,13 +23,13 @@ Runs a complete status report:
 
 ### Step 0 — Discover memory structure first
 
-Read `.gaai/contexts/memory/index.md`. This is the authoritative registry of all active memory files. Do not assume any specific files or categories exist — derive everything from what the index declares.
+Read `.gaai/project/contexts/memory/index.md`. This is the authoritative registry of all active memory files. Do not assume any specific files or categories exist — derive everything from what the index declares.
 
 From the index, extract:
 - The list of active memory files (path, category, id, last updated)
 - The list of declared-but-empty categories (summaries/, sessions/, archive/ if noted)
 
-Then read `.gaai/contexts/backlog/active.backlog.yaml` and the discovered memory files **in parallel**.
+Then read `.gaai/project/contexts/backlog/active.backlog.yaml` and the discovered memory files **in parallel**.
 
 ---
 
@@ -98,7 +98,7 @@ From the decisions log file discovered via `index.md`, list the 5 most recent en
 
 ### Section 4 — Framework Health
 
-- Count of active skills (glob `.gaai/skills/**/*.md`)
+- Count of active skills (glob `.gaai/core/skills/**/*.md`)
 - Confirm `index.md` was updated recently (within the last active session)
 - Note any open pre-go-live blockers visible in backlog notes
 - Flag any `in_progress` backlog item that may represent a stale lock
@@ -109,7 +109,7 @@ From the decisions log file discovered via `index.md`, list the 5 most recent en
 
 Check the content production cadence:
 
-1. List files in `.gaai/contexts/artefacts/content/plans/`
+1. List files in `.gaai/project/contexts/artefacts/content/plans/`
 2. Determine the current month (`YYYY-MM`)
 3. **If no `{YYYY-MM}-content-plan.md` exists:**
    - Display: `⚠️ Content plan due: no plan for {Month YYYY}. Run content-plan skill via /gaai-discover.`
@@ -129,7 +129,7 @@ This section always runs (no flag needed). It is intentionally lightweight — j
 
 **Only run this section if the user passes `--audit` as argument** (e.g., `/gaai-status --audit`), or explicitly asks for delivery readiness checks. Skip entirely otherwise to keep the standard status report fast.
 
-This section uses the `delivery-readiness-audit` skill (`.gaai/skills/cross/delivery-readiness-audit/SKILL.md`).
+This section uses the `delivery-readiness-audit` skill (`.gaai/core/skills/cross/delivery-readiness-audit/SKILL.md`).
 
 **6a. AC internal consistency — spot-check READY stories**
 

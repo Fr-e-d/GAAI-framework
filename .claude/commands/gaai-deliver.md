@@ -5,7 +5,7 @@ Activate the Delivery Agent to implement the next ready backlog item.
 ## What This Does
 
 Runs the Delivery Loop:
-1. Reads `.gaai/contexts/backlog/active.backlog.yaml`
+1. Reads `.gaai/project/contexts/backlog/active.backlog.yaml`
 2. Selects the next ready Story (status: refined)
 3. Builds execution context
 4. Creates an execution plan
@@ -23,13 +23,13 @@ Runs the Delivery Loop:
 
 ## Instructions for Claude Code
 
-Read `.gaai/agents/delivery.agent.md` and `.gaai/workflows/delivery-loop.workflow.md`.
+Read `.gaai/core/agents/delivery.agent.md` and `.gaai/core/workflows/delivery-loop.workflow.md`.
 
 ### Story Selection — Non-Negotiable
 
 **The backlog is the ONLY source of truth for story selection.**
 
-1. Open `.gaai/contexts/backlog/active.backlog.yaml`
+1. Open `.gaai/project/contexts/backlog/active.backlog.yaml`
 2. If an argument was passed (e.g. `/gaai-deliver E06S07`), select that story — verify its status is `refined` before proceeding.
 3. If no argument: select the **first** story in the backlog with `status: refined` (top-to-bottom order).
 4. **Ignore completely:** git branch name, git worktree state, artefact existence, impl-report or qa-report files. A story with `status: done` in the backlog is done — regardless of what branch or files exist.

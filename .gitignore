@@ -42,6 +42,6 @@ secrets/2FA/*/*.2FA.txt
 wrangler.log
 
 # GAAI Delivery Daemon
-.gaai/.delivery-locks/
-.gaai/.delivery-logs/
-.gaai/.delivery-daemon.log
+.gaai/project/contexts/backlog/.delivery-locks/
+.gaai/project/contexts/backlog/.delivery-logs/
+.gaai/project/contexts/backlog/.delivery-daemon.log
