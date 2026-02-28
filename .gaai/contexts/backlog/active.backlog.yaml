@@ -1397,7 +1397,7 @@ items:
     epic: E10
     title: "Extract .gaai framework from Callibrate monorepo into standalone repo"
     priority: high
-    status: in_progress
+    status: failed
     human_md_estimate: 1.5
     human_cost_usd: 1050
     artefact: contexts/artefacts/stories/E10S01.story.md
