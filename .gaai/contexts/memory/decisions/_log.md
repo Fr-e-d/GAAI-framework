@@ -23,6 +23,235 @@ updated_at: 2026-02-28
 
 ---
 
+### DEC-129 — GDPR data retention: purge abandoned funnels, OTP TTL
+
+**Context:** The prospect funnel creates data before the prospect identifies themselves (freetext, extraction results). GDPR requires justification for retaining personal data. Freetext may contain identifying information ("Je suis Jean Dupont, CEO de X").
+
+**Decision:**
+- **Abandoned funnels (no email provided):** Purge freetext + extraction data after 24h via cron job. No business reason to retain anonymous abandoned data.
+- **OTP codes:** TTL 10 minutes, then hard-deleted. Never store expired codes. Codes stored hashed, not in cleartext.
+- **Identified prospects (email provided):** Standard retention — duration of commercial relationship + 3 years (French prescription period).
+- **Consent mechanism:** Submit button on E03S01 includes visible link to privacy policy + mention "En soumettant, vous acceptez notre politique de confidentialité." No checkbox (GDPR: consent is implicit in the voluntary action, but info must be accessible).
+- **Match results:** Same retention as prospect profile (linked data).
+
+**Files:** No codebase files yet — architectural decision.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-128 — Return visit: cookie + magic link for identified prospects
+
+**Context:** A prospect who completes the funnel (email verified, profiles revealed) but doesn't book may return days later. Without persistent state, they'd redo the entire funnel.
+
+**Decision:**
+- **Same device:** After OTP verification, store an auth token in cookie/localStorage (TTL 7 days). If prospect returns on same device → results page displayed directly, no re-authentication.
+- **Cross-device / cleared cookies:** The confirmation email sent after OTP includes a magic link (JWT token, TTL 7 days) at the bottom: "Retrouvez vos résultats de matching." Prospect clicks → authenticated, results displayed.
+- **Implementation:** Both mechanisms use the same `prospect_auth_token` — cookie stores it client-side, magic link embeds it in URL. Single token, two delivery channels.
+- **Expiry:** After 7 days, prospect must re-identify (email + OTP). Match results are still stored server-side but require re-authentication.
+
+**Files:** No codebase files yet — architectural decision.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-127 — Booking flow: prospect confirmation + expert opt-in + reminders
+
+**Context:** Industry research reveals: (1) Calendly uses email OTP before booking hits calendar — reduces spam 90%+. (2) Cal.com offers expert-side opt-in. (3) No-show rates for consultations: 20-40%. (4) Automated reminders are universal standard. (5) Prepayment (Clarity.fm model) eliminates abuse but adds massive friction. Previous analysis omitted expert-side confirmation and reminders entirely.
+
+**Decision:**
+- **Prospect confirmation:** Required for ALL bookings. After selecting a slot: confirmation email with "Confirmez votre appel avec [Expert] le [Date] à [Heure]" + confirm/cancel buttons. If not confirmed within 30min → slot released. Prevents agent-initiated phantom bookings and casual/accidental bookings.
+- **Expert opt-in:** Configurable per expert. Default = auto-confirm (maximize bookings for new experts). Optional manual approval for premium/senior experts who want to screen before committing time. Setting in expert dashboard: "Approuver manuellement les réservations."
+- **Automated reminders:** J-1 (24h before) + H-1 (1h before) by email. No SMS at MVP (cost + compliance). Trivial to implement via cron job.
+- **No prepayment at MVP.** Discovery calls are free (expert invests time to qualify). Prepayment kills the funnel for an exploratory call. Reconsider when experts offer paid consultation sessions.
+- **No-show tracking:** Record no-shows per prospect. After 2 no-shows → flag prospect, require prepayment for future bookings. Natural abuse prevention.
+
+**Files:** No codebase files yet — architectural decision.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-126 — AI agents: allow with human confirmation gates
+
+**Context:** AI agents (OpenAI Operator, Claude Computer Use, browser automation) are becoming mainstream for web tasks. Research confirms: (1) No expert marketplace has an MCP server or agent-first API — zero competitors. (2) MCP donated to Linux Foundation, 97M+ SDK downloads/month, supported by all major AI companies. (3) Gartner: 75% API gateway vendors will have MCP features by 2026. (4) Blocking agents is futile — sophisticated agents bypass CAPTCHAs via real browsers. (5) Emerging identity protocols: Visa Trusted Agent Protocol, Skyfire Know Your Agent.
+
+**Decision:**
+- **Policy:** AI agents are ALLOWED to use Callibrate on behalf of verified humans. Blocking is counterproductive — our target audience (CTOs, tech leads) are early agent adopters.
+- **Tiered access by action:**
+  - Search + extraction + matching (anonymized) → agent can do freely. Low cost, no sensitive data exposed.
+  - Reveal (full profiles) → requires human click-through via email. Free for expert (no billing at reveal).
+  - Booking → requires human email confirmation (DEC-127). Expert calendar never impacted by unconfirmed agent action. Billing triggered at booking per DEC-14/DEC-30.
+- **Short term (MVP):** No special agent support. Turnstile in managed mode (not interactive) allows browser-based agents through. The human confirmation gates (OTP for email, confirmation for booking) are agent-compatible by design.
+- **Medium term:** Dedicated API endpoints for agents (`/api/v1/agent/*`), authenticated via API key tied to a verified prospect. Prospect creates API key from dashboard.
+- **Long term:** MCP server publishing Callibrate tools (`callibrate_describe_project`, `callibrate_find_experts`, `callibrate_request_reveal`, `callibrate_request_booking`). First-mover advantage — no marketplace has done this.
+- **Agent identity:** Monitor Visa TAP and Skyfire KYA protocols. Align with emerging standards rather than inventing proprietary auth.
+- **Turnstile mode:** Managed (not interactive). Allows browser-based agents through while still filtering basic scripts. Combined with rate limiting and input validation, this is sufficient.
+
+**Files:** No codebase files yet — strategic + architectural decision.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-125 — RETRACTED — Billing remains at booking, not at reveal
+
+**Context:** DEC-125 originally changed the billing trigger from booking to reveal (when prospect views full profile). This was motivated by a technical concern (multi-project flow needs billing without re-identify). However, this contradicts DEC-14 ("pay-per-booked-call, only when a prospect books") and DEC-30 ("call confirmé → lead created → billing"). Pay-per-reveal is the hostile lead-gen model that experts hate — paying for profile views regardless of whether a meeting happens.
+
+**Decision:** DEC-125 is **retracted**. Billing trigger remains **booking** per DEC-14/DEC-30/DEC-68:
+- **Billing event = booking confirmed** (prospect books a call in expert's calendar). NOT reveal, NOT identify.
+- **Reveal (viewing full profiles) is FREE** for the expert. This is a cost the platform absorbs to enable the matching value proposition.
+- **Multi-project (DEC-124) works without change:** Prospect identified → sees profiles for free → booking triggers billing. No billing trigger needed at reveal.
+- **AI agents (DEC-126) work without change:** Human confirms reveal (free) → human confirms booking → billing triggered.
+- **Lead creation = booking confirmed** per DEC-30. `leads` record created at booking, `billing_deadline_at = now() + 7 days`. Expert can flag within 7 days → credits restored.
+- **`matches.revealed_at`** timestamp is still useful (analytics, funnel tracking) but is NOT a billing event.
+- **DEC-67 pricing tiers remain unchanged.** Only the trigger timing was in question, and it reverts to the original: booking.
+
+**Files:** No codebase files.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-124 — Multi-project support: prospect ≠ project data model
+
+**Context:** The current data model implicitly assumes 1 prospect = 1 set of requirements. But prospects may need multiple experts for different projects, or return weeks later with new needs. Industry standard is universal: Upwork, Toptal, Expert360, Catalant all support one account = N projects. Forcing a prospect through the full funnel (including email + OTP) for each project is unacceptable UX.
+
+**Decision:**
+- **Data model refactor:** Decouple prospect identity from project requirements.
+  - `prospects` table: id, email (unique, verified), verified_at, auth_token, created_at.
+  - `prospect_projects` table: id, prospect_id (FK), satellite_id, freetext, requirements JSONB, extraction_confidence JSONB, status (active/archived), created_at.
+  - `matches` table: id, project_id (FK prospect_projects, NOT prospect_id), expert_id, score_breakdown, composite_score, revealed_at, created_at.
+- **Flow for identified prospect (project 2+):**
+  - Page 1: Freetext (no Turnstile — already verified human, greeted by name).
+  - Page 2: Results with full profiles immediately (no email gate, no OTP — already identified). Reveal is free; billing only at booking (DEC-14/DEC-30).
+  - Total: 2 interactions (write + submit). Profils complets immédiats.
+- **Anti-abuse for multi-project:**
+  - Max 5 active projects per prospect simultaneously.
+  - Rate limit: 3 new projects per 24h per prospect.
+  - Duplicate detection: cosine similarity on freetext > 85% → "Vous avez déjà un projet similaire" + link to existing.
+- **"Autre projet ?" CTA** on results page: mini textarea at bottom of results page allows identified prospect to start new project without navigating back.
+- **Prospect reputation (future):** Track reveal-to-book ratio. Prospects who reveal many experts but never book → lower matching priority or reveal cap. Protects experts from "window shoppers."
+
+**Files:** No codebase files yet — architectural decision.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-123 — Funnel restructure: 2 pages, merge confirmation into results
+
+**Context:** Current funnel is 3 distinct pages: E03S01 (freetext input), E03S02 (extraction confirmation), E03S03 (match results + email gate). Industry data confirms: fewer steps = better conversion, 3-4 fields max at top of funnel = ~42% conversion. When `ready_to_match: true`, the confirmation page is pure friction — prospect sees a summary and clicks "Confirmer" with no other action. This is a wasted screen.
+
+**Decision:**
+- **Merge E03S02 into E03S03.** The funnel becomes 2 pages:
+  - **Page 1 (input):** Freetext textarea + submit. Turnstile invisible. Extraction happens on submit.
+  - **Page 2 (results):** Single page containing ALL of: (1) extraction summary as collapsible/editable section at top ("Vos besoins identifiés [Modifier]"), (2) confirmation questions for low-confidence fields if any, (3) match results (anonymized initially), (4) email + OTP gate, (5) full profiles after verification.
+- **If `ready_to_match: true`:** Extraction AND matching run in pipeline on submit. Page 2 loads with summary + matches already displayed. Zero intermediate clicks.
+- **If `needs_confirmation`:** Page 2 shows confirmation questions at top, matches below (greyed out or hidden until confirmed). Prospect answers → re-match → results update (AJAX, no page reload).
+- **If prospect edits any field:** Re-match triggered client-side (AJAX). Results update in-place.
+- **Impact on stories:** E03S02 is absorbed into E03S03. E03S01 remains. Story count: E03S01 (input) + E03S03-expanded (results + confirmation + gate + reveal) + E03S06 (booking widget) + E03S04 (directory). 4 stories instead of 5.
+- **Impact on DEC-112 delivery order:** E03S01 → E03S03 (expanded) → E03S06 → E03S04.
+
+**Files:** `.gaai/contexts/artefacts/stories/E03S02.story.md` (to be merged into E03S03), `.gaai/contexts/artefacts/stories/E03S03.story.md` (to be expanded).
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-122 — Funnel abuse prevention: repeated submissions, fake emails, freetext quality
+
+**Context:** Multiple abuse vectors beyond bots: (1) Human prospects re-submitting variations to explore all experts without identifying. (2) Fake/disposable emails at the gate. (3) Gibberish/low-effort freetext wasting extraction resources. (4) Competitive scraping via the funnel. Each requires a distinct countermeasure.
+
+**Decision:**
+- **Repeated submissions (same person, no email):**
+  - Cookie-based: after 1 free extraction, subsequent attempts prompt "Identifiez-vous pour continuer" (email required). Contournable via incognito but sufficient for casual abuse.
+  - IP-based: max 3 extractions per IP per 24h without email. Soft limit (429 + "patientez") not hard block.
+  - Combined: cookie as primary, IP as fallback for incognito.
+- **Fake/disposable emails:**
+  - MX record DNS check (reject domains that can't receive email). Cost: zero.
+  - Blacklist ~3000 disposable domains (open-source list, maintained). Server-side check before OTP send.
+  - Email normalization: strip `+tag`, normalize Gmail dots. Check uniqueness on normalized email.
+  - Rate limit: max 3 OTP attempts per email per 24h. Prevents brute-force.
+- **Freetext quality:**
+  - Client-side: min 30 chars + min 3 distinct words (split + count). Instant feedback.
+  - Server-side pre-LLM: regex patterns for keyboard mashing, character repetition, lorem ipsum. Reject before extraction (saves LLM cost).
+  - Server-side post-extraction: if ALL fields confidence < 0.3 → don't match, return "Votre description est trop courte pour identifier vos besoins. Pouvez-vous préciser ?" with textarea pre-filled.
+- **Competitive scraping via funnel:**
+  - No additional measures needed. Anonymized results expose no actionable data (no names, no bios). Reveal requires verified email (traceable). Rate limiting prevents systematic exploration. Existing design is sufficient.
+
+**Files:** No codebase files yet — architectural decision.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-121 — Email verification: OTP inline, industry-validated (Calendly pattern)
+
+**Context:** The email captured at the gate (DEC-111) triggers expert billing. Fake emails = experts lose credits for unreachable leads. Five verification approaches evaluated: (A) no verification — rejected, billing integrity broken; (B) syntax + MX only — necessary but insufficient; (C) magic link — high friction, 30-50% drop-off from context switch; (D) OTP inline — moderate friction, 15-25% drop-off; (E) deferred verification — billing model collapses. Industry research confirms: Calendly uses exactly the OTP pattern and reports 90%+ spam reduction. Fiverr and Contra also use OTP at signup.
+
+**Decision:** Option D — OTP inline 6 digits. Flow:
+1. Prospect enters email on results page (Page 2, DEC-123).
+2. Server-side pre-checks: syntax validation + MX record DNS lookup + disposable email blacklist. If fail → inline error, no OTP sent.
+3. If pass → send 6-digit code via email (Resend/SES, cost ~$0.001).
+4. Prospect enters code on same page (no navigation, no context switch).
+5. Code valid → `POST /api/prospects/{id}/identify` → profiles revealed → billing triggered (DEC-125).
+6. Code expired (TTL 10 min) or invalid → "Code invalide, réessayer" + resend after 60s.
+- **UX details:** "Code envoyé à j•••@gmail.com" + "Modifier l'email" link + "Renvoyer le code" after 60s countdown.
+- **Anti-brute-force:** Max 5 code attempts per email per session. Max 3 OTP sends per email per 24h.
+- **Estimated drop-off:** 15-25% (acceptable — 75 verified leads >> 100 leads with 30% fakes).
+- **Supersedes:** This decision confirms DEC-111 email timing (after anonymized matches) and adds the verification mechanism.
+
+**Files:** No codebase files yet — architectural decision.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-120 — Bot protection & LLM cost control: multi-layer defense (revised)
+
+**Context:** Initial recommendation was Turnstile as primary bot protection before LLM extraction. Industry research reveals: (1) Turnstile detects only 33% of bot traffic (vs 69% reCAPTCHA). (2) Stanford: CAPTCHA reduces conversions up to 40%. (3) Real incident: $12,000 in LLM charges over a weekend from unprotected chatbot endpoint. (4) OWASP LLM Top 10: "Unbounded Consumption" is critical risk. (5) Best practice: CAPTCHA at last step, not first. Previous recommendation of Turnstile-first was insufficient and suboptimal.
+
+**Decision:** 6-layer defense, ordered by execution:
+1. **Input pre-validation (before LLM):** Regex for keyboard mashing, character repetition, lorem ipsum. Min 3 distinct words. Cost: ~0ms CPU. Blocks garbage before it costs anything.
+2. **Honeypot + timing:** Hidden CSS field + minimum 3s between page load and submit. Cost: zero. Blocks basic bots.
+3. **Rate limiting (Cloudflare native):** Tiered escalation per Cloudflare best practices:
+   - Tier 1: 4 req/min/IP → managed challenge.
+   - Tier 2: 10 req/10min/IP → block.
+   - Tier 3: exceeds tier 2 → block 24h.
+   - Also count by session/cookie (not just IP) to handle shared IPs.
+4. **Turnstile invisible on confirm submit (E03S02 section of Page 2, not on Page 1).** Placed at the highest-intent moment. 33% detection is a supplementary layer, not the primary defense.
+5. **Hard spending cap at LLM provider:** $50/day, $500/month. Non-negotiable. The single most critical protection against runaway costs. Set at provider level (OpenAI/Anthropic dashboard), not just application level.
+6. **Circuit breaker:** If extraction cost/hour exceeds $10 → pause extractions, serve "Service temporairement surchargé, réessayez dans quelques minutes." Auto-resume after cooldown.
+- **Model choice as cost protection:** GPT-4o-mini ($0.004/req) or Haiku ($0.002/req). Never use expensive models for extraction. 52x cost difference vs Opus. The model choice IS the primary cost control.
+- **Max output tokens:** Limit extraction response to 500 tokens. The output is a structured JSON, not prose.
+- **Flow token:** After successful Turnstile + extraction, server returns a signed token (HMAC, TTL 30min) that `POST /api/prospects/submit` requires. Prevents direct API calls with fabricated data.
+- **Supersedes DEC-63** (which placed Turnstile only on POST /api/prospects/submit). Turnstile placement is now on the confirmation action within Page 2, and is one layer among six.
+
+**Files:** No codebase files yet — architectural decision. Supersedes DEC-63.
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
+### DEC-119 — Freetext input UX: persistent hint text, not placeholder
+
+**Context:** The freetext textarea (E03S01) needs to guide prospects on what to write for effective matching, without adding friction. Standard placeholder text disappears on first keystroke — prospect forgets the guidance. Multiple alternatives evaluated: (A) placeholder — disappears, insufficient; (B) static text above — resembles a disguised quiz, contradicts DEC-17/52 freetext-first philosophy; (C) pre-filled example — risk of lazy copy-paste, biases responses; (D) dynamic floating hints — over-engineered for MVP; (E) clickable chips — complex, not standard; (F) label + sub-text between label and textarea — always visible, zero friction.
+
+**Decision:** Option F — persistent hint text between label and textarea.
+- **Pattern:** Label ("Décrivez votre projet") → hint text ("Quelques pistes pour nous aider : votre problème ou objectif · les outils concernés · votre budget approximatif · vos délais") → textarea. Sub-text is always visible during typing.
+- **Tone:** Conversational ("quelques pistes pour nous aider"), not directive ("vous devez indiquer").
+- **Language:** Matches the satellite's configured language. Not dynamically detected from browser for MVP.
+- **This is a standard UX pattern** (Material Design hint text, GOV.UK Design System, all major form design systems recommend hint text between label and input, never inside the input).
+- **Guard-rail for poor descriptions:** Client-side soft warning if < 50 chars ("Quelques mots de plus aideront à trouver le bon expert"). Not blocking — the E03S02 confirmation questions (max 3) are designed to handle low-quality input. Don't overcompensate at step 1 for what step 2 handles natively.
+
+**Files:** `.gaai/contexts/artefacts/stories/E03S01.story.md` (new AC to add).
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
 ### DEC-118 — Expert availability: hybrid model (Callibrate rules + GCal conflict filter)
 
 **Context:** Experts need to indicate when they're available for prospect calls. Four approaches evaluated: (A) GCal as sole source of truth — rejected because "free in calendar" ≠ "available for Callibrate calls"; (B) Callibrate dashboard as sole source — rejected because bidirectional sync with GCal is a nightmare; (C) External Calendly/Cal.com link — rejected because we lose availability data for the matching engine and the prospect leaves our platform; (D) Hybrid — Callibrate availability rules + GCal read-only conflict check.

@@ -200,13 +200,17 @@ export async function loadAdmissibilityData(
 
   const sql = createSql(env);
 
-  const rows = await sql<{ id: string; admissibility_criteria: unknown }[]>`
-    SELECT id, admissibility_criteria FROM experts WHERE id = ANY(${expertIds})`;
+  try {
+    const rows = await sql<{ id: string; admissibility_criteria: unknown }[]>`
+      SELECT id, admissibility_criteria FROM experts WHERE id = ANY(${expertIds})`;
 
-  const result = new Map<string, AdmissibilityCriteria>();
-  for (const row of rows) {
-    result.set(row.id, (row.admissibility_criteria ?? {}) as AdmissibilityCriteria);
+    const result = new Map<string, AdmissibilityCriteria>();
+    for (const row of rows) {
+      result.set(row.id, (row.admissibility_criteria ?? {}) as AdmissibilityCriteria);
+    }
+
+    return result;
+  } finally {
+    await sql.end();
   }
-
-  return result;
 }

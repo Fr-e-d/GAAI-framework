@@ -26,15 +26,19 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
 async function cleanupExpiredHolds(env: Env): Promise<void> {
   const sql = createSql(env);
   const now = new Date().toISOString();
-
-  const deleted = await sql`DELETE FROM bookings WHERE status = 'held' AND held_until < ${now} RETURNING id`;
-  console.log(`cleanupExpiredHolds: deleted ${deleted.length} expired holds`);
+  try {
+    const deleted = await sql`DELETE FROM bookings WHERE status = 'held' AND held_until < ${now} RETURNING id`;
+    console.log(`cleanupExpiredHolds: deleted ${deleted.length} expired holds`);
+  } finally {
+    await sql.end();
+  }
 }
 
 // AC12: Send reminders for upcoming confirmed bookings
 async function dispatchReminders(env: Env): Promise<void> {
   const sql = createSql(env);
   const now = new Date();
+  try {
 
   // J-1: 23h to 25h before start
   const j1Start = new Date(now.getTime() + 23 * 60 * 60 * 1000).toISOString();
@@ -101,5 +105,9 @@ async function dispatchReminders(env: Env): Promise<void> {
     } catch (err) {
       console.error('dispatchReminders H-1 error for booking', booking.id, err);
     }
+  }
+
+  } finally {
+    await sql.end();
   }
 }

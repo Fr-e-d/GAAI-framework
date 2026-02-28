@@ -71,41 +71,45 @@ export async function loadBillingData(
 
   const sql = createSql(env);
 
-  // Query 1: billing columns from experts table
-  const billingRows = await sql<
-    { id: string; credit_balance: number; max_lead_price: number | null; spending_limit: number | null }[]
-  >`SELECT id, credit_balance, max_lead_price, spending_limit FROM experts WHERE id = ANY(${expertIds})`;
+  try {
+    // Query 1: billing columns from experts table
+    const billingRows = await sql<
+      { id: string; credit_balance: number; max_lead_price: number | null; spending_limit: number | null }[]
+    >`SELECT id, credit_balance, max_lead_price, spending_limit FROM experts WHERE id = ANY(${expertIds})`;
 
-  // Query 2: monthly spend from credit_transactions (AC4, AC5 — uses index on expert_id, created_at)
-  const monthStart = new Date();
-  monthStart.setUTCDate(1);
-  monthStart.setUTCHours(0, 0, 0, 0);
+    // Query 2: monthly spend from credit_transactions (AC4, AC5 — uses index on expert_id, created_at)
+    const monthStart = new Date();
+    monthStart.setUTCDate(1);
+    monthStart.setUTCHours(0, 0, 0, 0);
 
-  const spendRows = await sql<{ expert_id: string; monthly_spend: number }[]>`
-    SELECT expert_id, COALESCE(SUM(ABS(amount)), 0)::integer AS monthly_spend
-    FROM credit_transactions
-    WHERE type = 'lead_debit'
-      AND expert_id = ANY(${expertIds})
-      AND created_at >= ${monthStart.toISOString()}
-    GROUP BY expert_id`;
+    const spendRows = await sql<{ expert_id: string; monthly_spend: number }[]>`
+      SELECT expert_id, COALESCE(SUM(ABS(amount)), 0)::integer AS monthly_spend
+      FROM credit_transactions
+      WHERE type = 'lead_debit'
+        AND expert_id = ANY(${expertIds})
+        AND created_at >= ${monthStart.toISOString()}
+      GROUP BY expert_id`;
 
-  // Build spend map
-  const spendMap = new Map<string, number>();
-  for (const row of spendRows) {
-    spendMap.set(row.expert_id, row.monthly_spend);
+    // Build spend map
+    const spendMap = new Map<string, number>();
+    for (const row of spendRows) {
+      spendMap.set(row.expert_id, row.monthly_spend);
+    }
+
+    // Build result map
+    const result = new Map<string, BillingRecord>();
+    for (const row of billingRows) {
+      result.set(row.id, {
+        expert_id: row.id,
+        credit_balance: row.credit_balance,
+        max_lead_price: row.max_lead_price,
+        spending_limit: row.spending_limit,
+        monthly_spend: spendMap.get(row.id) ?? 0,
+      });
+    }
+
+    return result;
+  } finally {
+    await sql.end();
   }
-
-  // Build result map
-  const result = new Map<string, BillingRecord>();
-  for (const row of billingRows) {
-    result.set(row.id, {
-      expert_id: row.id,
-      credit_balance: row.credit_balance,
-      max_lead_price: row.max_lead_price,
-      spending_limit: row.spending_limit,
-      monthly_spend: spendMap.get(row.id) ?? 0,
-    });
-  }
-
-  return result;
 }
