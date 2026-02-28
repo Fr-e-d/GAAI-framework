@@ -27,6 +27,11 @@ set -euo pipefail
 #                   blocked by lower-priority dependencies)
 #   --set-status <id> <status>  Update a story's status in the
 #                   YAML file. Requires file path (not --stdin).
+#   --set-field <id> <field> <value>  Set any field on a backlog
+#                   item. Updates if exists, inserts after delivery
+#                   metadata fields if not. Numbers and null/true/
+#                   false stay bare; strings are auto-quoted.
+#                   Requires file path (not --stdin).
 #   --stdin         Read YAML from stdin instead of file
 #
 # Inputs:
@@ -49,6 +54,9 @@ BACKLOG_FILE=""
 FROM_STDIN=false
 SET_STATUS_ID=""
 SET_STATUS_VAL=""
+SET_FIELD_ID=""
+SET_FIELD_NAME=""
+SET_FIELD_VAL=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -68,10 +76,22 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 3
       ;;
+    --set-field)
+      MODE="set-field"
+      SET_FIELD_ID="${2:-}"
+      SET_FIELD_NAME="${3:-}"
+      SET_FIELD_VAL="${4:-}"
+      if [[ -z "$SET_FIELD_ID" || -z "$SET_FIELD_NAME" ]]; then
+        >&2 echo "Error: --set-field requires <id> <field> <value>"
+        >&2 echo "Usage: $0 --set-field <id> <field> <value> <backlog-active-yaml>"
+        exit 1
+      fi
+      shift 4
+      ;;
     --stdin)      FROM_STDIN=true;   shift ;;
     -*)
       >&2 echo "Unknown option: $1"
-      >&2 echo "Usage: $0 [--next|--list|--ready-ids|--graph|--conflicts|--set-status <id> <status>] [--stdin] [<backlog-active-yaml>]"
+      >&2 echo "Usage: $0 [--next|--list|--ready-ids|--graph|--conflicts|--set-status <id> <status>|--set-field <id> <field> <value>] [--stdin] [<backlog-active-yaml>]"
       exit 1
       ;;
     *)
@@ -82,11 +102,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validate inputs ──────────────────────────────────────────
-if [[ "$MODE" == "set-status" ]]; then
-  # set-status always operates on a file (not stdin)
+if [[ "$MODE" == "set-status" || "$MODE" == "set-field" ]]; then
+  # set-status/set-field always operate on a file (not stdin)
   if [[ -z "$BACKLOG_FILE" ]]; then
-    >&2 echo "Error: --set-status requires a backlog file path"
-    >&2 echo "Usage: $0 --set-status <id> <status> <backlog-active-yaml>"
+    >&2 echo "Error: --$MODE requires a backlog file path"
+    >&2 echo "Usage: $0 --$MODE ... <backlog-active-yaml>"
     exit 1
   fi
   if [[ ! -f "$BACKLOG_FILE" ]]; then
@@ -146,6 +166,87 @@ with open(file_path, 'w') as f:
 
 print(f'{target_id} -> {new_status}')
 " "$BACKLOG_FILE" "$SET_STATUS_ID" "$SET_STATUS_VAL"
+  exit $?
+fi
+
+# ── set-field mode: set any field on a backlog item ──────────
+if [[ "$MODE" == "set-field" ]]; then
+  python3 -c "
+import sys, re
+
+file_path, target_id, field_name, field_value = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+
+with open(file_path, 'r') as f:
+    lines = f.readlines()
+
+# Find target item block boundaries
+block_start = -1
+block_end = len(lines)
+
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    if re.match(r'-\s+id:\s+' + re.escape(target_id) + r'\s*$', stripped):
+        block_start = i
+        continue
+    if block_start >= 0 and re.match(r'-\s+id:\s+', stripped):
+        block_end = i
+        break
+
+if block_start < 0:
+    print(f'Error: item {target_id} not found', file=sys.stderr)
+    sys.exit(1)
+
+# Format value: numbers stay bare, null/true/false/[] stay bare, strings get quoted
+try:
+    float(field_value)
+    formatted = field_value
+except ValueError:
+    if field_value in ('null', 'true', 'false', '[]'):
+        formatted = field_value
+    else:
+        # Escape inner double quotes and wrap
+        formatted = '\"' + field_value.replace('\\\\', '\\\\\\\\').replace('\"', '\\\\\"') + '\"'
+
+# Look for existing field within the block
+field_found = False
+for i in range(block_start + 1, block_end):
+    m = re.match(r'^(\s+)' + re.escape(field_name) + r':\s', lines[i])
+    if m:
+        indent = m.group(1)
+        lines[i] = f'{indent}{field_name}: {formatted}\n'
+        field_found = True
+        break
+
+if not field_found:
+    # Determine indentation from existing fields
+    indent = '    '
+    for i in range(block_start + 1, block_end):
+        m2 = re.match(r'^(\s+)\w', lines[i])
+        if m2:
+            indent = m2.group(1)
+            break
+
+    # Insertion order: after the last delivery-metadata field present,
+    # or after status: if none exist
+    DELIVERY_FIELDS = ['status', 'cost_usd', 'human_md_estimate', 'human_cost_usd', 'started_at', 'completed_at', 'pr_url', 'pr_number', 'pr_status']
+    insert_after = -1
+    for i in range(block_start + 1, block_end):
+        fm = re.match(r'^\s+(\w+):', lines[i])
+        if fm and fm.group(1) in DELIVERY_FIELDS:
+            insert_after = i
+
+    if insert_after < 0:
+        # Fallback: insert after the id line
+        insert_after = block_start
+
+    new_line = f'{indent}{field_name}: {formatted}\n'
+    lines.insert(insert_after + 1, new_line)
+
+with open(file_path, 'w') as f:
+    f.writelines(lines)
+
+print(f'{target_id}.{field_name} = {formatted}')
+" "$BACKLOG_FILE" "$SET_FIELD_ID" "$SET_FIELD_NAME" "$SET_FIELD_VAL"
   exit $?
 fi
 

@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate .gaai/ structure
-        run: bash .gaai/scripts/health-check.sh
+        run: bash .gaai/core/scripts/health-check.sh
 
       - name: Validate artefact references
-        run: bash .gaai/scripts/artefact-sync.sh
+        run: bash .gaai/core/scripts/artefact-sync.sh
