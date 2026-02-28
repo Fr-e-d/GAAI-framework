@@ -1,0 +1,16 @@
+name: Publish framework branch
+on:
+  push:
+    branches: [main]
+    paths: ['.gaai/core/**']
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Split .gaai/core/ to framework branch
+        run: |
+          git subtree split --prefix=.gaai/core -b framework-build
+          git push origin framework-build:framework --force

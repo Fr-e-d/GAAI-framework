@@ -84,7 +84,7 @@ tool_label() {
 # ── Wizard mode ────────────────────────────────────────────
 
 if [[ "$WIZARD" == "true" ]]; then
-  VERSION="$(cat "$SCRIPT_DIR/.gaai/VERSION" 2>/dev/null || echo '?')"
+  VERSION="$(cat "$SCRIPT_DIR/.gaai/core/VERSION" 2>/dev/null || echo '?')"
   echo ""
   echo "╔══════════════════════════════════════════╗"
   echo "║        GAAI Setup Wizard v$VERSION           ║"
@@ -170,7 +170,7 @@ fi
 # ── Pre-flight ─────────────────────────────────────────────
 
 echo ""
-echo "GAAI Installer v$(cat "$SCRIPT_DIR/.gaai/VERSION" 2>/dev/null || echo '?')"
+echo "GAAI Installer v$(cat "$SCRIPT_DIR/.gaai/core/VERSION" 2>/dev/null || echo '?')"
 echo "================================================"
 echo ""
 
@@ -201,9 +201,30 @@ fi
 # ── Copy .gaai/ ───────────────────────────────────────────
 
 echo ""
-info "Copying .gaai/ to $TARGET..."
-cp -r "$SCRIPT_DIR/.gaai" "$TARGET/"
-success ".gaai/ installed"
+info "Copying .gaai/core/ to $TARGET..."
+mkdir -p "$TARGET/.gaai"
+cp -r "$SCRIPT_DIR/.gaai/core" "$TARGET/.gaai/core"
+success ".gaai/core/ installed (framework)"
+
+# Create project/ from scaffolding (if not already present)
+if [[ ! -d "$TARGET/.gaai/project" ]]; then
+  info "Creating .gaai/project/ (project data)..."
+  mkdir -p "$TARGET/.gaai/project/contexts"
+  cp -r "$TARGET/.gaai/core/scaffolding/contexts/rules"        "$TARGET/.gaai/project/contexts/rules"
+  cp -r "$TARGET/.gaai/core/scaffolding/memory"                "$TARGET/.gaai/project/contexts/memory"
+  cp -r "$TARGET/.gaai/core/scaffolding/backlog"               "$TARGET/.gaai/project/contexts/backlog"
+  cp -r "$TARGET/.gaai/core/scaffolding/artefacts"             "$TARGET/.gaai/project/contexts/artefacts"
+  cp -r "$TARGET/.gaai/core/scaffolding/.delivery-locks"       "$TARGET/.gaai/project/contexts/backlog/.delivery-locks"
+  cp -r "$TARGET/.gaai/core/scaffolding/.delivery-logs"        "$TARGET/.gaai/project/contexts/backlog/.delivery-logs"
+  cp -r "$TARGET/.gaai/core/scaffolding/agents"                "$TARGET/.gaai/project/agents"
+  cp -r "$TARGET/.gaai/core/scaffolding/skills"                "$TARGET/.gaai/project/skills"
+  cp -r "$TARGET/.gaai/core/scaffolding/workflows"             "$TARGET/.gaai/project/workflows"
+  cp -r "$TARGET/.gaai/core/scaffolding/scripts"               "$TARGET/.gaai/project/scripts"
+  cp -r "$TARGET/.gaai/core/scaffolding/content"               "$TARGET/.gaai/project/content"
+  success ".gaai/project/ created"
+else
+  warn ".gaai/project/ already exists — preserving existing project data"
+fi
 
 # ── Select tool ──────────────────────────────────────────
 
@@ -236,7 +257,7 @@ fi
 
 # ── Deploy adapter ───────────────────────────────────────
 
-COMPAT_DIR="$TARGET/.gaai/compat"
+COMPAT_DIR="$TARGET/.gaai/core/compat"
 
 echo ""
 info "Deploying adapter for: $TOOL"
@@ -293,7 +314,7 @@ esac
 
 echo ""
 info "Running health check..."
-if bash "$TARGET/.gaai/scripts/health-check.sh" --gaai-dir "$TARGET/.gaai"; then
+if bash "$TARGET/.gaai/core/scripts/health-check.sh" --core-dir "$TARGET/.gaai/core" --project-dir "$TARGET/.gaai/project"; then
   echo ""
 else
   echo ""
@@ -316,15 +337,15 @@ case "$TOOL" in
     ;;
   cursor)
     echo "  Next steps:"
-    echo "    Tell Cursor: \"Read .gaai/agents/bootstrap.agent.md,"
-    echo "    then follow .gaai/workflows/context-bootstrap.workflow.md\""
+    echo "    Tell Cursor: \"Read .gaai/core/agents/bootstrap.agent.md,"
+    echo "    then follow .gaai/core/workflows/context-bootstrap.workflow.md\""
     ;;
   *)
     echo "  Next steps:"
-    echo "    Run the Bootstrap Agent — read .gaai/agents/bootstrap.agent.md"
+    echo "    Run the Bootstrap Agent — read .gaai/core/agents/bootstrap.agent.md"
     ;;
 esac
 
 echo ""
-echo "  Documentation: .gaai/GAAI.md"
+echo "  Documentation: .gaai/core/GAAI.md"
 echo ""
