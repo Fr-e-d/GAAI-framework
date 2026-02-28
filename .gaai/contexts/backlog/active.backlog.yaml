@@ -789,6 +789,9 @@ items:
     title: "Inline booking widget (availability → hold → confirm)"
     priority: high
     status: done
+    started_at: "2026-02-28T09:00:00+01:00"
+    completed_at: "2026-02-28T10:14:00+01:00"
+    cost_usd: null
     human_md_estimate: 5.2
     human_cost_usd: 3640
     artefact: contexts/artefacts/stories/E03S06.story.md
