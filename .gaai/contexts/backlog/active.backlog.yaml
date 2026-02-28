@@ -1249,7 +1249,7 @@ items:
     epic: E09
     title: "Matching-engine unit test suite"
     priority: high
-    status: refined
+    status: in_progress
     human_md_estimate: 1.5
     human_cost_usd: 1050
     artefact: contexts/artefacts/stories/E09S03.story.md
