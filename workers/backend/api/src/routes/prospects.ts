@@ -17,7 +17,7 @@ import {
   type ScoreBreakdown,
 } from '../types/matching';
 import { scoreMatch, applyReliabilityModifier } from '../matching/score';
-import { signProspectToken, verifyProspectToken, verifyFlowToken, verifyProspectTokenGetClaims } from '../lib/jwt';
+import { signProspectToken, verifyProspectToken, verifyFlowToken, verifyProspectTokenGetClaims, signProspectSessionToken, verifyProspectSessionToken, signMagicLinkToken, verifyMagicLinkToken } from '../lib/jwt';
 import { loadExpertPool } from '../lib/expertPool';
 import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
 import { createSql } from '../lib/db';
@@ -28,7 +28,7 @@ import { loadBillingData, applyBillingFilters } from '../lib/billingFilter';
 import { loadAdmissibilityData, applyAdmissibilityFilters } from '../lib/admissibilityFilter';
 import type { ProspectContext } from '../lib/admissibilityFilter';
 import { generateOtp, verifyOtpHash } from '../lib/otp';
-import { sendEmail, buildOtpEmail } from '../lib/email';
+import { sendEmail, buildOtpEmail, buildMagicLinkEmail } from '../lib/email';
 import { preCheckEmail } from '../lib/emailValidation';
 import { deriveQualityTier } from '../lib/qualityTier';
 
@@ -758,15 +758,35 @@ export async function handleProspectMatches(
   const url = new URL(request.url);
   const token = url.searchParams.get('token');
 
-  // AC4: token required
-  if (!token) {
-    return errorResponse('Forbidden', 403);
-  }
+  // E03S10 AC3: Also accept session token from Authorization header or cookie
+  const authHeader = request.headers.get('Authorization');
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const cookieHeader = request.headers.get('Cookie');
+  const cookieToken = cookieHeader
+    ? (cookieHeader.split(';').find((c) => c.trim().startsWith('prospect_session='))?.split('=').slice(1).join('=').trim() ?? null)
+    : null;
+  const sessionTokenRaw = bearerToken ?? cookieToken;
 
-  // AC4: validate token — prospect:submit is the session token for the full funnel (matches + identify)
-  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
-  if (!tokenValid) {
-    return errorResponse('Forbidden', 403);
+  if (sessionTokenRaw) {
+    // Try session token path (return visit)
+    const sessionClaims = await verifyProspectSessionToken(sessionTokenRaw, env.PROSPECT_TOKEN_SECRET);
+    if (sessionClaims && sessionClaims.prospect_id === prospectId) {
+      // Valid session — fall through to match loading below
+    } else {
+      // Invalid session token in Authorization header — reject (don't fall back to query param)
+      return errorResponse('Forbidden', 403);
+    }
+  } else {
+    // Legacy path: token required as query param
+    if (!token) {
+      return errorResponse('Forbidden', 403);
+    }
+
+    // AC4: validate token — prospect:submit is the session token for the full funnel
+    const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+    if (!tokenValid) {
+      return errorResponse('Forbidden', 403);
+    }
   }
 
   // E06S41: resolve project_id (optional param; defaults to most recent active project)
@@ -905,9 +925,9 @@ export async function handleProspectIdentify(
   const sql = createSql(env);
 
   try {
-    // Check if prospect already identified
-    const [prospect] = await sql<Pick<ProspectRow, 'id' | 'email'>[]>`
-      SELECT id, email FROM prospects WHERE id = ${prospectId}`;
+    // Check if prospect already identified (also fetch satellite_id for magic link email)
+    const [prospect] = await sql<Pick<ProspectRow, 'id' | 'email' | 'satellite_id'>[]>`
+      SELECT id, email, satellite_id FROM prospects WHERE id = ${prospectId}`;
 
     if (!prospect) return errorResponse('Prospect not found', 404);
 
@@ -972,6 +992,27 @@ export async function handleProspectIdentify(
       event: 'prospect.identified',
       properties: { email_domain: emailDomain },
     }));
+
+    // E03S10 AC4: Send magic link email with results URL (fire-and-forget)
+    if (prospect.satellite_id) {
+      ctx.waitUntil((async () => {
+        try {
+          const [satConfig] = await (createSql(env))<Pick<SatelliteConfigRow, 'domain'>[]>`
+            SELECT domain FROM satellite_configs WHERE id = ${prospect.satellite_id}`;
+          if (satConfig?.domain) {
+            const magicToken = await signMagicLinkToken(prospectId, env.PROSPECT_TOKEN_SECRET);
+            const satelliteUrl = `https://${satConfig.domain}`;
+            const { html, text } = buildMagicLinkEmail({ satelliteUrl, prospectId, token: magicToken });
+            await sendEmail(
+              { to: verifiedEmail, subject: 'Retrouvez vos résultats Callibrate', html, text },
+              { apiKey: env.RESEND_API_KEY, fromDomain: env.EMAIL_FROM_DOMAIN, replyTo: env.EMAIL_REPLY_TO },
+            );
+          }
+        } catch {
+          // Non-blocking — magic link email failure must not break the identify response
+        }
+      })());
+    }
 
     return jsonResponse({ experts: expertProfiles });
   } finally {
@@ -1158,13 +1199,148 @@ export async function handleOtpVerify(
   await env.SESSIONS.put(`verified:${prospectId}`, JSON.stringify({ email: otpRecord.email }), { expirationTtl: 300 });
   await env.SESSIONS.delete(`otp:${prospectId}`);
 
+  // E03S10 AC1: Generate 7-day session token — returned in body AND set as HttpOnly cookie
+  const sessionToken = await signProspectSessionToken(prospectId, otpRecord.email, env.PROSPECT_TOKEN_SECRET);
+
   ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
     distinctId: `prospect:${prospectId}`,
     event: 'prospect.otp_verified',
     properties: {},
   }));
 
-  return jsonResponse({ verified: true, email: otpRecord.email });
+  const responseBody = JSON.stringify({ verified: true, email: otpRecord.email, session_token: sessionToken });
+  return new Response(responseBody, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      // AC1: HttpOnly cookie for Core API domain (7 days)
+      'Set-Cookie': `prospect_session=${sessionToken}; HttpOnly; Secure; SameSite=None; Max-Age=604800; Path=/`,
+    },
+  });
+}
+
+// ── GET /api/auth/session — E03S10 (AC2/AC3) ──────────────────────────────────
+// Validates a prospect_session token from Authorization: Bearer or Cookie header.
+// Returns { prospect_id, email } on success, 401 on failure.
+// Used by satellite server-side to verify the return-visit cookie.
+
+export async function handleSessionValidate(request: Request, env: Env): Promise<Response> {
+  const authHeader = request.headers.get('Authorization');
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  const cookieHeader = request.headers.get('Cookie');
+  const cookieToken = cookieHeader
+    ? (cookieHeader.split(';').find((c) => c.trim().startsWith('prospect_session='))?.split('=').slice(1).join('=').trim() ?? null)
+    : null;
+
+  const rawToken = bearerToken ?? cookieToken;
+  if (!rawToken) {
+    return errorResponse('Unauthorized', 401);
+  }
+
+  const claims = await verifyProspectSessionToken(rawToken, env.PROSPECT_TOKEN_SECRET);
+  if (!claims) {
+    return errorResponse('Unauthorized', 401);
+  }
+
+  return jsonResponse({ prospect_id: claims.prospect_id, email: claims.email });
+}
+
+// ── POST /api/auth/magic-link/validate — E03S10 (AC5) ─────────────────────────
+// Validates a magic link token and returns a new session token for the satellite to use.
+// Called server-side by the satellite when a prospect clicks a magic link.
+
+export async function handleMagicLinkValidate(request: Request, env: Env): Promise<Response> {
+  let body: { prospect_id?: unknown; token?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON body', 400);
+  }
+
+  const { prospect_id, token } = body;
+  if (typeof prospect_id !== 'string' || !prospect_id || typeof token !== 'string' || !token) {
+    return errorResponse('prospect_id and token are required', 422);
+  }
+
+  const valid = await verifyMagicLinkToken(token, prospect_id, env.PROSPECT_TOKEN_SECRET);
+  if (!valid) {
+    return errorResponse('Invalid or expired magic link', 401);
+  }
+
+  // Look up the prospect's email to issue a session token
+  const sql = createSql(env);
+  try {
+    const [prospect] = await sql<Pick<ProspectRow, 'id' | 'email'>[]>`
+      SELECT id, email FROM prospects WHERE id = ${prospect_id}`;
+    if (!prospect || !prospect.email) {
+      return errorResponse('Prospect not found', 404);
+    }
+
+    const sessionToken = await signProspectSessionToken(prospect_id, prospect.email, env.PROSPECT_TOKEN_SECRET);
+    return jsonResponse({ session_token: sessionToken, prospect_id, email: prospect.email });
+  } finally {
+    await sql.end();
+  }
+}
+
+// ── POST /api/prospects/:id/magic-link/resend — E03S10 (AC8) ──────────────────
+// Generates a new magic link token and sends the results email. Rate: 3/24h.
+
+export async function handleMagicLinkResend(
+  request: Request,
+  env: Env,
+  prospectId: string,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
+  // Rate limit: 3 resends per 24h per prospect
+  const rateLimitKey = `magic-link-resend:${prospectId}`;
+  const countRaw = await env.SESSIONS.get(rateLimitKey);
+  const sendCount = countRaw ? parseInt(countRaw, 10) : 0;
+  if (sendCount >= 3) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
+  const sql = createSql(env);
+  try {
+    const [prospect] = await sql<Pick<ProspectRow, 'id' | 'email' | 'satellite_id'>[]>`
+      SELECT id, email, satellite_id FROM prospects WHERE id = ${prospectId}`;
+
+    if (!prospect) return errorResponse('Prospect not found', 404);
+    if (!prospect.email) return errorResponse('Prospect not identified', 403);
+
+    const newCount = sendCount + 1;
+    await env.SESSIONS.put(rateLimitKey, String(newCount), { expirationTtl: 86400 });
+
+    if (prospect.satellite_id) {
+      const [satConfig] = await sql<Pick<SatelliteConfigRow, 'domain'>[]>`
+        SELECT domain FROM satellite_configs WHERE id = ${prospect.satellite_id}`;
+      if (satConfig?.domain) {
+        const magicToken = await signMagicLinkToken(prospectId, env.PROSPECT_TOKEN_SECRET);
+        const satelliteUrl = `https://${satConfig.domain}`;
+        const { html, text } = buildMagicLinkEmail({ satelliteUrl, prospectId, token: magicToken });
+        await sendEmail(
+          { to: prospect.email, subject: 'Retrouvez vos résultats Callibrate', html, text },
+          { apiKey: env.RESEND_API_KEY, fromDomain: env.EMAIL_FROM_DOMAIN, replyTo: env.EMAIL_REPLY_TO },
+        );
+      }
+    }
+
+    ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+      distinctId: `prospect:${prospectId}`,
+      event: 'prospect.magic_link_resent',
+      properties: {},
+    }));
+
+    return jsonResponse({ sent: true });
+  } finally {
+    await sql.end();
+  }
 }
 
 // ── POST /api/prospects/:id/requirements — E03S08 (AC5) ───────────────────────

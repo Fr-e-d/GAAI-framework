@@ -6,7 +6,7 @@ import { authenticate } from './middleware/auth';
 import { handleRegister } from './handlers/experts/register';
 import { handleGetProfile, handlePatchProfile } from './handlers/experts/profile';
 import { handleSatelliteConfig } from './routes/satellites';
-import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify, handleCreateFromDirectory, handleProspectRequirements, handleProspectProjects } from './routes/prospects';
+import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify, handleCreateFromDirectory, handleProspectRequirements, handleProspectProjects, handleSessionValidate, handleMagicLinkValidate, handleMagicLinkResend } from './routes/prospects';
 import { handleCors, addCorsHeaders, corsForbidden } from './lib/cors';
 import { handleGcalAuthUrl, handleGcalStatus, handleGcalDisconnect, handleGcalCallback } from './handlers/experts/gcal';
 import { handleLsWebhook } from './handlers/webhooks/lemonsqueezy';
@@ -218,6 +218,36 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
         const response = await handleProspectProjects(request, env, prospectId, ctx);
         return addCorsHeaders(response, corsResult.origin);
       }
+
+      // POST /api/prospects/:id/magic-link/resend — E03S10 (AC8)
+      if (method === 'POST' && pathname === `/api/prospects/${prospectId}/magic-link/resend`) {
+        const response = await handleMagicLinkResend(request, env, prospectId, ctx);
+        return addCorsHeaders(response, corsResult.origin);
+      }
+    }
+
+    return addCorsHeaders(
+      new Response(JSON.stringify({ error: 'Not Found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }),
+      corsResult.origin,
+    );
+  }
+
+  // ── Auth routes — E03S10 (CORS-gated) ────────────────────────────────────────
+  if (pathname.startsWith('/api/auth/')) {
+    const corsResult = await handleCors(request, env);
+    if (corsResult.preflight) return corsResult.preflight;
+    if (!corsResult.allowed) return corsForbidden(corsResult.origin);
+
+    // GET /api/auth/session — validate prospect_session token
+    if (method === 'GET' && pathname === '/api/auth/session') {
+      const response = await handleSessionValidate(request, env);
+      return addCorsHeaders(response, corsResult.origin);
+    }
+
+    // POST /api/auth/magic-link/validate — exchange magic link token for session token
+    if (method === 'POST' && pathname === '/api/auth/magic-link/validate') {
+      const response = await handleMagicLinkValidate(request, env);
+      return addCorsHeaders(response, corsResult.origin);
     }
 
     return addCorsHeaders(

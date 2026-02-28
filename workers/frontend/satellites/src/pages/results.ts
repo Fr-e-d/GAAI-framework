@@ -11,11 +11,13 @@ function escapeHtml(str: string): string {
 }
 
 // E03S08: Merged Page 2 — extraction summary + confirmation questions + match results + email/OTP gate + full profiles + booking
+// E03S10: Optional session param enables return-visit mode (skips freetext+OTP gates)
 export function renderResultsPage(
   config: SatelliteConfig,
   posthogApiKey: string,
   coreApiUrl: string,
-  turnstileSiteKey: string
+  turnstileSiteKey: string,
+  session?: { sessionToken: string; prospectId: string },
 ): string {
   const theme = config.theme;
   const brand = config.brand;
@@ -43,11 +45,16 @@ export function renderResultsPage(
   const turnstileSdkScript = `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>`;
 
   // AC6: Inject config including turnstileSiteKey
-  const satConfigScript = `<script>window.__SAT__=${JSON.stringify({
+  // E03S10: Inject session data when present (return visit mode)
+  const satConfigData: Record<string, unknown> = {
     apiUrl: coreApiUrl,
     satelliteId: config.id,
     turnstileSiteKey: turnstileSiteKey,
-  }).replace(/</g, '\\u003c')};</script>`;
+  };
+  if (session) {
+    satConfigData['session'] = { token: session.sessionToken, prospectId: session.prospectId };
+  }
+  const satConfigScript = `<script>window.__SAT__=${JSON.stringify(satConfigData).replace(/</g, '\\u003c')};</script>`;
 
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -536,6 +543,7 @@ export function renderResultsPage(
     var mergedReqs={};
     var retryCount=0;
     var MAX_RETRIES=3;
+    var sessionToken=null; // E03S10: 7-day session token for return visits
     var waitStart=0;
     var networkErrorRetried=false;
     var isIdentifying=false;
@@ -551,6 +559,22 @@ export function renderResultsPage(
         ready_to_match:ext?ext.ready_to_match:null,
         needs_confirmation_count:ext&&Array.isArray(ext.needs_confirmation)?ext.needs_confirmation.length:0
       });
+    }
+
+    // E03S10 AC2: Return visit — check for server-injected session (from cookie or magic link)
+    if(window.__SAT__.session && window.__SAT__.session.token && window.__SAT__.session.prospectId){
+      sessionToken=window.__SAT__.session.token;
+      prospect_id=window.__SAT__.session.prospectId;
+      // Store in sessionStorage for this session (so API calls use it via Authorization header)
+      try{
+        sessionStorage.setItem('match:session_token',sessionToken);
+        sessionStorage.setItem('match:prospect_id',prospect_id);
+      }catch(e){}
+      // Skip funnel — jump directly to results
+      showEl('matches-loading');
+      firePostHog('prospect.return_visit_cookie',{prospect_id:prospect_id});
+      fetchMatchesWithSession();
+      return;
     }
 
     // AC1: Load extraction from sessionStorage
@@ -1105,6 +1129,53 @@ export function renderResultsPage(
       });
     }
 
+    // E03S10 AC2/AC3: Fetch matches using session token (return visit path)
+    function fetchMatchesWithSession(){
+      fetch(window.__SAT__.apiUrl+'/api/prospects/'+encodeURIComponent(prospect_id)+'/matches',{
+        headers:{'Authorization':'Bearer '+sessionToken}
+      })
+      .then(function(res){
+        if(!res.ok){
+          if(res.status===403||res.status===401){
+            // Session expired — clear and redirect to fresh start
+            try{sessionStorage.removeItem('match:session_token');sessionStorage.removeItem('match:prospect_id');}catch(e){}
+            firePostHog('prospect.session_expired',{prospect_id:prospect_id});
+            window.location.href='/match';return null;
+          }
+          throw{status:res.status};
+        }
+        return res.json();
+      })
+      .then(function(data){
+        if(!data)return;
+        matchesData=data.matches||[];
+        if(matchesData.length===0){
+          hideEl('matches-loading');
+          showEl('no-matches');
+          return;
+        }
+        renderAnonymizedCards(matchesData);
+        firePostHog('satellite.matches_viewed',{
+          satellite_id:window.__SAT__.satelliteId,
+          prospect_id:prospect_id,
+          match_count:matchesData.length,
+          top_score:matchesData[0]?matchesData[0].overall_score:null
+        });
+      })
+      .catch(function(err){
+        hideEl('matches-loading');
+        var errorMsg='Connexion interrompue. V\u00e9rifiez votre connexion et r\u00e9essayez.';
+        document.getElementById('fetch-error-msg').textContent=errorMsg;
+        showEl('fetch-error');
+        firePostHog('satellite.matching_error',{
+          satellite_id:window.__SAT__.satelliteId,
+          prospect_id:prospect_id,
+          error_type:'session_fetch_error',
+          page:'results'
+        });
+      });
+    }
+
     function handle202(data){
       if(retryCount===0){waitStart=Date.now();}
       if(retryCount>=MAX_RETRIES){
@@ -1348,6 +1419,15 @@ export function renderResultsPage(
           otpError.textContent='Code incorrect. '+(data.remaining_attempts||0)+' tentative(s) restante(s).';
           otpError.style.display='block';
           return;
+        }
+        // E03S10 AC1: Store session token for return visits (7-day persistence)
+        if(data.session_token){
+          sessionToken=data.session_token;
+          try{
+            sessionStorage.setItem('match:session_token',data.session_token);
+            localStorage.setItem('callibrate:session:token',data.session_token);
+            localStorage.setItem('callibrate:session:prospect_id',prospect_id);
+          }catch(e){}
         }
         // OTP verified — call identify (no email in body, taken from KV)
         return fetch(window.__SAT__.apiUrl+'/api/prospects/'+encodeURIComponent(prospect_id)+'/identify',{

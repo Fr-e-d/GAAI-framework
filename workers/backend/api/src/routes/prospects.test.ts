@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify, handleProspectRequirements, handleProspectProjects } from './prospects';
+import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify, handleProspectRequirements, handleProspectProjects, handleSessionValidate, handleMagicLinkValidate, handleMagicLinkResend } from './prospects';
 import type { Env } from '../types/env';
 
 vi.mock('../lib/db', () => ({
@@ -577,6 +577,15 @@ describe('handleOtpVerify — Core flow (E06S39 AC6)', () => {
     const body = await response.json() as Record<string, unknown>;
     expect(body['verified']).toBe(true);
     expect(body['email']).toBe('user@example.com');
+    // E03S10 AC1: session_token must be returned in body
+    expect(typeof body['session_token']).toBe('string');
+    expect((body['session_token'] as string).split('.').length).toBe(3); // JWT format
+    // E03S10 AC1: HttpOnly cookie must be set
+    const setCookie = response.headers.get('Set-Cookie');
+    expect(setCookie).toBeTruthy();
+    expect(setCookie).toContain('prospect_session=');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('Max-Age=604800');
     // verified KV token should be stored
     expect(mockSessions.put).toHaveBeenCalledWith(
       `verified:prospect-1`,
@@ -917,5 +926,230 @@ describe('handleProspectSubmit — anti-abuse max projects (E06S41 AC10)', () =>
         end: vi.fn().mockResolvedValue(undefined),
       }),
     );
+  });
+});
+
+// ── E03S10: handleSessionValidate ─────────────────────────────────────────────
+
+describe('handleSessionValidate — GET /api/auth/session (E03S10 AC2/AC3)', () => {
+  it('returns 401 when no token provided', async () => {
+    const request = new Request('https://test.workers.dev/api/auth/session', {
+      method: 'GET',
+      headers: { 'CF-Connecting-IP': '1.2.3.4' },
+    });
+    const response = await handleSessionValidate(request, makeMockEnv());
+    expect(response.status).toBe(401);
+  });
+
+  it('returns 401 when token is invalid', async () => {
+    const request = new Request('https://test.workers.dev/api/auth/session', {
+      method: 'GET',
+      headers: {
+        'CF-Connecting-IP': '1.2.3.4',
+        'Authorization': 'Bearer invalid.token.here',
+      },
+    });
+    const response = await handleSessionValidate(request, makeMockEnv());
+    expect(response.status).toBe(401);
+  });
+
+  it('returns 200 with prospect_id when session token is valid', async () => {
+    const { signProspectSessionToken } = await import('../lib/jwt');
+    const token = await signProspectSessionToken('prospect-abc', 'user@example.com', 'test-secret-32-chars-long-padding!!');
+
+    const request = new Request('https://test.workers.dev/api/auth/session', {
+      method: 'GET',
+      headers: {
+        'CF-Connecting-IP': '1.2.3.4',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    const response = await handleSessionValidate(request, makeMockEnv());
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body['prospect_id']).toBe('prospect-abc');
+    expect(body['email']).toBe('user@example.com');
+  });
+
+  it('returns 200 when session token is passed via Cookie header', async () => {
+    const { signProspectSessionToken } = await import('../lib/jwt');
+    const token = await signProspectSessionToken('prospect-xyz', 'test@example.com', 'test-secret-32-chars-long-padding!!');
+
+    const request = new Request('https://test.workers.dev/api/auth/session', {
+      method: 'GET',
+      headers: {
+        'CF-Connecting-IP': '1.2.3.4',
+        'Cookie': `prospect_session=${token}; other_cookie=value`,
+      },
+    });
+    const response = await handleSessionValidate(request, makeMockEnv());
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body['prospect_id']).toBe('prospect-xyz');
+  });
+});
+
+// ── E03S10: handleMagicLinkValidate ───────────────────────────────────────────
+
+describe('handleMagicLinkValidate — POST /api/auth/magic-link/validate (E03S10 AC5)', () => {
+  it('returns 422 when prospect_id or token missing', async () => {
+    const request = new Request('https://test.workers.dev/api/auth/magic-link/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '1.2.3.4' },
+      body: JSON.stringify({ prospect_id: 'abc' }),
+    });
+    const response = await handleMagicLinkValidate(request, makeMockEnv());
+    expect(response.status).toBe(422);
+  });
+
+  it('returns 401 when magic link token is invalid', async () => {
+    const request = new Request('https://test.workers.dev/api/auth/magic-link/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '1.2.3.4' },
+      body: JSON.stringify({ prospect_id: 'prospect-1', token: 'invalid.token.here' }),
+    });
+    const response = await handleMagicLinkValidate(request, makeMockEnv());
+    expect(response.status).toBe(401);
+  });
+
+  it('returns 401 when magic link token has wrong prospect_id', async () => {
+    const { signMagicLinkToken } = await import('../lib/jwt');
+    const token = await signMagicLinkToken('prospect-other', 'test-secret-32-chars-long-padding!!');
+    const request = new Request('https://test.workers.dev/api/auth/magic-link/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '1.2.3.4' },
+      body: JSON.stringify({ prospect_id: 'prospect-1', token }),
+    });
+    const response = await handleMagicLinkValidate(request, makeMockEnv());
+    expect(response.status).toBe(401);
+  });
+
+  it('returns session_token when magic link is valid and prospect has email', async () => {
+    const { createSql } = await import('../lib/db');
+    (createSql as ReturnType<typeof vi.fn>).mockImplementationOnce(() =>
+      Object.assign(
+        (async () => [{ id: 'prospect-1', email: 'user@example.com' }]) as unknown as ReturnType<typeof import('../lib/db').createSql>,
+        { begin: vi.fn(), end: vi.fn().mockResolvedValue(undefined) },
+      )
+    );
+
+    const { signMagicLinkToken } = await import('../lib/jwt');
+    const token = await signMagicLinkToken('prospect-1', 'test-secret-32-chars-long-padding!!');
+    const request = new Request('https://test.workers.dev/api/auth/magic-link/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '1.2.3.4' },
+      body: JSON.stringify({ prospect_id: 'prospect-1', token }),
+    });
+    const response = await handleMagicLinkValidate(request, makeMockEnv());
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(typeof body['session_token']).toBe('string');
+    expect((body['session_token'] as string).split('.').length).toBe(3);
+    expect(body['prospect_id']).toBe('prospect-1');
+
+    // Restore default mock
+    (createSql as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Object.assign((() => []) as unknown as ReturnType<typeof import('../lib/db').createSql>, {
+        begin: vi.fn(),
+        end: vi.fn().mockResolvedValue(undefined),
+      }),
+    );
+  });
+});
+
+// ── E03S10: handleMagicLinkResend ─────────────────────────────────────────────
+
+describe('handleMagicLinkResend — POST /api/prospects/:id/magic-link/resend (E03S10 AC8)', () => {
+  it('returns 429 when global rate limiter blocks the request', async () => {
+    const env = makeMockEnv({
+      RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: false }) },
+    });
+    const request = new Request('https://test.workers.dev/api/prospects/prospect-1/magic-link/resend', {
+      method: 'POST',
+      headers: { 'CF-Connecting-IP': '1.2.3.4' },
+    });
+    const response = await handleMagicLinkResend(request, env, 'prospect-1', mockCtx);
+    expect(response.status).toBe(429);
+  });
+
+  it('returns 429 when 3 resends already used (rate limit)', async () => {
+    const env = makeMockEnv({
+      SESSIONS: {
+        get: vi.fn().mockResolvedValue('3'),
+        put: vi.fn(),
+        delete: vi.fn(),
+      } as unknown as KVNamespace,
+    });
+    const request = new Request('https://test.workers.dev/api/prospects/prospect-1/magic-link/resend', {
+      method: 'POST',
+      headers: { 'CF-Connecting-IP': '1.2.3.4' },
+    });
+    const response = await handleMagicLinkResend(request, env, 'prospect-1', mockCtx);
+    expect(response.status).toBe(429);
+  });
+
+  it('returns 403 when prospect exists but has no email (not identified)', async () => {
+    const { createSql } = await import('../lib/db');
+    (createSql as ReturnType<typeof vi.fn>).mockImplementationOnce(() =>
+      Object.assign(
+        (async () => [{ id: 'prospect-1', email: null, satellite_id: 'sat-1' }]) as unknown as ReturnType<typeof import('../lib/db').createSql>,
+        { begin: vi.fn(), end: vi.fn().mockResolvedValue(undefined) },
+      )
+    );
+
+    const env = makeMockEnv({
+      SESSIONS: {
+        get: vi.fn().mockResolvedValue('0'),
+        put: vi.fn(),
+        delete: vi.fn(),
+      } as unknown as KVNamespace,
+    });
+    const request = new Request('https://test.workers.dev/api/prospects/prospect-1/magic-link/resend', {
+      method: 'POST',
+      headers: { 'CF-Connecting-IP': '1.2.3.4' },
+    });
+    const response = await handleMagicLinkResend(request, env, 'prospect-1', mockCtx);
+    expect(response.status).toBe(403);
+
+    // Restore
+    (createSql as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Object.assign((() => []) as unknown as ReturnType<typeof import('../lib/db').createSql>, {
+        begin: vi.fn(),
+        end: vi.fn().mockResolvedValue(undefined),
+      }),
+    );
+  });
+});
+
+// ── E03S10: handleProspectMatches session token (AC3) ─────────────────────────
+
+describe('handleProspectMatches — session token via Authorization header (E03S10 AC3)', () => {
+  it('returns 403 when Authorization bearer carries invalid session token', async () => {
+    const request = new Request('https://test.workers.dev/api/prospects/prospect-1/matches', {
+      method: 'GET',
+      headers: {
+        'CF-Connecting-IP': '1.2.3.4',
+        'Authorization': 'Bearer invalid.session.token',
+      },
+    });
+    const response = await handleProspectMatches(request, makeMockEnv(), 'prospect-1', mockCtx);
+    expect(response.status).toBe(403);
+  });
+
+  it('returns 200 with matches when valid session token provided via Authorization header', async () => {
+    const { signProspectSessionToken } = await import('../lib/jwt');
+    const token = await signProspectSessionToken('prospect-1', 'user@test.com', 'test-secret-32-chars-long-padding!!');
+
+    const request = new Request('https://test.workers.dev/api/prospects/prospect-1/matches', {
+      method: 'GET',
+      headers: {
+        'CF-Connecting-IP': '1.2.3.4',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    const response = await handleProspectMatches(request, makeMockEnv(), 'prospect-1', mockCtx);
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(Array.isArray(body['matches'])).toBe(true);
   });
 });

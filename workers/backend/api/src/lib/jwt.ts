@@ -279,6 +279,127 @@ export async function verifyProspectTokenGetClaims(
   return { prospect_id: claims.prospect_id };
 }
 
+// ── E03S10: Prospect session token — sign / verify ────────────────────────────
+// Long-lived (7 days) session token issued after OTP verification.
+// Stored in HttpOnly cookie (prospect_session) by Core API + in localStorage by satellite JS.
+// Payload: { prospect_id, email, purpose: 'prospect:session', exp, iss, aud: 'prospect:session' }
+
+export async function signProspectSessionToken(
+  prospectId: string,
+  email: string,
+  secret: string,
+): Promise<string> {
+  const encoder = new TextEncoder();
+  const exp = Math.floor(Date.now() / 1000) + 7 * 86400; // 7 days
+
+  const header = toBase64Url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
+  const payload = toBase64Url(
+    encoder.encode(JSON.stringify({ prospect_id: prospectId, email, purpose: 'prospect:session', exp, iss: 'callibrate', aud: 'prospect:session' })),
+  );
+  const signingInput = `${header}.${payload}`;
+
+  const key = await importHmacKey(secret, 'sign');
+  const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(signingInput));
+  return `${signingInput}.${toBase64Url(signatureBuffer)}`;
+}
+
+// Returns { prospect_id, email } if valid, null otherwise.
+export async function verifyProspectSessionToken(
+  token: string,
+  secret: string,
+): Promise<{ prospect_id: string; email: string } | null> {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  const [header, payload, sig] = parts as [string, string, string];
+  const signingInput = `${header}.${payload}`;
+
+  let signatureBytes: Uint8Array;
+  try {
+    signatureBytes = fromBase64Url(sig);
+  } catch {
+    return null;
+  }
+
+  const key = await importHmacKey(secret, 'verify');
+  const encoder = new TextEncoder();
+
+  const valid = await crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(signingInput));
+  if (!valid) return null;
+
+  let claims: { prospect_id?: string; email?: string; aud?: string; exp?: number };
+  try {
+    claims = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
+  } catch {
+    return null;
+  }
+
+  if (claims.exp === undefined || claims.exp < Math.floor(Date.now() / 1000)) return null;
+  if (claims.aud !== 'prospect:session') return null;
+  if (typeof claims.prospect_id !== 'string' || !claims.prospect_id) return null;
+  if (typeof claims.email !== 'string' || !claims.email) return null;
+
+  return { prospect_id: claims.prospect_id, email: claims.email };
+}
+
+// ── E03S10: Magic link token — sign / verify ──────────────────────────────────
+// Long-lived (7 days) one-use token embedded in "Vos résultats" email.
+// Payload: { prospect_id, purpose: 'prospect:magic_link', exp, iss, aud: 'prospect:magic_link' }
+
+export async function signMagicLinkToken(prospectId: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const exp = Math.floor(Date.now() / 1000) + 7 * 86400; // 7 days
+
+  const header = toBase64Url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
+  const payload = toBase64Url(
+    encoder.encode(JSON.stringify({ prospect_id: prospectId, purpose: 'prospect:magic_link', exp, iss: 'callibrate', aud: 'prospect:magic_link' })),
+  );
+  const signingInput = `${header}.${payload}`;
+
+  const key = await importHmacKey(secret, 'sign');
+  const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(signingInput));
+  return `${signingInput}.${toBase64Url(signatureBuffer)}`;
+}
+
+// Returns true if valid (signature + TTL + prospect_id match + correct audience).
+export async function verifyMagicLinkToken(
+  token: string,
+  prospectId: string,
+  secret: string,
+): Promise<boolean> {
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+
+  const [header, payload, sig] = parts as [string, string, string];
+  const signingInput = `${header}.${payload}`;
+
+  let signatureBytes: Uint8Array;
+  try {
+    signatureBytes = fromBase64Url(sig);
+  } catch {
+    return false;
+  }
+
+  const key = await importHmacKey(secret, 'verify');
+  const encoder = new TextEncoder();
+
+  const valid = await crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(signingInput));
+  if (!valid) return false;
+
+  let claims: { prospect_id?: string; aud?: string; exp?: number };
+  try {
+    claims = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
+  } catch {
+    return false;
+  }
+
+  if (claims.exp === undefined || claims.exp < Math.floor(Date.now() / 1000)) return false;
+  if (claims.aud !== 'prospect:magic_link') return false;
+  if (claims.prospect_id !== prospectId) return false;
+
+  return true;
+}
+
 // ── isValidProspectToken ───────────────────────────────────────────────────────
 // Verifies any prospect JWT (signature + TTL only — no prospect_id matching).
 // Used by AC9: if the caller holds a valid session token, they are identified and exempt

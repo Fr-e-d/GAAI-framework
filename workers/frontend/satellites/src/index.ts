@@ -176,18 +176,112 @@ app.get('/confirm', (c) => {
 });
 
 // ── Results page (/results) — merged page 2: extraction summary + confirmation + matches + email gate ──
-app.get('/results', (c) => {
+// E03S10 AC2: Server-side session check — reads prospect_session cookie, validates via Core API
+app.get('/results', async (c) => {
   const config = c.get('config');
+
+  // Read prospect_session cookie from incoming request
+  const cookieHeader = c.req.header('Cookie') ?? '';
+  const cookieToken = cookieHeader
+    .split(';')
+    .find((s) => s.trim().startsWith('prospect_session='))
+    ?.split('=')
+    .slice(1)
+    .join('=')
+    .trim();
+
+  let session: { sessionToken: string; prospectId: string } | undefined;
+  const responseHeaders: HeadersInit = {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+  };
+
+  if (cookieToken) {
+    // Validate session via Core API
+    try {
+      const sessionRes = await fetch(`${c.env.CORE_API_URL}/api/auth/session`, {
+        headers: { 'Authorization': `Bearer ${cookieToken}` },
+      });
+      if (sessionRes.ok) {
+        const sessionData = await sessionRes.json() as { prospect_id: string; email: string };
+        session = { sessionToken: cookieToken, prospectId: sessionData.prospect_id };
+      } else {
+        // Invalid/expired cookie — clear it
+        (responseHeaders as Record<string, string>)['Set-Cookie'] =
+          'prospect_session=; HttpOnly; Secure; SameSite=Lax; Max-Age=0; Path=/';
+      }
+    } catch {
+      // Network error — proceed without session (don't clear cookie)
+    }
+  }
+
   return new Response(
-    renderResultsPage(config, c.env.POSTHOG_API_KEY, c.env.CORE_API_URL, c.env.TURNSTILE_SITE_KEY),
-    {
+    renderResultsPage(config, c.env.POSTHOG_API_KEY, c.env.CORE_API_URL, c.env.TURNSTILE_SITE_KEY, session),
+    { status: 200, headers: responseHeaders },
+  );
+});
+
+// ── Magic link handler (/results/:prospectId) — E03S10 AC5 ───────────────────
+// Validates magic link token, sets session cookie, renders results page
+app.get('/results/:prospectId', async (c) => {
+  const config = c.get('config');
+  const prospectId = c.req.param('prospectId');
+  const magicToken = c.req.query('token');
+
+  if (!magicToken) {
+    // No token: redirect to fresh start
+    return new Response(null, {
+      status: 302,
+      headers: { Location: '/match', 'Cache-Control': 'no-store' },
+    });
+  }
+
+  // Exchange magic link token for session token via Core API
+  try {
+    const validateRes = await fetch(`${c.env.CORE_API_URL}/api/auth/magic-link/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prospect_id: prospectId, token: magicToken }),
+    });
+
+    if (!validateRes.ok) {
+      // Invalid/expired token — redirect to /match with message
+      const redirectUrl = '/match?error=link_expired';
+      return new Response(null, {
+        status: 302,
+        headers: { Location: redirectUrl, 'Cache-Control': 'no-store' },
+      });
+    }
+
+    const { session_token } = await validateRes.json() as { session_token: string };
+
+    const session = { sessionToken: session_token, prospectId };
+
+    // AC5: Fire-and-forget PostHog event — best effort
+    void fetch(`${c.env.CORE_API_URL}/api/auth/session`, {
+      headers: { 'Authorization': `Bearer ${session_token}` },
+    }).catch(() => {});
+
+    const html = renderResultsPage(
+      config, c.env.POSTHOG_API_KEY, c.env.CORE_API_URL, c.env.TURNSTILE_SITE_KEY, session,
+    );
+
+    return new Response(html, {
       status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store',
+        // AC5: Set HttpOnly cookie on satellite domain for future return visits
+        'Set-Cookie': `prospect_session=${session_token}; HttpOnly; Secure; SameSite=Lax; Max-Age=604800; Path=/`,
       },
-    }
-  );
+    });
+  } catch {
+    // Network error — redirect to fresh start
+    return new Response(null, {
+      status: 302,
+      headers: { Location: '/match', 'Cache-Control': 'no-store' },
+    });
+  }
 });
 
 // ── Expert directory (/experts) — AC1, AC2, AC3, AC6, AC7, AC8, AC9 ──────────
