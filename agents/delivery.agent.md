@@ -201,6 +201,7 @@ Tier 2 or 3? → assemble context bundle
                   → if merge fails: merge staging into branch, resolve, push, retry
                   → if merge rejected (checks): wait, retry
                   → verify staging deploy CI; if fails → ESCALATE with logs
+                  → BACKLOG VALIDATION CHECKPOINT (see below)
                   → flock: commit artefacts + mark done → push staging
                   → cleanup worktree + delete remote branch
                   → generate-build-in-public-content (non-blocking, best-effort)
@@ -262,19 +263,43 @@ Escalation target:
 
 ---
 
-## Cost & Duration Tracking
+## Delivery Metadata Fields (Non-Negotiable)
 
-Every delivery session must update the following fields on the Story's backlog entry:
+Every delivery session must update the following fields on the Story's backlog entry. All 6 fields are **mandatory** for any story marked `done`.
 
-| Field | When to set | Format |
-|-------|-------------|--------|
-| `started_at` | When marking `in_progress` (first session only) | ISO 8601 datetime with timezone |
-| `completed_at` | When marking `done` (QA PASS) | ISO 8601 datetime with timezone |
-| `cost_usd` | Post-session (cumulative across sessions) | Number — Claude Code `costUSD` value |
+| Field | When to set | Format | How |
+|-------|-------------|--------|-----|
+| `started_at` | When marking `in_progress` (first session only) | ISO 8601 datetime with timezone (e.g. `"2026-02-28T22:00:00Z"`) | `backlog-scheduler.sh --set-field {id} started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"` |
+| `completed_at` | When marking `done` (QA PASS) | ISO 8601 datetime with timezone | `backlog-scheduler.sh --set-field {id} completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"` |
+| `pr_url` | After `gh pr create` | Full GitHub PR URL (e.g. `"https://github.com/Fr-e-d/callibrate-core/pull/71"`) | `backlog-scheduler.sh --set-field {id} pr_url "$(gh pr view --json url -q .url)"` |
+| `pr_number` | After `gh pr create` | Integer — PR number | `backlog-scheduler.sh --set-field {id} pr_number "$(gh pr view --json number -q .number)"` |
+| `pr_status` | After `gh pr merge` | `merged` / `open` / `escalated` | `backlog-scheduler.sh --set-field {id} pr_status merged` |
+| `cost_usd` | Post-session (cumulative across sessions) | Number — Claude Code `costUSD` value | Auto-captured by `post-delivery-hook.sh` (Stop event). Manual fallback: `backlog-scheduler.sh --set-field {id} cost_usd <value>` |
 
-**`cost_usd` source:** The Claude Code CLI `/cost` command shows cumulative session cost at any time. The value displayed at session end (`costUSD` = `total_cost_usd`) is the authoritative total for that session. The Delivery Agent cannot capture it automatically — it must be entered post-session by the human operator (or via a post-session hook). If a Story spans multiple sessions, sum all session costs.
+**`cost_usd` source:** The Claude Code CLI `/cost` command shows cumulative session cost at any time. The value displayed at session end (`costUSD` = `total_cost_usd`) is the authoritative total for that session. If a Story spans multiple sessions, sum all session costs. The `post-delivery-hook.sh` Stop hook captures this automatically from the session transcript.
+
+**`ai_cost_usd` is deprecated.** Do not use this field. Use `cost_usd` only.
 
 These fields enable tracking total AI delivery time and API-equivalent cost vs Max subscription pricing.
+
+### Backlog Validation Checkpoint
+
+**Before the final `flock: commit artefacts + mark done` step**, the Delivery Agent MUST verify that all delivery metadata fields are present on the story entry. This is the "BACKLOG VALIDATION CHECKPOINT" referenced in the Orchestration Flow.
+
+Required fields checklist (all must be non-empty):
+1. `started_at` — should already be set from the `in_progress` step
+2. `completed_at` — set now (QA PASS timestamp)
+3. `pr_url` — set after PR creation/merge
+4. `pr_number` — set after PR creation/merge
+5. `pr_status` — set after PR merge (usually `merged`)
+6. `cost_usd` — set if available; if not, the post-delivery-hook will capture it at session end
+
+Additionally verify these Discovery-provided fields are present (warn if missing, do not block):
+- `human_md_estimate`
+- `human_cost_usd`
+- `artefact`
+
+If any of the 5 mandatory fields (1-5) are missing, set them before committing. `cost_usd` (field 6) is the only field that may be deferred to the post-delivery hook.
 
 ---
 
