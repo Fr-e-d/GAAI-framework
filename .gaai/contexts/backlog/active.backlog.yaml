@@ -1262,7 +1262,7 @@ items:
     epic: E06
     title: "AI agent API endpoints + MCP server foundation (DEC-126)"
     priority: low
-    status: refined
+    status: in_progress
     artefact: contexts/artefacts/stories/E06S43.story.md
     dependencies: [E06S39, E06S41]
     notes: "DEC-126: Dedicated API for AI agents (/api/v1/agent/*). Agent auth via API key tied to verified prospect (prospect creates key from dashboard). Endpoints: extract, match (anonymized), request_reveal (triggers human email), request_booking (triggers human confirmation). Rate limiting per API key. MCP server publishing Callibrate tools (callibrate_describe_project, callibrate_find_experts, callibrate_request_reveal, callibrate_request_booking). Monitor Visa TAP and Skyfire KYA protocols for agent identity standards. First-mover advantage — no marketplace has done this. Post-MVP — requires multi-project support (E06S41) and email infra (E06S39)."
