@@ -1240,6 +1240,7 @@ items:
     pr_number: 58
     pr_status: "merged"
     completed_at: "2026-02-28T13:09:57+0000"
+    cost_usd: 1.97
     artefact: contexts/artefacts/stories/E09S01.story.md
     dependencies: []
     notes: "Add tsc --noEmit + vitest run to core, satellite, posthog-proxy jobs in deploy-staging.yml. Aligns staging with preview-deploy.yml and deploy-production.yml which already have test gates. Highest impact, lowest effort."
