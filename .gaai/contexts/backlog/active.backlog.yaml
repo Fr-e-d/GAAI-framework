@@ -1210,6 +1210,7 @@ items:
     pr_number: 64
     pr_status: "merged"
     completed_at: "2026-02-28T16:56:00Z"
+    cost_usd: 6.25
     artefact: contexts/artefacts/stories/E03S09.story.md
     dependencies: [E03S01]
     notes: "DEC-119: Persistent hint text between label and textarea. Locale-aware (fr/en). Soft warning < 50 chars (1.5s debounce, amber, non-blocking). aria-describedby. DB migration: satellite_configs.locale TEXT column. 331/331 tests pass. QA PASS first cycle."
