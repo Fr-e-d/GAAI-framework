@@ -18,6 +18,18 @@ export function renderMatchPage(
   const brand = config.brand;
   const content = config.content;
 
+  const effectiveLocale: 'fr' | 'en' =
+    config.locale != null && config.locale.startsWith('fr') ? 'fr' : 'en';
+
+  const i18n = {
+    hintText: effectiveLocale === 'fr'
+      ? 'Quelques pistes pour nous aider\u00a0: votre probl\u00e8me ou objectif\u00a0\u00b7 les outils concern\u00e9s\u00a0\u00b7 votre budget approximatif\u00a0\u00b7 vos d\u00e9lais'
+      : 'A few pointers: your problem or goal \u00b7 tools involved \u00b7 approximate budget \u00b7 timeline',
+    softWarning: effectiveLocale === 'fr'
+      ? 'Quelques mots de plus aideront \u00e0 trouver le bon expert.'
+      : 'A few more words will help us find the right expert.',
+  };
+
   const cssVars = theme
     ? `:root {
       --color-primary: ${escapeHtml(theme.primary)};
@@ -108,6 +120,22 @@ export function renderMatchPage(
       line-height: 1.2;
       margin-bottom: 1.5rem;
       color: #1a1a2e;
+    }
+    #freetext-hint {
+      font-size: 0.9375rem;
+      color: #6b7280;
+      line-height: 1.5;
+      margin-bottom: 1rem;
+    }
+    #soft-warning {
+      font-size: 0.875rem;
+      color: #92400e;
+      background: #fffbeb;
+      border-left: 3px solid #f59e0b;
+      border-radius: 0.25rem;
+      padding: 0.4rem 0.75rem;
+      margin-top: 0.375rem;
+      display: none;
     }
     #match-form {
       width: 100%;
@@ -212,15 +240,16 @@ export function renderMatchPage(
     ${logoHtml}
     <h1>${escapeHtml(brand?.name ?? 'Callibrate')}</h1>
     <h2>D\u00e9crivez votre projet</h2>
+    <p id="freetext-hint">${i18n.hintText}</p>
     <form id="match-form" novalidate>
       <textarea
         id="match-text"
         name="text"
         maxlength="2000"
-        placeholder="D\u00e9crivez votre projet d&#39;int\u00e9gration IA\u00a0: quels probl\u00e8mes \u00e0 r\u00e9soudre, quels outils, quel secteur\u00a0?"
         rows="6"
-        aria-describedby="char-counter match-error"
+        aria-describedby="freetext-hint char-counter match-error"
       ></textarea>
+      <div id="soft-warning">${i18n.softWarning}</div>
       <div id="char-counter" aria-live="polite">0/2000</div>
       <div id="match-error" role="alert" aria-live="assertive" style="display:none"></div>
       <button type="submit" id="submit-btn" disabled>Analyser mon projet</button>
@@ -240,6 +269,10 @@ export function renderMatchPage(
     var WARN_CHARS=1800;
     var MAX_CHARS=2000;
     var isSubmitting=false;
+    var softWarningEl=document.getElementById('soft-warning');
+    var softWarnTimer=null;
+    var SOFT_WARN_CHARS=50;
+    var SOFT_WARN_DELAY=1500;
 
     // AC10: Restore textarea text from sessionStorage on back navigation
     try{
@@ -270,6 +303,12 @@ export function renderMatchPage(
       errorDiv.style.display='none';
       errorDiv.textContent='';
     }
+    function showSoftWarning(){
+      if(softWarningEl)softWarningEl.style.display='block';
+    }
+    function hideSoftWarning(){
+      if(softWarningEl)softWarningEl.style.display='none';
+    }
     function updateCounter(){
       var len=textarea.value.length;
       counter.textContent=len+'/'+MAX_CHARS;
@@ -285,15 +324,23 @@ export function renderMatchPage(
       }
     }
 
-    // AC2: Character counter on input
+    // AC2: Character counter on input + AC4 soft warning
     textarea.addEventListener('input',function(){
       updateCounter();
+      clearTimeout(softWarnTimer);
+      hideSoftWarning();
+      var len=textarea.value.length;
+      if(len>0&&len<SOFT_WARN_CHARS){
+        softWarnTimer=setTimeout(showSoftWarning,SOFT_WARN_DELAY);
+      }
     });
 
     // AC2 + AC3–AC6: Form submission
     form.addEventListener('submit',function(e){
       e.preventDefault();
       if(isSubmitting)return;
+      clearTimeout(softWarnTimer);
+      hideSoftWarning();
       var text=textarea.value;
       if(text.length<MIN_CHARS){
         showError('Veuillez d\u00e9crire votre projet en au moins 30 caract\u00e8res.');
