@@ -1,4 +1,4 @@
-name: Publish framework branch
+name: Publish _subtree-export branch
 on:
   push:
     branches: [production]
@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Split .gaai/core/ to framework branch
+      - name: Split .gaai/core/ to _subtree-export branch
         run: |
-          git subtree split --prefix=.gaai/core -b framework-build
-          git push origin framework-build:framework --force
+          git subtree split --prefix=.gaai/core -b _subtree-export-build
+          git push origin _subtree-export-build:_subtree-export --force

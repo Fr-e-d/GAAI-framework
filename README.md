@@ -210,6 +210,16 @@ Fork or clone. Run `install.sh`. Adapt the rules, memory, and skills to your pro
 
 ---
 
+## Branches
+
+| Branch | Purpose |
+|---|---|
+| `staging` | Active development — PRs target this branch |
+| `production` | Stable releases — merged from staging |
+| `_subtree-export` | Auto-generated. Contains `.gaai/core/` content at root for `git subtree` consumers. Do not use directly. |
+
+---
+
 ## Documentation
 
 - [Quick Start](docs/guides/quick-start.md) — first working Story in 30 minutes
