@@ -37,12 +37,10 @@ updated_at: 2026-02-28
 
 **1. Widget JS embed abandonné.** Aucun snippet embeddable ne sera développé. E03S04 (page profil expert) est le point d'entrée unique pour le trafic expert-originated.
 
-**2. Mode direct sur la page profil.** Le paramètre `?ref=direct` active un rendu minimaliste de la page `/experts/{slug}` :
-- Sans navigation globale callibrate.io
-- Sans suggestions d'autres experts (pas de sidebar, pas de "Also available")
-- Sans fil d'Ariane directory
-- Contenu : profil expert + formulaire freetext + booking widget + attribution "Powered by Callibrate"
-- L'expert partage **toujours** la variante `callibrate.io/experts/{slug}?ref=direct` (pas l'URL directory générique)
+**2. URL de booking direct : `/book/{slug}?t={token}`** (remplace `?ref=direct`). Deux URLs distinctes sur callibrate.io :
+- `callibrate.io/experts/{slug}` — indexée, anonymisée, SEO. Si un prospect arrive ici via Google ou une IA et booke → `lead_source='callibrate'` → expert paie (DEC-67). Callibrate a fait la découverte.
+- `callibrate.io/book/{slug}?t={token}` — noindex, profil complet, formulaire de booking. URL partagée par l'expert lui-même. Token HMAC valide → `lead_source='direct'` → gratuit. L'expert a fait la découverte.
+- L'expert partage **toujours** `callibrate.io/book/{slug}?t={token}` — jamais l'URL directory générique.
 
 **3. Sources valides pour le lien direct :** site portfolio de l'expert, blog, Google Business Profile, bio LinkedIn, profil Reddit, Discord — tout support où l'expert est présent.
 
@@ -50,30 +48,41 @@ updated_at: 2026-02-28
 - Sites web (HTML `<a href>` sans `rel="nofollow"`) → backlink dofollow éditorial vers callibrate.io — valeur réelle
 - Réseaux sociaux (LinkedIn, Reddit, Discord) → `nofollow` par défaut — brand mentions uniquement (SEO-001 AKU-015), pas de link equity
 
-**5. Pricing des leads expert-originated :** Bookings issus du trafic `?ref=direct` = **gratuits dans le quota mensuel**. Aucun billing trigger. Rationale : l'expert a fait le travail d'acquisition — Callibrate a fourni l'infrastructure de qualification + scheduling uniquement. Quota : 100 soumissions/mois par expert (canal direct + tous canaux expert-originated confondus). Au-delà du quota : message "Calendrier complet, prenez contact directement" — pas d'erreur bloquante.
+**5. Attribution et pricing — mécanisme HMAC :** L'attribution repose sur un **token HMAC-SHA256 signé** (pas sur le referrer HTTP — instable, stripped par les privacy browsers et iOS Safari).
 
-**6. Cas limite — rebond vers un autre expert :** Si le prospect arrive en mode direct (expert A) et finit par booker un expert B après navigation : tarif standard DEC-67 s'applique (Callibrate a fourni la valeur de découverte). Attribution via `ref` + `src={expert_slug}` dans l'URL.
+- **Design du token :** `t = base64url(HMAC-SHA256(DIRECT_LINK_SECRET, "{expert_id}:{nonce}"))`. `DIRECT_LINK_SECRET` = secret Worker env var (Cloudflare secret binding). `nonce` = `experts.direct_link_nonce` (TEXT, UUID v4, unique par expert, rotatable depuis le dashboard).
+- **Validation stateless :** le Worker recalcule le HMAC et compare. Pas de DB lookup pour valider — juste le nonce stocké en DB pour permettre la rotation.
+- **Token valide** → `lead_source='direct'` → **gratuit**. L'expert a fait le travail d'acquisition ; Callibrate a fourni l'infrastructure.
+- **Token absent ou invalide** (prospect arrivé via Google, IA, navigation directe, lien partagé secondaire) → `lead_source='callibrate'` → **facturation DEC-67**. Callibrate a fait la découverte.
+- **Rotation :** L'expert peut régénérer son lien depuis le dashboard (`PATCH /api/experts/:id/direct-link-token`). Le nonce est mis à jour en DB → l'ancien token est immédiatement invalide → anciens liens partagés = facturation DEC-67 à l'avenir.
+- **Quota mensuel (garde secondaire) :** 100 soumissions/mois par expert, indépendamment de la validité du token. Au-delà → message gracieux "Agenda complet pour ce mois-ci" — pas d'erreur bloquante. Protection anti-abus (ex. token diffusé massivement sur un forum).
 
-**7. Email validation en mode direct :** L'OTP inline (DEC-121) est remplacé par un **email de confirmation avec lien magique** (click-to-confirm, TTL 24h). Rationale : il n'y a pas de billing trigger en mode direct, donc l'OTP haute-friction n'est pas justifié. MX check + disposable email blacklist restent actifs. Logique DEC-129 (purge abandoned 24h) s'applique.
+**6. Communication transparente — règle non-négociable :** La règle "qui a amené le prospect paie" doit être communiquée de façon **crystal clear** sur tous les supports experts : page d'accueil Callibrate (expert-facing), wizard d'onboarding (E02S02), dashboard (section "Lien de réservation directe"), et tout support commercial. Formulation cible : *"Vous partagez votre lien → le prospect vient à vous → **gratuit**. Callibrate vous trouve un prospect → vous payez."* Aucune ambiguité n'est acceptable — un expert qui découvre la facturation DEC-67 sans l'avoir vue expliquée avant = violation de confiance. Artefact : AC à ajouter dans E02S02 (onboarding wizard), E01 landing page expert, et E02S12 AC18 (dashboard section).
 
-**8. Bot protection :** DEC-120 s'applique intégralement sans modification. Le trafic est sur callibrate.io — aucune nouvelle infrastructure de sécurité requise. Avantage structurel majeur vs widget embed.
+**7. Cas limite — rebond vers un autre expert :** Si le prospect arrive en mode direct (expert A) et finit par booker un expert B après navigation : tarif standard DEC-67 s'applique (Callibrate a fourni la valeur de découverte). Attribution via `ref` + `src={expert_slug}` dans l'URL.
 
-**9. Données et analytics :**
+**8. Email validation en mode direct :** L'OTP inline (DEC-121) est remplacé par un **email de confirmation avec lien magique** (click-to-confirm, TTL 24h). Rationale : il n'y a pas de billing trigger en mode direct, donc l'OTP haute-friction n'est pas justifié. MX check + disposable email blacklist restent actifs. Logique DEC-129 (purge abandoned 24h) s'applique.
+
+**9. Bot protection :** DEC-120 s'applique intégralement sans modification. Le trafic est sur callibrate.io — aucune nouvelle infrastructure de sécurité requise. Avantage structurel majeur vs widget embed.
+
+**10. Données et analytics :**
 - `lead_source: 'direct'` sur le booking record (nouveau champ)
 - Extraction requirements → alimente les signaux de profil expert (skills manquants, calibration prix)
 - Dashboard expert : section "Demandes via votre lien direct" (budget médian, stack mentionnée, type de projet)
 - Pas d'intégration au composite_score avant validation empirique de la corrélation qualité
 
-**10. E03S06 non affecté.** E03S06 (inline booking widget sur satellite sites) sert les prospects qui naviguent le funnel satellite — contexte entièrement différent. Inchangé.
+**11. E03S06 non affecté.** E03S06 (inline booking widget sur satellite sites) sert les prospects qui naviguent le funnel satellite — contexte entièrement différent. Inchangé.
 
-**11. Crédit DEC-117 non affecté.** Le lien direct est une feature gratuite disponible dès M1 (Matchable). Ce n'est pas un milestone supplémentaire — aucun crédit n'y est attaché.
+**12. Crédit DEC-117 non affecté.** Le lien direct est une feature gratuite disponible dès M1 (Matchable). Ce n'est pas un milestone supplémentaire — aucun crédit n'y est attaché.
 
 **Impact artefacts :**
-- `E03S04.story.md` : ajouter AC11 — rendu mode direct (`?ref=direct`) : supprime navigation globale + suggestions autres experts + fil d'Ariane. Ajouter AC12 — quota mensuel : vérification `direct_submissions_this_month` avant extraction LLM, retour gracieux si dépassé. Ajouter PostHog event `expert.direct_booking_submitted` (expert_slug, src_channel, quota_remaining).
-- Nouveau champ DB : `bookings.lead_source ENUM('callibrate', 'direct')` (ou `TEXT` pour extensibilité future)
-- Nouveau compteur DB : `experts.direct_submissions_this_month INT DEFAULT 0` + reset cron mensuel
+- `E02S12.story.md` (NEW) : page profil hébergée callibrate.io — route `/experts/:slug` (standard, indexée, anonymisée) + route `/book/:slug` (direct, noindex, profil complet). Booking flow complet en mode direct : HMAC token validation (primaire) → quota check (secondaire) → freetext → AI extraction → slots → magic link email. Dashboard section "Lien de réservation directe" avec copie du lien signé + rotation `direct_link_nonce`.
+- `E03S04.story.md` : AC11 uniquement — CTA "Prendre un rendez-vous direct" → `callibrate.io/book/:slug?t={token}` (URL pré-calculée server-side depuis le token de l'expert).
+- Nouveaux champs DB sur `bookings` : `lead_source TEXT NOT NULL DEFAULT 'callibrate' CHECK (lead_source IN ('callibrate', 'direct'))`
+- Nouveaux champs DB sur `experts` : `direct_link_nonce TEXT NOT NULL DEFAULT gen_random_uuid()::text`, `direct_submissions_this_month INT NOT NULL DEFAULT 0`, `direct_submissions_reset_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+- Reset cron mensuel (`0 0 1 * *`) : `UPDATE experts SET direct_submissions_this_month = 0, direct_submissions_reset_at = now()`
 
-**Fichiers :** `.gaai/contexts/artefacts/stories/E03S04.story.md`
+**Fichiers :** `.gaai/contexts/artefacts/stories/E02S12.story.md`, `.gaai/contexts/artefacts/stories/E03S04.story.md`
 **Decided by:** Founder + Discovery Agent
 **Date:** 2026-02-28
 
