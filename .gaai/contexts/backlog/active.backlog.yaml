@@ -1233,9 +1233,13 @@ items:
     epic: E09
     title: "Pre-deploy test gates in deploy-staging.yml"
     priority: high
-    status: in_progress
+    status: done
     human_md_estimate: 0.3
     human_cost_usd: 210
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/58"
+    pr_number: 58
+    pr_status: "merged"
+    completed_at: "2026-02-28T13:09:57+0000"
     artefact: contexts/artefacts/stories/E09S01.story.md
     dependencies: []
     notes: "Add tsc --noEmit + vitest run to core, satellite, posthog-proxy jobs in deploy-staging.yml. Aligns staging with preview-deploy.yml and deploy-production.yml which already have test gates. Highest impact, lowest effort."
