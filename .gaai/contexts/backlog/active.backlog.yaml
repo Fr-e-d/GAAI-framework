@@ -1205,10 +1205,14 @@ items:
     epic: E03
     title: "Freetext input UX: persistent hint text (DEC-119)"
     priority: low
-    status: in_progress
+    status: done
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/64"
+    pr_number: 64
+    pr_status: "merged"
+    completed_at: "2026-02-28T16:56:00Z"
     artefact: contexts/artefacts/stories/E03S09.story.md
     dependencies: [E03S01]
-    notes: "DEC-119: Replace current textarea guidance with persistent hint text between label and textarea (not placeholder). 'Quelques pistes pour nous aider : votre problème ou objectif · les outils concernés · votre budget approximatif · vos délais'. Conversational tone. Language matches satellite config. Client-side soft warning if < 50 chars. Standard UX pattern (Material Design, GOV.UK). Small change — can be bundled with E03S08 or delivered standalone."
+    notes: "DEC-119: Persistent hint text between label and textarea. Locale-aware (fr/en). Soft warning < 50 chars (1.5s debounce, amber, non-blocking). aria-describedby. DB migration: satellite_configs.locale TEXT column. 331/331 tests pass. QA PASS first cycle."
 
   - id: E06S41
     epic: E06
