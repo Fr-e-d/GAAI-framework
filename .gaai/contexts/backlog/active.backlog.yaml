@@ -802,7 +802,7 @@ items:
     epic: E03
     title: "Prospect waiting state — credible feedback & resilient errors"
     priority: medium
-    status: refined
+    status: in_progress
     human_md_estimate: 0.8
     human_cost_usd: 560
     artefact: contexts/artefacts/stories/E03S11.story.md
