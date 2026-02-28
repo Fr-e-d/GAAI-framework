@@ -183,6 +183,8 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
   }
 
   const sql = createSql(env);
+  // Ensure connection is released back to Hyperdrive pool after each request
+  try {
 
   // Load satellite config
   const [satellite] = await sql<Pick<SatelliteConfigRow, 'quiz_schema' | 'matching_weights'>[]>`
@@ -411,6 +413,10 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     token,
     token_expires_at: expiresAt,
   });
+
+  } finally {
+    ctx.waitUntil(sql.end());
+  }
 }
 
 // ── GET /api/prospects/:id/matches?token=xxx ───────────────────────────────────
@@ -449,9 +455,10 @@ export async function handleProspectMatches(
     WHERE prospect_id = ${prospectId} AND status != 'expired'
     ORDER BY score DESC`;
 
-  // AC6: defensive guard — empty matches table
+  // Matching is synchronous (E06S24) — token is only issued after matching completes.
+  // 0 matches means no experts are available, not "still computing".
   if (!matches || matches.length === 0) {
-    return jsonResponse({ status: 'computing', estimated_seconds: 5 }, 202);
+    return jsonResponse({ matches: [] });
   }
 
   // Load expert profiles for anonymized fields
