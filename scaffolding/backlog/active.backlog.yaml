@@ -1,0 +1,18 @@
+# GAAI Active Backlog
+# Execution queue — contains only Stories that are validated and ready for Delivery.
+# Rules:
+#   - One item = one Story
+#   - Must have a corresponding artefact with acceptance criteria
+#   - Keep under ~20 items; archive completed items to done/
+#   - Only Discovery may add items; only Delivery may update status
+
+# Example item (remove before using):
+# - id: E01S01
+#   epic: E01
+#   title: "Example story title"
+#   priority: high
+#   status: refined
+#   artefact: contexts/artefacts/stories/E01S01.story.md
+#   dependencies: []
+
+items: []
