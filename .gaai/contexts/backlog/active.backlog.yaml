@@ -802,9 +802,13 @@ items:
     epic: E03
     title: "Prospect waiting state — credible feedback & resilient errors"
     priority: medium
-    status: in_progress
+    status: done
     human_md_estimate: 0.8
     human_cost_usd: 560
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/60"
+    pr_number: 60
+    pr_status: "merged"
+    completed_at: "2026-02-28T13:48:10+00:00"
     artefact: contexts/artefacts/stories/E03S11.story.md
     dependencies: [E03S02, E03S03]
     notes: "Discovery 2026-02-28. 7 ACs. Three gaps: (A) /confirm loading message too small/muted for a high-stakes action, (B) /results 202-computing gives no reassurance during 10s+ waits, (C) error states are generic dead ends with no fallback path. Approach: honest feedback (no fake progress steppers or rotating messages — evaluated and rejected), silent first retry on /results, specific error messages per type, /experts fallback link on all error states. PostHog error tracking. Low effort — text/style + one retry mechanism, no new APIs."
