@@ -1233,7 +1233,7 @@ items:
     epic: E09
     title: "Pre-deploy test gates in deploy-staging.yml"
     priority: high
-    status: refined
+    status: in_progress
     human_md_estimate: 0.3
     human_cost_usd: 210
     artefact: contexts/artefacts/stories/E09S01.story.md
