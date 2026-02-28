@@ -47,5 +47,17 @@
       "Edit(.claude/settings.local.json)",
       "Edit(.githooks/pre-push)"
     ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .gaai/scripts/post-delivery-hook.sh"
+          }
+        ]
+      }
+    ]
   }
 }
