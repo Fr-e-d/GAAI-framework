@@ -1268,6 +1268,7 @@ items:
     status: in_progress
     human_md_estimate: 0.5
     human_cost_usd: 350
+    cost_usd: 0.69
     artefact: contexts/artefacts/stories/E09S02.story.md
     dependencies: [E09S03]
     notes: "Add deploy-matching job to deploy-staging.yml and deploy-production.yml. Core depends on matching-engine via Service Binding → deploy-matching must run before deploy-core (needs dependency). 6 ACs."
