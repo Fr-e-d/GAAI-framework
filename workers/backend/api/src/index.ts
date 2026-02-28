@@ -1,3 +1,4 @@
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import { Env } from './types/env';
 export { ExpertPoolDO } from './durable-objects/expertPoolDO';
 import { handleMatchCompute, handleMatchGet } from './routes/matches';
@@ -57,6 +58,68 @@ import { agentAuth } from './middleware/agentAuth';
 // CF Workflows — must be named exports so the runtime can locate the classes
 export { BookingConfirmedWorkflow } from './workflows/booking-confirmed.workflow';
 export { BookingCompletedWorkflow } from './workflows/booking-completed.workflow';
+
+// ── SatelliteRPC — Named entrypoint for satellite server-side calls (DEC-133) ──
+// Satellite Worker binds to this entrypoint via wrangler.toml:
+//   [[env.staging.services]]
+//   binding = "CORE_API"
+//   service = "callibrate-core-staging"
+//   entrypoint = "SatelliteRPC"
+export class SatelliteRPC extends WorkerEntrypoint<Env> {
+  // ── getPublicExperts — expert directory listing (server-side render) ─────────
+  async getPublicExperts(options: {
+    vertical?: string | null;
+    page?: number;
+    per_page?: number;
+    skills?: string;
+  }) {
+    const params = new URLSearchParams();
+    if (options.vertical) params.set('vertical', options.vertical);
+    if (options.page) params.set('page', String(options.page));
+    if (options.per_page) params.set('per_page', String(options.per_page));
+    if (options.skills) params.set('skills', options.skills);
+
+    const request = new Request(`https://rpc/api/experts/public?${params}`, {
+      headers: { 'CF-Connecting-IP': 'rpc-internal' },
+    });
+    const response = await handleGetPublicExperts(request, this.env);
+    if (!response.ok) throw new Error(`getPublicExperts failed: ${response.status}`);
+    return response.json();
+  }
+
+  // ── getPublicExpertBySlug — single expert detail (server-side render) ────────
+  async getPublicExpertBySlug(slug: string) {
+    const request = new Request(`https://rpc/api/experts/public/${encodeURIComponent(slug)}`, {
+      headers: { 'CF-Connecting-IP': 'rpc-internal' },
+    });
+    const response = await handleGetPublicExpertBySlug(request, this.env, slug);
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`getPublicExpertBySlug failed: ${response.status}`);
+    return response.json();
+  }
+
+  // ── validateSession — verify prospect_session cookie (return visit) ──────────
+  async validateSession(token: string): Promise<{ prospect_id: string; email: string } | null> {
+    const request = new Request('https://rpc/api/auth/session', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    const response = await handleSessionValidate(request, this.env);
+    if (!response.ok) return null;
+    return response.json() as Promise<{ prospect_id: string; email: string }>;
+  }
+
+  // ── validateMagicLink — exchange magic link token for session token ──────────
+  async validateMagicLink(prospectId: string, token: string): Promise<{ session_token: string; prospect_id: string; email: string } | null> {
+    const request = new Request('https://rpc/api/auth/magic-link/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prospect_id: prospectId, token }),
+    });
+    const response = await handleMagicLinkValidate(request, this.env);
+    if (!response.ok) return null;
+    return response.json() as Promise<{ session_token: string; prospect_id: string; email: string }>;
+  }
+}
 
 const QUEUES = ['email-notifications', 'lead-billing', 'score-computation'] as const;
 
@@ -645,20 +708,28 @@ export default {
     }
   },
 
-  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
-    await handleScheduled(controller, env);
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    try {
+      await handleScheduled(controller, env);
+    } finally {
+      cleanupPendingSql(ctx);
+    }
   },
 
-  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
-    if (batch.queue.includes('email-notifications')) {
-      await consumeEmailNotifications(batch as MessageBatch<EmailNotificationMessage>, env);
-    } else if (batch.queue.includes('lead-billing')) {
-      await consumeLeadBilling(batch as MessageBatch<LeadBillingMessage>, env);
-    } else if (batch.queue.includes('score-computation')) {
-      await consumeScoreComputation(batch as MessageBatch<ScoreComputationMessage>, env);
-    } else {
-      console.warn('queue: unknown queue', batch.queue);
-      batch.ackAll();
+  async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
+    try {
+      if (batch.queue.includes('email-notifications')) {
+        await consumeEmailNotifications(batch as MessageBatch<EmailNotificationMessage>, env);
+      } else if (batch.queue.includes('lead-billing')) {
+        await consumeLeadBilling(batch as MessageBatch<LeadBillingMessage>, env);
+      } else if (batch.queue.includes('score-computation')) {
+        await consumeScoreComputation(batch as MessageBatch<ScoreComputationMessage>, env);
+      } else {
+        console.warn('queue: unknown queue', batch.queue);
+        batch.ackAll();
+      }
+    } finally {
+      cleanupPendingSql(ctx);
     }
   },
 } satisfies ExportedHandler<Env>;

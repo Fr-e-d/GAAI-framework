@@ -1,12 +1,16 @@
 // ── callibrate-matching Worker ─────────────────────────────────────────────────
 // Compute-heavy operations: Vectorize semantic search, D1 edge cache, scoring.
-// Accessed from callibrate-core via Service Binding (MATCHING_SERVICE) — zero network hop.
+// Accessed from callibrate-core via RPC Service Binding (MATCHING_SERVICE) — zero network hop.
 //
-// Routes:
-//   POST /match           — full scoring pipeline for a prospect
-//   POST /embed           — upsert a single expert embedding into Vectorize
-//   POST /admin/reindex   — batch reindex all expert embeddings
+// RPC methods (preferred — DEC-133):
+//   match(data)           — full scoring pipeline for a prospect
+//   embed(data)           — upsert a single expert embedding into Vectorize
+//   reindex()             — batch reindex all expert embeddings
+//
+// HTTP routes (backward compat / direct access):
+//   POST /match, POST /embed, POST /admin/reindex
 
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import type { MatchingEnv } from './env';
 import { createSql } from './db';
 import { loadExpertPool } from './expertPool';
@@ -433,29 +437,78 @@ async function handleAdminReindex(request: Request, env: MatchingEnv, ctx: Execu
   return jsonResponse({ queued: total }, 202);
 }
 
-// ── Worker entry ─────────────────────────────────────────────────────────────
+// ── RPC + HTTP entry ──────────────────────────────────────────────────────────
 
-export default {
-  async fetch(request: Request, env: MatchingEnv, ctx: ExecutionContext): Promise<Response> {
+export default class MatchingEngine extends WorkerEntrypoint<MatchingEnv> {
+  // ── HTTP handler (backward compat + direct access) ──────────────────────────
+  async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
     const { method } = request;
 
     if (method === 'POST' && pathname === '/match') {
-      return handleMatch(request, env, ctx);
+      return handleMatch(request, this.env, this.ctx);
     }
 
     if (method === 'POST' && pathname === '/embed') {
-      return handleEmbed(request, env, ctx);
+      return handleEmbed(request, this.env, this.ctx);
     }
 
     if (method === 'POST' && pathname === '/admin/reindex') {
-      return handleAdminReindex(request, env, ctx);
+      return handleAdminReindex(request, this.env, this.ctx);
     }
 
     return new Response(JSON.stringify({ error: 'Not Found' }), {
       status: 404,
       headers: JSON_HEADERS,
     });
-  },
-} satisfies ExportedHandler<MatchingEnv>;
+  }
+
+  // ── RPC: match — full scoring pipeline for a prospect ───────────────────────
+  async match(data: { prospect_id: string; satellite_id: string; project_id: string | null }) {
+    const request = new Request('https://rpc/match', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(data),
+    });
+    const response = await handleMatch(request, this.env, this.ctx);
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(body);
+    }
+    return response.json();
+  }
+
+  // ── RPC: embed — upsert expert embedding into Vectorize ─────────────────────
+  async embed(data: {
+    expert_id: string;
+    profile: Record<string, unknown>;
+    rate_min: number | null;
+    rate_max: number | null;
+    availability: string | null;
+    outcome_tags?: string[];
+  }) {
+    const request = new Request('https://rpc/embed', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(data),
+    });
+    const response = await handleEmbed(request, this.env, this.ctx);
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(body);
+    }
+    return response.json();
+  }
+
+  // ── RPC: reindex — batch reindex all expert embeddings ──────────────────────
+  async reindex() {
+    const request = new Request('https://rpc/admin/reindex', { method: 'POST' });
+    const response = await handleAdminReindex(request, this.env, this.ctx);
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(body);
+    }
+    return response.json();
+  }
+}

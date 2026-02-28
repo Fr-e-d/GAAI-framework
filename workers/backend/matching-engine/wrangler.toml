@@ -37,7 +37,7 @@ name = "callibrate-matching-staging"
 
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
-id = "cc93b8f0e9554e4f8c1dbd9ad83688f5"
+id = "f5f975a02a87411080a536169790440c"
 
 # D1 edge database — provisioned E06S27
 [[env.staging.d1_databases]]

@@ -262,7 +262,7 @@ async function handleIdentifiedProjectSubmit(
       // Update existing project requirements + expire its matches
       await sql`
         UPDATE prospect_projects
-        SET requirements = ${JSON.stringify(requirements)}::jsonb, freetext = ${freetextStr}, updated_at = now()
+        SET requirements = ${sql.json(requirements)}, freetext = ${freetextStr}, updated_at = now()
         WHERE id = ${existingProjectId as string}`;
       await sql`
         UPDATE matches SET status = 'expired'
@@ -271,7 +271,7 @@ async function handleIdentifiedProjectSubmit(
       // Create new prospect_projects row
       const [newProj] = await sql<Pick<ProspectProjectRow, 'id'>[]>`
         INSERT INTO prospect_projects (prospect_id, satellite_id, freetext, requirements, status)
-        VALUES (${prospectId}, ${satellite_id}, ${freetextStr}, ${JSON.stringify(requirements)}::jsonb, 'active')
+        VALUES (${prospectId}, ${satellite_id}, ${freetextStr}, ${sql.json(requirements)}, 'active')
         RETURNING id`;
       if (!newProj) return errorResponse('Database error', 500);
       existingProjectId = newProj.id;
@@ -282,29 +282,21 @@ async function handleIdentifiedProjectSubmit(
 
   const projectId = existingProjectId!;
 
-  // Call matching engine (SQL closed before this)
+  // Call matching engine via RPC (SQL closed before this — DEC-133)
   if (env.MATCHING_SERVICE) {
     try {
-      const matchResp = await env.MATCHING_SERVICE.fetch(
-        new Request('https://matching/match', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prospect_id: prospectId, satellite_id, project_id: projectId }),
-        })
-      );
-      if (matchResp.ok) {
-        // Update matches to set project_id (MATCHING_SERVICE inserts without project_id)
-        const sqlLink = createSql(env);
-        try {
-          await sqlLink`UPDATE matches SET project_id = ${projectId} WHERE prospect_id = ${prospectId} AND project_id IS NULL`;
-        } finally {
-          await sqlLink.end();
-        }
-        const { token, expiresAt } = await signProspectToken(prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
-        return jsonResponse({ prospect_id: prospectId, project_id: projectId, token, token_expires_at: expiresAt });
+      await env.MATCHING_SERVICE.match({ prospect_id: prospectId, satellite_id, project_id: projectId });
+      // Update matches to set project_id (MATCHING_SERVICE inserts without project_id)
+      const sqlLink = createSql(env);
+      try {
+        await sqlLink`UPDATE matches SET project_id = ${projectId} WHERE prospect_id = ${prospectId} AND project_id IS NULL`;
+      } finally {
+        await sqlLink.end();
       }
+      const { token, expiresAt } = await signProspectToken(prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+      return jsonResponse({ prospect_id: prospectId, project_id: projectId, token, token_expires_at: expiresAt });
     } catch (err) {
-      console.error('[submit/fast-track] MATCHING_SERVICE.fetch failed, falling back', err);
+      console.error('[submit/fast-track] MATCHING_SERVICE RPC match() failed, falling back', err);
     }
   }
 
@@ -369,7 +361,7 @@ async function handleIdentifiedProjectSubmit(
       for (const row of top20Rows) {
         await sqlFallback`
           INSERT INTO matches (prospect_id, project_id, expert_id, score, score_breakdown, status, expires_at)
-          VALUES (${row.prospect_id}, ${row.project_id}, ${row.expert_id}, ${row.score}, ${JSON.stringify(row.score_breakdown)}::jsonb, ${row.status}, ${row.expires_at})
+          VALUES (${row.prospect_id}, ${row.project_id}, ${row.expert_id}, ${row.score}, ${sql.json(row.score_breakdown)}, ${row.status}, ${row.expires_at})
           ON CONFLICT DO NOTHING`;
       }
     }
@@ -493,7 +485,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     console.log('[submit] inserting prospect...');
     const [p] = await sql<Pick<ProspectRow, 'id'>[]>`
       INSERT INTO prospects (satellite_id, quiz_answers, requirements, status, utm_source, utm_campaign, utm_content)
-      VALUES (${satellite_id}, ${JSON.stringify(answers)}::jsonb, ${JSON.stringify(requirements)}::jsonb, 'anonymous', ${typeof utm_source === 'string' ? utm_source : null}, ${typeof utm_campaign === 'string' ? utm_campaign : null}, ${typeof utm_content === 'string' ? utm_content : null})
+      VALUES (${satellite_id}, ${sql.json(answers)}, ${sql.json(requirements)}, 'anonymous', ${typeof utm_source === 'string' ? utm_source : null}, ${typeof utm_campaign === 'string' ? utm_campaign : null}, ${typeof utm_content === 'string' ? utm_content : null})
       RETURNING id`;
     prospect = p;
     if (!prospect) return errorResponse('Database error', 500);
@@ -503,7 +495,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     const freetextVal = typeof body['freetext'] === 'string' ? body['freetext'].trim() : '';
     const [projectRow] = await sql<Pick<ProspectProjectRow, 'id'>[]>`
       INSERT INTO prospect_projects (prospect_id, satellite_id, freetext, requirements, status)
-      VALUES (${prospect.id}, ${satellite_id}, ${freetextVal}, ${JSON.stringify(requirements)}::jsonb, 'active')
+      VALUES (${prospect.id}, ${satellite_id}, ${freetextVal}, ${sql.json(requirements)}, 'active')
       RETURNING id`;
     newProjectId = projectRow?.id ?? null;
     console.log('[submit] prospect_projects row created:', newProjectId);
@@ -523,73 +515,66 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     console.log('[submit] SQL connection closed');
   }
 
-  // Phase 2: Call matching engine via service binding (SQL is now closed)
-  // AC4 (E06S24): Delegate scoring to callibrate-matching via Service Binding (zero network hop)
+  // Phase 2: Call matching engine via RPC Service Binding (SQL is now closed)
+  // AC4 (E06S24, DEC-133): Delegate scoring to callibrate-matching via RPC (zero network hop)
   // AC6: Fallback to local deterministic scoring when MATCHING_SERVICE not bound
   if (env.MATCHING_SERVICE) {
     try {
-      console.log('[submit] calling MATCHING_SERVICE.fetch...');
-      const matchResp = await env.MATCHING_SERVICE.fetch(
-        new Request('https://matching/match', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prospect_id: prospect!.id, satellite_id }),
-        })
-      );
-      console.log('[submit] MATCHING_SERVICE responded:', matchResp.status);
-      if (matchResp.ok) {
-        const matchBody = await matchResp.json() as {
-          computed: number;
-          top_matches: unknown[];
-          billing_excluded?: { expert_id: string; reason: string }[];
-          admissibility_excluded?: { expert_id: string; reason: string }[];
-        };
-        console.log('[submit] matching done, computed:', matchBody.computed);
-        const billingExcluded = matchBody.billing_excluded ?? [];
-        if (billingExcluded.length > 0) {
-          const lpResult = calculateLeadPrice(
-            requirements!.budget_range?.max ?? null,
-            { budget_max: requirements!.budget_range?.max ?? null }
-          );
-          for (const ex of billingExcluded) {
-            ctx.waitUntil(
-              env.EMAIL_NOTIFICATIONS.send({
-                type: 'expert.billing.lead_missed',
-                expert_id: ex.expert_id,
-                reason: ex.reason as 'insufficient_balance' | 'max_lead_price_exceeded' | 'spending_limit_reached',
-                prospect_vertical: satellite_id,
-                budget_tier: lpResult.tier,
-              })
-            );
-          }
-        }
-        const admissibilityExcludedMS = matchBody.admissibility_excluded ?? [];
-        for (const ex of admissibilityExcludedMS) {
+      console.log('[submit] calling MATCHING_SERVICE.match() via RPC...');
+      const matchBody = await env.MATCHING_SERVICE.match({
+        prospect_id: prospect!.id,
+        satellite_id,
+        project_id: null,
+      }) as {
+        computed: number;
+        top_matches: unknown[];
+        billing_excluded?: { expert_id: string; reason: string }[];
+        admissibility_excluded?: { expert_id: string; reason: string }[];
+      };
+      console.log('[submit] matching done, computed:', matchBody.computed);
+      const billingExcluded = matchBody.billing_excluded ?? [];
+      if (billingExcluded.length > 0) {
+        const lpResult = calculateLeadPrice(
+          requirements!.budget_range?.max ?? null,
+          { budget_max: requirements!.budget_range?.max ?? null }
+        );
+        for (const ex of billingExcluded) {
           ctx.waitUntil(
             env.EMAIL_NOTIFICATIONS.send({
-              type: 'expert.admissibility.lead_missed',
+              type: 'expert.billing.lead_missed',
               expert_id: ex.expert_id,
-              reason: ex.reason,
+              reason: ex.reason as 'insufficient_balance' | 'max_lead_price_exceeded' | 'spending_limit_reached',
               prospect_vertical: satellite_id,
+              budget_tier: lpResult.tier,
             })
           );
         }
-        // E06S41: Link matches to project_id
-        if (newProjectId) {
-          const sqlLink = createSql(env);
-          try {
-            await sqlLink`UPDATE matches SET project_id = ${newProjectId} WHERE prospect_id = ${prospect!.id} AND project_id IS NULL`;
-          } finally {
-            await sqlLink.end();
-          }
-        }
-        const { token, expiresAt } = await signProspectToken(prospect!.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
-        console.log('[submit] SUCCESS — prospect_id:', prospect!.id);
-        return jsonResponse({ prospect_id: prospect!.id, project_id: newProjectId, token, token_expires_at: expiresAt });
       }
-      console.error('[submit] MATCHING_SERVICE returned', matchResp.status, '— falling back to local scoring');
+      const admissibilityExcludedMS = matchBody.admissibility_excluded ?? [];
+      for (const ex of admissibilityExcludedMS) {
+        ctx.waitUntil(
+          env.EMAIL_NOTIFICATIONS.send({
+            type: 'expert.admissibility.lead_missed',
+            expert_id: ex.expert_id,
+            reason: ex.reason,
+            prospect_vertical: satellite_id,
+          })
+        );
+      }
+      // E06S41: Link matches to project_id
+      if (newProjectId) {
+        const sqlLink = createSql(env);
+        try {
+          await sqlLink`UPDATE matches SET project_id = ${newProjectId} WHERE prospect_id = ${prospect!.id} AND project_id IS NULL`;
+        } finally {
+          await sqlLink.end();
+        }
+      }
+      const { token, expiresAt } = await signProspectToken(prospect!.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+      console.log('[submit] SUCCESS — prospect_id:', prospect!.id);
+      return jsonResponse({ prospect_id: prospect!.id, project_id: newProjectId, token, token_expires_at: expiresAt });
     } catch (err) {
-      console.error('[submit] MATCHING_SERVICE.fetch failed, falling back to local scoring', err);
+      console.error('[submit] MATCHING_SERVICE RPC match() failed, falling back to local scoring', err);
     }
   }
 
@@ -694,7 +679,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     for (const row of top20Rows) {
       await sqlFallback`
         INSERT INTO matches (prospect_id, expert_id, project_id, score, score_breakdown, status, expires_at)
-        VALUES (${row.prospect_id}, ${row.expert_id}, ${newProjectId}, ${row.score}, ${JSON.stringify(row.score_breakdown)}::jsonb, ${row.status}, ${row.expires_at})
+        VALUES (${row.prospect_id}, ${row.expert_id}, ${newProjectId}, ${row.score}, ${sql.json(row.score_breakdown)}, ${row.status}, ${row.expires_at})
         ON CONFLICT DO NOTHING`;
     }
   }
@@ -1399,7 +1384,7 @@ export async function handleProspectRequirements(
   try {
     // Update prospect requirements
     await sql`
-      UPDATE prospects SET requirements = ${JSON.stringify(normalized)}::jsonb WHERE id = ${prospectId}`;
+      UPDATE prospects SET requirements = ${sql.json(normalized)} WHERE id = ${prospectId}`;
 
     // E06S41: Expire matches for the specific project if provided, else all prospect matches
     if (typeof project_id === 'string' && project_id) {

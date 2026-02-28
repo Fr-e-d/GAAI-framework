@@ -61,23 +61,25 @@ export async function handleMatchCompute(request: Request, env: Env, ctx: Execut
 
   const effectiveSatelliteId = satellite_id ?? prospect.satellite_id;
 
-  // AC4 (E06S24): Delegate to callibrate-matching via Service Binding (zero network hop)
+  // AC4 (E06S24, DEC-133): Delegate to callibrate-matching via RPC Service Binding (zero network hop)
   // AC6: Fallback to local deterministic scoring when MATCHING_SERVICE not bound
   if (env.MATCHING_SERVICE) {
-    const matchResp = await env.MATCHING_SERVICE.fetch(
-      new Request('https://matching/match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prospect_id, satellite_id, project_id: typeof project_id === 'string' && project_id ? project_id : null }),
-      })
-    );
-    if (!matchResp.ok) return matchResp;
-    const matchBody = await matchResp.json() as {
+    let matchBody: {
       computed: number;
       top_matches: unknown[];
       billing_excluded?: { expert_id: string; reason: string }[];
       admissibility_excluded?: { expert_id: string; reason: string }[];
     };
+    try {
+      matchBody = await env.MATCHING_SERVICE.match({
+        prospect_id,
+        satellite_id,
+        project_id: typeof project_id === 'string' && project_id ? project_id : null,
+      }) as typeof matchBody;
+    } catch (err) {
+      console.error('[matches] RPC match() failed:', err);
+      return errorResponse('Matching service error', 502);
+    }
     const billingExcluded = matchBody.billing_excluded ?? [];
     if (billingExcluded.length > 0) {
       const reqs = (prospect.requirements ?? {}) as { budget_range?: { max?: number } };
@@ -226,7 +228,7 @@ export async function handleMatchCompute(request: Request, env: Env, ctx: Execut
     for (const { expert, matchScore } of top20) {
       await sql`
         INSERT INTO matches (prospect_id, expert_id, project_id, score, score_breakdown, status, expires_at)
-        VALUES (${prospect_id}, ${expert.id}, ${typeof project_id === 'string' && project_id ? project_id : null}, ${matchScore.score}, ${JSON.stringify(matchScore.breakdown)}::jsonb, 'pending', ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()})
+        VALUES (${prospect_id}, ${expert.id}, ${typeof project_id === 'string' && project_id ? project_id : null}, ${matchScore.score}, ${sql.json(matchScore.breakdown)}, 'pending', ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()})
         ON CONFLICT DO NOTHING`;
     }
   }

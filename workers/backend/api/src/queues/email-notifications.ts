@@ -128,44 +128,47 @@ async function sendBookingConfirmedEmails(
   env: Env
 ): Promise<void> {
   const sql = createSql(env);
+  try {
+    // Fetch expert gcal_email
+    const [expert] = await sql<Pick<ExpertRow, 'gcal_email' | 'display_name'>[]>`
+      SELECT gcal_email, display_name FROM experts WHERE id = ${body.expert_id}`;
 
-  // Fetch expert gcal_email
-  const [expert] = await sql<Pick<ExpertRow, 'gcal_email' | 'display_name'>[]>`
-    SELECT gcal_email, display_name FROM experts WHERE id = ${body.expert_id}`;
+    if (!expert?.gcal_email) {
+      throw new Error(`Expert not found or no email for ${body.expert_id}`);
+    }
 
-  if (!expert?.gcal_email) {
-    throw new Error(`Expert not found or no email for ${body.expert_id}`);
+    // Fetch prospect email
+    const [prospect] = await sql<Pick<ProspectRow, 'email'>[]>`
+      SELECT email FROM prospects WHERE id = ${body.prospect_id}`;
+
+    if (!prospect?.email) {
+      throw new Error(`Prospect not found or no email for ${body.prospect_id}`);
+    }
+
+    // Email to expert
+    await sendResendEmail(
+      env.RESEND_API_KEY,
+      expert.gcal_email,
+      'New booking confirmed',
+      `<p>Hi ${expert.display_name ?? 'Expert'},</p><p>A new call has been booked with a prospect.</p><p>Meeting link: <a href="${body.meeting_url}">${body.meeting_url}</a></p><p>Scheduled: ${body.scheduled_at}</p>`,
+      `Hi ${expert.display_name ?? 'Expert'},\n\nA new call has been booked with a prospect.\n\nMeeting link: ${body.meeting_url}\n\nScheduled: ${body.scheduled_at}`,
+      env.EMAIL_FROM_DOMAIN || 'callibrate.io',
+      env.EMAIL_REPLY_TO || 'support@callibrate.io'
+    );
+
+    // Email to prospect
+    await sendResendEmail(
+      env.RESEND_API_KEY,
+      prospect.email,
+      'Your booking is confirmed',
+      `<p>Your call has been confirmed.</p><p>Meeting link: <a href="${body.meeting_url}">${body.meeting_url}</a></p><p>Scheduled: ${body.scheduled_at}</p>`,
+      `Your call has been confirmed.\n\nMeeting link: ${body.meeting_url}\n\nScheduled: ${body.scheduled_at}`,
+      env.EMAIL_FROM_DOMAIN || 'callibrate.io',
+      env.EMAIL_REPLY_TO || 'support@callibrate.io'
+    );
+  } finally {
+    await sql.end();
   }
-
-  // Fetch prospect email
-  const [prospect] = await sql<Pick<ProspectRow, 'email'>[]>`
-    SELECT email FROM prospects WHERE id = ${body.prospect_id}`;
-
-  if (!prospect?.email) {
-    throw new Error(`Prospect not found or no email for ${body.prospect_id}`);
-  }
-
-  // Email to expert
-  await sendResendEmail(
-    env.RESEND_API_KEY,
-    expert.gcal_email,
-    'New booking confirmed',
-    `<p>Hi ${expert.display_name ?? 'Expert'},</p><p>A new call has been booked with a prospect.</p><p>Meeting link: <a href="${body.meeting_url}">${body.meeting_url}</a></p><p>Scheduled: ${body.scheduled_at}</p>`,
-    `Hi ${expert.display_name ?? 'Expert'},\n\nA new call has been booked with a prospect.\n\nMeeting link: ${body.meeting_url}\n\nScheduled: ${body.scheduled_at}`,
-    env.EMAIL_FROM_DOMAIN || 'callibrate.io',
-    env.EMAIL_REPLY_TO || 'support@callibrate.io'
-  );
-
-  // Email to prospect
-  await sendResendEmail(
-    env.RESEND_API_KEY,
-    prospect.email,
-    'Your booking is confirmed',
-    `<p>Your call has been confirmed.</p><p>Meeting link: <a href="${body.meeting_url}">${body.meeting_url}</a></p><p>Scheduled: ${body.scheduled_at}</p>`,
-    `Your call has been confirmed.\n\nMeeting link: ${body.meeting_url}\n\nScheduled: ${body.scheduled_at}`,
-    env.EMAIL_FROM_DOMAIN || 'callibrate.io',
-    env.EMAIL_REPLY_TO || 'support@callibrate.io'
-  );
 }
 
 async function sendBookingConfirmedEnrichedEmail(

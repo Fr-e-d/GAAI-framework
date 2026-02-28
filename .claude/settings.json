@@ -54,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .gaai/scripts/post-delivery-hook.sh"
+            "command": "bash .gaai/core/scripts/post-delivery-hook.sh"
           }
         ]
       }

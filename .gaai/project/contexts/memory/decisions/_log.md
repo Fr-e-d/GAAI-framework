@@ -23,6 +23,45 @@ updated_at: 2026-02-28
 
 ---
 
+### DEC-133 — Worker-to-Worker communication: mandatory Cloudflare RPC Service Bindings
+
+**Context:** Staging UI audit (2026-02-28) revealed all Worker-to-Worker communication used fetch-based Service Bindings (`env.BINDING.fetch(new Request(...))`). Three patterns found: (1) API → Matching Engine via `MATCHING_SERVICE.fetch()` with synthetic Request objects; (2) Satellite → Core API via `CORE_API.fetch()` (staging only — production had NO service binding); (3) Satellite auth calls used plain HTTP fetch to `CORE_API_URL` (not even a service binding). CF RPC Service Bindings (via `WorkerEntrypoint` classes) eliminate all HTTP serialization boilerplate, provide type-safe method calls, and use Structured Clone (not JSON) for data transfer.
+
+**Decision:**
+
+1. **All Worker-to-Worker calls MUST use CF RPC Service Bindings** — never fetch-based bindings, never plain HTTP to public URLs. RPC is the canonical CF pattern since `compatibility_date >= "2024-04-03"`.
+2. **Matching Engine** exports `default class extends WorkerEntrypoint<MatchingEnv>` with RPC methods: `match()`, `embed()`, `reindex()`. HTTP `fetch()` handler retained for backward compat.
+3. **Core API** exports named `SatelliteRPC extends WorkerEntrypoint<Env>` for satellite-facing server-side calls: `getPublicExperts()`, `getPublicExpertBySlug()`, `validateSession()`, `validateMagicLink()`. Default export stays as `{ fetch, scheduled, queue }` (WorkerEntrypoint cannot have scheduled/queue handlers).
+4. **Satellite Worker** uses `env.CORE_API.getPublicExperts(...)` (RPC) for all server-side calls. Client-side browser JS continues using HTTP fetch to `CORE_API_URL` (browser cannot use RPC).
+5. **Service Bindings in ALL environments** — staging AND production `wrangler.toml` must declare `[[env.*.services]]` bindings. Dev falls back gracefully (binding optional).
+6. **Satellite HTML caching removed** — dynamic HTML pages (`/`, `/experts`, `/experts/:slug`) set `Cache-Control: no-store`. Caching of dynamic data is the backend's responsibility, not the frontend.
+7. **wrangler.toml binding config** for RPC uses `entrypoint` field for named entrypoints: `entrypoint = "SatelliteRPC"`.
+
+**Impact:** Eliminates HTTP serialization boilerplate, provides type-safe W2W calls, fixes missing production service binding, removes stale HTML caching from satellite.
+
+**Files:** `workers/backend/matching-engine/src/index.ts`, `workers/backend/api/src/index.ts`, `workers/backend/api/src/types/env.ts`, `workers/backend/api/src/routes/matches.ts`, `workers/backend/api/src/handlers/experts/register.ts`, `workers/backend/api/src/handlers/experts/profile.ts`, `workers/frontend/satellites/src/index.ts`, `workers/frontend/satellites/src/types/env.ts`, `workers/frontend/satellites/wrangler.toml`, `workers/backend/api/wrangler.toml`
+
+---
+
+### DEC-132 — Centralized SQL connection cleanup: safety net for Hyperdrive pool exhaustion
+
+**Context:** E09 CI/CD audit smoke tests revealed HTTP 500 / error 1101 on staging. Investigation traced to Hyperdrive pool exhaustion: 13+ request handlers called `createSql(env)` without `sql.end()`, leaking postgres.js connections. Hyperdrive's `origin_connection_limit: 60` saturated. The pool could NOT be recovered by config updates, caching toggles, or Worker redeployments — only delete+recreate flushed stale connections.
+
+**Decision:**
+
+1. **`db.ts` centralized tracking:** Module-level `_pendingCleanup` array tracks all `createSql()` instances. `cleanupPendingSql(ctx)` closes them all via `ctx.waitUntil()`.
+2. **All three handler exports wrapped:** `fetch()`, `queue()`, and `scheduled()` in `index.ts` call `cleanupPendingSql(ctx)` in their `finally` blocks. No handler can bypass cleanup.
+3. **Connection params hardened:** `max: 1` (was `5`), `prepare: false`, `connect_timeout: 10`, `idle_timeout: 5`.
+4. **Defense in depth:** Individual handlers SHOULD still close with `sql.end()` in try/finally. The centralized cleanup is a safety net, not a replacement.
+5. **Hyperdrive session mode:** Port 5432 (Supavisor session mode) preferred — port 6543 (PgBouncer transaction mode) is redundant with Hyperdrive's own pooling.
+6. **Recovery procedure documented:** Delete+recreate is the ONLY way to flush a saturated Hyperdrive pool. Runbook in Claude Code auto-memory: `memory/infra-hyperdrive-runbook.md`.
+
+**Impact:** Prevents future Hyperdrive pool exhaustion. Without this, any new handler that forgets `sql.end()` would silently contribute to pool pressure until the system goes down.
+
+**Files:** `src/lib/db.ts`, `src/index.ts`, `src/queues/email-notifications.ts`, `src/queues/lead-billing.ts`, `src/queues/score-computation.ts`
+
+---
+
 ### DEC-131 — Expert direct traffic: page profil hébergée (mode direct) remplace le widget JS embed
 
 **Context:** Durant la session Discovery 2026-02-28, un widget JS embeddable sur le site de l'expert a été proposé pour permettre aux experts de recevoir des leads depuis leur propre site tout en générant des backlinks SEO vers callibrate.io. Après analyse comparative (industry standards, modèle de coût, UX, compatibilité stack), le concept de widget embed a été abandonné au profit d'une approche plus simple : la page profil hébergée sur callibrate.io avec un mode direct.

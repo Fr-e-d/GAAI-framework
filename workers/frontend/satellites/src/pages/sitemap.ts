@@ -1,9 +1,17 @@
 import type { SatelliteConfig } from '../types/config';
 
 // AC7 (E03S04): Fetch expert slugs from Core API to include individual profile URLs in sitemap.
-// CF-edge-cached at 86400s — fetched once per day per edge node.
-async function fetchExpertSlugs(coreApiUrl: string, vertical: string | null): Promise<string[]> {
+// DEC-133: RPC when available, HTTP fallback.
+async function fetchExpertSlugs(coreApiUrl: string, vertical: string | null, coreApiBinding?: import('../types/env').CoreApiRPC): Promise<string[]> {
   try {
+    if (coreApiBinding) {
+      const data = await coreApiBinding.getPublicExperts({
+        vertical: vertical || null,
+        page: 1,
+        per_page: 50,
+      }) as { experts?: { slug: string }[] };
+      return (data.experts ?? []).map((e) => e.slug).filter(Boolean);
+    }
     const url = new URL(`${coreApiUrl}/api/experts/public`);
     url.searchParams.set('per_page', '50');
     url.searchParams.set('page', '1');
@@ -20,9 +28,10 @@ async function fetchExpertSlugs(coreApiUrl: string, vertical: string | null): Pr
 export async function renderSitemapXml(
   config: SatelliteConfig,
   coreApiUrl?: string,
+  coreApiBinding?: import('../types/env').CoreApiRPC,
 ): Promise<string> {
-  const slugs = coreApiUrl
-    ? await fetchExpertSlugs(coreApiUrl, config.vertical)
+  const slugs = coreApiUrl || coreApiBinding
+    ? await fetchExpertSlugs(coreApiUrl ?? '', config.vertical, coreApiBinding)
     : [];
 
   const expertProfileUrls = slugs.length > 0

@@ -91,35 +91,56 @@ export async function renderExpertsDirectoryPage(
   config: SatelliteConfig,
   posthogApiKey: string,
   coreApiUrl: string,
+  coreApiBinding?: import('../types/env').CoreApiRPC,
 ): Promise<string> {
   const theme = config.theme;
   const brand = config.brand;
   const vertical = config.vertical ?? '';
   const verticalLabel = config.content?.vertical_label ?? vertical ?? 'Automatisation';
 
-  // AC1: Fetch from Core API server-side
+  // AC1: Fetch from Core API server-side (DEC-133: RPC when available, HTTP fallback)
   let experts: AnonymizedExpert[] = [];
   let total = 0;
   let allSkills: string[] = [];
   try {
-    const apiUrl = new URL(`${coreApiUrl}/api/experts/public`);
-    if (vertical) apiUrl.searchParams.set('vertical', vertical);
-    apiUrl.searchParams.set('per_page', '12');
-    apiUrl.searchParams.set('page', '1');
-    const res = await fetch(apiUrl.toString());
-    if (res.ok) {
-      const data: ExpertsApiResponse = await res.json();
-      experts = data.experts ?? [];
-      total = data.total ?? 0;
-      // Collect unique skills for filter bar
-      const skillSet = new Set<string>();
-      for (const e of experts) {
-        for (const s of e.skills) skillSet.add(s);
+    let data: ExpertsApiResponse;
+
+    if (coreApiBinding) {
+      // RPC path — zero network hop, no HTTP overhead
+      console.log('[experts-directory] RPC getPublicExperts, vertical:', vertical);
+      data = await coreApiBinding.getPublicExperts({
+        vertical: vertical || null,
+        page: 1,
+        per_page: 12,
+      }) as ExpertsApiResponse;
+    } else {
+      // HTTP fallback (dev / binding not configured)
+      const apiUrl = new URL(`${coreApiUrl}/api/experts/public`);
+      if (vertical) apiUrl.searchParams.set('vertical', vertical);
+      apiUrl.searchParams.set('per_page', '12');
+      apiUrl.searchParams.set('page', '1');
+      console.log('[experts-directory] HTTP fetch:', apiUrl.toString());
+      const res = await fetch(apiUrl.toString());
+      if (!res.ok) {
+        const body = await res.text();
+        console.error('[experts-directory] API error:', res.status, body.substring(0, 200));
+        data = { experts: [], total: 0, page: 1, per_page: 12 };
+      } else {
+        data = await res.json();
       }
-      allSkills = Array.from(skillSet).slice(0, 12);
     }
-  } catch {
-    // Graceful degradation — empty state
+
+    experts = data.experts ?? [];
+    total = data.total ?? 0;
+    console.log('[experts-directory] loaded', experts.length, 'experts, total:', total);
+    // Collect unique skills for filter bar
+    const skillSet = new Set<string>();
+    for (const e of experts) {
+      for (const s of e.skills) skillSet.add(s);
+    }
+    allSkills = Array.from(skillSet).slice(0, 12);
+  } catch (err) {
+    console.error('[experts-directory] fetch failed:', err);
   }
 
   const cssVars = theme

@@ -1,3 +1,23 @@
+// DEC-133: RPC Service Binding interface for callibrate-matching Worker
+export interface MatchingServiceRPC {
+  fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
+  match(data: { prospect_id: string; satellite_id: string; project_id: string | null }): Promise<{
+    computed: number;
+    top_matches: unknown[];
+    billing_excluded?: { expert_id: string; reason: string }[];
+    admissibility_excluded?: { expert_id: string; reason: string }[];
+  }>;
+  embed(data: {
+    expert_id: string;
+    profile: Record<string, unknown>;
+    rate_min: number | null;
+    rate_max: number | null;
+    availability: string | null;
+    outcome_tags?: string[];
+  }): Promise<{ ok: boolean }>;
+  reindex(): Promise<{ queued: number }>;
+}
+
 export interface Env {
   // Hyperdrive binding (AC2)
   HYPERDRIVE: Hyperdrive;
@@ -26,9 +46,10 @@ export interface Env {
   AI: Ai;
   VECTORIZE: VectorizeIndex;
 
-  // Service Binding — callibrate-matching Worker (AC2, E06S24)
+  // RPC Service Binding — callibrate-matching Worker (AC2, E06S24, DEC-133)
+  // Exposes RPC methods: match(), embed(), reindex()
   // Optional: falls back to local deterministic scoring when not bound (dev/test, AC6)
-  MATCHING_SERVICE?: Fetcher;
+  MATCHING_SERVICE?: MatchingServiceRPC;
 
   // Durable Object — expert pool write coordinator (AC1–AC5, E06S25)
   // Optional: graceful degradation when not yet provisioned
