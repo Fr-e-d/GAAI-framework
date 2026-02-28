@@ -48,7 +48,7 @@ Skip when adding small features, tweaking existing flows, or implementing obviou
 
 ## Output Format
 
-Produces a file at `contexts/artefacts/prd/{name}.prd.md` using `contexts/artefacts/_template.prd.md`:
+Produces a file at `contexts/artefacts/prd/{name}.prd.md` using `contexts/artefacts/prd/_template.prd.md`:
 
 Key sections:
 - Vision
