@@ -818,7 +818,7 @@ items:
     epic: E03
     title: "Expert directory + profile pages (/experts, /experts/:slug)"
     priority: medium
-    status: refined
+    status: in_progress
     human_md_estimate: 3.7
     human_cost_usd: 2590
     artefact: contexts/artefacts/stories/E03S04.story.md
