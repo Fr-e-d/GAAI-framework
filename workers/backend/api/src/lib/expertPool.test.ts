@@ -105,9 +105,10 @@ describe('loadExpertPool — Cache miss + D1 hit (AC8/AC10)', () => {
     vi.mocked(d1Module.writeCachePool).mockResolvedValueOnce(undefined);
     vi.mocked(d1Module.upsertToD1).mockResolvedValueOnce(undefined);
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([expert2])  // expert query
-      .mockResolvedValueOnce([]);         // lead count query
+      .mockResolvedValueOnce([]),        // lead count query
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     const result = await loadExpertPool(mockEnvWithDb);
@@ -127,9 +128,10 @@ describe('loadExpertPool — D1 error falls through to Hyperdrive (AC12)', () =>
     vi.mocked(d1Module.writeCachePool).mockResolvedValueOnce(undefined);
     vi.mocked(d1Module.upsertToD1).mockResolvedValueOnce(undefined);
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([expert1])
-      .mockResolvedValueOnce([{ expert_id: expert1.id }]);
+      .mockResolvedValueOnce([{ expert_id: expert1.id }]),
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     const result = await loadExpertPool(mockEnvWithDb);
@@ -150,9 +152,10 @@ describe('loadExpertPool — Hyperdrive fallback (AC11)', () => {
     vi.mocked(d1Module.writeCachePool).mockResolvedValueOnce(undefined);
     vi.mocked(d1Module.upsertToD1).mockResolvedValueOnce(undefined);
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([expert1, expert2])
-      .mockResolvedValueOnce([{ expert_id: expert1.id }, { expert_id: expert1.id }]);
+      .mockResolvedValueOnce([{ expert_id: expert1.id }, { expert_id: expert1.id }]),
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     const result = await loadExpertPool(mockEnvWithDb);
@@ -169,7 +172,8 @@ describe('loadExpertPool — Hyperdrive fallback (AC11)', () => {
     vi.mocked(d1Module.getCachedPool).mockResolvedValueOnce(null);
     vi.mocked(d1Module.loadFromD1).mockResolvedValueOnce([]);
 
-    const mockSql = vi.fn().mockResolvedValueOnce([]);
+    const mockSql = Object.assign(vi.fn().mockResolvedValueOnce([]),
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     const result = await loadExpertPool(mockEnvWithDb);
@@ -185,9 +189,10 @@ describe('loadExpertPool — Hyperdrive fallback (AC11)', () => {
     vi.mocked(d1Module.writeCachePool).mockResolvedValueOnce(undefined);
     vi.mocked(d1Module.upsertToD1).mockRejectedValueOnce(new Error('D1 write error'));
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([expert1])
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([]),
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     const result = await loadExpertPool(mockEnvWithDb);
@@ -203,9 +208,10 @@ describe('loadExpertPool — EXPERT_DB not provisioned (graceful degradation)', 
     vi.mocked(d1Module.getCachedPool).mockResolvedValueOnce(null);
     vi.mocked(d1Module.writeCachePool).mockResolvedValueOnce(undefined);
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([expert1])
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([]),
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     const result = await loadExpertPool(mockEnvNoDb);

@@ -36,11 +36,12 @@ describe('handleLsBillingCron — autoConfirmLeads (AC6)', () => {
       new Response(JSON.stringify({}), { status: 201 })
     );
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       // autoConfirmLeads: UPDATE leads → 2 confirmed
       .mockResolvedValueOnce([{ id: 'lead-1' }, { id: 'lead-2' }])
       // reportUsage: SELECT leads for usage → none pending
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([]),
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     await handleLsBillingCron(env);
@@ -60,7 +61,7 @@ describe('handleLsBillingCron — autoConfirmLeads (AC6)', () => {
     );
 
     let capturedCutoff: string | undefined;
-    const mockSql = vi.fn().mockImplementation((...args: unknown[]) => {
+    const mockSql = Object.assign(vi.fn().mockImplementation((...args: unknown[]) => {
       if (Array.isArray(args[0])) {
         // 2nd arg is 'confirmed', 3rd is the cutoff ISO string
         if (typeof args[2] === 'string' && args[2].includes('T')) {
@@ -68,7 +69,7 @@ describe('handleLsBillingCron — autoConfirmLeads (AC6)', () => {
         }
       }
       return Promise.resolve([]);
-    });
+    }), { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     const before = Date.now();
@@ -92,14 +93,14 @@ describe('handleLsBillingCron — autoConfirmLeads (AC6)', () => {
     );
 
     let capturedCutoff: string | undefined;
-    const mockSql = vi.fn().mockImplementation((...args: unknown[]) => {
+    const mockSql = Object.assign(vi.fn().mockImplementation((...args: unknown[]) => {
       if (Array.isArray(args[0])) {
         if (typeof args[2] === 'string' && args[2].includes('T')) {
           capturedCutoff = args[2];
         }
       }
       return Promise.resolve([]);
-    });
+    }), { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     const before = Date.now();
@@ -139,13 +140,14 @@ describe('handleLsBillingCron — reportUsage happy path (AC7)', () => {
       ls_subscription_item_id: 'si-456',
     };
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       // autoConfirmLeads: UPDATE → none confirmed
       .mockResolvedValueOnce([])
       // reportUsage: SELECT confirmed leads → 1 pending
       .mockResolvedValueOnce([leadForUsage])
       // reportLeadUsage: UPDATE lead SET status='usage_reported'
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([]),
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     await handleLsBillingCron(env);
@@ -201,11 +203,12 @@ describe('handleLsBillingCron — reportUsage happy path (AC7)', () => {
       { id: 'lead-2', amount: 8000, expert_id: 'e2', ls_subscription_item_id: 'si-2' },
     ];
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([])     // autoConfirmLeads
       .mockResolvedValueOnce(leads)  // SELECT confirmed leads
       .mockResolvedValueOnce([])     // UPDATE lead-1
-      .mockResolvedValueOnce([]);    // UPDATE lead-2
+      .mockResolvedValueOnce([]),    // UPDATE lead-2
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     await handleLsBillingCron(env);
@@ -242,9 +245,10 @@ describe('handleLsBillingCron — LS failure → retry (AC8)', () => {
       ls_subscription_item_id: 'si-456',
     };
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([])              // autoConfirmLeads
-      .mockResolvedValueOnce([leadForUsage]); // SELECT confirmed leads
+      .mockResolvedValueOnce([leadForUsage]), // SELECT confirmed leads
+    { end: vi.fn().mockResolvedValue(undefined) });
     // No 3rd call — UPDATE should NOT happen on failure
     (createSql as Mock).mockReturnValue(mockSql);
 
@@ -273,9 +277,10 @@ describe('handleLsBillingCron — LS failure → retry (AC8)', () => {
       ls_subscription_item_id: 'si-456',
     };
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([leadForUsage]);
+      .mockResolvedValueOnce([leadForUsage]),
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     // Should not throw — error is caught and logged
@@ -302,10 +307,11 @@ describe('handleLsBillingCron — LS failure → retry (AC8)', () => {
       { id: 'lead-2', amount: 8000, expert_id: 'e2', ls_subscription_item_id: 'si-2' },
     ];
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([])     // autoConfirmLeads
       .mockResolvedValueOnce(leads)  // SELECT confirmed leads
-      .mockResolvedValueOnce([]);    // UPDATE lead-2 (only successful one)
+      .mockResolvedValueOnce([]),    // UPDATE lead-2 (only successful one)
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     await handleLsBillingCron(env);
