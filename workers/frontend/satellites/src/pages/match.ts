@@ -348,7 +348,7 @@ export function renderMatchPage(
             needs_confirmation_count:Array.isArray(data.needs_confirmation)?data.needs_confirmation.length:0
           });
         }
-        window.location.href='/confirm';
+        window.location.href='/results';
       })
       .catch(function(err){
         var status=err&&err.status?err.status:'network';

@@ -1,9 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify } from './prospects';
+import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify, handleProspectRequirements } from './prospects';
 import type { Env } from '../types/env';
 
 vi.mock('../lib/db', () => ({
   createSql: vi.fn(() => Object.assign((() => []) as unknown as ReturnType<typeof import('../lib/db').createSql>, { begin: vi.fn(), end: vi.fn().mockResolvedValue(undefined) })),
+}));
+
+// Mock matches module so handleProspectRequirements doesn't trigger real compute
+vi.mock('./matches', () => ({
+  handleMatchCompute: vi.fn().mockResolvedValue(new Response(JSON.stringify({ computed: 0 }), { status: 200 })),
+  handleMatchGet: vi.fn(),
 }));
 
 const mockCtx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
@@ -609,5 +615,167 @@ describe('handleOtpVerify — Core flow (E06S39 AC6)', () => {
     const response = await handleOtpVerify(request, env, 'prospect-1', mockCtx);
     expect(response.status).toBe(429);
     expect(mockSessions.delete).toHaveBeenCalledWith('otp:prospect-1');
+  });
+});
+
+// ── handleProspectRequirements — POST /api/prospects/:id/requirements ──────────
+// E03S08 (AC5): Update prospect requirements + async re-match
+
+describe('handleProspectRequirements — POST /api/prospects/:id/requirements', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function makeRequirementsRequest(
+    body: Record<string, unknown>,
+    ip = '1.2.3.4'
+  ): Request {
+    return new Request(
+      'https://test.workers.dev/api/prospects/prospect-1/requirements',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'CF-Connecting-IP': ip,
+        },
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  it('returns 403 when token is invalid', async () => {
+    const env = makeMockEnv({
+      SESSIONS: {
+        get: vi.fn().mockResolvedValue(null),
+        put: vi.fn(),
+        delete: vi.fn(),
+      } as unknown as KVNamespace,
+    });
+    const request = makeRequirementsRequest({
+      requirements: { skills_needed: ['n8n'] },
+      token: 'invalid-token',
+    });
+    const response = await handleProspectRequirements(request, env, 'prospect-1', mockCtx);
+    expect(response.status).toBe(403);
+  });
+
+  it('returns 400 when body is missing requirements', async () => {
+    const env = makeMockEnv({
+      SESSIONS: {
+        get: vi.fn().mockResolvedValue(null),
+        put: vi.fn(),
+        delete: vi.fn(),
+      } as unknown as KVNamespace,
+    });
+    const { signProspectToken } = await import('../lib/jwt');
+    const { token } = await signProspectToken('prospect-1', env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+
+    const request = makeRequirementsRequest({ token });
+    const response = await handleProspectRequirements(request, env, 'prospect-1', mockCtx);
+    expect(response.status).toBe(422);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body['error']).toBe('Validation failed');
+  });
+
+  it('returns 422 when requirements is not an object', async () => {
+    const env = makeMockEnv({
+      SESSIONS: {
+        get: vi.fn().mockResolvedValue(null),
+        put: vi.fn(),
+        delete: vi.fn(),
+      } as unknown as KVNamespace,
+    });
+    const { signProspectToken } = await import('../lib/jwt');
+    const { token } = await signProspectToken('prospect-1', env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+
+    const request = makeRequirementsRequest({ requirements: 'not-an-object', token });
+    const response = await handleProspectRequirements(request, env, 'prospect-1', mockCtx);
+    expect(response.status).toBe(422);
+  });
+
+  it('returns 429 when rate limit exceeded (rematch count > 5)', async () => {
+    const env = makeMockEnv({
+      SESSIONS: {
+        // Return count > 5 for rematch-count key
+        get: vi.fn().mockResolvedValue('6'),
+        put: vi.fn(),
+        delete: vi.fn(),
+      } as unknown as KVNamespace,
+    });
+    const { signProspectToken } = await import('../lib/jwt');
+    const { token } = await signProspectToken('prospect-1', env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+
+    const request = makeRequirementsRequest({
+      requirements: { skills_needed: ['n8n'] },
+      token,
+    });
+    const response = await handleProspectRequirements(request, env, 'prospect-1', mockCtx);
+    expect(response.status).toBe(429);
+  });
+
+  it('returns 202 with { status: "recomputing" } on success', async () => {
+    const env = makeMockEnv({
+      SESSIONS: {
+        get: vi.fn().mockResolvedValue('0'), // rematch count = 0
+        put: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn(),
+      } as unknown as KVNamespace,
+    });
+    const { signProspectToken } = await import('../lib/jwt');
+    const { token } = await signProspectToken('prospect-1', env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+
+    const request = makeRequirementsRequest({
+      requirements: { skills_needed: ['n8n'], industry: 'E-commerce' },
+      token,
+    });
+    const response = await handleProspectRequirements(request, env, 'prospect-1', mockCtx);
+    expect(response.status).toBe(202);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body['status']).toBe('recomputing');
+  });
+
+  it('increments rematch counter in KV on success', async () => {
+    const mockPut = vi.fn().mockResolvedValue(undefined);
+    const env = makeMockEnv({
+      SESSIONS: {
+        get: vi.fn().mockResolvedValue('2'), // existing count
+        put: mockPut,
+        delete: vi.fn(),
+      } as unknown as KVNamespace,
+    });
+    const { signProspectToken } = await import('../lib/jwt');
+    const { token } = await signProspectToken('prospect-1', env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+
+    const request = makeRequirementsRequest({
+      requirements: { industry: 'SaaS' },
+      token,
+    });
+    await handleProspectRequirements(request, env, 'prospect-1', mockCtx);
+    expect(mockPut).toHaveBeenCalledWith(
+      'rematch-count:prospect-1',
+      '3',
+      expect.objectContaining({ expirationTtl: 86400 })
+    );
+  });
+
+  it('triggers async match recompute via ctx.waitUntil', async () => {
+    const waitUntilMock = vi.fn();
+    const ctx = { waitUntil: waitUntilMock, passThroughOnException: vi.fn() } as unknown as ExecutionContext;
+    const env = makeMockEnv({
+      SESSIONS: {
+        get: vi.fn().mockResolvedValue('0'),
+        put: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn(),
+      } as unknown as KVNamespace,
+    });
+    const { signProspectToken } = await import('../lib/jwt');
+    const { token } = await signProspectToken('prospect-1', env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+
+    const request = makeRequirementsRequest({
+      requirements: { skills_needed: ['Make'] },
+      token,
+    });
+    await handleProspectRequirements(request, env, 'prospect-1', ctx);
+    expect(waitUntilMock).toHaveBeenCalled();
   });
 });

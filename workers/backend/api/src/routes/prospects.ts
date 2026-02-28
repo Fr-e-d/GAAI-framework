@@ -865,6 +865,83 @@ export async function handleOtpVerify(
   return jsonResponse({ verified: true, email: otpRecord.email });
 }
 
+// ── POST /api/prospects/:id/requirements — E03S08 (AC5) ───────────────────────
+// Updates prospect requirements and triggers async re-match computation.
+// Rate-limited to 5 re-matches per 24h per prospect.
+
+export async function handleProspectRequirements(
+  request: Request,
+  env: Env,
+  prospectId: string,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
+  let body: { requirements?: unknown; token?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON body', 400);
+  }
+
+  const { requirements, token } = body;
+
+  // Validate token
+  if (typeof token !== 'string' || !token) {
+    return errorResponse('Forbidden', 403);
+  }
+  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+  if (!tokenValid) {
+    return errorResponse('Forbidden', 403);
+  }
+
+  // Validate requirements
+  if (!requirements || typeof requirements !== 'object' || Array.isArray(requirements)) {
+    return errorResponse('Validation failed', 422, { requirements: 'must be a non-null object' });
+  }
+
+  // Rate limit: max 5 re-matches per 24h
+  const rateLimitKey = `rematch-count:${prospectId}`;
+  const countRaw = await env.SESSIONS.get(rateLimitKey);
+  const rematchCount = countRaw ? parseInt(countRaw, 10) : 0;
+  if (rematchCount >= 5) {
+    return errorResponse('Re-match limit exceeded. Try again tomorrow.', 429);
+  }
+
+  // Increment counter (TTL 24h)
+  await env.SESSIONS.put(rateLimitKey, String(rematchCount + 1), { expirationTtl: 86400 });
+
+  // Normalize requirements
+  const normalized = normalizeRequirements(requirements as Record<string, unknown>);
+
+  const sql = createSql(env);
+  try {
+    // Update prospect requirements
+    await sql`
+      UPDATE prospects SET requirements = ${JSON.stringify(normalized)}::jsonb WHERE id = ${prospectId}`;
+
+    // Expire existing matches
+    await sql`
+      UPDATE matches SET status = 'expired' WHERE prospect_id = ${prospectId} AND status != 'expired'`;
+  } finally {
+    await sql.end();
+  }
+
+  // Trigger async re-compute
+  const { handleMatchCompute } = await import('./matches');
+  const computeReq = new Request('https://internal/api/matches/compute', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prospect_id: prospectId }),
+  });
+  ctx.waitUntil(handleMatchCompute(computeReq, env, ctx));
+
+  return jsonResponse({ status: 'recomputing', message: 'Mise \u00e0 jour en cours\u2026' }, 202);
+}
+
 // ── POST /api/prospects/create-from-directory ─────────────────────────────────
 // E03S04 AC4: Lightweight prospect creation for directory-sourced bookings.
 // Body: { email: string, expert_slug: string }
