@@ -191,6 +191,23 @@ describe('renderMatchPage — PostHog tracking (AC7)', () => {
   });
 });
 
+// ── Group 4b: E03S08 — Navigation ────────────────────────────────────────────
+
+describe('renderMatchPage — Navigation (E03S08)', () => {
+  it('navigates to /results on extraction success', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain("/results");
+  });
+
+  it('does not navigate to /confirm on extraction success', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    expect(html).not.toContain("href='/confirm'");
+    expect(html).not.toContain('href="/confirm"');
+    // Check the JS navigation specifically
+    expect(html).not.toContain("location.href='/confirm'");
+  });
+});
+
 // ── Group 5: AC2 — Validation constants ──────────────────────────────────────
 
 describe('renderMatchPage — Validation constants (AC2)', () => {

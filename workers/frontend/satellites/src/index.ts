@@ -175,16 +175,19 @@ app.get('/confirm', (c) => {
   );
 });
 
-// ── Results page (/results) — match results + email gate ────────────────────
+// ── Results page (/results) — merged page 2: extraction summary + confirmation + matches + email gate ──
 app.get('/results', (c) => {
   const config = c.get('config');
-  return new Response(renderResultsPage(config, c.env.POSTHOG_API_KEY, c.env.CORE_API_URL), {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  });
+  return new Response(
+    renderResultsPage(config, c.env.POSTHOG_API_KEY, c.env.CORE_API_URL, c.env.TURNSTILE_SITE_KEY),
+    {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    }
+  );
 });
 
 // ── Expert directory (/experts) — AC1, AC2, AC3, AC6, AC7, AC8, AC9 ──────────
