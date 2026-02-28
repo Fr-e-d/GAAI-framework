@@ -1166,6 +1166,7 @@ items:
     pr_status: "merged"
     started_at: "2026-02-28T11:00:00+00:00"
     completed_at: "2026-02-28T14:00:00+00:00"
+    cost_usd: 13.31
     notes: "DEC-127: Two-phase confirmation email flow implemented. HMAC-signed confirm/cancel links (30min TTL). GCal event creation moved to email-confirm.ts handler. Expert opt-in flag. J-1/H-1 reminder emails wired. No-show tracking (blocks at ≥2). Cron cleanup + auto-confirm. 542/542 tests pass."
 
   # ── POST-MVP ────────────────────────────────────────────────────────────────
