@@ -5,7 +5,7 @@ role: implementation-specialist
 parent: AGENT-DELIVERY-001
 track: delivery
 lifecycle: ephemeral
-updated_at: 2026-02-18
+updated_at: 2026-02-20
 ---
 
 # Implementation Sub-Agent
@@ -18,8 +18,12 @@ Spawned by the Delivery Orchestrator. Executes code implementation against a val
 
 ```
 SPAWN   ← Orchestrator provides context bundle (Story + execution plan + coding patterns)
-EXECUTE ← Implements per plan steps; spawns specialists if needed
-HANDOFF ← Writes contexts/artefacts/reports/{id}.impl-report.md
+          Working directory: ../{id}-workspace (git worktree on branch story/{id})
+EXECUTE ← Implements per plan steps inside the worktree; spawns specialists if needed
+COMMIT  ← Atomic commit after all ACs are implemented and self-validated:
+          git add . && git commit -m "feat({id}): {title} [AC1–ACn]
+          Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+HANDOFF ← Writes contexts/artefacts/impl-reports/{id}.impl-report.md
 DIE     ← Terminates; context window released
 ```
 
@@ -29,6 +33,7 @@ DIE     ← Terminates; context window released
 
 - `contexts/artefacts/stories/{id}.story.md` — the validated Story
 - `contexts/artefacts/plans/{id}.execution-plan.md` — the Planning Sub-Agent's output
+- `contexts/artefacts/evaluations/{id}.approach-evaluation.md` — (when it exists) the approach comparison that informed the plan; provides the WHY behind the chosen implementation approach
 - `contexts/rules/orchestration.rules.md`
 - `contexts/memory/patterns/conventions.md`
 - `contexts/memory/project/context.md`
@@ -47,13 +52,13 @@ DIE     ← Terminates; context window released
 
 ## Specialist Dispatch
 
-The Implementation Sub-Agent reads the execution plan and matches against `contexts/specialists.registry.yaml`. For each trigger match, it spawns the corresponding Specialist Sub-Agent:
+The Implementation Sub-Agent reads the execution plan and matches against `agents/specialists.registry.yaml`. For each trigger match, it spawns the corresponding Specialist Sub-Agent:
 
 ```
 Specialist lifecycle: spawn → execute → handoff-specialist-artefact → die
 ```
 
-Specialist handoff artefacts are written to `contexts/artefacts/reports/{id}.specialist-{domain}.md`.
+Specialist handoff artefacts are written to `contexts/artefacts/impl-reports/{id}.specialist-{domain}.md`.
 
 The Implementation Sub-Agent waits for each specialist handoff before proceeding to the next plan step that depends on it.
 
@@ -61,7 +66,7 @@ The Implementation Sub-Agent waits for each specialist handoff before proceeding
 
 ## Handoff Artefact
 
-Writes to: `contexts/artefacts/reports/{id}.impl-report.md`
+Writes to: `contexts/artefacts/impl-reports/{id}.impl-report.md`
 
 The artefact must include:
 - Summary of changes made (files created/modified)
@@ -85,4 +90,7 @@ The artefact must include:
 - MUST implement exactly what the execution plan defines — no additions, no shortcuts
 - MUST NOT modify acceptance criteria or expand scope
 - MUST NOT invoke QA skills (QA is the QA Sub-Agent's responsibility)
+- MUST work exclusively inside `../{id}-workspace` — never in the main repo directory
+- MUST commit atomically before writing the handoff artefact — no uncommitted changes at HANDOFF
+- MUST NOT commit directly to `production` — always on `story/{id}` branch
 - MUST terminate after writing the handoff artefact

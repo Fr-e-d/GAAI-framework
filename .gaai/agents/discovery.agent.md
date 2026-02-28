@@ -4,7 +4,7 @@ id: AGENT-DISCOVERY-001
 role: product-intelligence
 responsibility: decide-what-to-build-and-why
 track: discovery
-updated_at: 2026-01-31
+updated_at: 2026-02-20
 ---
 
 # Discovery Agent (GAAI)
@@ -47,8 +47,10 @@ The Discovery Agent produces:
 - **PRD** — optional high-level strategic framing
 - **Epics** — user outcomes (not features)
 - **Stories** — executable product contracts with acceptance criteria
+- **Marketing** — community posts, observation logs, hypothesis logs, hand raiser campaigns, promise drafts (validation-phase only)
+- **Strategy** — GTM plans, phased launch plans, positioning artefacts
 
-Only these artefacts are valid inputs for Delivery.
+Only Epics and Stories are valid inputs for Delivery. Marketing and Strategy artefacts are Discovery-only and inform backlog decisions but never authorize execution.
 
 ---
 
@@ -65,6 +67,7 @@ Only these artefacts are valid inputs for Delivery.
 
 ### Cross Skills (Used Selectively)
 
+- `approach-evaluation` — research industry standards and compare viable approaches when a product or architectural decision requires objective comparison before committing to a Story definition. Produces a factual comparison matrix — Discovery reads and decides (or escalates to human for strategic choices).
 - `risk-analysis` — surface user, scope, value, and delivery risks before decisions lock in
 - `consistency-check` — detect incoherence between PRD, Epics, Stories, and rules
 - `context-building` — build minimal focused context bundles for skills

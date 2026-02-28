@@ -70,6 +70,27 @@ Welcome. This is the `.gaai/` folder — the GAAI framework living inside your p
 
 ---
 
+## Branch Model & Automation
+
+AI agents work exclusively on the **`staging`** branch. Promotion to `production` is a human action via GitHub PR.
+
+```
+staging  ←── AI works here
+   │  PR (human review)
+production  ←── Deploy via GitHub Actions
+```
+
+The **Delivery Daemon** (`scripts/delivery-daemon.sh`) automates delivery:
+- Polls the backlog for `refined` stories
+- Marks them `in_progress` on staging (cross-device coordination via git push)
+- Launches Claude Code sessions in isolated worktrees
+- Supports parallel execution (`--max-concurrent`) via tmux (VPS) or Terminal.app (macOS)
+- Monitors session health via heartbeat and `--max-turns` safety limits
+
+A pre-push hook (`.githooks/pre-push`) blocks all pushes to `production` from the development environment. Activate with `git config core.hooksPath .githooks`.
+
+---
+
 ## Core Principles (Non-Negotiable)
 
 1. **Every execution unit must be in the backlog.** If it's not in the backlog, it must not be executed.

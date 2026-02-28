@@ -9,7 +9,7 @@ tags:
   - backlog
   - governance
 created_at: 2026-02-09
-updated_at: 2026-02-09
+updated_at: 2026-02-26
 ---
 
 # 🧭 GAAI Orchestration Rules
@@ -102,9 +102,75 @@ draft → refined → in_progress → done | failed
 - Delivery must update status to `in_progress` when execution begins, then `done` on PASS
 - Failed executions must be marked `failed` with artefact notes
 
+## 🌿 Branch Rules
+
+All AI-driven execution targets the **`staging`** branch. The `production` branch is human-only.
+
+- AI agents MUST NOT push to, merge to, or interact with `production`
+- Delivery creates story branches from staging: `git branch story/{id} staging` (no checkout)
+- All implementation happens in worktrees (`git worktree add`)
+- Squash merges back to staging are serialized via `flock`
+- Promotion staging → production is a human action via GitHub PR
+- Before creating a story branch, verify that the **previous story's PR is merged** into staging.
+  If a prior story's PR is open (not yet merged), the Delivery Agent must wait before starting the next story.
+  This prevents chained branch conflicts and ensures each story builds on a clean staging base.
+- After creating a PR, immediately enable GitHub auto-merge: `gh pr merge --auto --squash story/{id}`.
+  This ensures PRs merge automatically when CI passes, without human intervention.
+
+A pre-push hook (`.githooks/pre-push`) enforces this rule at the git level.
+
+---
+
+## 🎯 Capability Readiness
+
+Before execution begins, the system must verify that agents have both the **skills** and **knowledge** required for the mission. Readiness is split across two agents, matching their existing responsibilities.
+
+### Knowledge Readiness (Discovery — before `refined`)
+
+Before marking a Story as `refined` in a domain where no relevant knowledge exists in memory, Discovery must:
+
+1. Invoke `memory-retrieve` for the target domain
+2. Assess whether returned entries cover current best practices and industry standards for the domain
+3. If no entries exist, or existing entries are stale (last updated >30 days ago for fast-moving domains, >90 days for stable domains):
+   - For **narrow decision points** (2-3 competing approaches): run `approach-evaluation`
+   - For **broad domain knowledge gaps**: research best practices and persist findings via `memory-ingest`
+   - Run `memory-ingest` to persist validated findings
+4. Only after knowledge gaps are remediated may the Story be marked `refined`
+
+This rule applies to **domains not yet covered** in `contexts/memory/`. For well-covered domains with recent memory entries, Discovery may proceed directly — no overhead on routine work.
+
+**Discovery does NOT need to verify skill coverage** — it defines *what* to build, not *how* to build it. Skill coverage is Delivery's responsibility.
+
+### Skill Coverage (Delivery — during `evaluate-story`)
+
+During `evaluate-story`, the Delivery Orchestrator must verify that all skills required for the identified domains exist in `skills-index.yaml`.
+
+If a required skill is absent:
+- The Story is marked `blocked` with an explicit gap report (which skill is missing, for which domain)
+- The gap is escalated to Discovery, which creates a Story for the missing skill via `create-skill`
+- The original Story resumes only when the dependency is delivered and the skill exists in the index
+
+If required knowledge is absent (detected during evaluation, not caught by Discovery):
+- Same escalation pattern: `blocked` + gap report → Discovery remediates
+
+---
+
 ## ⏰ Cron / Automation Responsibilities
 
-Cron jobs are **allowed and encouraged**, but limited to governance tasks.
+Cron jobs and the **Delivery Daemon** are **allowed and encouraged**, but limited to governance tasks.
+
+### Delivery Daemon (`scripts/delivery-daemon.sh`)
+
+The daemon automates backlog polling and Claude Code session launch:
+- Polls staging for `refined` stories at a configurable interval
+- Marks stories `in_progress` on staging before launch (cross-device coordination)
+- Launches Claude Code in isolated worktrees (tmux on VPS, Terminal.app on macOS)
+- Monitors session health (heartbeat, `--max-turns` limit)
+- Marks stories `failed` on non-zero exit (human must review and reset to `refined`)
+
+The daemon is a **governance automation** — it does not reason, implement, or make decisions.
+
+### Other Cron Jobs
 
 Cron MAY trigger:
 - backlog polling (check for `refined` items)

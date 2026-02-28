@@ -10,12 +10,10 @@ metadata:
   track: cross-cutting
   id: SKILL-MEMORY-RETRIEVE-001
   updated_at: 2026-01-27
+  status: stable
 inputs:
-  - contexts/memory/index.md
-  - contexts/memory/project/**
-  - contexts/memory/decisions/**
-  - contexts/memory/patterns/**
-  - contexts/memory/summaries/**
+  - contexts/memory/index.md        (registry — read first to discover available categories)
+  - contexts/memory/**              (any category registered in index.md — resolved at runtime)
 outputs:
   - memory_context_bundle
 ---
@@ -32,10 +30,10 @@ Activate before `context-building` whenever a task requires historical context.
 
 ## Process
 
-1. Read memory index
-2. Identify relevant categories for the current task
+1. Read memory index (`contexts/memory/index.md` — registry that maps categories to files). If `index.md` is absent or empty, fall back to scanning the `contexts/memory/` directory structure directly — enumerate subdirectories as categories.
+2. Identify relevant categories for the current task. Filter first by category (coarse), then by tags within selected categories (fine-grained) in Step 4.
 3. Prefer summaries when present (lower token cost)
-4. Filter by tags or scope
+4. Within the selected categories, filter by tags or scope to narrow to the minimum relevant files.
 5. Load only selected files
 
 ---

@@ -9,7 +9,8 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-CODEBASE-SCAN-001
-  updated_at: 2026-01-27
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - repository/**
 outputs:
@@ -37,7 +38,7 @@ Activate:
 
 ---
 
-## Output
+## Outputs
 
 **`codebase_tree`** — structured directory tree with annotations for key files
 

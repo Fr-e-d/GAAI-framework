@@ -9,7 +9,8 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-RULES-NORMALIZE-001
-  updated_at: 2026-01-27
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - detected_rule_files
   - existing_conventions  (linters, security configs, style guides, CI constraints)

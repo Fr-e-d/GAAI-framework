@@ -23,7 +23,13 @@ Scripts do NOT:
 
 ## Script Index
 
-Scripts are self-documenting. Each `.sh` file begins with a header comment describing its purpose, usage, inputs, outputs, and exit codes. Browse this directory to see what scripts exist.
+Scripts are self-documenting. Each `.sh` file begins with a header comment describing its purpose, usage, inputs, outputs, and exit codes.
+
+| Script | Purpose |
+|--------|---------|
+| `backlog-scheduler.sh` | Parse `active.backlog.yaml` — resolve dependencies, find ready stories, update status. Supports `--next`, `--ready-ids`, `--set-status`, and `--stdin` modes. |
+| `delivery-daemon.sh` | Poll the backlog and auto-launch Claude Code delivery sessions. Cross-platform (macOS Terminal.app / Linux tmux). Supports `--status`, `--dry-run`, `--max-concurrent`. |
+| `health-check.sh` | Verify GAAI framework integrity (required files, structure). |
 
 ---
 

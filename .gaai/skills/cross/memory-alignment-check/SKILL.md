@@ -9,14 +9,15 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-MEMORY-ALIGNMENT-CHECK-001
-  updated_at: 2026-02-19
+  updated_at: 2026-02-26
+  status: stable
 inputs:
-  - contexts/artefacts/reports/{id}.impl-report.md
+  - contexts/artefacts/impl-reports/{id}.impl-report.md
   - contexts/artefacts/stories/{id}.story.md
   - contexts/memory/index.md
   - [selective memory entries by scope tags]
 outputs:
-  - contexts/artefacts/reports/{id}.memory-delta.md
+  - contexts/artefacts/memory-deltas/{id}.memory-delta.md
 ---
 
 # Memory Alignment Check
@@ -77,9 +78,9 @@ These are **ingestion candidates** — flagged for Discovery to validate and ing
 
 ---
 
-## Output Format
+## Outputs
 
-Written to: `contexts/artefacts/reports/{id}.memory-delta.md`
+Written to: `contexts/artefacts/memory-deltas/{id}.memory-delta.md`
 
 ```yaml
 ---

@@ -9,7 +9,7 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-SUCCESS-METRICS-EVALUATION-001
-  updated_at: 2026-02-06
+  updated_at: 2026-02-26
   status: future
 inputs:
   - contexts/artefacts/stories/**
@@ -46,7 +46,7 @@ Use when:
 
 ---
 
-## Output
+## Outputs
 
 - Story-by-story KPI report
 - Metric vs target comparisons

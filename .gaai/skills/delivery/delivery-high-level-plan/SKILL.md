@@ -9,8 +9,9 @@ metadata:
   category: delivery
   track: delivery
   id: SKILL-DELIVERY-HIGH-LEVEL-PLAN-001
-  updated_at: 2026-02-18
+  updated_at: 2026-02-26
   owner: Planning Sub-Agent
+  status: stable
 inputs:
   - contexts/artefacts/stories/**  (validated)
   - acceptance_criteria
@@ -47,7 +48,7 @@ Do NOT activate if Stories are unclear, acceptance criteria are missing, or prod
 
 ---
 
-## Output Format
+## Outputs
 
 ```
 Execution Plan — Story <ID>

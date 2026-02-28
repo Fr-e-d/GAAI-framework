@@ -9,7 +9,8 @@ metadata:
   category: delivery
   track: delivery
   id: SKILL-IMPLEMENT-001
-  updated_at: 2026-01-30
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - contexts/artefacts/stories/**  (validated)
   - contexts/artefacts/plans/**

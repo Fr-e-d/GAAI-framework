@@ -2,10 +2,12 @@
 type: workflow
 id: WORKFLOW-DELIVERY-LOOP-001
 track: delivery
-updated_at: 2026-02-18
+updated_at: 2026-02-23
 ---
 
 # Delivery Loop Workflow
+
+> **Branch model:** The delivery workflow targets the `staging` branch. AI never interacts with `production`. Promotion staging → production is a human action via GitHub PR.
 
 ## Purpose
 
@@ -32,7 +34,7 @@ Sub-agents spawned during execution:
 - `agents/sub-agents/planning.sub-agent.md` (Tier 2/3)
 - `agents/sub-agents/implementation.sub-agent.md` (Tier 2/3)
 - `agents/sub-agents/qa.sub-agent.md` (Tier 2/3)
-- Specialists per `contexts/specialists.registry.yaml` (Tier 3 only)
+- Specialists per `agents/specialists.registry.yaml` (Tier 3 only)
 
 ---
 
@@ -42,11 +44,42 @@ Before starting the loop:
 - ✅ Stories are validated (`validate-artefacts` has PASSED)
 - ✅ Acceptance criteria are present and testable
 - ✅ Backlog item status is `refined`
-- ✅ `contexts/specialists.registry.yaml` is present
+- ✅ `agents/specialists.registry.yaml` is present
 
 ---
 
 ## Workflow Steps
+
+### 0. Git Setup (before any execution)
+
+**CRITICAL INVARIANT: The main working tree stays on `staging` at ALL times.** The daemon polls in the main working tree. Deliveries work in worktrees. All staging operations (pull, merge, push) are serialized via `flock .gaai/.delivery-locks/.staging.lock`.
+
+For every Story, before any implementation begins:
+
+```bash
+# Step 0a: Sync with latest staging (under flock if concurrent)
+flock .gaai/.delivery-locks/.staging.lock bash -c '
+  git pull origin staging
+'
+
+# Step 0b: Mark in_progress + push (cross-device coordination)
+# If daemon-launched: already done by the daemon. Skip if status is already in_progress.
+# If manual launch: the delivery agent does this itself.
+flock .gaai/.delivery-locks/.staging.lock bash -c '
+  scripts/backlog-scheduler.sh --set-status {id} in_progress contexts/backlog/active.backlog.yaml
+  git add .gaai/contexts/backlog/active.backlog.yaml
+  git commit -m "chore({id}): in_progress [delivery]"
+  git push origin staging
+'
+
+# Step 0c: Create branch WITHOUT switching (main stays on staging)
+git branch story/{id} staging
+git worktree add ../{id}-workspace story/{id}
+```
+
+All sub-agents operate exclusively inside `../{id}-workspace/`. The main working directory stays on `staging` and is never switched. If two Stories run in parallel, each has its own worktree — zero filesystem conflicts.
+
+> Solo founder shortcut: for Tier 1 (MicroDelivery, low-risk, no schema changes), worktree is optional — branch only is acceptable.
 
 ### 1. Select Next Story
 
@@ -93,6 +126,17 @@ Collect `{id}.impl-report.md`.
 
 Invoke `coordinate-handoffs` → validate artefact → PROCEED or RE-SPAWN or ESCALATE.
 
+**After PROCEED — atomic commit:**
+```bash
+git -C ../{id}-workspace add .
+git -C ../{id}-workspace commit -m "feat({id}): {Story title summary}
+
+Implements: {AC list e.g. AC1–AC9}
+Story: contexts/artefacts/stories/{id}.story.md
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+```
+
 ### 7. Execute — Tier 2/3: QA Phase
 
 Spawn `qa.sub-agent.md` with QA context bundle.
@@ -104,9 +148,72 @@ Invoke `coordinate-handoffs`:
 - FAIL → re-spawn Implementation Sub-Agent with qa-report, then re-spawn QA Sub-Agent (max 3 cycles — see `qa.sub-agent.md`)
 - ESCALATE → stop, surface to human
 
-### 8. Complete Story
+### 8. Create PR & Complete Story
 
-Update Story status to `done` in `contexts/backlog/active.backlog.yaml`.
+**8a. Push story branch and create PR to staging:**
+
+```bash
+# Push story branch to origin
+git -C ../{id}-workspace push origin story/{id}
+
+# Create PR targeting staging (human will review and merge)
+gh pr create --base staging --head story/{id} \
+  --title "feat({id}): {Story title}" \
+  --body "$(cat <<'EOF'
+## Summary
+{1-3 bullet points from impl-report}
+
+## Test Results
+- Tests: {X}/{X} pass
+- TSC: clean
+- QA Verdict: PASS
+
+## Changes Delivered
+| File | Purpose |
+|------|---------|
+{table from impl-report}
+
+## Story
+- ID: {id}
+- Artefact: .gaai/contexts/artefacts/stories/{id}.story.md
+
+🤖 Generated with [GAAI Delivery Agent](https://github.com/Fr-e-d/GAAI-framework)
+EOF
+)"
+```
+
+> The AI never merges to staging. It creates a PR for human review. The human merges when satisfied.
+
+**8b. Delivery artefacts (commit to staging):**
+
+Artefact files (execution-plan, impl-report, qa-report, memory-delta) are committed directly to staging since they are governance files, not application code:
+
+```bash
+flock .gaai/.delivery-locks/.staging.lock bash -c '
+  git pull origin staging
+  git add .gaai/contexts/artefacts/
+  git commit -m "docs({id}): delivery artefacts — plan, impl-report, qa-report, memory-delta"
+  git push origin staging
+'
+```
+
+**8c. Mark Story done + cleanup worktree:**
+
+```bash
+# Remove worktree (but keep story branch — needed for the PR)
+git worktree remove ../{id}-workspace
+
+# Update backlog
+flock .gaai/.delivery-locks/.staging.lock bash -c '
+  git pull origin staging
+  scripts/backlog-scheduler.sh --set-status {id} done contexts/backlog/active.backlog.yaml
+  git add .gaai/contexts/backlog/active.backlog.yaml
+  git commit -m "chore({id}): done [delivery]"
+  git push origin staging
+'
+```
+
+> **Note:** The story branch is NOT deleted. It stays on origin for the PR. GitHub can auto-delete branches after PR merge (configure in repo Settings → General → "Automatically delete head branches").
 
 Move completed Story to `contexts/backlog/done/{YYYY-MM}.done.yaml`.
 
@@ -114,18 +221,38 @@ Invoke `decision-extraction` if notable architectural or governance decisions em
 
 Invoke `memory-retrieve` + `memory-ingest` if new patterns worth persisting were identified.
 
-**If the Story required human intervention or reached 3 QA cycles:** invoke `post-mortem-learning`. Record the friction signal (domain, root cause hypothesis, AC gap if applicable) as a `[FRICTION]` entry in `contexts/memory/decisions.memory.md`. This informs future Discovery refinement — not as a new system, but as a structured note the Discovery Agent can retrieve before writing acceptance criteria in the same domain.
+**If the Story required human intervention or reached 3 QA cycles:** invoke `post-mortem-learning`. Record the friction signal (domain, root cause hypothesis, AC gap if applicable) as a `[FRICTION]` entry in `contexts/memory/decisions.memory.md`. This informs future Discovery refinement.
 
-Proceed to next Story.
+**STOP — report to human:**
+
+```
+✅ PR created for review: {PR_URL}
+
+Story: {id} — {Story title}
+QA: PASS ({X}/{X} tests, tsc clean)
+
+Next: review and merge the PR on GitHub.
+```
+
+**8d. On PR creation failure:**
+
+If `gh pr create` fails (e.g., branch conflict, auth issue):
+- Log the error
+- Do NOT update backlog to done
+- ESCALATE to human with the error details
 
 ---
 
 ## Flow Diagram
 
 ```
-active.backlog.yaml
+active.backlog.yaml (read via git show origin/staging:...)
        ↓
 Pick next ready Story
+       ↓
+flock: git pull staging → mark in_progress → commit → push staging
+       ↓
+git branch story/{id} staging (NO checkout) + worktree add ../{id}-workspace
        ↓
 evaluate-story
        ↓
@@ -144,14 +271,19 @@ Tier 2/3? ──→ compose-team (+ risk-analysis if needed)
              ↓
              spawn Implementation Sub-Agent ──→ {id}.impl-report.md
              │    (+ Specialists if Tier 3)
-             ↓
+             ↓ atomic commit in worktree
              spawn QA Sub-Agent ──→ {id}.qa-report.md
              ↓
-             PASS → done
+             PASS → push story/{id} → gh pr create --base staging
+                      → flock: commit artefacts + mark done → push staging
+                      → cleanup worktree (keep branch for PR)
+                      → STOP + report PR URL (human reviews + merges on GitHub)
              FAIL → re-spawn Impl + re-spawn QA (max 3 cycles)
              ESCALATE → human intervention required
              ↓ (on ESCALATE or 3 QA cycles)
              post-mortem-learning → [FRICTION] entry in decisions.memory.md
+             ↓ (human merges PR staging→production)
+             CI/CD auto-deploys production
 ```
 
 ---

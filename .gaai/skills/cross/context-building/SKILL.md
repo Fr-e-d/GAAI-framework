@@ -9,7 +9,8 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-CONTEXT-BUILDING-001
-  updated_at: 2026-01-27
+  updated_at: 2026-02-26
+  status: stable
 inputs:
   - retrieved_memory_bundle
   - contexts/artefacts/**  (relevant only)
@@ -47,7 +48,7 @@ For simple, single-artefact tasks, an agent may reason directly without this ski
 
 ---
 
-## Output Format
+## Outputs
 
 ```
 === EXECUTION CONTEXT ===

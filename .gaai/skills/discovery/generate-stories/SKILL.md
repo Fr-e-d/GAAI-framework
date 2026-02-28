@@ -10,8 +10,9 @@ metadata:
   track: discovery
   id: SKILL-GENERATE-STORIES-001
   updated_at: 2026-01-27
+  status: stable
 inputs:
-  - one_epic
+  - one_epic: contexts/artefacts/epics/{id}.epic.md (the parent Epic file)
   - prd  (optional)
 outputs:
   - contexts/artefacts/stories/*.md
@@ -32,19 +33,22 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 
 ## Process
 
-1. Write from the user's perspective
-2. Focus on behavior, not UI or technology
-3. Keep stories small and independent
-4. Ensure every story is testable
-5. Avoid technical solutions in story body
-6. For each story, answer: "What should the user be able to do or experience?"
-7. Output using canonical Story template
+1. Read the Story template at `contexts/artefacts/_template.story.md`. Read the parent Epic file. Derive story IDs using the parent Epic ID prefix (e.g., Epic E01 produces stories E01S01, E01S02, etc.).
+2. Write from the user's perspective
+3. Focus on behavior, not UI or technology
+4. Keep stories small and independent
+5. Ensure every story is testable
+6. Avoid technical solutions in story body
+7. For each story, answer: "What should the user be able to do or experience?"
+8. Output using canonical Story template
 
 ---
 
-## Output Format
+## Outputs
 
-Produces files at `contexts/artefacts/stories/{id}.story.md` using `_template.story.md`:
+Template: `contexts/artefacts/_template.story.md`
+
+Produces files at `contexts/artefacts/stories/{id}.story.md`:
 
 ```
 As a {user role},
@@ -64,6 +68,7 @@ Acceptance Criteria:
 - No technical implementation detail in story body
 - Each story maps to a single Epic
 - Stories are independent and deliverable individually
+- Each story file's frontmatter `id` and `related_backlog_id` match the parent Epic's ID prefix
 
 ---
 
