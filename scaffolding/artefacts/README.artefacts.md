@@ -128,9 +128,9 @@ updated_at: YYYY-MM-DD
 
 ---
 
-→ [_template.story.md](_template.story.md) — Story template
-→ [_template.epic.md](_template.epic.md) — Epic template
-→ [_template.plan.md](_template.plan.md) — Plan template
-→ [_template.prd.md](_template.prd.md) — PRD template
+→ [_template.story.md](stories/_template.story.md) — Story template
+→ [_template.epic.md](epics/_template.epic.md) — Epic template
+→ [_template.plan.md](plans/_template.plan.md) — Plan template
+→ [_template.prd.md](prd/_template.prd.md) — PRD template
 → [Back to README.contexts.md](../README.contexts.md)
 → [Back to GAAI.md](../../GAAI.md)

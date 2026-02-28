@@ -33,7 +33,7 @@ Works with or without a PRD.
 
 ## Process
 
-1. Read the Epic template at `contexts/artefacts/_template.epic.md` before writing any Epic file.
+1. Read the Epic template at `contexts/artefacts/epics/_template.epic.md` before writing any Epic file.
 2. Think in **user outcomes**, not features
 3. Keep Epics high-level and value-focused
 4. Avoid implementation detail
@@ -45,7 +45,7 @@ Works with or without a PRD.
 
 ## Outputs
 
-Template: `contexts/artefacts/_template.epic.md`
+Template: `contexts/artefacts/epics/_template.epic.md`
 
 Produces files at `contexts/artefacts/epics/{id}.epic.md`.
 
