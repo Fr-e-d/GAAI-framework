@@ -130,6 +130,8 @@ FLAG_WINDOW_MS = "60000"
 # DIRECT_LINK_SECRET: set via: wrangler secret put DIRECT_LINK_SECRET --env staging
 # INTERNAL_API_KEY: set via: wrangler secret put INTERNAL_API_KEY --env staging
 # DIRECT_BOOKING_SECRET: set via: wrangler secret put DIRECT_BOOKING_SECRET --env staging
+# E06S43: Agent API secret (HMAC key for reveal confirmation tokens)
+# AGENT_API_KEY_SECRET: set via: wrangler secret put AGENT_API_KEY_SECRET --env staging
 
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
@@ -231,6 +233,8 @@ name = "callibrate-core-prod"
 WORKER_BASE_URL = "https://api.callibrate.io"
 EMAIL_FROM_DOMAIN = "send.callibrate.io"
 EMAIL_REPLY_TO = "support@callibrate.io"
+# E06S43: Agent API secret (HMAC key for reveal confirmation tokens)
+# AGENT_API_KEY_SECRET: set via: wrangler secret put AGENT_API_KEY_SECRET --env production
 
 [[env.production.hyperdrive]]
 binding = "HYPERDRIVE"

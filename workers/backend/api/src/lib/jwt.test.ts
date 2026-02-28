@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { signProspectToken, verifyProspectToken, signSurveyToken, verifySurveyToken } from './jwt';
+import { signProspectToken, verifyProspectToken, signSurveyToken, verifySurveyToken, signRevealConfirmToken, verifyRevealConfirmToken } from './jwt';
 
 const SECRET = 'test-secret-at-least-32-characters-long';
 const PROSPECT_ID = 'prospect-uuid-abc123';
@@ -148,6 +148,114 @@ describe('verifySurveyToken', () => {
     const expiredToken = `${signingInput}.${toBase64Url(sigBuffer)}`;
 
     const result = await verifySurveyToken(expiredToken, SECRET);
+    expect(result).toBeNull();
+  });
+});
+
+// ── E06S43: Reveal confirmation token tests ────────────────────────────────────
+
+describe('signRevealConfirmToken', () => {
+  it('produces a 3-part JWT string', async () => {
+    const token = await signRevealConfirmToken('match-uuid-1', 'prospect-uuid-1', SECRET);
+    const parts = token.split('.');
+    expect(parts).toHaveLength(3);
+  });
+
+  it('encodes match_id and prospect_id in payload', async () => {
+    const token = await signRevealConfirmToken('match-abc', 'prospect-xyz', SECRET);
+    const parts = token.split('.');
+    const payloadJson = atob(parts[1]!.replace(/-/g, '+').replace(/_/g, '/'));
+    const claims = JSON.parse(payloadJson) as Record<string, unknown>;
+    expect(claims['match_id']).toBe('match-abc');
+    expect(claims['prospect_id']).toBe('prospect-xyz');
+    expect(claims['aud']).toBe('agent:reveal:confirm');
+  });
+
+  it('sets exp ~24h in the future', async () => {
+    const token = await signRevealConfirmToken('match-1', 'prospect-1', SECRET);
+    const parts = token.split('.');
+    const payloadJson = atob(parts[1]!.replace(/-/g, '+').replace(/_/g, '/'));
+    const claims = JSON.parse(payloadJson) as { exp: number };
+    const now = Math.floor(Date.now() / 1000);
+    expect(claims.exp).toBeGreaterThan(now + 23 * 3600);
+    expect(claims.exp).toBeLessThan(now + 25 * 3600);
+  });
+});
+
+describe('verifyRevealConfirmToken', () => {
+  it('returns { match_id, prospect_id } for a valid token', async () => {
+    const token = await signRevealConfirmToken('match-abc', 'prospect-xyz', SECRET);
+    const result = await verifyRevealConfirmToken(token, SECRET);
+    expect(result).not.toBeNull();
+    expect(result?.match_id).toBe('match-abc');
+    expect(result?.prospect_id).toBe('prospect-xyz');
+  });
+
+  it('returns null for a token signed with a different secret', async () => {
+    const token = await signRevealConfirmToken('match-1', 'prospect-1', 'wrong-secret-xxxxxxxxxxxxxxxxxx');
+    const result = await verifyRevealConfirmToken(token, SECRET);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for a malformed token', async () => {
+    const result = await verifyRevealConfirmToken('not.a.valid.jwt', SECRET);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for an expired token', async () => {
+    const encoder = new TextEncoder();
+    const toBase64Url = (data: Uint8Array | ArrayBuffer): string => {
+      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+      let binary = '';
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    };
+
+    const pastExp = Math.floor(Date.now() / 1000) - 3600;
+    const header = toBase64Url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
+    const payload = toBase64Url(encoder.encode(JSON.stringify({ match_id: 'match-1', prospect_id: 'prospect-1', exp: pastExp, iss: 'callibrate', aud: 'agent:reveal:confirm' })));
+    const signingInput = `${header}.${payload}`;
+
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(SECRET),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const sigBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(signingInput));
+    const expiredToken = `${signingInput}.${toBase64Url(sigBuffer)}`;
+
+    const result = await verifyRevealConfirmToken(expiredToken, SECRET);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for wrong audience', async () => {
+    // Build a token with wrong aud
+    const encoder = new TextEncoder();
+    const toBase64Url = (data: Uint8Array | ArrayBuffer): string => {
+      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+      let binary = '';
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    };
+
+    const exp = Math.floor(Date.now() / 1000) + 86400;
+    const header = toBase64Url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
+    const payload = toBase64Url(encoder.encode(JSON.stringify({ match_id: 'match-1', prospect_id: 'prospect-1', exp, iss: 'callibrate', aud: 'wrong:audience' })));
+    const signingInput = `${header}.${payload}`;
+
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(SECRET),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const sigBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(signingInput));
+    const wrongAudToken = `${signingInput}.${toBase64Url(sigBuffer)}`;
+
+    const result = await verifyRevealConfirmToken(wrongAudToken, SECRET);
     expect(result).toBeNull();
   });
 });

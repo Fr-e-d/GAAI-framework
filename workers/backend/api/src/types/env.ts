@@ -91,4 +91,7 @@ export interface Env {
   DIRECT_LINK_SECRET: string;
   INTERNAL_API_KEY: string;
   DIRECT_BOOKING_SECRET: string;
+
+  // E06S43: Agent API — HMAC secret for reveal confirmation tokens
+  AGENT_API_KEY_SECRET: string;
 }
