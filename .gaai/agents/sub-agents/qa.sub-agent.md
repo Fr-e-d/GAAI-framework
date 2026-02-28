@@ -5,7 +5,7 @@ role: qa-specialist
 parent: AGENT-DELIVERY-001
 track: delivery
 lifecycle: ephemeral
-updated_at: 2026-02-18
+updated_at: 2026-02-28
 ---
 
 # QA Sub-Agent
@@ -35,6 +35,7 @@ DIE     ← Terminates; context window released
 - `contexts/artefacts/impl-reports/{id}.impl-report.md` — the Implementation Sub-Agent's output
 - `contexts/rules/orchestration.rules.md`
 - `contexts/rules/artefacts.rules.md`
+- `contexts/memory/decisions/_log.md` (relevant entries for the story's domain — used by `memory-alignment-check` to verify decision compliance)
 
 On remediation pass: also receives previous `{id}.qa-report.md` to verify that prior failures are resolved.
 
@@ -45,7 +46,7 @@ On remediation pass: also receives previous `{id}.qa-report.md` to verify that p
 - `qa-review` — validate implementation against acceptance criteria and rules
 - `remediate-failures` — during remediation loop: diagnose root cause, produce corrected implementation
 - `consistency-check` — verify implementation did not drift from plan or rules
-- `memory-alignment-check` — after PASS verdict only: compare implementation footprint against memory, produce delta report for Discovery
+- `memory-alignment-check` — after PASS verdict only: compare implementation footprint against memory **including decisions (DEC-*)**. Produce delta report for Discovery. If the implementation introduces behavior that contradicts a recorded DEC, flag as `DRIFT_DETECTED` with the specific DEC reference.
 
 ---
 

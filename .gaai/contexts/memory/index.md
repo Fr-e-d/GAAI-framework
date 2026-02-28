@@ -1,7 +1,7 @@
 ---
 type: memory_index
 id: MEMORY-INDEX
-updated_at: 2026-02-27
+updated_at: 2026-02-28
 ---
 
 # Memory Map
@@ -39,7 +39,7 @@ updated_at: 2026-02-27
 | File | Category | ID | Last updated |
 |---|---|---|---|
 | `project/context.md` | project | PROJECT-001 | 2026-02-27 (updated: M0 channels corrected X/Discord — DEC-100/103, promise validated — DEC-102) |
-| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-27 (15 active entries — DEC-90 to DEC-104. DEC-01–59 and DEC-60–89 compacted.) |
+| `decisions/_log.md` | decisions | DECISIONS-LOG | 2026-02-28 (41 active entries — DEC-90 to DEC-130. DEC-116–130: expert profile/credits/availability/OTP/bot protection/funnel/multi-project/AI agents/GDPR/booking/return visit/governance gate. DEC-125 retracted. DEC-01–59 and DEC-60–89 compacted.) |
 | `patterns/conventions.md` | patterns | PATTERNS-001 | 2026-02-27 (E08 security patterns: OAuth CSRF+PKCE, security headers, JWT hardening, admin auth, prompt injection guard + 6 anti-patterns) |
 | `ops/platform.md` | ops | OPS-001 | 2026-02-27 (PostHog EU stack operational — dashboards, proxy, MCP + Delivery costs $149.90/24 stories) |
 | `ops/channels.md` | ops | OPS-002 | 2026-02-27 (distribution channels Phase 0-1 — X, Substack, dev.to, Reddit, Discord, Skool — DEC-100, DEC-101, DEC-104) |
@@ -102,6 +102,17 @@ updated_at: 2026-02-27
 | `artefacts/stories/E06S36.story.md` | Story | Refined — expert admissibility criteria non-budget filters (DEC-80) |
 | `artefacts/stories/E06S37.story.md` | Story | Refined — outcome-based expert profiles + extraction enhancement (DEC-81) |
 | `artefacts/stories/E03S05.story.md` | Story | Refined — crawler access policy |
+| `artefacts/stories/E06S39.story.md` | Story | Refined — Email OTP verification service (DEC-121/122) — 12 ACs, critical |
+| `artefacts/stories/E06S40.story.md` | Story | Refined — Input pre-validation & abuse prevention (DEC-120/122) — 12 ACs |
+| `artefacts/stories/E02S10.story.md` | Story | Refined — Expert profile mandatory fields + credit milestones (DEC-116/117) — 12 ACs |
+| `artefacts/stories/E02S11.story.md` | Story | Refined — Expert availability weekly recurring rules (DEC-118) — 12 ACs |
+| `artefacts/stories/E03S07.story.md` | Story | Refined — Booking confirmation + reminders + no-show (DEC-127) — 11 ACs |
+| `artefacts/stories/E03S08.story.md` | Story | Refined — Funnel restructure merge pages (DEC-123) — post-MVP, 10 ACs |
+| `artefacts/stories/E03S09.story.md` | Story | Refined — Freetext hint text (DEC-119) — post-MVP, 6 ACs |
+| `artefacts/stories/E06S41.story.md` | Story | Refined — Multi-project support (DEC-124) — post-MVP, 14 ACs |
+| `artefacts/stories/E06S42.story.md` | Story | Refined — GDPR data retention (DEC-129) — post-MVP, 6 ACs |
+| `artefacts/stories/E03S10.story.md` | Story | Refined — Return visit cookie + magic link (DEC-128) — post-MVP, 10 ACs |
+| `artefacts/stories/E06S43.story.md` | Story | Refined — AI agent API + MCP server (DEC-126) — post-MVP, 11 ACs |
 | `artefacts/strategy/GTM-001.md` | Strategy | GTM plan — 4 phases, binary PASS/FAIL gates, J0–J90 — Phase 0 restructurée (DEC-31) — build-in-public orchestrated launch (DEC-77) — .gaai OSS (DEC-72) + formation (DEC-73) |
 | `artefacts/strategy/COMMS-001.strategy.md` | Strategy | Communication & publication strategic plan — empathy maps, channel strategy, personal branding, launch orchestration, comment response, content pipeline (DEC-78) |
 | `artefacts/strategy/MARKET-001.md` | Strategy | Market research & satellite vertical selection — 8 verticals scored, Tier 1: V3 AI Chatbot + V1 Workflow Auto + V8 AI Integration (DEC-84). Scope strategy AI-pure → niche-down (DEC-85). Niche-down candidates: Real Estate #1, Accounting/Legal sleepers, trigger ≥30% domain concentration (DEC-88) |

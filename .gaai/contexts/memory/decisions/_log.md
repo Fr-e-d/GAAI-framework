@@ -23,6 +23,27 @@ updated_at: 2026-02-28
 
 ---
 
+### DEC-130 — Decision Consistency Gate: mandatory memory-retrieve before recording decisions
+
+**Context:** During a Discovery session (2026-02-28), the agent proposed DEC-125 (billing at reveal) which directly contradicted DEC-14/DEC-30/DEC-68 (billing at booking). Root cause: the agent reasoned from first principles without retrieving existing decisions. The contradiction was caught by the human, not by any automated governance check. This exposed a structural gap — no agent or sub-agent was required to verify decision consistency before recording.
+
+**Decision:** Decision Consistency Gate added as mandatory governance across all layers:
+- **orchestration.rules.md:** New section "Decision Consistency Gate (Mandatory)" requiring 5 steps before any DEC recording: (1) retrieve existing DECs in domain, (2) list relevant ones, (3) verify no contradiction, (4) supersede explicitly or stop, (5) never record silently.
+- **discovery.agent.md:** New "Decision Integrity (Non-Negotiable)" subsection — memory-retrieve mandatory before proposing decisions.
+- **delivery.agent.md:** Step 6 added to Pre-Flight Checks — load all DEC-* touching story domains, include in Planning Sub-Agent context bundle. Memory-retrieve for decisions made mandatory.
+- **bootstrap.agent.md:** Consistency guard added to decision extraction (section 2) — must verify against existing DECs, never silently overwrite. Decision drift detection added to gap analysis (section 6).
+- **planning.sub-agent.md:** Mandatory DEC consistency check added to Planning Flow between approach evaluation and consistency-check. New constraint: must not produce plan contradicting DEC-* without escalating.
+- **qa.sub-agent.md:** `decisions/_log.md` added to Context Bundle. Memory-alignment-check extended to verify DEC compliance and flag DRIFT_DETECTED.
+- **decision-extraction SKILL.md:** Step 0 (mandatory) added — consistency gate before extracting any new decision.
+
+**Impact:** Prevents silent decision contradictions. Any future DEC that contradicts an existing one must explicitly state "Supersedes DEC-XX" with rationale, or be rejected. Agent cannot determine consistency → stop and escalate to human.
+
+**Files modified:** `.gaai/contexts/rules/orchestration.rules.md`, `.gaai/agents/discovery.agent.md`, `.gaai/agents/delivery.agent.md`, `.gaai/agents/bootstrap.agent.md`, `.gaai/agents/sub-agents/planning.sub-agent.md`, `.gaai/agents/sub-agents/qa.sub-agent.md`, `.gaai/skills/cross/decision-extraction/SKILL.md`
+**Decided by:** Founder + Discovery Agent
+**Date:** 2026-02-28
+
+---
+
 ### DEC-129 — GDPR data retention: purge abandoned funnels, OTP TTL
 
 **Context:** The prospect funnel creates data before the prospect identifies themselves (freetext, extraction results). GDPR requires justification for retaining personal data. Freetext may contain identifying information ("Je suis Jean Dupont, CEO de X").

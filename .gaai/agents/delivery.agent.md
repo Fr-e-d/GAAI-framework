@@ -4,7 +4,7 @@ id: AGENT-DELIVERY-001
 role: delivery-orchestrator
 responsibility: coordinate-sub-agents-to-deliver-validated-stories
 track: delivery
-updated_at: 2026-02-23
+updated_at: 2026-02-28
 ---
 
 # Delivery Agent (GAAI)
@@ -62,7 +62,8 @@ Before acting on any Story, the Delivery Orchestrator must:
 3. If `refined` → mark `in_progress` + commit + push staging (manual launch case)
 4. If `in_progress` → proceed (daemon already marked it)
 5. Verify acceptance criteria are present and unambiguous
-6. Articulate the execution approach — tier, sub-agent composition, context bundles — before spawning anything
+6. **Load relevant decisions:** After identifying the story's domain(s) via `evaluate-story`, invoke `memory-retrieve` for all existing decisions (DEC-*) touching those domains. These decisions MUST be included in the context bundle provided to the Planning Sub-Agent. The Planning Sub-Agent's execution plan MUST NOT contradict any existing decision without explicit escalation to Discovery.
+7. Articulate the execution approach — tier, sub-agent composition, context bundles — before spawning anything
 
 If acceptance criteria are ambiguous or missing: stop. Escalate to Discovery. Do not interpret intent.
 
@@ -112,7 +113,7 @@ Specialists are dispatched by the Implementation Sub-Agent, not by the Orchestra
 
 ### Supporting (Orchestrator-level only)
 
-- `memory-retrieve` — load minimal relevant memory before composing context bundles
+- `memory-retrieve` — load relevant memory before composing context bundles. **Mandatory for decisions**: all DEC-* entries touching the story's domain(s) must be loaded and passed to the Planning Sub-Agent context bundle.
 - `context-building` — assemble context bundles for sub-agents
 - `decision-extraction` — capture notable decisions after Story completion
 - `risk-analysis` — pre-flight for Tier 3 or high-risk Stories before spawning Planning Sub-Agent
