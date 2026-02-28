@@ -119,6 +119,7 @@ export interface ExpertRow {
   rate_min: number | null;
   rate_max: number | null;
   availability: string | null;
+  outcome_tags: string[] | null; // E06S37: used by admin reindex to pre-compute embeddings
 }
 
 // Billing exclusion result (returned in handleMatch response)

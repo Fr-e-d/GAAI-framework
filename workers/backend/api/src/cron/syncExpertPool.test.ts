@@ -20,7 +20,6 @@ const baseEnv = {
   SESSIONS: {} as KVNamespace,
   RATE_LIMITING: {} as KVNamespace,
   FEATURE_FLAGS: {} as KVNamespace,
-  EXPERT_POOL: {} as KVNamespace,
   PROSPECT_TOKEN_SECRET: 'secret',
   EMAIL_NOTIFICATIONS: {} as Queue,
   LEAD_BILLING: {} as Queue,

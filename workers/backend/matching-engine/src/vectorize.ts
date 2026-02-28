@@ -92,55 +92,50 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return Math.max(0, Math.min(1, dot));
 }
 
-// Compute outcome alignment scores for a batch of experts in one Workers AI call.
-// Returns Map<expert_id, alignment_score (0.0–1.0)> for experts with non-empty outcome_tags.
-// Experts without outcome_tags are not included in the returned map (treated as null by caller).
-export async function computeBatchOutcomeAlignments(
-  ai: Ai,
-  expertOutcomeTagsMap: Map<string, string[]>, // expert_id → outcome_tags
-  desiredOutcomes: string[], // prospect's desired_outcomes
-): Promise<Map<string, number>> {
-  const result = new Map<string, number>();
-
-  if (desiredOutcomes.length === 0) return result;
-
-  // Collect all unique outcome strings across all experts
-  const allExpertTagStrings = [...new Set(
-    [...expertOutcomeTagsMap.values()].flat()
-  )];
-
-  if (allExpertTagStrings.length === 0) return result;
-
-  // One batch embedding call: desired_outcomes first, then all expert tags
-  const allStrings = [...desiredOutcomes, ...allExpertTagStrings];
-  let embedData: number[][];
-
-  try {
-    const embeddingResult = await ai.run('@cf/baai/bge-base-en-v1.5', {
-      text: allStrings,
+// Embed a list of strings via Workers AI, batching in groups of 100 if needed.
+// BGE-base-en-v1.5 supports up to 100 texts per call.
+export async function embedStrings(ai: Ai, texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const BATCH_SIZE = 100;
+  const results: number[][] = [];
+  for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+    const batch = texts.slice(i, i + BATCH_SIZE);
+    const result = await ai.run('@cf/baai/bge-base-en-v1.5', {
+      text: batch,
     }) as { data: number[][] };
-    embedData = embeddingResult.data;
-  } catch (err) {
-    console.error('matching: outcome alignment embedding failed', err);
-    return result;
+    results.push(...result.data);
   }
+  return results;
+}
 
-  const desiredEmbeddings = embedData.slice(0, desiredOutcomes.length);
-  const expertTagEmbeddings = embedData.slice(desiredOutcomes.length);
+// Compute embeddings for an expert's outcome_tags.
+// Returns Record<tag_string, embedding_vector> — stored in D1, not recomputed at match time.
+export async function computeTagEmbeddings(
+  ai: Ai,
+  tags: string[],
+): Promise<Record<string, number[]>> {
+  if (tags.length === 0) return {};
+  const embeddings = await embedStrings(ai, tags);
+  const result: Record<string, number[]> = {};
+  for (let i = 0; i < tags.length; i++) {
+    result[tags[i]!] = embeddings[i]!;
+  }
+  return result;
+}
 
-  // Build lookup: tag string → embedding
-  const tagEmbeddingMap = new Map<string, number[]>(
-    allExpertTagStrings.map((tag, i) => [tag, expertTagEmbeddings[i] as number[]])
-  );
+// Compute outcome alignment scores using pre-computed expert tag embeddings from D1.
+// desiredEmbeddings: pre-embedded desired_outcomes vectors (computed once per request, max 5).
+// expertEmbeddingsMap: Map<expert_id, Record<tag, vector>> loaded from D1.
+// Returns Map<expert_id, alignment_score (0.0–1.0)>.
+export function computeAlignmentsFromPrecomputed(
+  expertEmbeddingsMap: Map<string, Record<string, number[]>>,
+  desiredEmbeddings: number[][],
+): Map<string, number> {
+  const result = new Map<string, number>();
+  if (desiredEmbeddings.length === 0) return result;
 
-  // For each expert, compute max-pairwise alignment averaged over desired_outcomes
-  for (const [expertId, tags] of expertOutcomeTagsMap) {
-    if (tags.length === 0) continue;
-
-    const tagEmbs = tags
-      .map((t) => tagEmbeddingMap.get(t))
-      .filter((e): e is number[] => e != null);
-
+  for (const [expertId, tagEmbeddings] of expertEmbeddingsMap) {
+    const tagEmbs = Object.values(tagEmbeddings).filter((v) => v.length > 0);
     if (tagEmbs.length === 0) continue;
 
     let totalMaxSim = 0;
@@ -149,7 +144,7 @@ export async function computeBatchOutcomeAlignments(
       totalMaxSim += maxSim;
     }
 
-    result.set(expertId, Math.min(1.0, totalMaxSim / desiredOutcomes.length));
+    result.set(expertId, Math.min(1.0, totalMaxSim / desiredEmbeddings.length));
   }
 
   return result;

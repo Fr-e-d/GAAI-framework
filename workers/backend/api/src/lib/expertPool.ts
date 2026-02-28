@@ -1,6 +1,5 @@
 // Expert pool read chain (E06S23)
 // AC8: Cache API L1 (60s TTL) → D1 → Hyperdrive fallback
-// AC14: EXPERT_POOL KV removed from read path (KV binding retained for other uses)
 
 import { createSql } from './db';
 import { getCachedPool, writeCachePool, loadFromD1, upsertToD1 } from './d1ExpertPool';

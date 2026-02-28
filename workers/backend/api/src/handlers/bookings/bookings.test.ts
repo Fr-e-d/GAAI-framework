@@ -49,7 +49,6 @@ const mockEnv = {
   } as unknown as KVNamespace,
   RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: true }) } as unknown as RateLimit,
   FEATURE_FLAGS: {} as KVNamespace,
-  EXPERT_POOL: {} as KVNamespace,
   PROSPECT_TOKEN_SECRET: 'secret',
   EMAIL_NOTIFICATIONS: { send: vi.fn().mockResolvedValue(undefined) } as unknown as Queue,
   LEAD_BILLING: { send: vi.fn().mockResolvedValue(undefined) } as unknown as Queue,

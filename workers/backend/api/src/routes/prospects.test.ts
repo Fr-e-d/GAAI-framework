@@ -18,7 +18,6 @@ const baseMockEnv = {
   SESSIONS: {} as KVNamespace,
   RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: true }) },
   FEATURE_FLAGS: {} as KVNamespace,
-  EXPERT_POOL: {} as KVNamespace,
   PROSPECT_TOKEN_SECRET: 'test-secret-32-chars-long-padding!!',
   TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
   EMAIL_NOTIFICATIONS: { send: vi.fn().mockResolvedValue(undefined) } as unknown as Queue,

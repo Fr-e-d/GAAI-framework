@@ -115,6 +115,58 @@ export async function setLastSyncAt(db: D1Database, ts: string): Promise<void> {
     .run();
 }
 
+// ── Outcome embeddings — separate table (E06S37 scalability fix) ──────────────
+
+interface D1OutcomeEmbeddingRow {
+  expert_id: string;
+  embeddings: string; // JSON: Record<tag_string, number[]>
+}
+
+// Load pre-computed outcome tag embeddings for a set of candidate expert IDs.
+// Batches in groups of 100 to respect D1 parameter limit.
+export async function loadOutcomeEmbeddings(
+  db: D1Database,
+  expertIds: string[],
+): Promise<Map<string, Record<string, number[]>>> {
+  const map = new Map<string, Record<string, number[]>>();
+  if (expertIds.length === 0) return map;
+
+  const BATCH_SIZE = 100;
+  for (let i = 0; i < expertIds.length; i += BATCH_SIZE) {
+    const batch = expertIds.slice(i, i + BATCH_SIZE);
+    const placeholders = batch.map((_, j) => `?${j + 1}`).join(',');
+    const { results } = await db
+      .prepare(`SELECT expert_id, embeddings FROM expert_outcome_embeddings WHERE expert_id IN (${placeholders})`)
+      .bind(...batch)
+      .all<D1OutcomeEmbeddingRow>();
+    for (const row of results ?? []) {
+      try {
+        map.set(row.expert_id, JSON.parse(row.embeddings) as Record<string, number[]>);
+      } catch { /* skip malformed row */ }
+    }
+  }
+  return map;
+}
+
+// Upsert pre-computed outcome tag embeddings for one expert.
+export async function upsertOutcomeEmbedding(
+  db: D1Database,
+  expertId: string,
+  embeddings: Record<string, number[]>,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO expert_outcome_embeddings (expert_id, embeddings, updated_at)
+       VALUES (?1, ?2, ?3)
+       ON CONFLICT (expert_id) DO UPDATE SET
+         embeddings = excluded.embeddings,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(expertId, JSON.stringify(embeddings), now)
+    .run();
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 function rowToEntry(row: D1ExpertRow): ExpertPoolEntry {

@@ -37,8 +37,6 @@ export interface ExpertRow {
 
 export interface BookingRow {
   id: string;
-  cal_booking_id: string | null;
-  cal_meeting_url: string | null;
   cancel_reason: string | null; // E06S38
   confirmed_at: string | null;
   created_at: string | null;

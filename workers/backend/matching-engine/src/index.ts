@@ -15,8 +15,11 @@ import {
   buildProspectEmbeddingText,
   upsertExpertEmbedding,
   queryVectorize,
-  computeBatchOutcomeAlignments,
+  embedStrings,
+  computeTagEmbeddings,
+  computeAlignmentsFromPrecomputed,
 } from './vectorize';
+import { loadOutcomeEmbeddings, upsertOutcomeEmbedding } from './d1ExpertPool';
 import { scoreMatch, applyReliabilityModifier } from './score';
 import {
   DEFAULT_WEIGHTS,
@@ -184,7 +187,7 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     const vector = embeddingResult.data[0];
 
     if (vector && vector.length > 0) {
-      const topK = Math.max(eligible.length, 100);
+      const topK = 100; // cap candidates — D1 outcome embeddings load bounded to ~6 MB regardless of pool size
       similarityMap = await queryVectorize(env, vector, topK);
       if (similarityMap.size > 0) {
         const candidateIds = new Set(similarityMap.keys());
@@ -199,24 +202,18 @@ async function handleMatch(request: Request, env: MatchingEnv, ctx: ExecutionCon
     similarityMap = new Map();
   }
 
-  // AC9/E06S37: Compute outcome alignment scores in batch when desired_outcomes present
+  // AC9/E06S37: Compute outcome alignment using pre-computed expert tag embeddings from D1.
+  // Expert embeddings are stored at profile-save time (/embed, /admin/reindex) — never at match time.
+  // Only the prospect's desired_outcomes (max 5 strings) are embedded here: 1 AI call regardless of pool size.
   let outcomeAlignmentMap = new Map<string, number>();
   const desiredOutcomes = (requirements.desired_outcomes ?? []).filter((s): s is string => typeof s === 'string');
-  if (desiredOutcomes.length > 0 && candidates.length > 0) {
+  if (desiredOutcomes.length > 0 && candidates.length > 0 && env.EXPERT_DB) {
     try {
-      // Load outcome_tags for all candidates from DB (separate from the pool cache)
       const candidateIds = candidates.map((c) => c.id);
-      const outcomeRows = await sql<{ id: string; outcome_tags: string[] | null }[]>`
-        SELECT id, outcome_tags FROM experts WHERE id = ANY(${candidateIds})`;
-
-      const expertTagsMap = new Map<string, string[]>();
-      for (const row of outcomeRows) {
-        const tags = row.outcome_tags ?? [];
-        if (tags.length > 0) expertTagsMap.set(row.id, tags);
-      }
-
-      if (expertTagsMap.size > 0) {
-        outcomeAlignmentMap = await computeBatchOutcomeAlignments(env.AI, expertTagsMap, desiredOutcomes);
+      const expertEmbeddingsMap = await loadOutcomeEmbeddings(env.EXPERT_DB, candidateIds);
+      if (expertEmbeddingsMap.size > 0) {
+        const desiredEmbeddings = await embedStrings(env.AI, desiredOutcomes);
+        outcomeAlignmentMap = computeAlignmentsFromPrecomputed(expertEmbeddingsMap, desiredEmbeddings);
       }
     } catch (err) {
       console.error('matching: outcome alignment computation failed, skipping', err);
@@ -302,6 +299,7 @@ async function handleEmbed(request: Request, env: MatchingEnv, ctx: ExecutionCon
     rate_min?: unknown;
     rate_max?: unknown;
     availability?: unknown;
+    outcome_tags?: unknown; // E06S37: pre-compute and store tag embeddings in D1
   };
   try {
     body = await request.json();
@@ -313,12 +311,32 @@ async function handleEmbed(request: Request, env: MatchingEnv, ctx: ExecutionCon
     return errorResponse('expert_id is required', 422);
   }
 
-  upsertExpertEmbedding(env, ctx, body.expert_id, {
+  const expertId = body.expert_id;
+
+  upsertExpertEmbedding(env, ctx, expertId, {
     profile: (body.profile ?? {}) as { skills?: string[]; industries?: string[]; project_types?: string[]; languages?: string[] },
     rate_min: typeof body.rate_min === 'number' ? body.rate_min : null,
     rate_max: typeof body.rate_max === 'number' ? body.rate_max : null,
     availability: typeof body.availability === 'string' ? body.availability : null,
   });
+
+  // Store pre-computed outcome_tags embeddings in D1 (fire-and-forget).
+  // Eliminates on-the-fly embedding of expert tags at match time.
+  const outcomeTags = Array.isArray(body.outcome_tags)
+    ? (body.outcome_tags as unknown[]).filter((s): s is string => typeof s === 'string')
+    : [];
+  if (outcomeTags.length > 0 && env.EXPERT_DB) {
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const embeddings = await computeTagEmbeddings(env.AI, outcomeTags);
+          await upsertOutcomeEmbedding(env.EXPERT_DB!, expertId, embeddings);
+        } catch (err) {
+          console.error('matching: outcome tag embedding storage failed for expert', expertId, err);
+        }
+      })()
+    );
+  }
 
   return jsonResponse({ ok: true });
 }
@@ -329,8 +347,8 @@ async function handleEmbed(request: Request, env: MatchingEnv, ctx: ExecutionCon
 async function handleAdminReindex(request: Request, env: MatchingEnv, ctx: ExecutionContext): Promise<Response> {
   const sql = createSql(env);
 
-  const experts = await sql<Pick<ExpertRow, 'id' | 'profile' | 'rate_min' | 'rate_max' | 'availability'>[]>`
-    SELECT id, profile, rate_min, rate_max, availability FROM experts
+  const experts = await sql<Pick<ExpertRow, 'id' | 'profile' | 'rate_min' | 'rate_max' | 'availability' | 'outcome_tags'>[]>`
+    SELECT id, profile, rate_min, rate_max, availability, outcome_tags FROM experts
     WHERE availability != 'unavailable'`;
 
   const total = experts.length;
@@ -339,6 +357,7 @@ async function handleAdminReindex(request: Request, env: MatchingEnv, ctx: Execu
     (async () => {
       for (const expert of experts) {
         try {
+          // Vectorize: profile text embedding (skills, industries, etc.)
           const text = buildEmbeddingText((expert.profile ?? {}) as { skills?: string[]; industries?: string[]; project_types?: string[]; languages?: string[] });
           const result = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
             text: [text],
@@ -353,6 +372,17 @@ async function handleAdminReindex(request: Request, env: MatchingEnv, ctx: Execu
           if (expert.rate_max != null) metadata.rate_max = expert.rate_max;
           if (expert.availability != null) metadata.availability = expert.availability;
           await env.VECTORIZE.upsert([{ id: expert.id, values: vector, metadata }]);
+
+          // D1: outcome_tags embeddings pre-computation (E06S37 scalability fix)
+          const outcomeTags = expert.outcome_tags ?? [];
+          if (outcomeTags.length > 0 && env.EXPERT_DB) {
+            try {
+              const embeddings = await computeTagEmbeddings(env.AI, outcomeTags);
+              await upsertOutcomeEmbedding(env.EXPERT_DB, expert.id, embeddings);
+            } catch (err) {
+              console.error('reindex: outcome embedding failed for expert', expert.id, err);
+            }
+          }
         } catch (err) {
           console.error('reindex: failed for expert', expert.id, err);
         }

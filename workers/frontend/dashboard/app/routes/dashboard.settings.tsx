@@ -1029,7 +1029,7 @@ function AdmissibiliteSection({
           {/* Custom rules */}
           <div className="space-y-2">
             <Label>Règles personnalisées</Label>
-            <HelpText>Critères d'exclusion libres — utilisés pour le filtrage manuel.</HelpText>
+            <HelpText>Critères d'exclusion libres — interprétation automatique à venir (non actif pour l'instant).</HelpText>
             <TagInput
               name="custom_rules"
               values={customRules}

@@ -6,9 +6,6 @@ export interface MatchingEnv {
   // Hyperdrive — Supabase PostgreSQL access via postgres.js
   HYPERDRIVE: Hyperdrive;
 
-  // KV — expert pool cache (shared namespace with core, read-only)
-  EXPERT_POOL: KVNamespace;
-
   // D1 — expert pool edge cache (optional: graceful degradation when not provisioned)
   EXPERT_DB?: D1Database;
 

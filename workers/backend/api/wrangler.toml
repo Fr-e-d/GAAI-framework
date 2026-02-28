@@ -59,11 +59,6 @@ binding = "FEATURE_FLAGS"
 id = "24a3f09adaf34c26805ba2351d773829"
 preview_id = "24a3f09adaf34c26805ba2351d773829"
 
-[[kv_namespaces]]
-binding = "EXPERT_POOL"
-id = "68927a33fd9a46ec8b537a22a9cf2d20"
-preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
-
 [[analytics_engine_datasets]]
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
@@ -173,10 +168,6 @@ id = "eb21bf12dbd74b96928a98c866af62a1"
 binding = "FEATURE_FLAGS"
 id = "24a3f09adaf34c26805ba2351d773829"
 
-[[env.staging.kv_namespaces]]
-binding = "EXPERT_POOL"
-id = "68927a33fd9a46ec8b537a22a9cf2d20"
-
 [[env.staging.analytics_engine_datasets]]
 binding = "MATCHING_ANALYTICS"
 dataset = "matching-metrics"
@@ -278,10 +269,6 @@ id = "dc5d4d61b04d44fe827254ae8c8bade8"
 [[env.production.kv_namespaces]]
 binding = "FEATURE_FLAGS"
 id = "4d5d37620fe14ddfb34aa374cbc37ffe"
-
-[[env.production.kv_namespaces]]
-binding = "EXPERT_POOL"
-id = "af0c9c22c77b45ffbac4215009a295d4"
 
 [[env.production.analytics_engine_datasets]]
 binding = "MATCHING_ANALYTICS"

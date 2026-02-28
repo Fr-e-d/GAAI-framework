@@ -13,11 +13,6 @@ binding = "HYPERDRIVE"
 id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
 # localConnectionString: set in workers/backend/matching-engine/.dev.vars (gitignored) — see SETUP.md
 
-[[kv_namespaces]]
-binding = "EXPERT_POOL"
-id = "68927a33fd9a46ec8b537a22a9cf2d20"
-preview_id = "68927a33fd9a46ec8b537a22a9cf2d20"
-
 # D1 edge database — provisioned E06S27
 [[d1_databases]]
 binding = "EXPERT_DB"
@@ -43,10 +38,6 @@ name = "callibrate-matching-staging"
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "cc93b8f0e9554e4f8c1dbd9ad83688f5"
-
-[[env.staging.kv_namespaces]]
-binding = "EXPERT_POOL"
-id = "68927a33fd9a46ec8b537a22a9cf2d20"
 
 # D1 edge database — provisioned E06S27
 [[env.staging.d1_databases]]
@@ -74,10 +65,6 @@ name = "callibrate-matching-prod"
 binding = "HYPERDRIVE"
 # ⚠️ REPLACE at launch with production Hyperdrive config ID
 id = "PLACEHOLDER_HYPERDRIVE_CONFIG_ID"
-
-[[env.production.kv_namespaces]]
-binding = "EXPERT_POOL"
-id = "af0c9c22c77b45ffbac4215009a295d4"
 
 # D1 edge database — provisioned E06S27
 [[env.production.d1_databases]]

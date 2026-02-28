@@ -161,6 +161,7 @@ export async function handlePatchProfile(
           rate_min: updated.rate_min ?? null,
           rate_max: updated.rate_max ?? null,
           availability: updated.availability ?? null,
+          outcome_tags: updated.outcome_tags ?? [],
         }),
       })).catch((err) => console.error('profile: MATCHING_SERVICE embed failed', err))
     );

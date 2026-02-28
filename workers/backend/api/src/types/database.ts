@@ -16,8 +16,6 @@ export type Database = {
     Tables: {
       bookings: {
         Row: {
-          cal_booking_id: string | null
-          cal_meeting_url: string | null
           confirmed_at: string | null
           created_at: string | null
           description: string | null
@@ -40,8 +38,6 @@ export type Database = {
           status: string | null
         }
         Insert: {
-          cal_booking_id?: string | null
-          cal_meeting_url?: string | null
           confirmed_at?: string | null
           created_at?: string | null
           description?: string | null
@@ -64,8 +60,6 @@ export type Database = {
           status?: string | null
         }
         Update: {
-          cal_booking_id?: string | null
-          cal_meeting_url?: string | null
           confirmed_at?: string | null
           created_at?: string | null
           description?: string | null
