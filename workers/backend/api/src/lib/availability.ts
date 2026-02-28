@@ -1,3 +1,5 @@
+import type { ExpertAvailabilityRuleRow } from '../types/db';
+
 export interface AvailabilityRules {
   working_hours: Record<string, [string, string]>; // e.g. { mon: ["09:00","18:00"], ... }
   buffer_minutes: number;
@@ -130,4 +132,83 @@ export function computeFreeSlots(params: ComputeFreeSlotsParams): FreeSlot[] {
   }
 
   return slots;
+}
+
+// Day abbreviation (0=Sun, 1=Mon, ..., 6=Sat) — same order as DAY_KEYS above
+const DAY_KEYS_EXPORT = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+
+/**
+ * Convert a local time string (HH:MM or HH:MM:SS) to a UTC HH:MM string,
+ * given the expert's IANA timezone.
+ *
+ * Strategy: interpret "2024-01-15T{time}:00" as UTC, then determine the offset
+ * by comparing what that UTC moment looks like in the expert's timezone vs. UTC.
+ * The reference date 2024-01-15 (Monday in January) minimises DST ambiguity for
+ * the majority of winter-schedule experts; for full DST accuracy, a per-slot
+ * approach would be needed (out of scope for MVP).
+ */
+function localTimeToUTC(timeStr: string, timezone: string): string {
+  // Normalise to HH:MM
+  const hhmm = timeStr.slice(0, 5);
+
+  // Parse as a UTC Date at a fixed winter reference date to get a stable Date object
+  const refDateUTC = new Date(`2024-01-15T${hhmm}:00Z`);
+
+  // Obtain what that UTC instant looks like in the expert's timezone
+  const localAsDisplayed = new Date(refDateUTC.toLocaleString('en-US', { timeZone: 'UTC' }));
+  const expertLocal = new Date(refDateUTC.toLocaleString('en-US', { timeZone: timezone }));
+
+  // Offset between UTC and the expert's timezone at this reference instant
+  // offset > 0 means expert is ahead of UTC (e.g. UTC+1 → expert time is 1h later than UTC)
+  const offsetMs = localAsDisplayed.getTime() - expertLocal.getTime();
+
+  // The expert specifies times in local time. To convert local → UTC we ADD the negative offset.
+  // local + offset = UTC  ⟹  UTC = local - (expert_local - UTC) = local + offsetMs
+  const utcTime = new Date(refDateUTC.getTime() + offsetMs);
+
+  const utcHH = String(utcTime.getUTCHours()).padStart(2, '0');
+  const utcMM = String(utcTime.getUTCMinutes()).padStart(2, '0');
+  return `${utcHH}:${utcMM}`;
+}
+
+/**
+ * Convert DB availability rules (stored in expert local time) to working_hours
+ * format in UTC, compatible with computeFreeSlots().
+ *
+ * @param rules - Rows from expert_availability_rules (may include inactive ones)
+ * @param timezone - Expert's IANA timezone (e.g., 'Europe/Brussels')
+ * @returns working_hours map keyed by day abbreviation (sun/mon/tue/wed/thu/fri/sat)
+ */
+export function expandRulesToWorkingHours(
+  rules: ExpertAvailabilityRuleRow[],
+  timezone: string,
+): Record<string, [string, string]> {
+  const result: Record<string, [string, string]> = {};
+
+  // Validate timezone — fall back to UTC if invalid
+  let tz = timezone;
+  try {
+    Intl.DateTimeFormat('en-GB', { timeZone: tz });
+  } catch {
+    console.warn(`expandRulesToWorkingHours: invalid timezone "${timezone}", falling back to UTC`);
+    tz = 'UTC';
+  }
+
+  for (const rule of rules) {
+    // Only active rules
+    if (!rule.is_active) continue;
+
+    const dayKey = DAY_KEYS_EXPORT[rule.day_of_week];
+    if (!dayKey) continue;
+
+    // First rule per day wins (overlap prevention means there shouldn't be conflicts)
+    if (result[dayKey]) continue;
+
+    const startUTC = localTimeToUTC(rule.start_time, tz);
+    const endUTC = localTimeToUTC(rule.end_time, tz);
+
+    result[dayKey] = [startUTC, endUTC];
+  }
+
+  return result;
 }

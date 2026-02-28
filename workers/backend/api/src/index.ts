@@ -32,6 +32,8 @@ import { handleLeadEvaluation } from './handlers/evaluations/lead';
 import { applySecurityHeaders } from './lib/securityHeaders';
 // E06S38: Dashboard API endpoints
 import { handleGetLeads, handleEvaluateLead } from './handlers/experts/leads';
+// E02S11: Availability rules CRUD
+import { handleGetAvailabilityRules, handleCreateAvailabilityRule, handleUpdateAvailabilityRule, handleDeleteAvailabilityRule } from './handlers/experts/availability-rules';
 import { handleGetBookings } from './handlers/experts/bookings';
 import { handleGetBilling } from './handlers/experts/billing';
 import { handleGetDashboard } from './handlers/experts/dashboard';
@@ -380,6 +382,22 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     const dashboardMatch = pathname.match(/^\/api\/experts\/([^/]+)\/dashboard$/);
     if (method === 'GET' && dashboardMatch && dashboardMatch[1]) {
       return handleGetDashboard(request, env, user, dashboardMatch[1]);
+    }
+
+    // E02S11: availability rules CRUD
+    const rulesCollectionMatch = pathname.match(/^\/api\/experts\/([^/]+)\/availability\/rules$/);
+    if (rulesCollectionMatch && rulesCollectionMatch[1]) {
+      const expertId = rulesCollectionMatch[1];
+      if (method === 'GET') return handleGetAvailabilityRules(request, env, user, expertId);
+      if (method === 'POST') return handleCreateAvailabilityRule(request, env, user, expertId);
+    }
+
+    const ruleItemMatch = pathname.match(/^\/api\/experts\/([^/]+)\/availability\/rules\/([^/]+)$/);
+    if (ruleItemMatch && ruleItemMatch[1] && ruleItemMatch[2]) {
+      const expertId = ruleItemMatch[1];
+      const ruleId = ruleItemMatch[2];
+      if (method === 'PUT') return handleUpdateAvailabilityRule(request, env, user, expertId, ruleId);
+      if (method === 'DELETE') return handleDeleteAvailabilityRule(request, env, user, expertId, ruleId);
     }
 
     return new Response(JSON.stringify({ error: 'Not Found' }), {
