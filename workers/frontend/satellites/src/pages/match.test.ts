@@ -261,3 +261,88 @@ describe('renderMatchPage — HTML escaping', () => {
     expect(html).toContain('&lt;/style&gt;');
   });
 });
+
+// ── Group 7: E03S09 AC1/AC5 — Hint text element ──────────────────────────────
+
+describe('renderMatchPage — Hint text element (E03S09 AC1/AC5)', () => {
+  it('includes freetext-hint paragraph element', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('id="freetext-hint"');
+  });
+
+  it('hint text appears between h2 and form elements', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    const h2Idx = html.indexOf('<h2>');
+    const hintIdx = html.indexOf('id="freetext-hint"');
+    const formIdx = html.indexOf('<form');
+    expect(hintIdx).toBeGreaterThan(h2Idx);
+    expect(hintIdx).toBeLessThan(formIdx);
+  });
+
+  it('textarea has no placeholder attribute', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    const textareaStart = html.indexOf('<textarea');
+    const textareaEnd = html.indexOf('></textarea>', textareaStart);
+    const textareaHtml = html.slice(textareaStart, textareaEnd);
+    expect(textareaHtml).not.toContain('placeholder');
+  });
+
+  it('textarea aria-describedby includes freetext-hint', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('aria-describedby="freetext-hint char-counter match-error"');
+  });
+
+  it('includes soft-warning element', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('id="soft-warning"');
+  });
+
+  it('soft-warning is hidden by default via CSS', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('#soft-warning');
+    expect(html).toContain('display: none');
+  });
+
+  it('soft-warning element appears inside the form', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    const formStart = html.indexOf('<form');
+    const formEnd = html.indexOf('</form>');
+    const warnIdx = html.indexOf('id="soft-warning"');
+    expect(warnIdx).toBeGreaterThan(formStart);
+    expect(warnIdx).toBeLessThan(formEnd);
+  });
+});
+
+// ── Group 8: E03S09 AC2/AC4 — Locale and soft-warning logic ──────────────────
+
+describe('renderMatchPage — Locale and soft-warning logic (E03S09 AC2/AC4)', () => {
+  it('renders French hint text when locale is "fr"', () => {
+    const html = renderMatchPage({ ...baseConfig, locale: 'fr' }, '', 'https://api.example.com');
+    expect(html).toContain('Quelques pistes pour nous aider');
+  });
+
+  it('renders English hint text when locale is "en"', () => {
+    const html = renderMatchPage({ ...baseConfig, locale: 'en' }, '', 'https://api.example.com');
+    expect(html).toContain('A few pointers');
+  });
+
+  it('defaults to English hint text when locale is null', () => {
+    const html = renderMatchPage({ ...baseConfig, locale: null }, '', 'https://api.example.com');
+    expect(html).toContain('A few pointers');
+  });
+
+  it('defaults to English hint text when locale is absent', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('A few pointers');
+  });
+
+  it('includes SOFT_WARN_CHARS=50 constant in JS', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('SOFT_WARN_CHARS=50');
+  });
+
+  it('includes SOFT_WARN_DELAY=1500 constant in JS', () => {
+    const html = renderMatchPage(baseConfig, '', 'https://api.example.com');
+    expect(html).toContain('SOFT_WARN_DELAY=1500');
+  });
+});

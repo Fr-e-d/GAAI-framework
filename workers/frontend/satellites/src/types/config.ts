@@ -34,4 +34,5 @@ export interface SatelliteConfig {
   quiz_schema: unknown;
   matching_weights: unknown;
   tracking_enabled: boolean;
+  locale?: string | null;
 }
