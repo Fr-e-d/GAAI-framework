@@ -5,7 +5,7 @@ role: planning-specialist
 parent: AGENT-DELIVERY-001
 track: delivery
 lifecycle: ephemeral
-updated_at: 2026-02-20
+updated_at: 2026-02-28
 ---
 
 # Planning Sub-Agent
@@ -82,6 +82,11 @@ Approach evaluation triggered?
   │         Implementation choice? → proceed with chosen approach
   │         Architectural choice?  → plan-blocked + escalate
   ↓
+Decision consistency check (MANDATORY)
+  Verify planned approach against all DEC-* entries in context bundle.
+  If planned approach contradicts an existing DEC → plan-blocked + escalate.
+  If no DEC-* entries in context bundle → flag to Orchestrator (context bundle incomplete).
+  ↓
 consistency-check (if multi-artefact references)
   ↓
 prepare-execution-plan (informed by evaluation when it exists)
@@ -121,4 +126,5 @@ The Orchestrator validates artefact presence and structure before proceeding.
 - MUST NOT write any code
 - MUST NOT modify acceptance criteria or Story scope
 - MUST NOT make architectural decisions not already implied by the Story
+- MUST NOT produce an execution plan that contradicts any DEC-* entry in the context bundle without escalating via plan-blocked
 - MUST terminate after writing the handoff artefact

@@ -4,7 +4,7 @@ id: AGENT-BOOTSTRAP-001
 role: context-architect
 responsibility: initialize-and-converge-project-context
 track: cross
-updated_at: 2026-01-27
+updated_at: 2026-02-28
 ---
 
 # Bootstrap Agent (GAAI)
@@ -42,6 +42,8 @@ Identify implicit or explicit technical/product decisions:
 
 Store as: `contexts/memory/decisions/*`
 Via: `memory-ingest.skill`
+
+**Consistency guard:** When decisions already exist in `contexts/memory/decisions/`, Bootstrap must verify that any newly extracted decisions are consistent with existing ones. If a contradiction is detected between what the codebase implies and what a DEC states, Bootstrap must flag the contradiction for human resolution — never silently overwrite or supersede an existing decision. Only Discovery may supersede decisions.
 
 ### 3. Map System Structure
 
@@ -84,6 +86,7 @@ Identify:
 - uncaptured decisions
 - weak or absent governance rules
 - incomplete project context
+- **decision drift** — cases where the codebase has evolved to contradict an existing DEC. Flag these as explicit gaps requiring Discovery resolution.
 
 Trigger targeted refinement until gaps are closed.
 

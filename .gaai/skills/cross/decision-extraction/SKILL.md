@@ -9,7 +9,7 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-DECISION-EXTRACTION-001
-  updated_at: 2026-01-27
+  updated_at: 2026-02-28
   status: stable
 inputs:
   - recent_agent_outputs: session outputs from the invoking agent, or file paths to artefacts produced in the current session (e.g., evaluation reports, refined stories, approach-evaluation outputs)
@@ -35,6 +35,7 @@ Do NOT use for trivial steps, implementation details, brainstorming, or reversib
 
 ## Process
 
+0. **Decision Consistency Gate (mandatory — see `orchestration.rules.md`):** Before extracting any new decision, search existing decisions (`contexts/memory/decisions/`) for all entries touching the same domain/topic. List the relevant existing decisions explicitly. Verify that the new decision does not contradict any of them. If contradiction detected: the new decision MUST explicitly state "Supersedes DEC-XX" with rationale, OR be rejected. If the agent cannot determine consistency → stop and escalate to the human. **A decision extracted without this verification is invalid by governance.**
 1. Scan outputs for explicit or implicit decisions: architectural choices, accepted trade-offs, scope boundaries, prioritization shifts, constraints introduced
 2. Filter strictly for **durable, governance-relevant decisions**
 3. **Deduplication check:** Before writing a new decision entry, scan `contexts/memory/decisions/` for existing entries covering the same topic. If found: (a) if the new decision supersedes the old, update the existing entry's `updated_at` and add a `supersedes` note; (b) if the new decision confirms the old, skip writing a duplicate.

@@ -8,6 +8,7 @@ tags:
   - memory
   - backlog
   - governance
+updated_at: 2026-02-28
 created_at: 2026-02-09
 updated_at: 2026-02-26
 ---
@@ -248,6 +249,26 @@ When an agent encounters ambiguity in a backlog item or acceptance criteria:
 - Delivery must not begin on ambiguous criteria.
 
 **If in doubt: stop and ask. Always.**
+
+## 🔒 Decision Consistency Gate (Mandatory)
+
+Before recording ANY new decision (DEC-*), the authoring agent MUST:
+
+1. **Retrieve:** Invoke `memory-retrieve` for all existing decisions touching the same domain/topic (search by keywords, tags, and related DEC references)
+2. **List:** Explicitly enumerate which existing decisions are relevant and what they state
+3. **Verify:** Confirm that the new decision does not contradict any existing decision
+4. **Supersede or stop:**
+   - If no contradiction → proceed with recording
+   - If contradiction detected AND the new decision should replace the old → the new DEC MUST explicitly state "Supersedes DEC-XX" with rationale for the change
+   - If contradiction detected AND the agent cannot determine which is correct → stop and ask the human
+5. **Never record silently:** A decision recorded without this verification is **invalid by governance**
+
+This gate applies to:
+- Discovery Agent (primary decision-maker)
+- Delivery Agent (via `decision-extraction` after story completion)
+- Bootstrap Agent (during decision formalization from codebase analysis)
+
+---
 
 ## 🚫 Forbidden Patterns
 
