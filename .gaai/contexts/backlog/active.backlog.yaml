@@ -1307,7 +1307,7 @@ items:
     epic: E09
     title: "Matching-engine CI/CD pipeline in deploy-staging.yml"
     priority: high
-    status: in_progress
+    status: failed
     human_md_estimate: 0.5
     human_cost_usd: 350
     cost_usd: 0.69
