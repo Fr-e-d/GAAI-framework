@@ -39,14 +39,14 @@ function errorResponse(error: string, status: number, details?: unknown): Respon
 // AC10 (B2 fix): uses loadExpertPool(env) instead of direct DB query for experts
 
 export async function handleMatchCompute(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  let body: { prospect_id?: unknown; satellite_id?: unknown };
+  let body: { prospect_id?: unknown; satellite_id?: unknown; project_id?: unknown };
   try {
     body = await request.json();
   } catch {
     return errorResponse('Invalid JSON body', 400);
   }
 
-  const { prospect_id, satellite_id } = body;
+  const { prospect_id, satellite_id, project_id } = body;
 
   if (typeof prospect_id !== 'string' || !prospect_id) {
     return errorResponse('prospect_id is required', 422, { prospect_id: 'must be a non-empty string' });
@@ -68,7 +68,7 @@ export async function handleMatchCompute(request: Request, env: Env, ctx: Execut
       new Request('https://matching/match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prospect_id, satellite_id }),
+        body: JSON.stringify({ prospect_id, satellite_id, project_id: typeof project_id === 'string' && project_id ? project_id : null }),
       })
     );
     if (!matchResp.ok) return matchResp;
@@ -216,12 +216,17 @@ export async function handleMatchCompute(request: Request, env: Env, ctx: Execut
 
   // Upsert into matches table: delete existing, then insert fresh
   if (top20.length > 0) {
-    await sql`DELETE FROM matches WHERE prospect_id = ${prospect_id}`;
+    // E06S41: scope delete by project_id if provided, else by prospect_id (backwards compat)
+    if (typeof project_id === 'string' && project_id) {
+      await sql`DELETE FROM matches WHERE project_id = ${project_id}`;
+    } else {
+      await sql`DELETE FROM matches WHERE prospect_id = ${prospect_id}`;
+    }
 
     for (const { expert, matchScore } of top20) {
       await sql`
-        INSERT INTO matches (prospect_id, expert_id, score, score_breakdown, status, expires_at)
-        VALUES (${prospect_id}, ${expert.id}, ${matchScore.score}, ${JSON.stringify(matchScore.breakdown)}::jsonb, 'pending', ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()})
+        INSERT INTO matches (prospect_id, expert_id, project_id, score, score_breakdown, status, expires_at)
+        VALUES (${prospect_id}, ${expert.id}, ${typeof project_id === 'string' && project_id ? project_id : null}, ${matchScore.score}, ${JSON.stringify(matchScore.breakdown)}::jsonb, 'pending', ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()})
         ON CONFLICT DO NOTHING`;
     }
   }

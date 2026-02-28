@@ -6,7 +6,7 @@ import { authenticate } from './middleware/auth';
 import { handleRegister } from './handlers/experts/register';
 import { handleGetProfile, handlePatchProfile } from './handlers/experts/profile';
 import { handleSatelliteConfig } from './routes/satellites';
-import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify, handleCreateFromDirectory, handleProspectRequirements } from './routes/prospects';
+import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify, handleCreateFromDirectory, handleProspectRequirements, handleProspectProjects } from './routes/prospects';
 import { handleCors, addCorsHeaders, corsForbidden } from './lib/cors';
 import { handleGcalAuthUrl, handleGcalStatus, handleGcalDisconnect, handleGcalCallback } from './handlers/experts/gcal';
 import { handleLsWebhook } from './handlers/webhooks/lemonsqueezy';
@@ -210,6 +210,12 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       // POST /api/prospects/:id/requirements — E03S08 (AC5)
       if (method === 'POST' && pathname === `/api/prospects/${prospectId}/requirements`) {
         const response = await handleProspectRequirements(request, env, prospectId, ctx);
+        return addCorsHeaders(response, corsResult.origin);
+      }
+
+      // GET /api/prospects/:id/projects — E06S41 (AC8)
+      if (method === 'GET' && pathname === `/api/prospects/${prospectId}/projects`) {
+        const response = await handleProspectProjects(request, env, prospectId, ctx);
         return addCorsHeaders(response, corsResult.origin);
       }
     }

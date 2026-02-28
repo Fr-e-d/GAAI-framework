@@ -237,6 +237,48 @@ export async function verifyFlowToken(token: string, secret: string): Promise<{ 
   return { extraction_id: claims.extraction_id };
 }
 
+// ── E06S41: Verify prospect JWT and return claims ──────────────────────────────
+// Used by identified fast-track path (project 2+). Returns { prospect_id } on
+// success, null on any failure (invalid signature, expired, wrong audience).
+
+export async function verifyProspectTokenGetClaims(
+  token: string,
+  secret: string,
+  expectedAud: 'prospect:submit',
+): Promise<{ prospect_id: string } | null> {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  const [header, payload, sig] = parts as [string, string, string];
+  const signingInput = `${header}.${payload}`;
+
+  let signatureBytes: Uint8Array;
+  try {
+    signatureBytes = fromBase64Url(sig);
+  } catch {
+    return null;
+  }
+
+  const key = await importHmacKey(secret, 'verify');
+  const encoder = new TextEncoder();
+
+  const valid = await crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(signingInput));
+  if (!valid) return null;
+
+  let claims: { prospect_id?: string; exp?: number; aud?: string };
+  try {
+    claims = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
+  } catch {
+    return null;
+  }
+
+  if (claims.exp === undefined || claims.exp < Math.floor(Date.now() / 1000)) return null;
+  if (claims.aud !== expectedAud) return null;
+  if (typeof claims.prospect_id !== 'string' || !claims.prospect_id) return null;
+
+  return { prospect_id: claims.prospect_id };
+}
+
 // ── isValidProspectToken ───────────────────────────────────────────────────────
 // Verifies any prospect JWT (signature + TTL only — no prospect_id matching).
 // Used by AC9: if the caller holds a valid session token, they are identified and exempt

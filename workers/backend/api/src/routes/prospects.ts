@@ -17,11 +17,11 @@ import {
   type ScoreBreakdown,
 } from '../types/matching';
 import { scoreMatch, applyReliabilityModifier } from '../matching/score';
-import { signProspectToken, verifyProspectToken, verifyFlowToken } from '../lib/jwt';
+import { signProspectToken, verifyProspectToken, verifyFlowToken, verifyProspectTokenGetClaims } from '../lib/jwt';
 import { loadExpertPool } from '../lib/expertPool';
 import { writeMatchingDataPoint } from '../lib/matchingAnalytics';
 import { createSql } from '../lib/db';
-import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow } from '../types/db';
+import type { ProspectRow, MatchRow, SatelliteConfigRow, ExpertRow, ProspectProjectRow } from '../types/db';
 import { captureEvent } from '../lib/posthog';
 import { calculateLeadPrice } from '../lib/pricing';
 import { loadBillingData, applyBillingFilters } from '../lib/billingFilter';
@@ -137,6 +137,250 @@ function normalizeRequirements(quizAnswers: Record<string, unknown>): ProspectRe
   return r;
 }
 
+// ── E06S41: Anti-abuse helpers ─────────────────────────────────────────────────
+
+function tokenizeText(text: string): Set<string> {
+  return new Set(text.toLowerCase().split(/[\s\p{P}]+/u).filter(Boolean));
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  let intersectionSize = 0;
+  for (const token of a) {
+    if (b.has(token)) intersectionSize++;
+  }
+  const unionSize = a.size + b.size - intersectionSize;
+  return unionSize === 0 ? 0 : intersectionSize / unionSize;
+}
+
+// ── Identified prospect fast-track (E06S41 AC5/AC9) ──────────────────────────
+// Called when POST /api/prospects/submit carries a valid prospect:submit JWT.
+// Skips Turnstile + OTP. Creates (or updates) a project, runs matching, returns results.
+
+async function handleIdentifiedProjectSubmit(
+  prospectId: string,
+  body: {
+    satellite_id?: unknown;
+    quiz_answers?: unknown;
+    freetext?: unknown;
+    project_id?: unknown;
+    utm_source?: unknown;
+    utm_campaign?: unknown;
+    utm_content?: unknown;
+  },
+  env: Env,
+  ctx: ExecutionContext,
+  startTime: number,
+): Promise<Response> {
+  const { satellite_id, quiz_answers, freetext, project_id, utm_source, utm_campaign, utm_content } = body;
+
+  // satellite_id required
+  if (typeof satellite_id !== 'string' || !satellite_id) {
+    return errorResponse('Validation failed', 422, { satellite_id: 'required' });
+  }
+
+  // quiz_answers required
+  if (!quiz_answers || typeof quiz_answers !== 'object' || Array.isArray(quiz_answers)) {
+    return errorResponse('Validation failed', 422, { quiz_answers: 'must be an object' });
+  }
+
+  const answers = quiz_answers as Record<string, unknown>;
+  const freetextStr = typeof freetext === 'string' ? freetext.trim() : '';
+  const isUpdate = typeof project_id === 'string' && project_id;
+
+  const sql = createSql(env);
+  let prospect: Pick<ProspectRow, 'id' | 'email'> | undefined;
+  let existingProjectId: string | undefined;
+  let requirements: ReturnType<typeof normalizeRequirements>;
+  let experts: Awaited<ReturnType<typeof loadExpertPool>>;
+  let weights: MatchingWeights = DEFAULT_WEIGHTS;
+
+  try {
+    // Load prospect — must be identified (has email)
+    const [p] = await sql<Pick<ProspectRow, 'id' | 'email'>[]>`
+      SELECT id, email FROM prospects WHERE id = ${prospectId}`;
+    if (!p) return errorResponse('Prospect not found', 404);
+    if (!p.email) return errorResponse('Prospect not yet identified', 403);
+    prospect = p;
+
+    if (isUpdate) {
+      // Verify project belongs to this prospect (IDOR prevention)
+      const [proj] = await sql<Pick<ProspectProjectRow, 'id'>[]>`
+        SELECT id FROM prospect_projects WHERE id = ${project_id as string} AND prospect_id = ${prospectId}`;
+      if (!proj) return errorResponse('Project not found', 404);
+      existingProjectId = proj.id;
+    } else {
+      // AC10: max 5 active projects
+      const [countRow] = await sql<{ count: string }[]>`
+        SELECT COUNT(*)::text AS count FROM prospect_projects
+        WHERE prospect_id = ${prospectId} AND status = 'active'`;
+      const activeCount = parseInt(countRow?.count ?? '0', 10);
+      if (activeCount >= 5) {
+        return errorResponse('max_projects_exceeded', 429);
+      }
+
+      // AC11: rate limit — 3 new projects per 24h
+      const rateLimitKey = `rate:new_project:${prospectId}`;
+      const countRaw = await env.SESSIONS.get(rateLimitKey);
+      const newProjectCount = countRaw ? parseInt(countRaw, 10) : 0;
+      if (newProjectCount >= 3) {
+        return errorResponse('rate_limit_exceeded', 429);
+      }
+
+      // AC12: duplicate detection (Jaccard > 0.85 on freetext, if len > 20)
+      if (freetextStr.length > 20) {
+        const existingProjects = await sql<Pick<ProspectProjectRow, 'id' | 'freetext'>[]>`
+          SELECT id, freetext FROM prospect_projects
+          WHERE prospect_id = ${prospectId} AND status = 'active' AND freetext IS NOT NULL`;
+        const newTokens = tokenizeText(freetextStr);
+        for (const ep of existingProjects) {
+          if (!ep.freetext) continue;
+          const existingTokens = tokenizeText(ep.freetext);
+          if (jaccardSimilarity(newTokens, existingTokens) > 0.85) {
+            return errorResponse('duplicate_project', 409, { existing_project_id: ep.id });
+          }
+        }
+      }
+
+      // Store rate limit increment (done after validation, before matching)
+      await env.SESSIONS.put(`rate:new_project:${prospectId}`, String(newProjectCount + 1), { expirationTtl: 86400 });
+    }
+
+    // Normalize requirements
+    requirements = normalizeRequirements(answers);
+
+    // Load satellite config for matching weights
+    const [sat] = await sql<Pick<SatelliteConfigRow, 'matching_weights'>[]>`
+      SELECT matching_weights FROM satellite_configs WHERE id = ${satellite_id}`;
+    if (sat?.matching_weights && typeof sat.matching_weights === 'object' && !Array.isArray(sat.matching_weights)) {
+      weights = sat.matching_weights as unknown as MatchingWeights;
+    }
+
+    // Load expert pool
+    experts = await loadExpertPool(env);
+
+    if (isUpdate) {
+      // Update existing project requirements + expire its matches
+      await sql`
+        UPDATE prospect_projects
+        SET requirements = ${JSON.stringify(requirements)}::jsonb, freetext = ${freetextStr}, updated_at = now()
+        WHERE id = ${existingProjectId as string}`;
+      await sql`
+        UPDATE matches SET status = 'expired'
+        WHERE project_id = ${existingProjectId as string} AND status != 'expired'`;
+    } else {
+      // Create new prospect_projects row
+      const [newProj] = await sql<Pick<ProspectProjectRow, 'id'>[]>`
+        INSERT INTO prospect_projects (prospect_id, satellite_id, freetext, requirements, status)
+        VALUES (${prospectId}, ${satellite_id}, ${freetextStr}, ${JSON.stringify(requirements)}::jsonb, 'active')
+        RETURNING id`;
+      if (!newProj) return errorResponse('Database error', 500);
+      existingProjectId = newProj.id;
+    }
+  } finally {
+    await sql.end();
+  }
+
+  const projectId = existingProjectId!;
+
+  // Call matching engine (SQL closed before this)
+  if (env.MATCHING_SERVICE) {
+    try {
+      const matchResp = await env.MATCHING_SERVICE.fetch(
+        new Request('https://matching/match', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prospect_id: prospectId, satellite_id, project_id: projectId }),
+        })
+      );
+      if (matchResp.ok) {
+        // Update matches to set project_id (MATCHING_SERVICE inserts without project_id)
+        const sqlLink = createSql(env);
+        try {
+          await sqlLink`UPDATE matches SET project_id = ${projectId} WHERE prospect_id = ${prospectId} AND project_id IS NULL`;
+        } finally {
+          await sqlLink.end();
+        }
+        const { token, expiresAt } = await signProspectToken(prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+        return jsonResponse({ prospect_id: prospectId, project_id: projectId, token, token_expires_at: expiresAt });
+      }
+    } catch (err) {
+      console.error('[submit/fast-track] MATCHING_SERVICE.fetch failed, falling back', err);
+    }
+  }
+
+  // Fallback: local deterministic scoring
+  const sqlFallback = createSql(env);
+  try {
+    const budgetMax = requirements.budget_range?.max ?? null;
+    const lpResult = calculateLeadPrice(budgetMax, { budget_max: budgetMax });
+    const leadPrice = lpResult.amount;
+
+    const billingMap = await loadBillingData(env, experts.map((e) => e.id));
+    const { eligible: billingEligible, excluded: billingExcluded } = applyBillingFilters(experts, billingMap, leadPrice);
+
+    for (const ex of billingExcluded) {
+      ctx.waitUntil(env.EMAIL_NOTIFICATIONS.send({
+        type: 'expert.billing.lead_missed',
+        expert_id: ex.expert_id,
+        reason: ex.reason,
+        prospect_vertical: satellite_id,
+        budget_tier: lpResult.tier,
+      }));
+    }
+
+    const admissibilityMap = await loadAdmissibilityData(env, billingEligible.map((e) => e.id));
+    const prospectCtx: ProspectContext = {
+      industry: requirements.industry ?? null,
+      vertical: satellite_id,
+      timeline: requirements.timeline ?? null,
+      budget_max: requirements.budget_range?.max ?? null,
+      skills_needed: requirements.skills_needed ?? [],
+      methodology: (requirements as unknown as { methodology?: string[] }).methodology ?? [],
+    };
+    const { eligible, excluded: admissibilityExcluded } = applyAdmissibilityFilters(billingEligible, admissibilityMap, prospectCtx);
+
+    for (const ex of admissibilityExcluded) {
+      ctx.waitUntil(env.EMAIL_NOTIFICATIONS.send({
+        type: 'expert.admissibility.lead_missed',
+        expert_id: ex.expert_id,
+        reason: ex.reason,
+        prospect_vertical: satellite_id,
+      }));
+    }
+
+    if (eligible.length > 0) {
+      const matchRows = eligible.map((expert) => {
+        const profile: ExpertProfile = { ...((expert.profile ?? {}) as ExpertProfile), rate_min: expert.rate_min, rate_max: expert.rate_max };
+        const prefs = (expert.preferences ?? {}) as ExpertPreferences;
+        const raw = scoreMatch(profile, prefs, requirements, weights, undefined);
+        const { score, breakdown } = applyReliabilityModifier(raw, { composite_score: expert.composite_score, total_leads: expert.total_leads });
+        return {
+          prospect_id: prospectId,
+          project_id: projectId,
+          expert_id: expert.id,
+          score,
+          score_breakdown: breakdown as unknown as Json,
+          status: 'pending',
+          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        };
+      });
+
+      const top20Rows = matchRows.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 20);
+      for (const row of top20Rows) {
+        await sqlFallback`
+          INSERT INTO matches (prospect_id, project_id, expert_id, score, score_breakdown, status, expires_at)
+          VALUES (${row.prospect_id}, ${row.project_id}, ${row.expert_id}, ${row.score}, ${JSON.stringify(row.score_breakdown)}::jsonb, ${row.status}, ${row.expires_at})
+          ON CONFLICT DO NOTHING`;
+      }
+    }
+
+    const { token, expiresAt } = await signProspectToken(prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+    return jsonResponse({ prospect_id: prospectId, project_id: projectId, token, token_expires_at: expiresAt });
+  } finally {
+    ctx.waitUntil(sqlFallback.end());
+  }
+}
+
 // ── POST /api/prospects/submit ─────────────────────────────────────────────────
 
 export async function handleProspectSubmit(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -156,6 +400,8 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     utm_content?: unknown;
     'cf-turnstile-response'?: unknown;
     flow_token?: unknown; // AC11 (E06S40): signed token from POST /api/extract
+    freetext?: unknown;   // E06S41: raw freetext for project 2+
+    project_id?: unknown; // E06S41: update existing project
   };
   try {
     body = await request.json();
@@ -163,10 +409,21 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     return errorResponse('Invalid JSON body', 400);
   }
 
+  // E06S41: Detect identified fast-track (project 2+).
+  // If Authorization header carries a valid prospect:submit JWT, route to fast-track.
+  // Otherwise fall through to the anonymous flow token path.
+  const authHeader = request.headers.get('Authorization');
+  const rawBearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (rawBearerToken) {
+    const prospectClaims = await verifyProspectTokenGetClaims(rawBearerToken, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+    if (prospectClaims) {
+      return handleIdentifiedProjectSubmit(prospectClaims.prospect_id, body, env, ctx, startTime);
+    }
+  }
+
   // AC11 (E06S40): Flow token required — proves client went through legitimate extraction flow.
   // Check Authorization header first, then body field `flow_token`.
-  const authHeader = request.headers.get('Authorization');
-  const rawFlowToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : body['flow_token'];
+  const rawFlowToken = rawBearerToken ?? body['flow_token'];
   if (typeof rawFlowToken !== 'string' || !rawFlowToken) {
     return errorResponse('invalid_flow_token', 403);
   }
@@ -208,6 +465,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
   const sql = createSql(env);
   let satellite: Pick<SatelliteConfigRow, 'quiz_schema' | 'matching_weights'> | undefined;
   let prospect: Pick<ProspectRow, 'id'> | undefined;
+  let newProjectId: string | null = null; // E06S41
   let requirements: ReturnType<typeof normalizeRequirements>;
   let experts: Awaited<ReturnType<typeof loadExpertPool>>;
   let weights: MatchingWeights = DEFAULT_WEIGHTS;
@@ -240,6 +498,15 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     prospect = p;
     if (!prospect) return errorResponse('Database error', 500);
     console.log('[submit] prospect created:', prospect.id);
+
+    // E06S41 AC1/AC3: create prospect_projects row for this submission
+    const freetextVal = typeof body['freetext'] === 'string' ? body['freetext'].trim() : '';
+    const [projectRow] = await sql<Pick<ProspectProjectRow, 'id'>[]>`
+      INSERT INTO prospect_projects (prospect_id, satellite_id, freetext, requirements, status)
+      VALUES (${prospect.id}, ${satellite_id}, ${freetextVal}, ${JSON.stringify(requirements)}::jsonb, 'active')
+      RETURNING id`;
+    newProjectId = projectRow?.id ?? null;
+    console.log('[submit] prospect_projects row created:', newProjectId);
 
     // AC1/AC3: load expert pool from KV (with DB fallback)
     console.log('[submit] loading expert pool...');
@@ -307,9 +574,18 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
             })
           );
         }
+        // E06S41: Link matches to project_id
+        if (newProjectId) {
+          const sqlLink = createSql(env);
+          try {
+            await sqlLink`UPDATE matches SET project_id = ${newProjectId} WHERE prospect_id = ${prospect!.id} AND project_id IS NULL`;
+          } finally {
+            await sqlLink.end();
+          }
+        }
         const { token, expiresAt } = await signProspectToken(prospect!.id, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
         console.log('[submit] SUCCESS — prospect_id:', prospect!.id);
-        return jsonResponse({ prospect_id: prospect!.id, token, token_expires_at: expiresAt });
+        return jsonResponse({ prospect_id: prospect!.id, project_id: newProjectId, token, token_expires_at: expiresAt });
       }
       console.error('[submit] MATCHING_SERVICE returned', matchResp.status, '— falling back to local scoring');
     } catch (err) {
@@ -417,8 +693,8 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
     // AC3: INSERT top 20 scored results
     for (const row of top20Rows) {
       await sqlFallback`
-        INSERT INTO matches (prospect_id, expert_id, score, score_breakdown, status, expires_at)
-        VALUES (${row.prospect_id}, ${row.expert_id}, ${row.score}, ${JSON.stringify(row.score_breakdown)}::jsonb, ${row.status}, ${row.expires_at})
+        INSERT INTO matches (prospect_id, expert_id, project_id, score, score_breakdown, status, expires_at)
+        VALUES (${row.prospect_id}, ${row.expert_id}, ${newProjectId}, ${row.score}, ${JSON.stringify(row.score_breakdown)}::jsonb, ${row.status}, ${row.expires_at})
         ON CONFLICT DO NOTHING`;
     }
   }
@@ -455,6 +731,7 @@ export async function handleProspectSubmit(request: Request, env: Env, ctx: Exec
 
   return jsonResponse({
     prospect_id: prospect!.id,
+    project_id: newProjectId,
     token,
     token_expires_at: expiresAt,
   });
@@ -492,14 +769,39 @@ export async function handleProspectMatches(
     return errorResponse('Forbidden', 403);
   }
 
+  // E06S41: resolve project_id (optional param; defaults to most recent active project)
+  const urlForMatches = new URL(request.url);
+  const requestedProjectId = urlForMatches.searchParams.get('project_id');
+
   const sql = createSql(env);
 
   try {
-    // AC5: load all matches for prospect, ordered by score DESC
-    const matches = await sql<Pick<MatchRow, 'id' | 'expert_id' | 'score' | 'score_breakdown'>[]>`
-      SELECT id, expert_id, score, score_breakdown FROM matches
-      WHERE prospect_id = ${prospectId} AND status != 'expired'
-      ORDER BY score DESC`;
+    // E06S41: resolve project scope
+    let resolvedProjectId: string | null = null;
+    if (requestedProjectId) {
+      // IDOR check: verify project belongs to this prospect
+      const [proj] = await sql<Pick<ProspectProjectRow, 'id'>[]>`
+        SELECT id FROM prospect_projects WHERE id = ${requestedProjectId} AND prospect_id = ${prospectId}`;
+      if (!proj) return jsonResponse({ matches: [] });
+      resolvedProjectId = proj.id;
+    } else {
+      // Default to most recent active project
+      const [latestProj] = await sql<Pick<ProspectProjectRow, 'id'>[]>`
+        SELECT id FROM prospect_projects WHERE prospect_id = ${prospectId}
+        ORDER BY created_at DESC LIMIT 1`;
+      resolvedProjectId = latestProj?.id ?? null;
+    }
+
+    // AC5: load matches for resolved project (or fall back to prospect_id for legacy)
+    const matches = resolvedProjectId
+      ? await sql<Pick<MatchRow, 'id' | 'expert_id' | 'score' | 'score_breakdown'>[]>`
+          SELECT id, expert_id, score, score_breakdown FROM matches
+          WHERE project_id = ${resolvedProjectId} AND status != 'expired'
+          ORDER BY score DESC`
+      : await sql<Pick<MatchRow, 'id' | 'expert_id' | 'score' | 'score_breakdown'>[]>`
+          SELECT id, expert_id, score, score_breakdown FROM matches
+          WHERE prospect_id = ${prospectId} AND status != 'expired'
+          ORDER BY score DESC`;
 
     // Matching is synchronous (E06S24) — token is only issued after matching completes.
     // 0 matches means no experts are available, not "still computing".
@@ -880,14 +1182,14 @@ export async function handleProspectRequirements(
     return errorResponse('Too Many Requests', 429);
   }
 
-  let body: { requirements?: unknown; token?: unknown };
+  let body: { requirements?: unknown; token?: unknown; project_id?: unknown };
   try {
     body = await request.json();
   } catch {
     return errorResponse('Invalid JSON body', 400);
   }
 
-  const { requirements, token } = body;
+  const { requirements, token, project_id } = body;
 
   // Validate token
   if (typeof token !== 'string' || !token) {
@@ -923,9 +1225,14 @@ export async function handleProspectRequirements(
     await sql`
       UPDATE prospects SET requirements = ${JSON.stringify(normalized)}::jsonb WHERE id = ${prospectId}`;
 
-    // Expire existing matches
-    await sql`
-      UPDATE matches SET status = 'expired' WHERE prospect_id = ${prospectId} AND status != 'expired'`;
+    // E06S41: Expire matches for the specific project if provided, else all prospect matches
+    if (typeof project_id === 'string' && project_id) {
+      await sql`
+        UPDATE matches SET status = 'expired' WHERE project_id = ${project_id} AND status != 'expired'`;
+    } else {
+      await sql`
+        UPDATE matches SET status = 'expired' WHERE prospect_id = ${prospectId} AND status != 'expired'`;
+    }
   } finally {
     await sql.end();
   }
@@ -935,7 +1242,10 @@ export async function handleProspectRequirements(
   const computeReq = new Request('https://internal/api/matches/compute', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prospect_id: prospectId }),
+    body: JSON.stringify({
+      prospect_id: prospectId,
+      ...(typeof project_id === 'string' && project_id ? { project_id } : {}),
+    }),
   });
   ctx.waitUntil(handleMatchCompute(computeReq, env, ctx));
 
@@ -1021,4 +1331,74 @@ export async function handleCreateFromDirectory(
   }));
 
   return jsonResponse({ prospect_id: prospectId, token, expert_id: expertId });
+}
+
+// ── GET /api/prospects/:id/projects — E06S41 AC8 ──────────────────────────────
+// Returns list of prospect's projects with match_count and top_score.
+// Auth: Bearer JWT (prospect:submit audience).
+
+export async function handleProspectProjects(
+  request: Request,
+  env: Env,
+  prospectId: string,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
+  // Auth: Bearer JWT required (prospect:submit)
+  const authHeader = request.headers.get('Authorization');
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    return errorResponse('Forbidden', 403);
+  }
+  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+  if (!tokenValid) {
+    return errorResponse('Forbidden', 403);
+  }
+
+  const sql = createSql(env);
+  try {
+    const projects = await sql<{
+      id: string;
+      satellite_id: string | null;
+      status: string | null;
+      created_at: string | null;
+      match_count: string;
+      top_score: number | null;
+    }[]>`
+      SELECT
+        pp.id,
+        pp.satellite_id,
+        pp.status,
+        pp.created_at,
+        COUNT(m.id)::text AS match_count,
+        MAX(m.score) AS top_score
+      FROM prospect_projects pp
+      LEFT JOIN matches m ON m.project_id = pp.id AND m.status != 'expired'
+      WHERE pp.prospect_id = ${prospectId}
+      GROUP BY pp.id
+      ORDER BY pp.created_at DESC`;
+
+    ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+      distinctId: `prospect:${prospectId}`,
+      event: 'prospect.projects_listed',
+      properties: { project_count: projects.length },
+    }));
+
+    return jsonResponse({
+      projects: projects.map((p) => ({
+        id: p.id,
+        satellite_id: p.satellite_id,
+        status: p.status,
+        created_at: p.created_at,
+        match_count: parseInt(p.match_count, 10),
+        top_score: p.top_score,
+      })),
+    });
+  } finally {
+    ctx.waitUntil(sql.end());
+  }
 }

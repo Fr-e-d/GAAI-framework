@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify, handleProspectRequirements } from './prospects';
+import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify, handleProspectRequirements, handleProspectProjects } from './prospects';
 import type { Env } from '../types/env';
 
 vi.mock('../lib/db', () => ({
@@ -777,5 +777,145 @@ describe('handleProspectRequirements — POST /api/prospects/:id/requirements', 
     });
     await handleProspectRequirements(request, env, 'prospect-1', ctx);
     expect(waitUntilMock).toHaveBeenCalled();
+  });
+});
+
+// ── Tests: E06S41 — identified fast-track (project 2+) ────────────────────────
+
+describe('handleProspectSubmit — identified fast-track (E06S41 AC5/AC9)', () => {
+  it('routes to fast-track when Authorization carries valid prospect:submit JWT', async () => {
+    // This test verifies the routing decision — mock sql returns [] for all queries
+    // so the fast-track will return 404 ("Prospect not found") which proves we entered
+    // the identified path (the anonymous path would reject with invalid_flow_token first)
+    const { signProspectToken } = await import('../lib/jwt');
+    const prospectId = '00000000-0000-0000-0000-000000000001';
+    const { token } = await signProspectToken(prospectId, 'test-secret-32-chars-long-padding!!', 'prospect:submit');
+
+    const request = new Request('https://test.workers.dev/api/prospects/submit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '1.2.3.4',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        satellite_id: 'sat-1',
+        quiz_answers: { challenge: 'test', skills_needed: ['python'] },
+      }),
+    });
+
+    const response = await handleProspectSubmit(request, makeMockEnv(), mockCtx);
+    // With mocked DB (returns []), prospect not found → 404 from fast-track
+    expect(response.status).toBe(404);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body['error']).toBe('Prospect not found');
+  });
+});
+
+// ── Tests: E06S41 — handleProspectProjects ────────────────────────────────────
+
+describe('handleProspectProjects (E06S41 AC8)', () => {
+  it('returns 403 without Authorization header', async () => {
+    const request = new Request('https://test.workers.dev/api/prospects/test-id/projects', {
+      method: 'GET',
+      headers: { 'CF-Connecting-IP': '1.2.3.4' },
+    });
+
+    const response = await handleProspectProjects(request, makeMockEnv(), 'test-id', mockCtx);
+    expect(response.status).toBe(403);
+  });
+
+  it('returns 403 with invalid token', async () => {
+    const request = new Request('https://test.workers.dev/api/prospects/test-id/projects', {
+      method: 'GET',
+      headers: {
+        'CF-Connecting-IP': '1.2.3.4',
+        'Authorization': 'Bearer invalid-token',
+      },
+    });
+
+    const response = await handleProspectProjects(request, makeMockEnv(), 'test-id', mockCtx);
+    expect(response.status).toBe(403);
+  });
+
+  it('returns empty projects list with valid token and mocked DB', async () => {
+    const { signProspectToken } = await import('../lib/jwt');
+    const prospectId = '00000000-0000-0000-0000-000000000002';
+    const { token } = await signProspectToken(prospectId, 'test-secret-32-chars-long-padding!!', 'prospect:submit');
+
+    const request = new Request(`https://test.workers.dev/api/prospects/${prospectId}/projects`, {
+      method: 'GET',
+      headers: {
+        'CF-Connecting-IP': '1.2.3.4',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    const response = await handleProspectProjects(request, makeMockEnv(), prospectId, mockCtx);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { projects: unknown[] };
+    expect(Array.isArray(body.projects)).toBe(true);
+    expect(body.projects).toHaveLength(0);
+  });
+});
+
+// ── Tests: E06S41 — Anti-abuse (AC10/AC11) ───────────────────────────────────
+
+describe('handleProspectSubmit — anti-abuse max projects (E06S41 AC10)', () => {
+  it('returns 429 max_projects_exceeded when 5 active projects exist', async () => {
+    const { signProspectToken } = await import('../lib/jwt');
+    const prospectId = '00000000-0000-0000-0000-000000000003';
+    const { token } = await signProspectToken(prospectId, 'test-secret-32-chars-long-padding!!', 'prospect:submit');
+
+    // Mock DB: prospect found + has email + count returns 5
+    const { createSql } = await import('../lib/db');
+    let callCount = 0;
+    (createSql as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      const mockSql = Object.assign(
+        (async () => {
+          callCount++;
+          if (callCount === 1) return [{ id: prospectId, email: 'user@test.com' }]; // prospect
+          if (callCount === 2) return [{ count: '5' }]; // active project count
+          return [];
+        }) as unknown as ReturnType<typeof import('../lib/db').createSql>,
+        { begin: vi.fn(), end: vi.fn().mockResolvedValue(undefined) },
+      );
+      return mockSql;
+    });
+
+    const mockEnvSessions = {
+      ...baseMockEnv,
+      SESSIONS: {
+        get: vi.fn().mockResolvedValue(null),
+        put: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    const request = new Request('https://test.workers.dev/api/prospects/submit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '1.2.3.4',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        satellite_id: 'sat-1',
+        quiz_answers: { challenge: 'test', skills_needed: ['python'] },
+      }),
+    });
+
+    const response = await handleProspectSubmit(request, makeMockEnv(mockEnvSessions as any), mockCtx);
+    expect(response.status).toBe(429);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body['error']).toBe('max_projects_exceeded');
+
+    // Restore default mock
+    (createSql as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Object.assign((() => []) as unknown as ReturnType<typeof import('../lib/db').createSql>, {
+        begin: vi.fn(),
+        end: vi.fn().mockResolvedValue(undefined),
+      }),
+    );
   });
 });

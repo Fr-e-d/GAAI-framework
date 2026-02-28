@@ -104,6 +104,7 @@ export interface MatchRow {
   expert_id: string | null;
   expires_at: string | null;
   prospect_id: string | null;
+  project_id: string | null; // E06S41
   score: number | null;
   score_breakdown: Json | null;
   status: string | null;
@@ -183,4 +184,17 @@ export interface CreditTransactionRow {
   balance_after: number;
   created_at: string | null;
   available_at: string | null; // E02S10: 72h delay for milestone credits (AC6)
+}
+
+// E06S41: prospect_projects row
+export interface ProspectProjectRow {
+  id: string;
+  prospect_id: string | null;
+  satellite_id: string | null;
+  freetext: string | null;
+  requirements: Json | null;
+  extraction_confidence: number | null;
+  status: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
