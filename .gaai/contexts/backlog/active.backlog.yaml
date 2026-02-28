@@ -788,7 +788,7 @@ items:
     epic: E03
     title: "Inline booking widget (availability → hold → confirm)"
     priority: high
-    status: in_progress
+    status: done
     human_md_estimate: 5.2
     human_cost_usd: 3640
     artefact: contexts/artefacts/stories/E03S06.story.md
