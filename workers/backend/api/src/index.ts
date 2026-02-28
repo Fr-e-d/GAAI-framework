@@ -6,7 +6,7 @@ import { authenticate } from './middleware/auth';
 import { handleRegister } from './handlers/experts/register';
 import { handleGetProfile, handlePatchProfile } from './handlers/experts/profile';
 import { handleSatelliteConfig } from './routes/satellites';
-import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify } from './routes/prospects';
+import { handleProspectSubmit, handleProspectMatches, handleProspectIdentify, handleOtpSend, handleOtpVerify } from './routes/prospects';
 import { handleCors, addCorsHeaders, corsForbidden } from './lib/cors';
 import { handleGcalAuthUrl, handleGcalStatus, handleGcalDisconnect, handleGcalCallback } from './handlers/experts/gcal';
 import { handleLsWebhook } from './handlers/webhooks/lemonsqueezy';
@@ -168,6 +168,18 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       // GET /api/prospects/:id/matches?token=xxx
       if (method === 'GET' && pathname === `/api/prospects/${prospectId}/matches`) {
         const response = await handleProspectMatches(request, env, prospectId, ctx);
+        return addCorsHeaders(response, corsResult.origin);
+      }
+
+      // POST /api/prospects/:id/otp/send — E06S39 (AC5/AC10)
+      if (method === 'POST' && pathname === `/api/prospects/${prospectId}/otp/send`) {
+        const response = await handleOtpSend(request, env, prospectId, ctx);
+        return addCorsHeaders(response, corsResult.origin);
+      }
+
+      // POST /api/prospects/:id/otp/verify — E06S39 (AC6/AC10)
+      if (method === 'POST' && pathname === `/api/prospects/${prospectId}/otp/verify`) {
+        const response = await handleOtpVerify(request, env, prospectId, ctx);
         return addCorsHeaders(response, corsResult.origin);
       }
 

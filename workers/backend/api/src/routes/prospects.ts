@@ -3,6 +3,7 @@
 // AC4/AC5/AC6: GET /api/prospects/:id/matches?token=xxx
 // AC7/AC8: POST /api/prospects/:id/identify
 // AC10: consistent error shape { error: string, details?: object }
+// E06S39: POST /api/prospects/:id/otp/send + POST /api/prospects/:id/otp/verify
 
 import type { Json } from '../types/database';
 import type { Env } from '../types/env';
@@ -26,6 +27,9 @@ import { calculateLeadPrice } from '../lib/pricing';
 import { loadBillingData, applyBillingFilters } from '../lib/billingFilter';
 import { loadAdmissibilityData, applyAdmissibilityFilters } from '../lib/admissibilityFilter';
 import type { ProspectContext } from '../lib/admissibilityFilter';
+import { generateOtp, verifyOtpHash } from '../lib/otp';
+import { sendEmail, buildOtpEmail } from '../lib/email';
+import { preCheckEmail } from '../lib/emailValidation';
 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -504,6 +508,9 @@ export async function handleProspectMatches(
 }
 
 // ── POST /api/prospects/:id/identify ──────────────────────────────────────────
+// E06S39 (AC7): Requires prior OTP verification. Email comes from the verified KV
+// token, not from the request body. The prospect session JWT is still required for
+// authorization.
 
 export async function handleProspectIdentify(
   request: Request,
@@ -517,16 +524,16 @@ export async function handleProspectIdentify(
     return errorResponse('Too Many Requests', 429);
   }
 
-  let body: { email?: unknown; token?: unknown };
+  let body: { token?: unknown };
   try {
     body = await request.json();
   } catch {
     return errorResponse('Invalid JSON body', 400);
   }
 
-  const { email, token } = body;
+  const { token } = body;
 
-  // AC7: validate token — prospect:submit is the session token for the full funnel (matches + identify)
+  // AC7: validate prospect session token
   if (typeof token !== 'string' || !token) {
     return errorResponse('Forbidden', 403);
   }
@@ -536,15 +543,25 @@ export async function handleProspectIdentify(
     return errorResponse('Forbidden', 403);
   }
 
-  // AC7: validate email format
-  if (typeof email !== 'string' || !email || !isValidEmail(email)) {
-    return errorResponse('Validation failed', 422, { email: 'must be a valid email address' });
+  // AC7 (E06S39): require prior OTP verification — email comes from KV, not body
+  const verifiedRaw = await env.SESSIONS.get(`verified:${prospectId}`);
+  if (!verifiedRaw) {
+    return errorResponse('OTP verification required', 403);
+  }
+
+  let verifiedEmail: string;
+  try {
+    const parsed = JSON.parse(verifiedRaw) as { email?: string };
+    if (!parsed.email) throw new Error('missing email');
+    verifiedEmail = parsed.email;
+  } catch {
+    return errorResponse('OTP verification required', 403);
   }
 
   const sql = createSql(env);
 
   try {
-    // AC8: check if prospect already identified
+    // Check if prospect already identified
     const [prospect] = await sql<Pick<ProspectRow, 'id' | 'email'>[]>`
       SELECT id, email FROM prospects WHERE id = ${prospectId}`;
 
@@ -554,8 +571,12 @@ export async function handleProspectIdentify(
       return errorResponse('Prospect already identified', 409);
     }
 
-    // AC7: update prospect with email + status
-    await sql`UPDATE prospects SET email = ${email}, status = 'identified' WHERE id = ${prospectId}`;
+    // AC7: update prospect with verified email + status + verified_at
+    const verifiedAt = new Date().toISOString();
+    await sql`UPDATE prospects SET email = ${verifiedEmail}, status = 'identified', verified_at = ${verifiedAt} WHERE id = ${prospectId}`;
+
+    // Consume the verified KV token — single-use
+    ctx.waitUntil(env.SESSIONS.delete(`verified:${prospectId}`));
 
     // Load matches to get expert_ids, sorted by score DESC
     const matches = await sql<Pick<MatchRow, 'expert_id' | 'score'>[]>`
@@ -571,14 +592,13 @@ export async function handleProspectIdentify(
       return jsonResponse({ experts: [] });
     }
 
-    // AC7: load full expert profiles
+    // Load full expert profiles
     const expertRows = await sql<Pick<ExpertRow, 'id' | 'display_name' | 'headline' | 'bio' | 'profile' | 'rate_min' | 'rate_max' | 'cal_username'>[]>`
       SELECT id, display_name, headline, bio, profile, rate_min, rate_max, cal_username FROM experts WHERE id = ANY(${expertIds})`;
 
     const expertMap = new Map(expertRows.map((e) => [e.id, e]));
     const matchScoreMap = new Map(matches.map((m) => [m.expert_id ?? '', m.score ?? 0]));
 
-    // AC7: full profiles with booking_url
     const expertProfiles = expertIds
       .map((expertId) => {
         const expert = expertMap.get(expertId);
@@ -602,7 +622,7 @@ export async function handleProspectIdentify(
       })
       .filter(Boolean);
 
-    const emailDomain = email.split('@')[1] ?? 'unknown';
+    const emailDomain = verifiedEmail.split('@')[1] ?? 'unknown';
     ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
       distinctId: `prospect:${prospectId}`,
       event: 'prospect.identified',
@@ -613,4 +633,192 @@ export async function handleProspectIdentify(
   } finally {
     ctx.waitUntil(sql.end());
   }
+}
+
+// ── POST /api/prospects/:id/otp/send ──────────────────────────────────────────
+// E06S39 (AC5): Run pre-checks, generate OTP, store hash in KV, send email.
+
+export async function handleOtpSend(
+  request: Request,
+  env: Env,
+  prospectId: string,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
+  let body: { email?: unknown; token?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON body', 400);
+  }
+
+  const { email, token } = body;
+
+  // Prospect session token required
+  if (typeof token !== 'string' || !token) {
+    return errorResponse('Forbidden', 403);
+  }
+  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+  if (!tokenValid) {
+    return errorResponse('Forbidden', 403);
+  }
+
+  if (typeof email !== 'string' || !email) {
+    return errorResponse('Validation failed', 422, { email: 'required' });
+  }
+
+  // AC4: Pre-check pipeline — syntax → normalize → MX → disposable
+  const preCheck = await preCheckEmail(email);
+  if (!preCheck.ok) {
+    const errorMessages: Record<string, string> = {
+      invalid_syntax: 'Invalid email address',
+      no_mx_record: 'Email domain does not exist or cannot receive mail',
+      disposable_domain: 'Disposable email addresses are not allowed',
+    };
+    return errorResponse(errorMessages[preCheck.error ?? ''] ?? 'Invalid email address', 422, { email: preCheck.error });
+  }
+
+  const normalizedEmail = preCheck.normalizedEmail!;
+
+  // AC8: Email uniqueness check on normalized email (before OTP send)
+  const sql = createSql(env);
+  try {
+    const [existing] = await sql<Pick<ProspectRow, 'id'>[]>`
+      SELECT id FROM prospects WHERE email = ${normalizedEmail} LIMIT 1`;
+    if (existing) {
+      return errorResponse('Email already registered', 409);
+    }
+  } finally {
+    ctx.waitUntil(sql.end());
+  }
+
+  // AC5: Rate limit — max 3 OTP sends per email per 24h
+  const rateLimitKey = `otp:rate:${normalizedEmail}`;
+  const countRaw = await env.SESSIONS.get(rateLimitKey);
+  const sendCount = countRaw ? parseInt(countRaw, 10) : 0;
+  if (sendCount >= 3) {
+    return errorResponse('Too many OTP requests for this email. Try again tomorrow.', 429);
+  }
+
+  // AC1 + AC5: Generate OTP, store hash in KV
+  const { code, hash } = await generateOtp();
+  const otpRecord = JSON.stringify({ hash, email: normalizedEmail, attempts: 0 });
+  await env.SESSIONS.put(`otp:${prospectId}`, otpRecord, { expirationTtl: 600 });
+
+  // Increment rate counter (TTL resets on each put — use max remaining TTL for simplicity)
+  const newCount = sendCount + 1;
+  await env.SESSIONS.put(rateLimitKey, String(newCount), { expirationTtl: 86400 });
+
+  // AC2 + AC9: Send OTP email
+  const { html, text } = buildOtpEmail(code);
+  try {
+    await sendEmail(
+      { to: email, subject: 'Your Callibrate verification code', html, text },
+      { apiKey: env.RESEND_API_KEY, fromDomain: env.EMAIL_FROM_DOMAIN, replyTo: env.EMAIL_REPLY_TO },
+    );
+  } catch (err) {
+    console.error('otp/send: email send failed', err);
+    // Roll back KV writes on send failure so the user can retry
+    await env.SESSIONS.delete(`otp:${prospectId}`);
+    await env.SESSIONS.put(rateLimitKey, String(sendCount), { expirationTtl: 86400 });
+    return errorResponse('Failed to send verification email. Please try again.', 502);
+  }
+
+  // Mask email for display: "j•••@gmail.com"
+  const atIdx = email.indexOf('@');
+  const localPart = email.slice(0, atIdx);
+  const maskedLocal = localPart.length > 1 ? localPart[0] + '•••' : '•••';
+  const maskedEmail = `${maskedLocal}@${email.slice(atIdx + 1)}`;
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospectId}`,
+    event: 'prospect.otp_sent',
+    properties: {},
+  }));
+
+  return jsonResponse({ sent: true, email: maskedEmail });
+}
+
+// ── POST /api/prospects/:id/otp/verify ────────────────────────────────────────
+// E06S39 (AC6): Verify submitted code against stored hash. On success, store
+// verified:{prospectId} in KV (TTL 300s) so identify can proceed.
+
+export async function handleOtpVerify(
+  request: Request,
+  env: Env,
+  prospectId: string,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const rateCheck = await checkRateLimit(request, env);
+  if (!rateCheck.allowed) {
+    return errorResponse('Too Many Requests', 429);
+  }
+
+  let body: { code?: unknown; token?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON body', 400);
+  }
+
+  const { code, token } = body;
+
+  // Prospect session token required
+  if (typeof token !== 'string' || !token) {
+    return errorResponse('Forbidden', 403);
+  }
+  const tokenValid = await verifyProspectToken(token, prospectId, env.PROSPECT_TOKEN_SECRET, 'prospect:submit');
+  if (!tokenValid) {
+    return errorResponse('Forbidden', 403);
+  }
+
+  if (typeof code !== 'string' || !code) {
+    return errorResponse('Validation failed', 422, { code: 'required' });
+  }
+
+  // AC6: Retrieve OTP record from KV
+  const otpRaw = await env.SESSIONS.get(`otp:${prospectId}`);
+  if (!otpRaw) {
+    return errorResponse('Verification code expired or not found. Please request a new code.', 410);
+  }
+
+  let otpRecord: { hash: string; email: string; attempts: number };
+  try {
+    otpRecord = JSON.parse(otpRaw) as { hash: string; email: string; attempts: number };
+  } catch {
+    return errorResponse('Verification code expired or not found. Please request a new code.', 410);
+  }
+
+  // AC6: Enforce max 5 attempts
+  if (otpRecord.attempts >= 5) {
+    await env.SESSIONS.delete(`otp:${prospectId}`);
+    return errorResponse('Maximum verification attempts exceeded. Please request a new code.', 429);
+  }
+
+  // AC6: Hash and compare
+  const codeMatches = await verifyOtpHash(code, otpRecord.hash);
+
+  if (!codeMatches) {
+    // Increment attempts and persist
+    otpRecord.attempts += 1;
+    await env.SESSIONS.put(`otp:${prospectId}`, JSON.stringify(otpRecord), { expirationTtl: 600 });
+    const remaining = 5 - otpRecord.attempts;
+    return jsonResponse({ verified: false, remaining_attempts: remaining });
+  }
+
+  // AC6: Code valid — store verified token (TTL 300s), delete OTP record
+  await env.SESSIONS.put(`verified:${prospectId}`, JSON.stringify({ email: otpRecord.email }), { expirationTtl: 300 });
+  await env.SESSIONS.delete(`otp:${prospectId}`);
+
+  ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
+    distinctId: `prospect:${prospectId}`,
+    event: 'prospect.otp_verified',
+    properties: {},
+  }));
+
+  return jsonResponse({ verified: true, email: otpRecord.email });
 }

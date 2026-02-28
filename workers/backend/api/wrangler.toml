@@ -123,6 +123,7 @@ EMAIL_REPLY_TO = "support@callibrate.io"
 SURVEY_DELAY_7D_MS = "60000"
 SURVEY_DELAY_38D_MS = "120000"
 # TURNSTILE_SECRET_KEY: set via: wrangler secret put TURNSTILE_SECRET_KEY --env staging
+# RESEND_API_KEY: set via: wrangler secret put RESEND_API_KEY --env staging  (E06S39: required for OTP email sending)
 # Staging acceleration: lead flag window = 1 minute (production default: 7 days)
 FLAG_WINDOW_MS = "60000"
 

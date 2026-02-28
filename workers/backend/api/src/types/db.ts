@@ -70,6 +70,7 @@ export interface ProspectRow {
   utm_campaign: string | null;
   utm_content: string | null;
   utm_source: string | null;
+  verified_at: string | null; // E06S39: set when OTP verification completes
 }
 
 export interface MatchRow {
