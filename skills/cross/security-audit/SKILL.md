@@ -1,7 +1,7 @@
 ---
 name: security-audit
 description: Detect security vulnerabilities and governance violations across delivered code, configurations, and deployed environments. Activate after implementation or periodically as a governance check.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

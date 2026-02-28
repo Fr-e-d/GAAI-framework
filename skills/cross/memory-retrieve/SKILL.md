@@ -1,7 +1,7 @@
 ---
 name: memory-retrieve
 description: Load only the minimum relevant memory for a task by filtering the memory index by relevance. Activate before context-building — never load full memory dumps.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
