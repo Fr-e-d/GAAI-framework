@@ -309,3 +309,41 @@ export function buildExpertApprovalEmail(opts: {
 </html>`;
   return { html, text };
 }
+
+// E03S10 AC4: Magic link email — sent after OTP verification with prospect's results link.
+export function buildMagicLinkEmail(opts: {
+  satelliteUrl: string;
+  prospectId: string;
+  token: string;
+}): { html: string; text: string } {
+  const magicUrl = `${opts.satelliteUrl}/results/${encodeURIComponent(opts.prospectId)}?token=${encodeURIComponent(opts.token)}`;
+
+  const text = [
+    `Vos résultats de matching sont prêts.`,
+    ``,
+    `Retrouvez vos résultats à tout moment depuis n'importe quel appareil :`,
+    magicUrl,
+    ``,
+    `Ce lien est valable 7 jours.`,
+    ``,
+    `— Callibrate`,
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><title>Vos résultats Callibrate</title></head>
+<body style="font-family:sans-serif;color:#111;max-width:480px;margin:0 auto;padding:24px;">
+  <p>Vos résultats de matching sont prêts.</p>
+  <p>Retrouvez vos résultats à tout moment depuis n'importe quel appareil :</p>
+  <p style="text-align:center;margin:24px 0;">
+    <a href="${magicUrl}" style="background:#4F46E5;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">
+      Voir mes résultats
+    </a>
+  </p>
+  <p style="color:#888;font-size:12px;">Ce lien est valable 7 jours.</p>
+  <p style="margin-top:24px;font-size:12px;color:#888;">— Callibrate</p>
+</body>
+</html>`;
+
+  return { html, text };
+}
