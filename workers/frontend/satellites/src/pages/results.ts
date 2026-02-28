@@ -1,4 +1,5 @@
 import type { SatelliteConfig } from '../types/config';
+import { getBookingWidgetStyles, getBookingWidgetScript } from './booking-widget';
 
 function escapeHtml(str: string): string {
   return str
@@ -171,6 +172,7 @@ export function renderResultsPage(
       .criterion-row { flex-wrap:wrap; }
       .criterion-label { width:auto; }
     }
+    ${getBookingWidgetStyles()}
   </style>
 </head>
 <body>
@@ -233,6 +235,7 @@ export function renderResultsPage(
     </section>
   </main>
   ${satConfigScript}
+  ${getBookingWidgetScript()}
   <script>(function(){
     var prospect_id=null;
     var token=null;
@@ -438,6 +441,7 @@ export function renderResultsPage(
       })
       .then(function(data){
         if(!data)return;
+        try{sessionStorage.setItem('match:identified_email',email);}catch(e){}
         revealFullProfiles(data.experts||[]);
       })
       .catch(function(err){
@@ -503,9 +507,12 @@ export function renderResultsPage(
         });
       });
       // Wire booking buttons
+      var expertNameMap={};
+      experts.forEach(function(expert){ var id=expert.expert_id||''; if(id)expertNameMap[id]=expert.display_name||''; });
       container.querySelectorAll('.booking-btn').forEach(function(btn){
         btn.addEventListener('click',function(){
           var expertId=btn.getAttribute('data-expert-id')||'';
+          var expertName=expertNameMap[expertId]||'';
           var matchCard=btn.closest('.match-card');
           var rank=matchCard?parseInt(matchCard.getAttribute('data-rank')||'0',10):0;
           firePostHog('satellite.booking_cta_clicked',{
@@ -513,7 +520,7 @@ export function renderResultsPage(
             prospect_id:prospect_id,
             expert_rank:rank
           });
-          window.dispatchEvent(new CustomEvent('booking-open',{detail:{expertId:expertId}}));
+          window.dispatchEvent(new CustomEvent('booking-open',{detail:{expertId:expertId,expertName:expertName}}));
         });
       });
       // AC10: profiles_unlocked
