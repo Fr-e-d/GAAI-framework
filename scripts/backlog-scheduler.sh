@@ -6,9 +6,9 @@ set -euo pipefail
 #
 # Description:
 #   Selects the next ready Story from the active backlog.
-#   Reads active.backlog.yaml, finds items with status: refined,
-#   sorts by priority, checks dependencies, and returns the
-#   first actionable item.
+#   Reads active.backlog.yaml, finds items with status: refined
+#   or ready, sorts by priority, checks dependencies, and returns
+#   the first actionable item.
 #
 #   Also supports: listing all ready items, outputting ready
 #   IDs, showing a dependency graph, detecting priority
@@ -326,7 +326,7 @@ priority_order = {"critical": -1, "high": 0, "medium": 1, "low": 2}
 done_ids = {i["id"] for i in items if i.get("status") in ("done", "cancelled", "superseded")}
 
 def is_ready(item):
-    if item.get("status") != "refined":
+    if item.get("status") not in ("refined", "ready"):
         return False
     return all(d in done_ids for d in item.get("depends_on", []) if d)
 
@@ -395,7 +395,7 @@ if mode == "graph":
             resolved = "\u2713" if dep in done_ids else "\u2717"
             print(f'       \u2514\u2500 {resolved} depends on {dep} (status: {dep_status})')
     print()
-    print("Legend: \u2705 ready  \U0001f504 in-progress  \U0001f512 blocked  \u23f3 not yet refined")
+    print("Legend: \u2705 ready  \U0001f504 in-progress  \U0001f512 blocked  \u23f3 not yet refined/ready")
     sys.exit(0)
 
 # -- Mode: conflicts --
@@ -404,7 +404,7 @@ if mode == "conflicts":
     active_items = [i for i in items if i.get("status") not in ("done", "cancelled")]
 
     for item in active_items:
-        if item.get("status") != "refined":
+        if item.get("status") not in ("refined", "ready"):
             continue
         unres = unresolved_deps(item)
         if not unres:
