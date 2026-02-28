@@ -38,6 +38,7 @@ export interface Env {
   PROSPECT_TOKEN_SECRET: string;
   TURNSTILE_SECRET_KEY: string;
   SURVEY_TOKEN_SECRET: string;
+  BOOKING_CONFIRM_SECRET: string;
 
   // Queue producers
   EMAIL_NOTIFICATIONS: Queue;

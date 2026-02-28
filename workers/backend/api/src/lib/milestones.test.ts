@@ -44,6 +44,7 @@ function makeExpert(overrides: Partial<ExpertRow> = {}): ExpertRow {
     spending_limit: null,
     verified_at: null,
     timezone: 'UTC', // E02S11
+    booking_auto_confirm: true, // E03S07
     ...overrides,
   };
 }

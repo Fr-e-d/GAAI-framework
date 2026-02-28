@@ -46,6 +46,9 @@ export function getBookingWidgetStyles(): string {
 .bw-success-meet { display:inline-block; margin-top:0.75rem; margin-bottom:0.75rem; padding:0.625rem 1.25rem; background:#059669; color:#fff; border-radius:var(--radius-card,0.5rem); text-decoration:none; font-weight:600; font-size:0.9375rem; }
 .bw-success-email-note { font-size:0.875rem; color:#6b7280; margin-top:0.5rem; }
 .bw-success-prep { display:block; margin-top:0.75rem; font-size:0.875rem; color:var(--color-primary,#4F46E5); }
+.bw-resend-btn { background:none; border:1.5px solid var(--color-primary,#4F46E5); color:var(--color-primary,#4F46E5); font-size:0.875rem; cursor:pointer; padding:0.5rem 1rem; border-radius:var(--radius-card,0.375rem); font-family:var(--font-family,'Inter, sans-serif'); margin-top:0.5rem; min-height:44px; }
+.bw-resend-btn:hover:not(:disabled) { background:var(--color-primary,#4F46E5); color:#fff; }
+.bw-resend-btn:disabled { opacity:0.5; cursor:not-allowed; }
 .bw-step-expired { text-align:center; padding:1.5rem 0; }
 .bw-expired-title { font-size:1rem; font-weight:600; color:#dc2626; margin-bottom:0.75rem; }
 .bw-reselect-btn { padding:0.625rem 1.25rem; background:var(--color-primary,#4F46E5); color:#fff; border:none; border-radius:var(--radius-card,0.5rem); cursor:pointer; font-weight:600; font-family:var(--font-family,'Inter, sans-serif'); min-height:44px; }
@@ -457,7 +460,8 @@ export function getBookingWidgetScript(): string {
       if(!data)return;
       clearCountdown();
       firePostHog('satellite.booking_confirmed',{satellite_id:satelliteId,expert_id:currentExpertId,booking_id:bookingId});
-      renderSuccess(data,email);
+      if(data.booking_id)bookingId=data.booking_id;
+      renderPendingConfirmation(data.confirmation_sent_to||email);
     })
     .catch(function(){
       if(confirmBtn){confirmBtn.disabled=false;confirmBtn.textContent='Confirmer la r\u00e9servation';}
@@ -465,27 +469,59 @@ export function getBookingWidgetScript(): string {
     });
   }
 
-  function renderSuccess(data,email){
+  function renderPendingConfirmation(email){
     if(!containerEl)return;
     STATE='SUCCESS';
-    var tz=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';
-    var startD=new Date(data.start_at||selectedSlot.start_at);
-    var slotLabel=formatSlotLabel(startD,tz);
-    var meetUrl=data.meeting_url||null;
-    var prepToken=data.prep_token||null;
-    var prepUrl=prepToken?'https://'+window.location.hostname+'/prep/'+encodeURIComponent(prepToken):null;
+    var countdown=60;
     var html='<div class="bw-inner">'
       +'<div class="bw-step-success">'
-      +'<div class="bw-success-check">\u2713</div>'
-      +'<div class="bw-success-title">R\u00e9servation confirm\u00e9e !</div>'
-      +'<p class="bw-success-detail"><strong>'+escHtml(currentExpertName)+'</strong> \u2014 '+escHtml(slotLabel)+'</p>'
-      +(meetUrl?'<a class="bw-success-meet" href="'+escHtml(meetUrl)+'" target="_blank" rel="noopener">Rejoindre Google Meet</a>':'')
-      +'<p class="bw-success-email-note">Un email de confirmation avec l\'invitation Google Calendar a \u00e9t\u00e9 envoy\u00e9 \u00e0 '+escHtml(email)+'.</p>'
-      +(prepUrl?'<a class="bw-success-prep" href="'+escHtml(prepUrl)+'">Pr\u00e9parer mon appel \u2192</a>':'')
+      +'<div class="bw-success-check">\u2709</div>'
+      +'<div class="bw-success-title">V\u00e9rifiez votre email</div>'
+      +'<p class="bw-success-detail">Un email de confirmation a \u00e9t\u00e9 envoy\u00e9 \u00e0 <strong>'+escHtml(email)+'</strong>.</p>'
+      +'<p class="bw-success-detail">Cliquez sur le lien dans l\'email pour finaliser votre r\u00e9servation.</p>'
+      +'<div id="bw-resend-container">'
+      +'<p class="bw-success-email-note" id="bw-countdown-msg">Renvoyer l\'email dans <span id="bw-countdown-sec">'+countdown+'</span>s</p>'
+      +'</div>'
       +'</div>'
       +'</div>';
     containerEl.innerHTML=html;
-    containerEl.setAttribute('aria-label','R\u00e9servation confirm\u00e9e');
+    containerEl.setAttribute('aria-label','Email de confirmation envoy\u00e9');
+
+    var resendInterval=setInterval(function(){
+      countdown--;
+      var secEl=document.getElementById('bw-countdown-sec');
+      var msgEl=document.getElementById('bw-countdown-msg');
+      if(secEl)secEl.textContent=String(countdown);
+      if(countdown<=0){
+        clearInterval(resendInterval);
+        if(msgEl){
+          msgEl.innerHTML='<button class="bw-resend-btn" id="bw-resend-btn">Renvoyer l\'email</button>';
+          var btn=document.getElementById('bw-resend-btn');
+          if(btn){
+            btn.addEventListener('click',function(){
+              btn.disabled=true;
+              btn.textContent='Envoi...';
+              var resendUrl=apiUrl+'/api/bookings/'+encodeURIComponent(bookingId)+'/confirmation/resend';
+              fetch(resendUrl,{
+                method:'POST',
+                headers:{'Content-Type':'application/json'}
+              }).then(function(r){
+                if(r.ok){
+                  btn.textContent='Email renvoy\u00e9 !';
+                  btn.disabled=true;
+                }else{
+                  btn.textContent='Erreur, r\u00e9essayez';
+                  btn.disabled=false;
+                }
+              }).catch(function(){
+                btn.textContent='Erreur, r\u00e9essayez';
+                btn.disabled=false;
+              });
+            });
+          }
+        }
+      }
+    },1000);
   }
 
   function handleGcalNotConnected(){

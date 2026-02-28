@@ -24,7 +24,15 @@ import { Calendar } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type BookingStatus = "held" | "confirmed" | "cancelled";
+type BookingStatus =
+  | "held"
+  | "confirmed"
+  | "cancelled"
+  | "no_show"
+  | "pending_confirmation"
+  | "expired_no_confirmation"
+  | "cancelled_by_prospect"
+  | "pending_expert_approval";
 
 type Prospect = {
   id: string;
@@ -63,7 +71,8 @@ type LoaderData = {
 type ActionData =
   | { success: true; intent: "cancel"; bookingId: string }
   | { success: true; intent: "reschedule"; bookingId: string }
-  | { success: false; intent: "cancel" | "reschedule"; error: string }
+  | { success: true; intent: "no-show"; bookingId: string }
+  | { success: false; intent: "cancel" | "reschedule" | "no-show"; error: string }
   | { success: false; intent: "unknown"; error: string };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -118,6 +127,16 @@ export function bookingStatusDisplay(
         label: "Annulé",
         badgeClass: "bg-red-100 text-red-800 border border-red-200",
       };
+    case "no_show":
+      return { label: "Absent", badgeClass: "bg-orange-100 text-orange-800 border border-orange-200" };
+    case "pending_confirmation":
+      return { label: "En attente de confirmation", badgeClass: "bg-yellow-100 text-yellow-800 border border-yellow-200" };
+    case "expired_no_confirmation":
+      return { label: "Expiré", badgeClass: "bg-gray-100 text-gray-800 border border-gray-200" };
+    case "cancelled_by_prospect":
+      return { label: "Annulé par le prospect", badgeClass: "bg-red-100 text-red-800 border border-red-200" };
+    case "pending_expert_approval":
+      return { label: "Approbation requise", badgeClass: "bg-purple-100 text-purple-800 border border-purple-200" };
     default:
       return { label: status, badgeClass: "bg-gray-100 text-gray-800 border border-gray-200" };
   }
@@ -307,6 +326,40 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
   }
 
+  if (intent === "no-show") {
+    const bookingId = String(formData.get("bookingId") ?? "");
+    if (!bookingId) {
+      return Response.json(
+        {
+          success: false,
+          intent: "no-show",
+          error: "Booking ID manquant.",
+        } satisfies ActionData,
+        { status: 400 },
+      );
+    }
+
+    try {
+      await apiPost<{ success: true }>(env, session.token, `/api/bookings/${bookingId}/no-show`, {});
+      captureEvent(env, `expert:${userId}`, "expert.booking_no_show_reported", {
+        booking_id: bookingId,
+      }).catch(() => {});
+      return Response.json(
+        { success: true, intent: "no-show", bookingId } satisfies ActionData,
+      );
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : 500;
+      return Response.json(
+        {
+          success: false,
+          intent: "no-show",
+          error: "Impossible de marquer cet appel comme absent.",
+        } satisfies ActionData,
+        { status },
+      );
+    }
+  }
+
   return Response.json(
     { success: false, intent: "unknown", error: "Action inconnue." } satisfies ActionData,
     { status: 400 },
@@ -347,6 +400,9 @@ export default function BookingsPage() {
         setRescheduleDialogOpen(false);
         setNewStartAt("");
         setSelectedBooking(null);
+      }
+      if (actionData.intent === "no-show") {
+        toast.success("Absent enregistré");
       }
     } else {
       toast.error(actionData.error);
@@ -498,6 +554,20 @@ export default function BookingsPage() {
                             Annuler
                           </Button>
                         </>
+                      )}
+                      {period === "past" && booking.status === "confirmed" && (
+                        <Form method="post" className="inline">
+                          <input type="hidden" name="intent" value="no-show" />
+                          <input type="hidden" name="bookingId" value={booking.id} />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            type="submit"
+                            className="border-orange-200 text-orange-700 hover:bg-orange-50"
+                          >
+                            Marquer comme absent
+                          </Button>
+                        </Form>
                       )}
                     </div>
                   </CardContent>

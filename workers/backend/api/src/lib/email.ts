@@ -69,3 +69,151 @@ export function buildOtpEmail(code: string): { html: string; text: string } {
 
   return { html, text };
 }
+
+export function buildConfirmationEmail(opts: {
+  expertName: string;
+  confirmUrl: string;
+  cancelUrl: string;
+  startAt: string;
+  expiryMinutes: number;
+}): { html: string; text: string } {
+  const dateStr = new Date(opts.startAt).toLocaleString('fr-FR', {
+    timeZone: 'UTC',
+    weekday: 'long', day: 'numeric', month: 'long',
+    hour: '2-digit', minute: '2-digit'
+  });
+
+  const text = [
+    `Bonjour,`,
+    ``,
+    `Vous avez demandé un appel découverte avec ${opts.expertName}.`,
+    ``,
+    `Date : ${dateStr} (UTC)`,
+    ``,
+    `Confirmez votre réservation en cliquant sur ce lien :`,
+    opts.confirmUrl,
+    ``,
+    `Pour annuler : ${opts.cancelUrl}`,
+    ``,
+    `Ce lien expire dans ${opts.expiryMinutes} minutes. Sans confirmation, le créneau sera libéré.`,
+    ``,
+    `Si vous n'avez pas effectué cette réservation, ignorez cet email.`,
+    ``,
+    `— Callibrate`,
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><title>Confirmez votre appel</title></head>
+<body style="font-family:sans-serif;color:#111;max-width:480px;margin:0 auto;padding:24px;">
+  <p>Bonjour,</p>
+  <p>Vous avez demandé un appel découverte avec <strong>${opts.expertName}</strong>.</p>
+  <p><strong>Date :</strong> ${dateStr} (UTC)</p>
+  <p>Cliquez sur le bouton ci-dessous pour confirmer votre réservation :</p>
+  <p style="text-align:center;margin:24px 0;">
+    <a href="${opts.confirmUrl}" style="background:#4F46E5;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">
+      Confirmer mon appel
+    </a>
+  </p>
+  <p>Si vous souhaitez annuler, <a href="${opts.cancelUrl}" style="color:#4F46E5;">cliquez ici</a>.</p>
+  <p style="color:#888;font-size:12px;">Ce lien expire dans ${opts.expiryMinutes} minutes. Sans confirmation, le créneau sera libéré.</p>
+  <p style="color:#888;font-size:12px;">Si vous n'avez pas effectué cette réservation, ignorez cet email.</p>
+  <p style="margin-top:24px;font-size:12px;color:#888;">— Callibrate</p>
+</body>
+</html>`;
+  return { html, text };
+}
+
+export function buildReminderEmail(opts: {
+  recipientType: 'prospect' | 'expert';
+  expertName: string;
+  prospectName: string | null;
+  startAt: string;
+  meetingUrl: string | null;
+  reminderType: 'j1' | 'h1';
+}): { html: string; text: string } {
+  const dateStr = new Date(opts.startAt).toLocaleString('fr-FR', {
+    timeZone: 'UTC',
+    weekday: 'long', day: 'numeric', month: 'long',
+    hour: '2-digit', minute: '2-digit'
+  });
+  const urgency = opts.reminderType === 'h1' ? ' (dans 1 heure !)' : ' (demain)';
+  const recipient = opts.recipientType === 'prospect' ? opts.expertName : (opts.prospectName ?? 'votre prospect');
+
+  const lines = [
+    `Bonjour,`,
+    ``,
+    `Rappel : vous avez un appel${urgency} avec ${recipient}.`,
+    ``,
+    `Date : ${dateStr} (UTC)`,
+  ];
+  if (opts.meetingUrl) {
+    lines.push(``, `Lien de réunion : ${opts.meetingUrl}`);
+  }
+  lines.push(``, `— Callibrate`);
+  const text = lines.join('\n');
+
+  const meetHtml = opts.meetingUrl
+    ? `<p><a href="${opts.meetingUrl}" style="background:#059669;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Rejoindre Google Meet</a></p>`
+    : '';
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><title>Rappel — votre appel</title></head>
+<body style="font-family:sans-serif;color:#111;max-width:480px;margin:0 auto;padding:24px;">
+  <p>Bonjour,</p>
+  <p>Rappel : vous avez un appel<strong>${urgency}</strong> avec <strong>${recipient}</strong>.</p>
+  <p><strong>Date :</strong> ${dateStr} (UTC)</p>
+  ${meetHtml}
+  <p style="margin-top:24px;font-size:12px;color:#888;">— Callibrate</p>
+</body>
+</html>`;
+  return { html, text };
+}
+
+export function buildExpertApprovalEmail(opts: {
+  expertName: string;
+  prospectName: string;
+  startAt: string;
+  approveUrl: string;
+  rejectUrl: string;
+  expiryHours: number;
+}): { html: string; text: string } {
+  const dateStr = new Date(opts.startAt).toLocaleString('fr-FR', {
+    timeZone: 'UTC',
+    weekday: 'long', day: 'numeric', month: 'long',
+    hour: '2-digit', minute: '2-digit'
+  });
+
+  const text = [
+    `Bonjour ${opts.expertName},`,
+    ``,
+    `${opts.prospectName} souhaite réserver un appel avec vous.`,
+    ``,
+    `Date proposée : ${dateStr} (UTC)`,
+    ``,
+    `Accepter : ${opts.approveUrl}`,
+    `Refuser : ${opts.rejectUrl}`,
+    ``,
+    `Ce lien expire dans ${opts.expiryHours}h. Sans réponse, la réservation sera automatiquement confirmée.`,
+    ``,
+    `— Callibrate`,
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><title>Nouvelle demande de réservation</title></head>
+<body style="font-family:sans-serif;color:#111;max-width:480px;margin:0 auto;padding:24px;">
+  <p>Bonjour ${opts.expertName},</p>
+  <p><strong>${opts.prospectName}</strong> souhaite réserver un appel avec vous.</p>
+  <p><strong>Date proposée :</strong> ${dateStr} (UTC)</p>
+  <p style="text-align:center;margin:24px 0;">
+    <a href="${opts.approveUrl}" style="background:#059669;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;margin-right:8px;">Accepter</a>
+    <a href="${opts.rejectUrl}" style="background:#DC2626;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Refuser</a>
+  </p>
+  <p style="color:#888;font-size:12px;">Sans réponse dans ${opts.expiryHours}h, la réservation sera automatiquement confirmée.</p>
+  <p style="margin-top:24px;font-size:12px;color:#888;">— Callibrate</p>
+</body>
+</html>`;
+  return { html, text };
+}
