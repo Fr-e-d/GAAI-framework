@@ -1258,3 +1258,25 @@ items:
     artefact: contexts/artefacts/stories/E09S04.story.md
     dependencies: [E09S01, E09S02]
     notes: "Automate existing smoke-test-staging.sh (339 lines, E06S29) as a post-deploy job in deploy-staging.yml. Depends on all deploy jobs. 30s readiness wait for CF edge propagation. 5min timeout. 8 ACs."
+
+  - id: E09S05
+    epic: E09
+    title: "Extended API regression suite"
+    priority: high
+    status: refined
+    human_md_estimate: 1.5
+    human_cost_usd: 1050
+    artefact: contexts/artefacts/stories/E09S05.story.md
+    dependencies: [E09S04]
+    notes: "Extend smoke-test-staging.sh with ~10 new checks (AC10-AC19) covering: dashboard API endpoints (E06S38), OTP flow (E06S39), booking lifecycle (E06S11/E08S03), security headers (E08S02), robots.txt/sitemap (E03S05), legal pages (E06S30). Same tooling (bash + curl), same CI job. 14 ACs."
+
+  - id: E09S06
+    epic: E09
+    title: "Frontend E2E regression suite (Playwright)"
+    priority: high
+    status: refined
+    human_md_estimate: 2.5
+    human_cost_usd: 1750
+    artefact: contexts/artefacts/stories/E09S06.story.md
+    dependencies: [E09S04, E09S05]
+    notes: "Playwright headless tests for satellite prospect funnel (E03S01-S03, E03S06) and expert dashboard (E02S01-S08). Chromium-only. New CI job with continue-on-error: true (soft failure initially). Screenshot artifacts on failure. 13 ACs."
