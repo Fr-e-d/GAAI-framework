@@ -62,9 +62,10 @@ describe('syncExpertPoolToD1 — Full load (AC7: no lastSyncAt)', () => {
     const expertRows = [
       { id: 'e1', profile: { skills: ['Python'] }, preferences: {}, rate_min: 100, rate_max: 200, composite_score: 60 },
     ];
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce(expertRows)                                       // full expert load
-      .mockResolvedValueOnce([{ expert_id: 'e1', lead_count: '3' }]);          // lead counts
+      .mockResolvedValueOnce([{ expert_id: 'e1', lead_count: '3' }]),          // lead counts
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     await syncExpertPoolToD1(mockEnvWithDb);
@@ -82,9 +83,10 @@ describe('syncExpertPoolToD1 — Full load (AC7: no lastSyncAt)', () => {
     vi.mocked(d1Module.upsertToD1).mockResolvedValueOnce(undefined);
     vi.mocked(d1Module.setLastSyncAt).mockResolvedValueOnce(undefined);
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([{ id: 'e2', profile: null, preferences: null, rate_min: null, rate_max: null, composite_score: null }])
-      .mockResolvedValueOnce([]); // no leads
+      .mockResolvedValueOnce([]), // no leads
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     await syncExpertPoolToD1(mockEnvWithDb);
@@ -103,9 +105,10 @@ describe('syncExpertPoolToD1 — Incremental load (AC6)', () => {
     vi.mocked(d1Module.upsertToD1).mockResolvedValueOnce(undefined);
     vi.mocked(d1Module.setLastSyncAt).mockResolvedValueOnce(undefined);
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([{ id: 'e1', profile: null, preferences: null, rate_min: 50, rate_max: 100, composite_score: 30 }])
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([]),
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     await syncExpertPoolToD1(mockEnvWithDb);
@@ -118,7 +121,8 @@ describe('syncExpertPoolToD1 — Incremental load (AC6)', () => {
     vi.mocked(d1Module.getLastSyncAt).mockResolvedValueOnce('2026-02-23T10:00:00.000Z');
     vi.mocked(d1Module.setLastSyncAt).mockResolvedValueOnce(undefined);
 
-    const mockSql = vi.fn().mockResolvedValueOnce([]); // incremental — no changes
+    const mockSql = Object.assign(vi.fn().mockResolvedValueOnce([]), // incremental — no changes
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     await syncExpertPoolToD1(mockEnvWithDb);
@@ -133,7 +137,8 @@ describe('syncExpertPoolToD1 — Sync failure (AC12)', () => {
 
   it('does not throw when SQL query fails', async () => {
     vi.mocked(d1Module.getLastSyncAt).mockResolvedValueOnce(null);
-    const mockSql = vi.fn().mockRejectedValueOnce(new Error('Hyperdrive connection error'));
+    const mockSql = Object.assign(vi.fn().mockRejectedValueOnce(new Error('Hyperdrive connection error')),
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     // AC12: sync failure must not propagate
@@ -145,9 +150,10 @@ describe('syncExpertPoolToD1 — Sync failure (AC12)', () => {
     vi.mocked(d1Module.getLastSyncAt).mockResolvedValueOnce(null);
     vi.mocked(d1Module.upsertToD1).mockRejectedValueOnce(new Error('D1 batch failed'));
 
-    const mockSql = vi.fn()
+    const mockSql = Object.assign(vi.fn()
       .mockResolvedValueOnce([{ id: 'e1', profile: null, preferences: null, rate_min: null, rate_max: null, composite_score: null }])
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([]),
+    { end: vi.fn().mockResolvedValue(undefined) });
     (createSql as Mock).mockReturnValue(mockSql);
 
     await expect(syncExpertPoolToD1(mockEnvWithDb)).resolves.toBeUndefined();
