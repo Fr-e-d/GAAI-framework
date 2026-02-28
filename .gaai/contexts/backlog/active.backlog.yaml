@@ -1117,6 +1117,7 @@ items:
     pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/54"
     pr_number: 54
     pr_status: merged
+    cost_usd: 16.68
     notes: "DEC-120: 6-layer bot protection. DEC-122: abuse prevention. Server-side: gibberish detection (regex patterns, min 3 distinct words) before LLM call. Honeypot field + timing check (<3s = bot). Repeated submission prevention: cookie-based (1 free extraction, then email required) + IP rate limit (3 extractions/IP/24h without email). Flow token signé (HMAC, TTL 30min) from extraction to submit — prevents direct API calls with fabricated data. Tiered rate limiting per Cloudflare best practices (4/min → challenge, 10/10min → block, exceed → block 24h). Hard spending cap documentation ($50/day at LLM provider). Max output tokens 500 on extraction. QA: 71/71 tests PASS, TSC clean. Merged PR #54 to staging 2026-02-28."
 
   - id: E02S10
