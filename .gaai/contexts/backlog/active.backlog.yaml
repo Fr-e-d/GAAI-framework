@@ -1124,7 +1124,10 @@ items:
     epic: E02
     title: "Expert profile mandatory fields + credit milestones (DEC-116/DEC-117)"
     priority: high
-    status: in_progress
+    status: done
+    cost_usd: 8.58
+    pr_url: "https://github.com/Fr-e-d/callibrate-core/pull/55"
+    pr_number: 55
     artefact: contexts/artefacts/stories/E02S10.story.md
     dependencies: [E02S02, E02S03, E02S07]
     notes: "DEC-116: 4 mandatory fields (display_name, bio 50+ chars, 3+ skill tags, availability rules). DEC-117: 3 milestones (Matchable 40€, Bookable 40€, Trustworthy 20€). Add 3 immutable timestamp columns to experts table. Validation on profile save: check mandatory fields, set milestone timestamps if conditions met + NULL check (once set, never reset). Credit allocation on milestone unlock. Dashboard: profile completion progress bar + milestones status display. Anti-gaming: email normalization (strip +tag, Gmail dots), disposable blacklist check at expert signup, 72h activation delay for credits."

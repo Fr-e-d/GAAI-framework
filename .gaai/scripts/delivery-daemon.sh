@@ -660,7 +660,10 @@ on_exit() {
   if [[ \$EXIT_CODE -ne 0 ]]; then
     # Check if the delivery already marked the story as done
     cd "$PROJECT_DIR"
-    git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
+    # Sync with remote — fetch+reset handles divergence safely
+    # (delivery work already in staging via PR merge, only metadata at risk)
+    git fetch origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+    git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
     local current_status
     current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
     if [[ "\$current_status" == "done" ]]; then
@@ -671,6 +674,8 @@ on_exit() {
       (
         if command -v flock &>/dev/null; then
           flock "$STAGING_LOCK" bash -c "
+            git fetch origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+            git reset --hard 'origin/$TARGET_BRANCH' --quiet 2>/dev/null || true
             [[ -n \$DELIVERY_COST ]] && '$SCHEDULER' --set-field '$story_id' cost_usd \$DELIVERY_COST '$BACKLOG' 2>/dev/null
             '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
             git add '$BACKLOG_REL' 2>/dev/null
@@ -678,6 +683,8 @@ on_exit() {
             git push origin '$TARGET_BRANCH' --quiet 2>&1
           "
         else
+          git fetch origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+          git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
           [[ -n "\$DELIVERY_COST" ]] && '$SCHEDULER' --set-field '$story_id' cost_usd "\$DELIVERY_COST" '$BACKLOG' 2>/dev/null
           '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
           git add '$BACKLOG_REL' 2>/dev/null
@@ -692,11 +699,14 @@ on_exit() {
   # Cost-only block: runs for EXIT_CODE==0 or done-but-nonzero-exit
   if [[ -n "\$DELIVERY_COST" ]]; then
     cd "$PROJECT_DIR"
-    [[ \$EXIT_CODE -eq 0 ]] && git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
+    git fetch origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+    git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
     echo "[WRAPPER] Recording cost_usd=\$DELIVERY_COST for $story_id..."
     (
       if command -v flock &>/dev/null; then
         flock "$STAGING_LOCK" bash -c "
+          git fetch origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+          git reset --hard 'origin/$TARGET_BRANCH' --quiet 2>/dev/null || true
           '$SCHEDULER' --set-field '$story_id' cost_usd \$DELIVERY_COST '$BACKLOG' 2>/dev/null || true
           git add '$BACKLOG_REL' 2>/dev/null
           git diff --cached --quiet 2>/dev/null || {
@@ -806,7 +816,10 @@ on_exit() {
     # Check if the delivery already marked the story as done
     # (interactive mode: user closes terminal after successful delivery → non-zero exit)
     cd "$PROJECT_DIR"
-    git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
+    # Sync with remote — fetch+reset handles divergence safely
+    # (delivery work already in staging via PR merge, only metadata at risk)
+    git fetch origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+    git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
     local current_status
     current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
     if [[ "\$current_status" == "done" ]]; then
@@ -815,6 +828,8 @@ on_exit() {
     else
       echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
       (
+        git fetch origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+        git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
         [[ -n "\$DELIVERY_COST" ]] && '$SCHEDULER' --set-field '$story_id' cost_usd "\$DELIVERY_COST" '$BACKLOG' 2>/dev/null
         '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
         git add '$BACKLOG_REL' 2>/dev/null
@@ -828,7 +843,8 @@ on_exit() {
   # Cost-only block: runs for EXIT_CODE==0 or done-but-nonzero-exit
   if [[ -n "\$DELIVERY_COST" ]]; then
     cd "$PROJECT_DIR"
-    [[ \$EXIT_CODE -eq 0 ]] && git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
+    git fetch origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+    git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
     echo "[WRAPPER] Recording cost_usd=\$DELIVERY_COST for $story_id..."
     (
       '$SCHEDULER' --set-field '$story_id' cost_usd "\$DELIVERY_COST" '$BACKLOG' 2>/dev/null || true
