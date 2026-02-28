@@ -1,7 +1,7 @@
 ---
 name: architecture-extract
 description: Convert raw project structure into clear architectural understanding — module boundaries, data flows, service relationships, and architectural patterns. Activate after codebase-scan during Bootstrap.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

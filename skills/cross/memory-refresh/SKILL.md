@@ -1,7 +1,7 @@
 ---
 name: memory-refresh
 description: Periodic memory maintenance — archive session files, convert recurring knowledge into summaries, update the memory index. Activate at end of a major phase (Discovery complete, sprint done) or when memory spans many sessions. For emergency context-window pressure mid-task, use memory-compact instead.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
