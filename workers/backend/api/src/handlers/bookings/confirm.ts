@@ -189,5 +189,6 @@ export async function handleConfirm(
     start_at: booking.start_at,
     end_at: booking.end_at,
     expert_gcal_event_id: gcalResult.eventId,
+    prep_token: booking.prep_token,
   });
 }
