@@ -561,10 +561,10 @@ items:
     epic: E03
     title: "Inline booking widget (availability → hold → confirm)"
     priority: high
-    status: failed
+    status: in_progress
     artefact: contexts/artefacts/stories/E03S06.story.md
     dependencies: [E03S03, E06S11]
-    notes: "Discovery 2026-02-27. 12 ACs. Reusable inline widget — no modal, no redirect. Calendar view (14 days) → 20-min time slots (local TZ) → instant hold (10min TTL with countdown) → name/email/desc form → confirm → success (Meet link + prep page). Email pre-filled if already identified. Keyboard accessible. Mobile week view. Used by E03S03 + E03S04. ⚠️ prospect_id required — directory path (E03S04) needs lightweight prospect creation."
+    notes: "Discovery 2026-02-27. 12 ACs. Reusable inline widget — no modal, no redirect. Calendar view (14 days) → 20-min time slots (local TZ) → instant hold (10min TTL with countdown) → name/email/desc form → confirm → success (Meet link + prep page). Email pre-filled if already identified. Keyboard accessible. Mobile week view. Used by E03S03 + E03S04. ⚠️ prospect_id required — directory path (E03S04) needs lightweight prospect creation. Previous delivery failed due to transient Anthropic API 500 (2026-02-28, 45 turns, $3.97, zero code committed). Reset to refined for retry."
 
   - id: E03S04
     epic: E03
