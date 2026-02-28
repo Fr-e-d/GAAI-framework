@@ -68,9 +68,17 @@ export async function handleGetDashboard(
 
   const sql = createSql(env);
 
-  // Query 1 — expert base data
-  const [expert] = await sql<{ credit_balance: number; composite_score: number | null }[]>`
-    SELECT credit_balance, composite_score FROM experts WHERE id = ${expertId}
+  // Query 1 — expert base data + milestone timestamps (E02S10)
+  const [expert] = await sql<{
+    credit_balance: number;
+    composite_score: number | null;
+    milestone_matchable_at: string | null;
+    milestone_bookable_at: string | null;
+    milestone_trust_at: string | null;
+  }[]>`
+    SELECT credit_balance, composite_score,
+           milestone_matchable_at, milestone_bookable_at, milestone_trust_at
+    FROM experts WHERE id = ${expertId}
   `;
 
   if (!expert) {
@@ -164,6 +172,10 @@ export async function handleGetDashboard(
 
   const monthlyHistory = padMonthlyHistory(historyLeadsRows, historyBookingsRows);
 
+  // E02S10: Compute milestone available_at (milestone timestamp + 72h — the credit release date)
+  const milestoneAvailableAt = (ts: string | null) =>
+    ts ? new Date(new Date(ts).getTime() + 72 * 3600 * 1000).toISOString() : null;
+
   return new Response(
     JSON.stringify({
       unread_leads: parseInt(unreadRow?.count ?? '0', 10),
@@ -180,6 +192,27 @@ export async function handleGetDashboard(
         conversions_declared: parseInt(monthLeads?.conversions_declared ?? '0', 10),
       },
       monthly_history: monthlyHistory,
+      // E02S10/AC7: Milestone completion data for dashboard profile completion section
+      milestones: {
+        matchable: {
+          unlocked: !!expert.milestone_matchable_at,
+          unlocked_at: expert.milestone_matchable_at ?? null,
+          available_at: milestoneAvailableAt(expert.milestone_matchable_at),
+          credits: 4000,
+        },
+        bookable: {
+          unlocked: !!expert.milestone_bookable_at,
+          unlocked_at: expert.milestone_bookable_at ?? null,
+          available_at: milestoneAvailableAt(expert.milestone_bookable_at),
+          credits: 4000,
+        },
+        trust: {
+          unlocked: !!expert.milestone_trust_at,
+          unlocked_at: expert.milestone_trust_at ?? null,
+          available_at: milestoneAvailableAt(expert.milestone_trust_at),
+          credits: 2000,
+        },
+      },
     }),
     { status: 200, headers: JSON_HEADERS },
   );

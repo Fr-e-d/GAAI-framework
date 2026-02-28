@@ -197,26 +197,16 @@ async function handleSubscriptionCreated(event: LsWebhookEvent, env: Env): Promi
     console.warn('handleSubscriptionCreated: failed to fetch subscription items', e);
   }
 
-  // UPDATE experts: set LS subscription fields + credit_balance += 10000
-  const updated = await sql<{ credit_balance: number }[]>`
+  // AC11 (E02S10): No blanket welcome credit — credits are now milestone-based (DEC-117).
+  // Update only subscription metadata. Milestones are triggered on profile update via processMilestoneCredits().
+  await sql`
     UPDATE experts SET
       ls_subscription_id = ${subscriptionId},
       ls_subscription_status = 'active',
-      ls_subscription_item_id = ${subscriptionItemId},
-      credit_balance = credit_balance + 10000
-    WHERE id = ${expertId}
-    RETURNING credit_balance`;
-  const balanceAfter = updated[0]?.credit_balance ?? 0;
+      ls_subscription_item_id = ${subscriptionItemId}
+    WHERE id = ${expertId}`;
 
-  // INSERT credit_transaction — idempotent (WHERE NOT EXISTS)
-  await sql`
-    INSERT INTO credit_transactions (expert_id, type, amount, balance_after)
-    SELECT ${expertId}, 'welcome_credit', 10000, ${balanceAfter}
-    WHERE NOT EXISTS (
-      SELECT 1 FROM credit_transactions WHERE expert_id = ${expertId} AND type = 'welcome_credit'
-    )`;
-
-  console.log('handleSubscriptionCreated: processed for expert', expertId, 'balance_after', balanceAfter);
+  console.log('handleSubscriptionCreated: processed for expert', expertId, '(milestone-based credits — no immediate award)');
 }
 
 // ── subscription_updated (AC3) ────────────────────────────────────────────────

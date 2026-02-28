@@ -6,6 +6,7 @@ import { requireSession } from "~/lib/session.server";
 import { apiGet } from "~/lib/api.server";
 import { captureEvent } from "~/lib/posthog.server";
 import { Badge } from "~/components/ui/badge";
+import { Progress } from "~/components/ui/progress";
 import {
   Card,
   CardContent,
@@ -13,7 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "~/components/ui/card";
-import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, CheckCircle, Lock, Clock } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,13 @@ type MonthStats = {
 
 type MonthHistory = MonthStats & { month: string };
 
+type MilestoneInfo = {
+  unlocked: boolean;
+  unlocked_at: string | null;
+  available_at: string | null;
+  credits: number;
+};
+
 type DashboardIndexResponse = {
   unread_leads: number;
   upcoming_bookings: number;
@@ -38,6 +46,12 @@ type DashboardIndexResponse = {
   quality_tier: QualityTier;
   month_stats: MonthStats;
   monthly_history: MonthHistory[];
+  // E02S10/AC7: Profile completion milestones
+  milestones?: {
+    matchable: MilestoneInfo;
+    bookable: MilestoneInfo;
+    trust: MilestoneInfo;
+  };
 };
 
 type LoaderData = { data: DashboardIndexResponse; userId: string };
@@ -99,6 +113,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       conversions_declared: 0,
     },
     monthly_history: [],
+    milestones: undefined,
   };
 
   const data = await apiGet<DashboardIndexResponse>(
@@ -139,6 +154,7 @@ export default function DashboardIndex() {
     quality_tier,
     month_stats,
     monthly_history,
+    milestones,
   } = data;
 
   // monthly_history is ASCENDING: index 0 = oldest, index [length-1] = current month
@@ -228,7 +244,112 @@ export default function DashboardIndex() {
         </Link>
       </div>
 
-      {/* AC8: Monthly summary */}
+      {/* AC7: Profile completion milestones section */}
+      {milestones && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Complétion du profil</CardTitle>
+            <CardDescription>
+              Complétez votre profil pour débloquer vos crédits de bienvenue (100EUR au total).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Progress bar */}
+            {(() => {
+              const unlocked = [milestones.matchable, milestones.bookable, milestones.trust].filter(m => m.unlocked).length;
+              return (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>{unlocked}/3 jalons atteints</span>
+                    <span>{unlocked === 3 ? "100%" : unlocked === 2 ? "67%" : unlocked === 1 ? "33%" : "0%"}</span>
+                  </div>
+                  <Progress value={Math.round((unlocked / 3) * 100)} className="h-2" />
+                </div>
+              );
+            })()}
+            {/* Milestone cards */}
+            <div className="grid gap-3 md:grid-cols-3">
+              {[
+                {
+                  key: "matchable" as const,
+                  label: "Matchable",
+                  credit: "40EUR",
+                  missing: "Nom affiché (2+ chars) + bio (50+ chars) + 3 compétences",
+                  info: milestones.matchable,
+                },
+                {
+                  key: "bookable" as const,
+                  label: "Réservable",
+                  credit: "40EUR",
+                  missing: "Définissez vos disponibilités hebdomadaires",
+                  info: milestones.bookable,
+                },
+                {
+                  key: "trust" as const,
+                  label: "De confiance",
+                  credit: "20EUR",
+                  missing: "Photo de profil ou lien portfolio/LinkedIn/GitHub",
+                  info: milestones.trust,
+                },
+              ].map(({ label, credit, missing, info }) => {
+                const now = new Date();
+                const isPending = info.unlocked && info.available_at ? new Date(info.available_at) > now : false;
+                return (
+                  <div
+                    key={label}
+                    className={[
+                      "rounded-lg border p-3 text-sm",
+                      info.unlocked && !isPending ? "border-green-200 bg-green-50" :
+                      isPending ? "border-amber-200 bg-amber-50" :
+                      "border-gray-200 bg-gray-50",
+                    ].join(" ")}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      {info.unlocked && !isPending ? (
+                        <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
+                      ) : isPending ? (
+                        <Clock className="h-4 w-4 text-amber-600 flex-shrink-0" />
+                      ) : (
+                        <Lock className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                      )}
+                      <span className="font-medium">{label}</span>
+                      <span className={[
+                        "ml-auto text-xs font-semibold",
+                        info.unlocked && !isPending ? "text-green-700" : "text-muted-foreground",
+                      ].join(" ")}>{credit}</span>
+                    </div>
+                    {info.unlocked && !isPending && info.unlocked_at && (
+                      <p className="text-xs text-green-700">
+                        Crédité le {new Date(info.unlocked_at).toLocaleDateString("fr-FR")}
+                      </p>
+                    )}
+                    {isPending && info.available_at && (
+                      <p className="text-xs text-amber-700">
+                        Disponible le {new Date(info.available_at).toLocaleDateString("fr-FR")}
+                      </p>
+                    )}
+                    {!info.unlocked && (
+                      <p className="text-xs text-muted-foreground">
+                        Complétez&#8239;: {missing}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {/* CTA if any milestone unlocked */}
+            {[milestones.matchable, milestones.bookable, milestones.trust].some(m => !m.unlocked) && (
+              <p className="text-xs text-muted-foreground">
+                <Link to="/dashboard/settings" className="text-primary hover:underline">
+                  Compléter mon profil →
+                </Link>
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Monthly summary */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Ce mois</CardTitle>

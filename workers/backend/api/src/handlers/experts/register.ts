@@ -6,6 +6,7 @@ import { checkRateLimit } from '../../lib/rateLimit';
 import { notifyExpertPoolDO } from '../../durable-objects/expertPoolDO';
 import type { ExpertRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
+import { normalizeEmail, isDisposableDomain } from '../../lib/emailValidation';
 
 const RegisterSchema = z.object({
   display_name: z.string().min(1, 'display_name is required').max(100),
@@ -57,19 +58,52 @@ export async function handleRegister(
   }
 
   const { display_name, headline, bio, rate_min, rate_max } = parsed.data;
+
+  // AC4 / AC5: Email anti-gaming checks (email sourced from JWT)
+  const expertEmail = user.email ?? '';
+  if (expertEmail) {
+    // AC5: Disposable email check — reuse E06S39's isDisposableDomain
+    const domain = expertEmail.split('@')[1]?.toLowerCase() ?? '';
+    if (isDisposableDomain(domain)) {
+      return new Response(
+        JSON.stringify({
+          error: 'disposable_email',
+          message: 'Les adresses email temporaires ne sont pas acceptees.',
+        }),
+        { status: 422, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+  }
+
+  // AC4: Normalize email for deduplication
+  const normalized = expertEmail ? normalizeEmail(expertEmail) : null;
+
   const sql = createSql(env);
 
-  // Insert expert row (Google Calendar OAuth layer wired in E06S10 — DEC-41)
+  // AC4: Check normalized_email uniqueness before insert
+  if (normalized) {
+    const existing = await sql<{ id: string }[]>`
+      SELECT id FROM experts WHERE normalized_email = ${normalized}
+    `;
+    if (existing.length > 0) {
+      return new Response(
+        JSON.stringify({ error: 'email_already_registered' }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+  }
+
+  // Insert expert row — store normalized_email for deduplication (Google Calendar OAuth layer wired in E06S10 — DEC-41)
   let expert: Pick<ExpertRow, 'id' | 'display_name'>;
   try {
     const [row] = await sql<Pick<ExpertRow, 'id' | 'display_name'>[]>`
-      INSERT INTO experts (id, display_name, headline, bio, rate_min, rate_max)
-      VALUES (${user.id}, ${display_name}, ${headline ?? null}, ${bio ?? null}, ${rate_min ?? null}, ${rate_max ?? null})
+      INSERT INTO experts (id, display_name, headline, bio, rate_min, rate_max, normalized_email)
+      VALUES (${user.id}, ${display_name}, ${headline ?? null}, ${bio ?? null}, ${rate_min ?? null}, ${rate_max ?? null}, ${normalized})
       RETURNING id, display_name`;
     if (!row) throw new Error('Insert failed');
     expert = row;
   } catch (err) {
-    // AC4: Duplicate detection — Postgres unique violation
+    // Duplicate detection — Postgres unique violation (id or normalized_email unique index)
     if ((err as { code?: string }).code === '23505') {
       return new Response(
         JSON.stringify({ error: 'Expert already registered' }),
@@ -92,7 +126,7 @@ export async function handleRegister(
   await env.EMAIL_NOTIFICATIONS.send({
     type: 'expert.registered',
     expert_id: user.id,
-    email: user.email ?? '',
+    email: expertEmail,
   });
 
   // AC5 (E06S25): Notify ExpertPoolDO — fire-and-forget, must NOT block response

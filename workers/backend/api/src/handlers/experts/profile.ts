@@ -5,6 +5,7 @@ import { createSql } from '../../lib/db';
 import { notifyExpertPoolDO } from '../../durable-objects/expertPoolDO';
 import type { ExpertRow } from '../../types/db';
 import { captureEvent } from '../../lib/posthog';
+import { checkMilestones, checkBookable, processMilestoneCredits } from '../../lib/milestones';
 
 const VALID_AVAILABILITY = ['available', 'limited', 'unavailable'] as const;
 
@@ -18,17 +19,18 @@ const AdmissibilityCriteriaSchema = z.object({
   custom_rules: z.array(z.string()).optional(),
 }).optional();
 
+// AC10: mandatory fields enforce minimums when provided (cannot be cleared below threshold)
 const PatchProfileSchema = z.object({
-  display_name: z.string().min(1).max(100).optional(),
+  display_name: z.string().min(2, 'display_name must be at least 2 characters').max(100).optional(),
   headline: z.string().max(200).optional(),
-  bio: z.string().max(2000).optional(),
+  bio: z.string().min(50, 'bio must be at least 50 characters').max(2000).optional(),
   rate_min: z.number().int().positive().optional(),
   rate_max: z.number().int().positive().optional(),
   availability: z.enum(VALID_AVAILABILITY).optional(),
   profile: z.record(z.string(), z.unknown()).optional(),
   preferences: z.record(z.string(), z.unknown()).optional(),
   admissibility_criteria: AdmissibilityCriteriaSchema,
-  // AC3/E06S37: outcome_tags — max 10 items, max 200 chars each
+  // AC3/E06S37: outcome_tags — used as skill_tags for milestone check (min 3 for milestone)
   outcome_tags: z.array(z.string().max(200)).max(10).optional(),
 });
 
@@ -90,7 +92,7 @@ export async function handlePatchProfile(
     });
   }
 
-  // AC9: Validate availability enum + other fields
+  // AC10: Validate — mandatory fields enforce minimums when provided
   const parsed = PatchProfileSchema.safeParse(body);
   if (!parsed.success) {
     return new Response(
@@ -137,6 +139,12 @@ export async function handlePatchProfile(
 
   const updated = rows[0] as ExpertRow;
 
+  // AC3 / AC2: Check and process milestone credits after successful profile update
+  const syncMilestones = checkMilestones(updated);
+  const bookable = await checkBookable(expertId, sql);
+  const milestoneConditions = { ...syncMilestones, bookable };
+  const milestonesUnlocked = await processMilestoneCredits(expertId, milestoneConditions, sql);
+
   // AC5 (E06S25): Notify ExpertPoolDO — fire-and-forget, must NOT block response
   notifyExpertPoolDO(env, ctx, {
     id: expertId,
@@ -182,10 +190,18 @@ export async function handlePatchProfile(
   ctx.waitUntil(captureEvent(env.POSTHOG_API_KEY, {
     distinctId: `expert:${expertId}`,
     event: 'expert.profile_updated',
-    properties: { fields_updated: fieldsUpdated },
+    properties: {
+      fields_updated: fieldsUpdated,
+      milestones_unlocked: milestonesUnlocked,
+    },
   }));
 
-  return new Response(JSON.stringify(updated), {
+  // AC3: Include milestones_unlocked in response for frontend toast (AC9)
+  const responseBody = milestonesUnlocked.length > 0
+    ? { ...updated, milestones_unlocked: milestonesUnlocked }
+    : updated;
+
+  return new Response(JSON.stringify(responseBody), {
     status: 200,
     headers: JSON_HEADERS,
   });

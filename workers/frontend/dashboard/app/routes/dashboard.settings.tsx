@@ -116,7 +116,7 @@ type GcalStatus = { connected: boolean; email?: string };
 type SectionName = "identite" | "expertise" | "marche" | "admissibilite";
 
 type ActionData =
-  | { success: true; section: SectionName }
+  | { success: true; section: SectionName; milestones_unlocked?: string[] }
   | {
       success: false;
       section: SectionName;
@@ -205,12 +205,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
         { status: 422, headers: responseHeaders },
       );
     }
+    let milestonesUnlocked: string[] = [];
     try {
-      await apiPatch(env, token, `/api/experts/${userId}/profile`, {
+      const apiRes = await apiPatch<{ milestones_unlocked?: string[] }>(env, token, `/api/experts/${userId}/profile`, {
         display_name: parsed.data.display_name,
         headline: parsed.data.headline,
         bio: parsed.data.bio ?? "",
       });
+      milestonesUnlocked = apiRes?.milestones_unlocked ?? [];
     } catch (err) {
       const msg = err instanceof ApiError ? `Erreur API: ${err.status}` : "Erreur lors de la sauvegarde.";
       return Response.json(
@@ -219,7 +221,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
       );
     }
     captureEvent(env, `expert:${userId}`, "expert.profile_section_saved", { section: "identite", fields_updated: 3 }).catch(() => {});
-    return Response.json({ success: true, section: "identite" as SectionName }, { headers: responseHeaders });
+    return Response.json(
+      { success: true, section: "identite" as SectionName, milestones_unlocked: milestonesUnlocked },
+      { headers: responseHeaders },
+    );
   }
 
   if (intent === "expertise") {
@@ -243,13 +248,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
         { status: 422, headers: responseHeaders },
       );
     }
+    let milestonesUnlockedExpertise: string[] = [];
     try {
-      await apiPatch(env, token, `/api/experts/${userId}/profile`, {
+      const apiRes = await apiPatch<{ milestones_unlocked?: string[] }>(env, token, `/api/experts/${userId}/profile`, {
         profile: { skills: parsed.data.skills, verticals: parsed.data.verticals ?? [] },
         rate_min: parsed.data.rate_min,
         rate_max: parsed.data.rate_max,
         outcome_tags: parsed.data.outcome_tags ?? [],
       });
+      milestonesUnlockedExpertise = apiRes?.milestones_unlocked ?? [];
     } catch (err) {
       const msg = err instanceof ApiError ? `Erreur API: ${err.status}` : "Erreur lors de la sauvegarde.";
       return Response.json(
@@ -258,7 +265,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
       );
     }
     captureEvent(env, `expert:${userId}`, "expert.profile_section_saved", { section: "expertise", fields_updated: parsed.data.skills.length }).catch(() => {});
-    return Response.json({ success: true, section: "expertise" as SectionName }, { headers: responseHeaders });
+    return Response.json(
+      { success: true, section: "expertise" as SectionName, milestones_unlocked: milestonesUnlockedExpertise },
+      { headers: responseHeaders },
+    );
   }
 
   if (intent === "marche") {
@@ -448,7 +458,11 @@ function IdentiteSection({
         <input type="hidden" name="intent" value="identite" />
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="display_name">Nom affiché *</Label>
+            {/* AC8: Mandatory for Matchable milestone */}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="display_name">Nom affiché *</Label>
+              <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Requis pour devenir matchable</span>
+            </div>
             <Input
               id="display_name"
               name="display_name"
@@ -468,12 +482,16 @@ function IdentiteSection({
             <FieldError errors={errors} field="headline" />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="bio">Bio</Label>
+            {/* AC8: Bio ≥50 chars required for Matchable milestone */}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="bio">Bio</Label>
+              <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">50 caractères min pour devenir matchable</span>
+            </div>
             <Textarea
               id="bio"
               name="bio"
               defaultValue={profile?.bio ?? ""}
-              placeholder="Décrivez votre expertise..."
+              placeholder="Décrivez votre expertise... (50 caractères minimum pour le matching)"
               rows={4}
             />
             <FieldError errors={errors} field="bio" />
@@ -537,9 +555,12 @@ function ExpertiseSection({
           <input key={v} type="hidden" name="verticals" value={v} />
         ))}
         <CardContent className="space-y-6">
-          {/* Skills */}
+          {/* Skills — AC8: 3+ required for Matchable milestone */}
           <div className="space-y-2">
-            <Label>Compétences * ({skills.length}/15)</Label>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Label>Compétences * ({skills.length}/15)</Label>
+              <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">3 minimum pour devenir matchable</span>
+            </div>
             <div className="flex flex-wrap gap-2 p-3 border rounded-md min-h-[60px]">
               {PREDEFINED_SKILLS.map((skill) => (
                 <button
@@ -1081,6 +1102,16 @@ export default function SettingsPage() {
     if (!actionData) return;
     if (actionData.success) {
       toast.success("Profil mis à jour");
+      // AC9: Celebratory toasts for newly unlocked milestones
+      const milestoneLabels: Record<string, string> = {
+        matchable: "Félicitations ! Vous êtes maintenant matchable. 40EUR crédités sur votre compte.",
+        bookable:  "Félicitations ! Vous êtes maintenant réservable. 40EUR crédités sur votre compte.",
+        trust:     "Félicitations ! Votre profil inspire confiance. 20EUR crédités sur votre compte.",
+      };
+      for (const milestone of actionData.milestones_unlocked ?? []) {
+        const msg = milestoneLabels[milestone];
+        if (msg) toast.success(msg, { duration: 6000 });
+      }
     } else {
       const firstError = Object.values(actionData.errors)[0];
       toast.error(firstError?.[0] ?? "Erreur lors de la sauvegarde.");

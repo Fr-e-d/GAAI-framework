@@ -169,28 +169,28 @@ describe('handleLsWebhook — idempotency (AC5)', () => {
   });
 });
 
-// ── AC2: subscription_created tests ──────────────────────────────────────────
+// ── AC2 / AC11: subscription_created tests (E02S10: no welcome credit — milestone-based) ──
 
-describe('handleLsWebhook — subscription_created (AC2)', () => {
+describe('handleLsWebhook — subscription_created (AC2/AC11)', () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it('happy path: expert found via custom_data.expert_id, welcome credit inserted', async () => {
+  it('AC11: expert found via custom_data.expert_id — only subscription fields updated, NO credit awarded', async () => {
     const env = makeEnv();
     const event = makeLsEvent('subscription_created');
 
-    // Mock fetch for LS subscription items API
+    // Mock fetch for LS subscription items API (still needed for ls_subscription_item_id)
     const globalFetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ data: [{ id: 'si-456' }] }), { status: 200 })
     );
 
-    // sql mock: 0) L2 webhook_events check, 1) SELECT expert by id → found, 2) UPDATE experts RETURNING, 3) INSERT credit_transactions, 4) INSERT webhook_events
+    // AC11: sql calls = L2 check (1), SELECT expert by id (2), UPDATE experts subscription fields (3), INSERT webhook_events (4)
+    // NO INSERT credit_transactions — credits are milestone-based now
     const mockSql = vi.fn()
       .mockResolvedValueOnce([])                             // L2: SELECT webhook_events → not found
       .mockResolvedValueOnce([{ id: 'expert-uuid-1' }])     // SELECT id FROM experts WHERE id
-      .mockResolvedValueOnce([{ credit_balance: 10000 }])   // UPDATE experts RETURNING credit_balance
-      .mockResolvedValueOnce([])                             // INSERT credit_transactions
+      .mockResolvedValueOnce([])                             // UPDATE experts (subscription fields only)
       .mockResolvedValueOnce([]);                            // INSERT webhook_events
     (createSql as Mock).mockReturnValue(mockSql);
 
@@ -199,19 +199,24 @@ describe('handleLsWebhook — subscription_created (AC2)', () => {
 
     expect(res.status).toBe(200);
 
-    // LS subscription items API called
+    // LS subscription items API still called (to get subscription item ID)
     expect(globalFetchSpy).toHaveBeenCalledWith(
       expect.stringContaining('subscription-items?filter[subscription_id]=sub-123'),
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-ls-api-key' }) })
     );
 
-    // SQL called 5 times (L2 check, SELECT, UPDATE, INSERT credit_transactions, INSERT webhook_events)
-    expect(mockSql).toHaveBeenCalledTimes(5);
+    // SQL called 4 times (AC11: no credit_transactions INSERT)
+    expect(mockSql).toHaveBeenCalledTimes(4);
+
+    // Verify no credit amount in any SQL call (no +10000)
+    const allCalls = mockSql.mock.calls.map((c: unknown[]) => JSON.stringify(c));
+    const hasCreditCall = allCalls.some((call: string) => call.includes('10000') || call.includes('welcome_credit'));
+    expect(hasCreditCall).toBe(false);
 
     globalFetchSpy.mockRestore();
   });
 
-  it('fallback to gcal_email when custom_data.expert_id returns no expert', async () => {
+  it('fallback to gcal_email when custom_data.expert_id returns no expert — no credit awarded', async () => {
     const env = makeEnv();
     const event = makeLsEvent('subscription_created');
 
@@ -223,8 +228,7 @@ describe('handleLsWebhook — subscription_created (AC2)', () => {
       .mockResolvedValueOnce([])                              // L2: SELECT webhook_events → not found
       .mockResolvedValueOnce([])                              // SELECT id WHERE id → not found
       .mockResolvedValueOnce([{ id: 'expert-uuid-2' }])      // SELECT id WHERE gcal_email → found
-      .mockResolvedValueOnce([{ credit_balance: 10000 }])    // UPDATE experts
-      .mockResolvedValueOnce([])                              // INSERT credit_transactions
+      .mockResolvedValueOnce([])                              // UPDATE experts (subscription fields only)
       .mockResolvedValueOnce([]);                             // INSERT webhook_events
     (createSql as Mock).mockReturnValue(mockSql);
 
@@ -232,7 +236,7 @@ describe('handleLsWebhook — subscription_created (AC2)', () => {
     const res = await handleLsWebhook(req, env);
 
     expect(res.status).toBe(200);
-    expect(mockSql).toHaveBeenCalledTimes(6);
+    expect(mockSql).toHaveBeenCalledTimes(5);
 
     vi.restoreAllMocks();
   });

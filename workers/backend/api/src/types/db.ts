@@ -25,6 +25,11 @@ export interface ExpertRow {
   ls_subscription_id: string | null;
   ls_subscription_item_id: string | null;
   ls_subscription_status: string | null;
+  // E02S10: milestone timestamps (immutable once set, DEC-116/DEC-117)
+  milestone_matchable_at: string | null;
+  milestone_bookable_at: string | null;
+  milestone_trust_at: string | null;
+  normalized_email: string | null;
   preferences: Json | null;
   profile: Json | null;
   rate_max: number | null;
@@ -157,4 +162,5 @@ export interface CreditTransactionRow {
   description: string | null;
   balance_after: number;
   created_at: string | null;
+  available_at: string | null; // E02S10: 72h delay for milestone credits (AC6)
 }
