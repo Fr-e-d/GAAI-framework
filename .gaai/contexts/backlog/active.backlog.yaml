@@ -1311,7 +1311,7 @@ items:
     epic: E09
     title: "Matching-engine CI/CD pipeline in deploy-staging.yml"
     priority: high
-    status: in_progress
+    status: refined
     human_md_estimate: 0.5
     human_cost_usd: 350
     cost_usd: 0.69
@@ -1397,7 +1397,7 @@ items:
     epic: E10
     title: "Extract .gaai framework from Callibrate monorepo into standalone repo"
     priority: high
-    status: refined
+    status: in_progress
     human_md_estimate: 1.5
     human_cost_usd: 1050
     artefact: contexts/artefacts/stories/E10S01.story.md
