@@ -209,6 +209,20 @@ export function renderMatchPage(
       opacity: 0.5;
       cursor: not-allowed;
     }
+    .consent-notice {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      text-align: center;
+      margin-top: 0.625rem;
+      line-height: 1.4;
+    }
+    .consent-notice a {
+      color: #9ca3af;
+      text-decoration: underline;
+    }
+    .consent-notice a:hover {
+      color: #6b7280;
+    }
     #loading-msg {
       color: #555;
       font-size: 0.875rem;
@@ -253,6 +267,7 @@ export function renderMatchPage(
       <div id="char-counter" aria-live="polite">0/2000</div>
       <div id="match-error" role="alert" aria-live="assertive" style="display:none"></div>
       <button type="submit" id="submit-btn" disabled>Analyser mon projet</button>
+      <p class="consent-notice">En soumettant, vous acceptez notre <a href="/privacy">politique de confidentialit&eacute;</a>.</p>
     </form>
     <div id="loading-msg" style="display:none" aria-live="polite">Analyse en cours&hellip;</div>
   </main>
