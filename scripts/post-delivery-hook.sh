@@ -74,18 +74,21 @@ field_is_set() {
 # Track whether any field was updated
 fields_updated=0
 
-# ── 3. cost_usd — extract from session transcript ────────────────────────────
+# ── 3. cost_usd — read from delivery log (type:result → total_cost_usd) ───────
+# Source: stream-json output produced by the delivery agent. The type:result
+# entry contains the authoritative API-reported cost including all subagents.
+# No estimation — if the delivery log is absent or has no result entry, skip.
 if ! field_is_set "cost_usd"; then
   cost=""
-  if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
-    cost=$(python3 - "$transcript_path" <<'PYEOF'
+  delivery_log="$PROJECT_DIR/.gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
+  if [[ -f "$delivery_log" ]]; then
+    cost=$(python3 - "$delivery_log" <<'PYEOF'
 import json, sys
 
-path = sys.argv[1]
-total_cost = 0.0
+log_path = sys.argv[1]
 
 try:
-    with open(path, 'r') as f:
+    with open(log_path, 'r') as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -94,17 +97,13 @@ try:
                 d = json.loads(line)
             except:
                 continue
-            # Stream-json result message — authoritative final cost
-            # Use assignment (not +=) because result.total_cost_usd is cumulative
             if d.get('type') == 'result':
-                c = d.get('total_cost_usd') or d.get('cost_usd') or 0
+                c = d.get('total_cost_usd') or d.get('costUSD') or 0
                 if c:
-                    total_cost = float(c)
+                    print(round(float(c), 4))
+                    sys.exit(0)
 except Exception as e:
-    sys.stderr.write(f'[post-delivery-hook] transcript parse error: {e}\n')
-
-if total_cost > 0:
-    print(round(total_cost, 2))
+    sys.stderr.write(f'[post-delivery-hook] delivery log parse error: {e}\n')
 PYEOF
     2>/dev/null) || cost=""
   fi
