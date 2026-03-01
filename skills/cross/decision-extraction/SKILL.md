@@ -47,6 +47,7 @@ Do NOT use for trivial steps, implementation details, brainstorming, or reversib
 1. Scan outputs for explicit or implicit decisions: architectural choices, accepted trade-offs, scope boundaries, prioritization shifts, constraints introduced
 2. Filter strictly for **durable, governance-relevant decisions**
 3. **Deduplication check:** Scan the Decision Registry in `index.md` for existing entries covering the same topic. If found: (a) if the new decision supersedes the old, update the old `DEC-{ID}.md` file's frontmatter (`status: superseded`, `superseded_by: DEC-{new-id}`) and record the supersession in the new entry's `supersedes` field; (b) if the new decision confirms the old, skip writing a duplicate.
+3b. **Cross-reference assignment:** For the new decision, populate `related_to` with up to 5 DEC IDs that are directly related (same domain cluster, supersession chain, or shared concern). Only include decisions the new entry explicitly builds on, refines, or constrains. If no strong relation exists, leave as `[]`.
 4. Convert each into a structured ADR file (see Output Format below):
    - Context
    - Decision
@@ -77,6 +78,7 @@ supersedes: null          # or DEC-{old-id} if replacing
 superseded_by: null
 tags:
   - {relevant tags}
+related_to: []            # optional — max 5 DEC IDs (e.g. [DEC-66, DEC-130])
 ---
 
 # DEC-{N} — Decision Title

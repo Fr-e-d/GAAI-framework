@@ -112,6 +112,7 @@ Specialists are dispatched by the Implementation Sub-Agent, not by the Orchestra
 
 ### Supporting (Orchestrator-level only)
 
+- `memory-search` — find relevant memory by frontmatter, keywords, or cross-references
 - `memory-retrieve` — load minimal relevant memory before composing context bundles
 - `context-building` — assemble context bundles for sub-agents
 - `decision-extraction` — capture notable decisions after Story completion
