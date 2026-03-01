@@ -74,18 +74,54 @@ field_is_set() {
 # Track whether any field was updated
 fields_updated=0
 
-# ── 3. cost_usd — extract from session transcript ────────────────────────────
+# ── 3. cost_usd — extract from delivery log (primary) or transcript (fallback) ─
 if ! field_is_set "cost_usd"; then
   cost=""
-  if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
-    cost=$(python3 - "$transcript_path" <<'PYEOF'
-import json, sys
+  delivery_log="$PROJECT_DIR/.gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
+  if [[ -n "$transcript_path" || -f "$delivery_log" ]]; then
+    cost=$(python3 - "$delivery_log" "$transcript_path" <<'PYEOF'
+import json, sys, os
 
-path = sys.argv[1]
-total_cost = 0.0
+log_path      = sys.argv[1]
+transcript_path = sys.argv[2] if len(sys.argv) > 2 else ''
+
+# ── Primary: delivery log has type:result with authoritative total_cost_usd ──
+if os.path.isfile(log_path):
+    try:
+        with open(log_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except:
+                    continue
+                if d.get('type') == 'result':
+                    c = d.get('total_cost_usd') or d.get('costUSD') or 0
+                    if c:
+                        print(round(float(c), 4))
+                        sys.exit(0)
+    except Exception as e:
+        sys.stderr.write(f'[post-delivery-hook] delivery log parse error: {e}\n')
+
+# ── Fallback: compute from token usage in session transcript ─────────────────
+if not os.path.isfile(transcript_path):
+    sys.exit(0)
+
+PRICING = {
+    'claude-sonnet-4-6':  {'input': 3.00,  'output': 15.00, 'cache_write': 3.75,  'cache_read': 0.30},
+    'claude-opus-4-6':    {'input': 15.00, 'output': 75.00, 'cache_write': 18.75, 'cache_read': 1.50},
+    'claude-haiku-4-5':   {'input': 0.80,  'output': 4.00,  'cache_write': 1.00,  'cache_read': 0.08},
+    'claude-haiku-4-5-20251001': {'input': 0.80, 'output': 4.00, 'cache_write': 1.00, 'cache_read': 0.08},
+}
+DEFAULT_PRICING = PRICING['claude-sonnet-4-6']
+
+input_tokens = output_tokens = cache_write_tokens = cache_read_tokens = 0
+detected_model = ''
 
 try:
-    with open(path, 'r') as f:
+    with open(transcript_path, 'r') as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -94,17 +130,30 @@ try:
                 d = json.loads(line)
             except:
                 continue
-            # Stream-json result message — authoritative final cost
-            # Use assignment (not +=) because result.total_cost_usd is cumulative
-            if d.get('type') == 'result':
-                c = d.get('total_cost_usd') or d.get('cost_usd') or 0
-                if c:
-                    total_cost = float(c)
+            if d.get('type') == 'assistant':
+                msg = d.get('message', {})
+                if not isinstance(msg, dict):
+                    continue
+                usage = msg.get('usage', {})
+                input_tokens       += usage.get('input_tokens', 0)
+                output_tokens      += usage.get('output_tokens', 0)
+                cache_write_tokens += usage.get('cache_creation_input_tokens', 0)
+                cache_read_tokens  += usage.get('cache_read_input_tokens', 0)
+                if not detected_model and msg.get('model'):
+                    detected_model = msg['model']
 except Exception as e:
     sys.stderr.write(f'[post-delivery-hook] transcript parse error: {e}\n')
 
+p = PRICING.get(detected_model, DEFAULT_PRICING)
+total_cost = (
+    input_tokens       * p['input']       / 1_000_000 +
+    output_tokens      * p['output']      / 1_000_000 +
+    cache_write_tokens * p['cache_write'] / 1_000_000 +
+    cache_read_tokens  * p['cache_read']  / 1_000_000
+)
+
 if total_cost > 0:
-    print(round(total_cost, 2))
+    print(round(total_cost, 4))
 PYEOF
     2>/dev/null) || cost=""
   fi
