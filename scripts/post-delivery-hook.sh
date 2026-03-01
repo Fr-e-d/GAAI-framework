@@ -28,7 +28,7 @@
 
 set -uo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 BACKLOG="$PROJECT_DIR/.gaai/project/contexts/backlog/active.backlog.yaml"
 SCHEDULER="$PROJECT_DIR/.gaai/core/scripts/backlog-scheduler.sh"
 TARGET_BRANCH="staging"
