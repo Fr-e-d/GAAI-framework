@@ -69,6 +69,9 @@ Includes:
 - Change summary
 - Acceptance criteria result (PASS / FAIL / ESCALATE)
 - Remediation log if applicable (max 2 attempts)
+- **Friction Log** (if any friction occurred — omit if smooth):
+
+  Same table format as Implementation Friction Log.
 
 ---
 
