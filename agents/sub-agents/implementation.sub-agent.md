@@ -44,6 +44,7 @@ DIE     ← Terminates; context window released
 ## Skills
 
 - `implement` — code generation against acceptance criteria
+- `frontend-design` — distinctive, production-grade frontend interfaces (activate when execution plan involves UI components, pages, or visual design — see `specialists.registry.yaml` ui-component triggers)
 - `codebase-scan` — map affected files and dependencies before implementing
 - `context-building` — assemble focused coding context per plan step
 - `consistency-check` — validate implementation against plan before handoff
