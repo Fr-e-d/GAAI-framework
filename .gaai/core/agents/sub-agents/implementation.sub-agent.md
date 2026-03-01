@@ -74,6 +74,17 @@ The artefact must include:
 - Rules applied
 - Known risks or limitations
 - Specialist sub-agents invoked (if any) and their outputs
+- **Friction Log** (if any friction occurred — omit entirely if delivery was smooth):
+
+  | # | phase | type | description | workaround | signal |
+  |---|-------|------|-------------|------------|--------|
+
+  Controlled vocabulary:
+  - **phase:** `planning` | `implementation` | `integration`
+  - **type:** `ac-ambiguity` | `missing-context` | `tool-failure` | `rule-conflict` | `scope-drift` | `pattern-gap` | `retry-loop`
+  - **signal:** `low` (one-off) | `medium` (could recur) | `high` (systemic, will recur)
+  - **Rule F1:** Omit section if no friction. Empty tables are forbidden.
+  - **Rule F4:** Log environment friction (ACs, context, tooling, rules), not self-assessment.
 
 ---
 
