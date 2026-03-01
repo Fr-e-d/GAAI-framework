@@ -80,6 +80,9 @@ Always writes: `contexts/artefacts/qa-reports/{id}.qa-report.md`
 - Per-criterion result (pass/fail with evidence)
 - Rule violations (if any)
 - Remediation attempts log (if applicable)
+- **Friction Log** (only if `remediate-failures` was invoked at least once — omit on clean PASS):
+
+  Same table format as Implementation Friction Log. Use `type: retry-loop` for QA failures, plus the root cause type if identifiable (e.g., `pattern-gap` if the failure stemmed from a missing coding pattern).
 - Escalation reason (if ESCALATE)
 
 On PASS only: `contexts/artefacts/memory-deltas/{id}.memory-delta.md`
