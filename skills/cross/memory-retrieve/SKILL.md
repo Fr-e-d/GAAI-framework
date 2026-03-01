@@ -5,7 +5,7 @@ license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
-  version: "2.0"
+  version: "2.1"
   category: cross
   track: cross-cutting
   id: SKILL-MEMORY-RETRIEVE-001
@@ -39,6 +39,8 @@ Level 1 — INDEX SCAN (~5 tokens/entry)
 Level 2 — INDIVIDUAL ADR FILES (~300 tokens/file)
   Load specific decisions/DEC-{ID}.md files for full entry text
   Load other relevant category files (patterns, project, ops)
+  Optionally traverse `related_to` in loaded files to discover adjacent decisions
+  Or invoke `memory-search` Mode C for systematic cross-reference discovery
 
 Level 3 — CROSS-DOMAIN SCAN (only for Decision Consistency Gate)
   Grep frontmatter across all DEC-*.md files for conflicts
