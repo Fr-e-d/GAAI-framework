@@ -197,6 +197,7 @@ Tier 2 or 3? → assemble context bundle
                   → tsc --noEmit + vitest run (in worktree — verify integration)
                   → if story-introduced failures → fix; pre-existing → proceed; unclear → ESCALATE
                   → push story/{id} → gh pr create --base staging
+                  → /review-pr (pr-review-toolkit plugin — complementary code review before merge, optional for Tier 1)
                   → gh run watch (wait for PR CI green; if red: triage or ESCALATE)
                   → gh pr merge --squash story/{id}  (immediate — DEC-71)
                   → if merge fails: merge staging into branch, resolve, push, retry
