@@ -76,6 +76,7 @@ Only Epics and Stories are valid inputs for Delivery. Marketing and Strategy art
 
 ### Memory Skills (Agent-Owned)
 
+- `memory-search` — find relevant memory by frontmatter, keywords, or cross-references
 - `memory-retrieve` — load only relevant history
 - `memory-refresh` — distill durable knowledge
 - `memory-compact` — reduce token bloat

@@ -59,7 +59,9 @@ Agents MUST NOT:
 
 ### R3 — Explicit Invocation Required
 
-Memory retrieval MUST occur only via `memory-retrieve.skill`.
+Memory retrieval MUST occur only via `memory-retrieve` or `memory-search` skills.
+- `memory-search` — locates relevant memory files (returns paths, IDs, excerpts)
+- `memory-retrieve` — loads the actual file content into context
 
 Memory MUST NEVER:
 - be auto-loaded
