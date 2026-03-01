@@ -71,7 +71,7 @@ Ensure:
 - index is accurate
 - summaries remain high-signal
 
-Using: `memory-ingest.skill`, `memory-refresh.skill`
+Using: `memory-search.skill`, `memory-ingest.skill`, `memory-refresh.skill`
 
 ### 6. Perform Context Gap Analysis
 
