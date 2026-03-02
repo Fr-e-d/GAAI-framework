@@ -50,7 +50,9 @@ cd "$PROJECT_DIR" || exit 0
 
 git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>/dev/null || true
 
-story_id=$(git log --oneline -20 2>/dev/null \
+# Search last 2 hours (not a fixed commit count) to avoid missing stories
+# when many commits land between delivery completion and session Stop.
+story_id=$(git log --oneline --since="2 hours ago" 2>/dev/null \
   | grep -oE 'chore\([A-Z][0-9]+S[0-9]+\): done \[delivery\]' \
   | head -1 \
   | grep -oE '[A-Z][0-9]+S[0-9]+') || story_id=""
