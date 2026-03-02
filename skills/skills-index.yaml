@@ -3,13 +3,13 @@
 # Source of truth: frontmatter in each SKILL.md
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-03-01
-total: 4
+generated_at: 2026-03-02
+total: 8
 
 discovery:
   - id: SKILL-VALIDATE-ARTEFACTS-001
     name: validate-artefacts
-    description: "Validate that all Discovery artefacts (Epics, Stories) are clear, governed, complete, and safe to pass into Delivery. Activate after generating Epics or Stories and before any Delivery planning. This is the mandatory Discovery → Delivery gate."
+    description: "Validate that all Discovery artefacts (Epics, Stories) are clear, governed, complete, and safe to pass into Delivery. Activate after generating Epics or Stories and before any Delivery planning."
     category: discovery
     track: discovery
     tags: []
@@ -19,7 +19,7 @@ discovery:
 delivery:
   - id: SKILL-FRONTEND-DESIGN-001
     name: frontend-design
-    description: "Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, or applications. Generates creative, polished code that avoids generic AI aesthetics."
+    description: "Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, or applications."
     category: delivery
     track: delivery
     tags: [design, frontend, ui-ux]
@@ -27,7 +27,7 @@ delivery:
     path: delivery/frontend-design/SKILL.md
   - id: SKILL-REMEDIATE-FAILURES-001
     name: remediate-failures
-    description: "Correct failures, rule violations, and acceptance criteria gaps detected during QA review. Activate when qa-review returns FAIL. Fixes without redefining scope — loops until all quality gates pass."
+    description: "Correct failures, rule violations, and acceptance criteria gaps detected during QA review. Activate when qa-review returns FAIL."
     category: delivery
     track: delivery
     tags: []
@@ -35,9 +35,41 @@ delivery:
     path: delivery/remediate-failures/SKILL.md
 
 cross:
+  - id: SKILL-IDIOMATIQUE-TRANSLATE-001
+    name: idiomatique-translate
+    description: "Translate copy from any source language to any target language with idiomatic fluency, cultural awareness, domain expertise, and consistent voice. Auto-detects source language, language-agnostic pattern optimized for B2B SaaS."
+    category: content
+    track: cross
+    tags: [i18n, translation, content]
+    updated_at: 2026-03-02
+    path: cross/idiomatique-translate/SKILL.md
+  - id: SKILL-I18N-EXTRACT-001
+    name: i18n-extract
+    description: "Scan React/TypeScript codebase to identify all hardcoded user-facing strings and organize them into a structured extraction report. Enables bulk translation workflow by creating the starting inventory of what needs translation."
+    category: analysis
+    track: cross
+    tags: [i18n, extraction, analysis]
+    updated_at: 2026-03-02
+    path: cross/i18n-extract/SKILL.md
+  - id: SKILL-I18N-VALIDATE-001
+    name: i18n-validate
+    description: "Validate i18n JSON files for completeness, consistency, and quality across multiple languages. Catch missing translations, orphaned keys, placeholder mismatches, and length violations before deployment."
+    category: analysis
+    track: cross
+    tags: [i18n, validation, quality]
+    updated_at: 2026-03-02
+    path: cross/i18n-validate/SKILL.md
+  - id: SKILL-I18N-GLOSSARY-SYNC-001
+    name: i18n-glossary-sync
+    description: "Ensure all domain-specific terms used in i18n translations are documented in the glossary and applied consistently across all languages. Prevents terminology drift and simplifies future language additions."
+    category: analysis
+    track: cross
+    tags: [i18n, glossary, consistency]
+    updated_at: 2026-03-02
+    path: cross/i18n-glossary-sync/SKILL.md
   - id: SKILL-SUMMARIZATION-001
     name: summarization
-    description: "Transform large, noisy, or short-term memory into compact, durable, high-signal summaries. Activate when session memory grows large, decisions accumulate, or memory retrieval starts returning too many files."
+    description: "Transform large, noisy, or short-term memory into compact, durable, high-signal summaries. Activate when session memory grows large."
     category: cross
     track: cross-cutting
     tags: []
