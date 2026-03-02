@@ -81,6 +81,22 @@ while cycle < 3:
         raw_log = gh run view <run-id> --repo <repo> --log-failed
         failure_log = last 3000 chars of raw_log
 
+        # Step 4b — Pre-existing infra failure detection (fast-path)
+        # Detect infrastructure-level failures that code changes cannot fix.
+        # These are pre-existing conditions unrelated to the story's changes.
+        INFRA_PATTERNS = [
+            "recent account payments have failed",
+            "spending limit needs to be increased",
+            "Actions minutes",
+            "Actions quota",
+            "not started because",       # job queuing failure (billing gate)
+            "out of Actions minutes",
+        ]
+        if any(pattern matches failure_log) for any failed job:
+            echo "[ci-watch-and-fix] Pre-existing infra failure detected — billing/quota. Escalating immediately (no retry)." >> $LOG_DIR/<story-id>.log
+            convergence_failure_reason = "Pre-existing infrastructure failure: GitHub Actions billing/quota limit. Not caused by this story's changes."
+            goto ESCALATE
+
         # Step 5 — Flaky test detection
         signature = hash(check_name + first_100_chars_of_failure_log)
         if signature in previous_failure_signatures:
@@ -211,7 +227,7 @@ remediation_report: docs/ci-failures/<story-id>-<timestamp>.md
 This skill must NOT:
 - Modify acceptance criteria or product scope
 - Apply fixes to pre-existing CI failures unrelated to this story's changes
-- Attempt to fix infrastructure failures (missing secrets, missing bindings, quota limits) — these are ESCALATE conditions
+- Attempt to fix infrastructure failures (missing secrets, missing bindings, quota limits, billing limits) — these are ESCALATE conditions (detected via Step 4b fast-path; do NOT burn retry cycles)
 - Merge the PR (that is the Orchestrator's responsibility after CI PASS)
 - Use `gh pr checks --watch` (heartbeat requirement — see AC7)
 
