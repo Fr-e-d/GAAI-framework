@@ -9,7 +9,7 @@ metadata:
   category: delivery
   track: delivery
   id: SKILL-DELIVERY-HIGH-LEVEL-PLAN-001
-  updated_at: 2026-02-26
+  updated_at: 2026-03-02
   owner: Planning Sub-Agent
   status: stable
 inputs:
@@ -78,6 +78,23 @@ For Tier 2/3: this output feeds directly into `prepare-execution-plan` for file-
 
 ---
 
+## Mandatory Delivery Sequence (Non-Negotiable)
+
+Every plan produced by this skill MUST include the following steps in this order as the **final phase** of any delivery:
+
+```
+... → create-pr → ci-watch-and-fix → [if CI PASS] → mark done
+                                    → [if CI FAIL after retries] → mark failed
+```
+
+- `ci-watch-and-fix` is **always mandatory** — it is never optional.
+- The plan must **never** include a "mark done" step without `ci-watch-and-fix` preceding it.
+- If CI FAIL is returned by `ci-watch-and-fix`, the story is marked `failed` — not `done`.
+
+**Turn budget note:** A 3-cycle CI remediation loop can consume ~60–90 tool turns. Plans for complex stories should reserve turn budget for CI remediation. Combined implementation + CI remediation should target under 150 turns out of the daemon's 200-turn budget.
+
+---
+
 ## Quality Checks
 
 - Every acceptance criterion maps to at least one step
@@ -85,6 +102,7 @@ For Tier 2/3: this output feeds directly into `prepare-execution-plan` for file-
 - Scope is unchanged from the Story
 - Dependencies are explicit
 - Nothing ambiguous remains
+- Mandatory delivery sequence (create-pr → ci-watch-and-fix → mark done/failed) is present in every plan
 
 ---
 
