@@ -3,8 +3,8 @@
 # Regenerate: invoke build-skills-indices skill
 
 generated_at: 2026-03-02
-total: 53
-core: 45
+total: 54
+core: 46
 project: 8
 
 discovery:
@@ -82,6 +82,15 @@ delivery:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/delivery/browser-journey-test/SKILL.md
+  - id: SKILL-DELIVERY-CI-WATCH-001
+    name: ci-watch-and-fix
+    source: core
+    description: "Watch GitHub Actions CI after PR creation, detect failures, extract logs, apply minimal fixes, and re-push — keeping the delivery session alive until CI resolves or escalating after 3 cycles. Activate immediately after gh pr create and before marking the story done."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-03-02
+    path: core/skills/delivery/ci-watch-and-fix/SKILL.md
   - id: SKILL-DEL-008
     name: compose-team
     source: core
@@ -107,7 +116,7 @@ delivery:
     category: delivery
     track: delivery
     tags: []
-    updated_at: 2026-02-26
+    updated_at: 2026-03-02
     path: core/skills/delivery/delivery-high-level-plan/SKILL.md
   - id: SKILL-DEL-007
     name: evaluate-story
