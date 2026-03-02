@@ -134,7 +134,8 @@ BEFORE execution  → flock: git pull origin staging
 
 AFTER impl PASS   → atomic commit inside ../{id}-workspace
 
-AFTER QA PASS     → git merge staging into story branch (in worktree — catch staleness BEFORE push)
+AFTER QA PASS     → commit artefacts to story branch (in worktree — DEC-146)
+                    git merge staging into story branch (in worktree — catch staleness BEFORE push)
                     npx tsc --noEmit + npx vitest run (in worktree — verify integration)
                     if story-introduced failures → fix and re-commit
                     if pre-existing failures only → proceed
@@ -146,7 +147,7 @@ AFTER QA PASS     → git merge staging into story branch (in worktree — catch
                     if merge rejected (checks/review) → wait for checks, retry
                     verify staging deploy CI (gh run list --branch staging --limit 1)
                     if staging deploy fails → ESCALATE with logs (do not attempt infra fixes)
-                    flock: commit artefacts + mark done + push staging (governance)
+                    flock: mark done + push staging (with retry — DEC-146)
                     cleanup: worktree remove + delete remote branch
 
 NEVER             → interact with the production branch
@@ -193,6 +194,7 @@ Tier 2 or 3? → assemble context bundle
            PASS → collect memory-deltas/{id}.memory-delta.md
                   → if verdict DRIFT_DETECTED or NEW_KNOWLEDGE_FOUND or DRIFT_AND_NEW_KNOWLEDGE:
                       flag Discovery with delta report before marking done
+                  → commit artefacts to story branch (in worktree — DEC-146)
                   → git merge staging into story branch (in worktree)
                   → tsc --noEmit + vitest run (in worktree — verify integration)
                   → if story-introduced failures → fix; pre-existing → proceed; unclear → ESCALATE
@@ -204,7 +206,7 @@ Tier 2 or 3? → assemble context bundle
                   → if merge rejected (checks): wait, retry
                   → verify staging deploy CI; if fails → ESCALATE with logs
                   → BACKLOG VALIDATION CHECKPOINT (see below)
-                  → flock: commit artefacts + mark done → push staging
+                  → flock: mark done → push staging (with retry — DEC-146)
                   → cleanup worktree + delete remote branch
                   → generate-build-in-public-content (non-blocking, best-effort)
                     inputs: story artefact, impl-report, qa-report, referenced DEC- entries, backlog metrics
@@ -286,7 +288,7 @@ These fields enable tracking total AI delivery time and API-equivalent cost vs M
 
 ### Backlog Validation Checkpoint
 
-**Before the final `flock: commit artefacts + mark done` step**, the Delivery Agent MUST verify that all delivery metadata fields are present on the story entry. This is the "BACKLOG VALIDATION CHECKPOINT" referenced in the Orchestration Flow.
+**Before the final `flock: mark done` step**, the Delivery Agent MUST verify that all delivery metadata fields are present on the story entry. This is the "BACKLOG VALIDATION CHECKPOINT" referenced in the Orchestration Flow.
 
 Required fields checklist (all must be non-empty):
 1. `started_at` — should already be set from the `in_progress` step

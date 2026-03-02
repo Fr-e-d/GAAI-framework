@@ -54,6 +54,22 @@ Before starting the loop:
 
 **CRITICAL INVARIANT: The main working tree stays on `staging` at ALL times.** The daemon polls in the main working tree. Deliveries work in worktrees. All staging operations (pull, merge, push) are serialized via `flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock`.
 
+### Staging Push Retry Pattern
+
+With `--max-concurrent > 1`, concurrent `git push origin staging` can fail (non-fast-forward). All staging push operations use a retry-with-rebase pattern (DEC-146):
+
+```bash
+# Retry pattern: pull --rebase + push, 3 attempts, exponential backoff
+for attempt in 1 2 3; do
+  git pull --rebase origin staging && git push origin staging && break
+  [ $attempt -lt 3 ] && sleep $((attempt * 2))  # backoff: 2s, 4s, 6s
+done || { echo "ESCALATE: staging push failed after 3 attempts"; exit 1; }
+```
+
+- **3 attempts**, backoff 2s / 4s / 6s
+- On exhaustion: **ESCALATE** (do not mark done, do not lose work)
+- `flock` serialization still applies (prevents local contention on multi-worktree macOS setups)
+
 For every Story, before any implementation begins:
 
 ```bash
@@ -62,14 +78,17 @@ flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
   git pull origin staging
 '
 
-# Step 0b: Mark in_progress + push (cross-device coordination)
+# Step 0b: Mark in_progress + push with retry (cross-device coordination)
 # If daemon-launched: already done by the daemon. Skip if status is already in_progress.
 # If manual launch: the delivery agent does this itself.
 flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
   scripts/backlog-scheduler.sh --set-status {id} in_progress contexts/backlog/active.backlog.yaml
   git add .gaai/project/contexts/backlog/active.backlog.yaml
   git commit -m "chore({id}): in_progress [delivery]"
-  git push origin staging
+  for attempt in 1 2 3; do
+    git pull --rebase origin staging && git push origin staging && break
+    [ $attempt -lt 3 ] && sleep $((attempt * 2))
+  done || { echo "ESCALATE: staging push failed after 3 attempts"; exit 1; }
 '
 
 # Step 0c: Create branch WITHOUT switching (main stays on staging)
@@ -148,6 +167,16 @@ Invoke `coordinate-handoffs`:
 - FAIL → re-spawn Implementation Sub-Agent with qa-report, then re-spawn QA Sub-Agent (max 3 cycles — see `qa.sub-agent.md`)
 - ESCALATE → stop, surface to human
 
+### 7b. Commit Delivery Artefacts to Story Branch
+
+After QA PASS, commit all delivery artefacts (execution-plan, impl-report, qa-report, memory-delta) to the story branch in the worktree. This ensures artefacts flow to staging via the PR merge — never pushed directly to staging (DEC-146).
+
+```bash
+# Step 7b: Commit delivery artefacts to story branch (in worktree)
+git -C ../{id}-workspace add .gaai/project/contexts/artefacts/
+git -C ../{id}-workspace commit -m "docs({id}): delivery artefacts — plan, impl-report, qa-report, memory-delta"
+```
+
 ### 8. Create PR & Complete Story
 
 **8a. Push story branch and create PR to staging:**
@@ -184,18 +213,7 @@ EOF
 
 > The AI never merges to staging. It creates a PR for human review. The human merges when satisfied.
 
-**8b. Delivery artefacts (commit to staging):**
-
-Artefact files (execution-plan, impl-report, qa-report, memory-delta) are committed directly to staging since they are governance files, not application code:
-
-```bash
-flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
-  git pull origin staging
-  git add .gaai/project/contexts/artefacts/
-  git commit -m "docs({id}): delivery artefacts — plan, impl-report, qa-report, memory-delta"
-  git push origin staging
-'
-```
+**8b. Delivery artefacts:** Delivery artefacts are committed to the story branch before PR creation (step 7b) and merge to staging via the PR (DEC-146). No separate staging push needed.
 
 **8c. Mark Story done + cleanup worktree:**
 
@@ -203,13 +221,16 @@ flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
 # Remove worktree (but keep story branch — needed for the PR)
 git worktree remove ../{id}-workspace
 
-# Update backlog
+# Update backlog (push with retry — DEC-146)
 flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
   git pull origin staging
   scripts/backlog-scheduler.sh --set-status {id} done contexts/backlog/active.backlog.yaml
   git add .gaai/project/contexts/backlog/active.backlog.yaml
   git commit -m "chore({id}): done [delivery]"
-  git push origin staging
+  for attempt in 1 2 3; do
+    git pull --rebase origin staging && git push origin staging && break
+    [ $attempt -lt 3 ] && sleep $((attempt * 2))
+  done || { echo "ESCALATE: staging push failed after 3 attempts"; exit 1; }
 '
 ```
 
@@ -250,7 +271,7 @@ active.backlog.yaml (read via git show origin/staging:...)
        ↓
 Pick next ready Story
        ↓
-flock: git pull staging → mark in_progress → commit → push staging
+flock: git pull staging → mark in_progress → commit → push staging (with retry)
        ↓
 git branch story/{id} staging (NO checkout) + worktree add ../{id}-workspace
        ↓
@@ -274,8 +295,9 @@ Tier 2/3? ──→ compose-team (+ risk-analysis if needed)
              ↓ atomic commit in worktree
              spawn QA Sub-Agent ──→ {id}.qa-report.md
              ↓
-             PASS → push story/{id} → gh pr create --base staging
-                      → flock: commit artefacts + mark done → push staging
+             PASS → commit artefacts to story branch (step 7b)
+                      → push story/{id} → gh pr create --base staging
+                      → flock: mark done → push staging (with retry)
                       → cleanup worktree (keep branch for PR)
                       → STOP + report PR URL (human reviews + merges on GitHub)
              FAIL → re-spawn Impl + re-spawn QA (max 3 cycles)
