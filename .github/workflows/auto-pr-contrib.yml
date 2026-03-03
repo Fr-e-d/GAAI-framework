@@ -1,0 +1,73 @@
+name: Auto-PR from contrib branch
+
+on:
+  push:
+    branches: ['contrib/**']
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+    env:
+      CONTRIB_BRANCH: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Extract project name from branch
+        id: meta
+        run: |
+          PROJECT="${CONTRIB_BRANCH#contrib/}"
+          MERGE_BRANCH="merge/${CONTRIB_BRANCH}"
+          echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
+          echo "merge_branch=$MERGE_BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch contrib branch and merge into .gaai/core/
+        env:
+          MERGE_BRANCH: ${{ steps.meta.outputs.merge_branch }}
+          PROJECT: ${{ steps.meta.outputs.project }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$CONTRIB_BRANCH"
+          git checkout -b "$MERGE_BRANCH"
+          git subtree pull --prefix=.gaai/core origin "$CONTRIB_BRANCH" --squash -m "sync(.gaai/core): merge contrib from $PROJECT"
+
+      - name: Push merge branch
+        env:
+          MERGE_BRANCH: ${{ steps.meta.outputs.merge_branch }}
+        run: git push origin "$MERGE_BRANCH" --force
+
+      - name: Create or update PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_BRANCH: ${{ steps.meta.outputs.merge_branch }}
+          PROJECT: ${{ steps.meta.outputs.project }}
+        run: |
+          EXISTING=$(gh pr list --head "$MERGE_BRANCH" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "PR #$EXISTING already exists — branch updated, PR will reflect new changes."
+          else
+            gh pr create \
+              --title "sync(.gaai/core): contrib from $PROJECT" \
+              --body "## Auto-generated sync PR
+
+          Merges framework changes from **$PROJECT** into \`.gaai/core/\` on \`main\`.
+
+          **Source branch:** \`$CONTRIB_BRANCH\` (flat subtree content)
+          **Merge branch:** \`$MERGE_BRANCH\` (merged into \`.gaai/core/\`)
+
+          ### Review checklist
+          - [ ] Changes are generic (no project-specific content)
+          - [ ] No secrets or project-specific paths leaked
+          - [ ] Skills/agents/rules are consistent with OSS standards
+
+          > Auto-created by CI when a contrib branch was pushed." \
+              --base main \
+              --head "$MERGE_BRANCH"
+          fi
