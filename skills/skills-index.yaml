@@ -3,8 +3,8 @@
 # Regenerate: invoke build-skills-indices skill
 
 generated_at: 2026-03-03
-total: 55
-core: 46
+total: 56
+core: 47
 project: 9
 
 discovery:
@@ -312,11 +312,11 @@ cross:
   - id: SKILL-DECISION-EXTRACTION-001
     name: decision-extraction
     source: core
-    description: "Identify and formalize durable product and technical decisions from agent outputs into long-term memory. Activate after Discovery produces artefacts, Delivery resolves trade-offs, or product direction materially changes."
+    description: "Identify and formalize durable product and technical decisions from agent outputs into long-term memory. Activate after Discovery produces artefacts, Delivery resolves trade-offs, or product direction materially changes. Always runs after Delivery QA PASS — mandatory gate includes updating index.md."
     category: cross
     track: cross-cutting
     tags: []
-    updated_at: 2026-03-01
+    updated_at: 2026-03-03
     path: core/skills/cross/decision-extraction/SKILL.md
   - id: SKILL-CRS-019
     name: delivery-readiness-audit
@@ -426,6 +426,19 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/cross/memory-ingest/SKILL.md
+  - id: SKILL-MEMORY-INDEX-SYNC-001
+    name: memory-index-sync
+    source: core
+    description: "Detect and heal index.md drift — finds memory files on disk not registered in index.md and registers them. Run when /gaai-status reports unregistered files, after batch memory operations, or as a post-delivery gate."
+    category: cross
+    track: cross-cutting
+    tags:
+      - memory
+      - index
+      - sync
+      - governance
+    updated_at: 2026-03-03
+    path: core/skills/cross/memory-index-sync/SKILL.md
   - id: SKILL-MEMORY-REFRESH-001
     name: memory-refresh
     source: core
@@ -433,7 +446,7 @@ cross:
     category: cross
     track: cross-cutting
     tags: []
-    updated_at: 2026-03-01
+    updated_at: 2026-03-03
     path: core/skills/cross/memory-refresh/SKILL.md
   - id: SKILL-MEMORY-RETRIEVE-001
     name: memory-retrieve
