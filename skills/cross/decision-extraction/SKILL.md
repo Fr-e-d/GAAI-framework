@@ -9,7 +9,7 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-DECISION-EXTRACTION-001
-  updated_at: 2026-03-01
+  updated_at: 2026-03-03
   status: stable
 inputs:
   - recent_agent_outputs: session outputs from the invoking agent, or file paths to artefacts produced in the current session (e.g., evaluation reports, refined stories, approach-evaluation outputs)
@@ -55,7 +55,8 @@ Do NOT use for trivial steps, implementation details, brainstorming, or reversib
 5. Classify using the **10 canonical domains**: `architecture`, `matching`, `expert-system`, `billing`, `booking`, `infrastructure`, `strategy`, `governance`, `market`, `content`. And **3 levels**: `strategic` (WHAT/WHY), `architectural` (HOW), `operational` (PROCESS).
 6. **Get next available ID** from `decisions/_log.md` → write `decisions/DEC-{N}.md`
 7. **Update `_log.md`:** increment next available ID, add one-line entry for the new decision
-8. **Update `index.md`:** add row to Decision Registry, increment file count in Shared Categories table
+8. **MANDATORY GATE — Update `index.md`:** Add one row per new decision to the Decision Registry table (columns: DEC ID | domain | level | one-line description). Increment the file count in the Shared Categories table. **Verify:** re-read the updated `index.md` and confirm the new DEC-{N} entry is present before completing this skill. This step is a blocking gate — do not output success until confirmed.
+9. **Summary range check:** Read the Summaries section of `index.md`. If the new DEC ID exceeds the highest DEC covered by the latest summary file (e.g., summary covers 90–155 but new DEC is 156), append a line to `decisions/_log.md`: `# ⚠️ PENDING: extend summary range to DEC-{new-max-id} — run memory-refresh`. This signals the next `memory-refresh` cycle to extend the summary. Do NOT create a new summary mid-delivery.
 
 ---
 
