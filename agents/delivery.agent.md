@@ -4,7 +4,7 @@ id: AGENT-DELIVERY-001
 role: delivery-orchestrator
 responsibility: coordinate-sub-agents-to-deliver-validated-stories
 track: delivery
-updated_at: 2026-02-23
+updated_at: 2026-03-03
 ---
 
 # Delivery Agent (GAAI)
@@ -115,7 +115,7 @@ Specialists are dispatched by the Implementation Sub-Agent, not by the Orchestra
 - `memory-search` — find relevant memory by frontmatter, keywords, or cross-references
 - `memory-retrieve` — load minimal relevant memory before composing context bundles
 - `context-building` — assemble context bundles for sub-agents
-- `decision-extraction` — capture notable decisions after Story completion
+- `decision-extraction` — **always runs after QA PASS** — scan impl-report + qa-report; write DEC-{N}.md + update _log.md + index.md; no-op if no durable decisions found
 - `risk-analysis` — pre-flight for Tier 3 or high-risk Stories before spawning Planning Sub-Agent
 
 ---
@@ -134,7 +134,8 @@ BEFORE execution  → flock: git pull origin staging
 
 AFTER impl PASS   → atomic commit inside ../{id}-workspace
 
-AFTER QA PASS     → commit artefacts to story branch (in worktree — DEC-146)
+AFTER QA PASS     → decision-extraction (scan impl-report + qa-report → write DEC files + update _log.md + index.md; no-op if no durable decisions found)
+                    commit artefacts to story branch (includes new DEC files, _log.md, index.md — DEC-146)
                     git merge staging into story branch (in worktree — catch staleness BEFORE push)
                     npx tsc --noEmit + npx vitest run (in worktree — verify integration)
                     if story-introduced failures → fix and re-commit
@@ -192,9 +193,10 @@ Tier 2 or 3? → assemble context bundle
            collect qa-reports/{id}.qa-report.md
            ↓
            PASS → collect memory-deltas/{id}.memory-delta.md
+                  → decision-extraction (scan impl-report + qa-report → DEC-{N}.md + _log.md + index.md; no-op if no durable decisions found)
                   → if verdict DRIFT_DETECTED or NEW_KNOWLEDGE_FOUND or DRIFT_AND_NEW_KNOWLEDGE:
                       flag Discovery with delta report before marking done
-                  → commit artefacts to story branch (in worktree — DEC-146)
+                  → commit artefacts to story branch (includes new DEC files, _log.md, index.md — DEC-146)
                   → git merge staging into story branch (in worktree)
                   → tsc --noEmit + vitest run (in worktree — verify integration)
                   → if story-introduced failures → fix; pre-existing → proceed; unclear → ESCALATE
