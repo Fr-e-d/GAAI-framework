@@ -1,7 +1,7 @@
 ---
 name: codebase-scan
 description: Create a high-level map of the project structure and identify architectural pillars, entry points, and module boundaries. Activate at Bootstrap initialization or before architecture extraction.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

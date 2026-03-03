@@ -253,8 +253,11 @@ fi
 # ── Read backlog content ─────────────────────────────────────
 if $FROM_STDIN; then
   BACKLOG_CONTENT=$(cat)
+  # Fallback: if stdin parsing fails, create temp file
+  FROM_STDIN_BACKUP=true
 else
   BACKLOG_CONTENT=$(cat "$BACKLOG_FILE")
+  FROM_STDIN_BACKUP=false
 fi
 
 # ── Python parser + all read modes ───────────────────────────
@@ -292,7 +295,7 @@ for line in content.splitlines():
         if stripped.startswith("title:"):
             current["title"] = stripped.split(":", 1)[1].strip().strip("\"'")
         elif stripped.startswith("status:"):
-            current["status"] = stripped.split(":", 1)[1].strip()
+            current["status"] = stripped.split(":", 1)[1].strip().strip('"\'')
             in_depends = False
         elif stripped.startswith("priority:"):
             current["priority"] = stripped.split(":", 1)[1].strip()
@@ -444,4 +447,19 @@ if mode == "conflicts":
     sys.exit(0)
 PYEOF
 
-echo "$BACKLOG_CONTENT" | python3 -c "$PYTHON_PARSER" "$MODE"
+# ── Execute parser with temp file fallback ───────────────────
+# Using temp file is more reliable than piping through echo,
+# which can lose data or break on special characters in YAML
+TEMP_BACKLOG=$(mktemp)
+trap "rm -f $TEMP_BACKLOG" EXIT
+
+echo "$BACKLOG_CONTENT" > "$TEMP_BACKLOG"
+
+# Verify content was written successfully
+if [[ ! -s "$TEMP_BACKLOG" ]]; then
+  >&2 echo "Error: failed to write backlog content to temp file"
+  exit 1
+fi
+
+# Execute with stdin redirected from temp file (more reliable)
+python3 -c "$PYTHON_PARSER" "$MODE" < "$TEMP_BACKLOG"

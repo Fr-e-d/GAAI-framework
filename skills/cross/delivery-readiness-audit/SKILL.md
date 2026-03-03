@@ -1,7 +1,7 @@
 ---
 name: delivery-readiness-audit
 description: Spot-check AC internal consistency and scan for pending revisions on delivery-ready stories. Activated by `/gaai-status --audit` as Section 5. Complements the standard status checks with depth checks that standard status skips for speed.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

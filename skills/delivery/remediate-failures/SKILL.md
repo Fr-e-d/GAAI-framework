@@ -1,7 +1,7 @@
 ---
 name: remediate-failures
 description: Correct failures, rule violations, and acceptance criteria gaps detected during QA review. Activate when qa-review returns FAIL. Fixes without redefining scope — loops until all quality gates pass.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
