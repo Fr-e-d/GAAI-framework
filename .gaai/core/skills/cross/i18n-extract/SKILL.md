@@ -1,6 +1,8 @@
 ---
 type: skill
 id: i18n-extract
+name: i18n-extract
+description: Scan codebase for hardcoded strings that should be internationalised, classify by domain and priority, and produce a structured extraction report for translation workflows.
 layer: cross
 category: analysis
 created_at: 2026-03-02

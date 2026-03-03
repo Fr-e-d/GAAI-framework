@@ -1,6 +1,8 @@
 ---
 type: skill
 id: i18n-glossary-sync
+name: i18n-glossary-sync
+description: Maintain a canonical i18n glossary file — sync new terms across all language pairs, detect drift, flag missing translations, and enforce consistent terminology across the codebase.
 layer: cross
 category: analysis
 created_at: 2026-03-02

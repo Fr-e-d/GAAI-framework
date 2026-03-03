@@ -1,6 +1,8 @@
 ---
 type: skill
 id: idiomatique-translate
+name: idiomatique-translate
+description: Translate strings idiomatically across multiple target languages using a project glossary, preserving tone, domain terminology, and format placeholders while flagging untranslatable content.
 layer: cross
 category: content
 created_at: 2026-03-02
