@@ -213,7 +213,7 @@ cross:
   - id: SKILL-CRS-020
     name: analytics-query
     source: project
-    description: "Query PostHog analytics data and surface data-driven growth insights for Callibrate funnels using the PostHog MCP server. Activate when a Discovery Agent session requires funnel diagnosis, activation analysis, lifecycle check, conversion trend analysis, or friction scanning."
+    description: "Query PostHog analytics data and surface data-driven growth insights for your project's funnels using the PostHog MCP server. Activate when a Discovery Agent session requires funnel diagnosis, activation analysis, lifecycle check, conversion trend analysis, or friction scanning."
     category: cross
     track: cross-cutting
     tags: []

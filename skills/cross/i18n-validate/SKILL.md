@@ -1,6 +1,8 @@
 ---
 type: skill
 id: i18n-validate
+name: i18n-validate
+description: Validate translation completeness and consistency across all locale files — detect missing keys, untranslated strings, format mismatches, and glossary violations.
 layer: cross
 category: analysis
 created_at: 2026-03-02
@@ -121,8 +123,8 @@ Validate i18n JSON files for completeness, consistency, and quality across multi
       "type": "potential_untranslated",
       "severity": "info",
       "key": "footer.copyright",
-      "en_text": "© 2026 Callibrate",
-      "fr_text": "© 2026 Callibrate",
+      "en_text": "© 2026 YourProject",
+      "fr_text": "© 2026 YourProject",
       "message": "Text identical to EN — may be intentional (proper noun) or missed translation"
     }
   ],

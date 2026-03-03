@@ -1,6 +1,8 @@
 ---
 type: skill
 id: build-skills-indices
+name: build-skills-indices
+description: Scan SKILL.md files in .gaai/core/skills/ and .gaai/project/skills/, extract YAML frontmatter, and regenerate a single unified skills index for fast discovery across all skill repositories.
 layer: cross
 category: governance
 created_at: 2026-03-02

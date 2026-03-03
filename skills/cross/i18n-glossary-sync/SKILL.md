@@ -1,6 +1,8 @@
 ---
 type: skill
 id: i18n-glossary-sync
+name: i18n-glossary-sync
+description: Maintain a canonical i18n glossary file — sync new terms across all language pairs, detect drift, flag missing translations, and enforce consistent terminology across the codebase.
 layer: cross
 category: analysis
 created_at: 2026-03-02
@@ -320,17 +322,15 @@ When renaming terms (e.g., milestone rename E12S13):
 Canonical format (Markdown with YAML table):
 
 ```markdown
-# Callibrate i18n Glossary
+# {YourProject} i18n Glossary
 
 ## Domain Terms
 
 | Term | EN | FR | DE | ES | Context | Notes | Variants |
 |---|---|---|---|---|---|---|---|
-| lead | lead | prospect | Lead | prospecto | Sales/acquisition | Distinct from "prospect" (rare in Callibrate) | lead, leads |
-| milestone | milestone | jalon | Meilenstein | hito | Onboarding progress | Not "étape" (confuses with steps) | milestone, milestones |
-| direct link | direct link | lien direct | direkter Link | enlace directo | Feature name | Signed URL for direct prospect submissions | direct link, direct links |
-| spending limit | spending limit | limite de dépenses | Ausgabenlimit | límite de gasto | Budget control | Monthly cap on expert spending | spending limit, spending_limit |
-| free mode | free mode | mode gratuit | kostenloser Modus | modo gratuito | Direct link fallback | When spending limit exceeded, no AI processing | free mode, free-mode |
+| dashboard | dashboard | tableau de bord | Dashboard | panel | Navigation | Main overview screen | dashboard, dashboards |
+| workspace | workspace | espace de travail | Arbeitsbereich | espacio de trabajo | Multi-tenant | Container for projects/users | workspace, workspaces |
+| plan | plan | forfait | Tarif | plan | Billing | Subscription tier name | plan, plans |
 
 ## Deprecation Log
 

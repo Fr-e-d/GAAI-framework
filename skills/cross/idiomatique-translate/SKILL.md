@@ -1,6 +1,8 @@
 ---
 type: skill
 id: idiomatique-translate
+name: idiomatique-translate
+description: Translate strings idiomatically across multiple target languages using a project glossary, preserving tone, domain terminology, and format placeholders while flagging untranslatable content.
 layer: cross
 category: content
 created_at: 2026-03-02
@@ -90,7 +92,7 @@ Glossary can be:
 - **Flat (single language pair):** `{ "source": "target" }`
 - **Multi-language keyed:** `{ "term": { "en": "...", "fr": "...", "de": "..." } }`
 
-Example (Callibrate domain):
+Example (project domain):
 
 | EN | FR | DE | ES |
 |---|---|---|---|
@@ -198,7 +200,7 @@ Finalize: Choose final translation or iterate with skill
 - **Context dependency:** Same source phrase can translate differently in billing vs error context — always provide context
 - **Humor/idioms:** Culture-specific wordplay is hard to translate idiomatically — flag for manual review or rephrase
 - **Regional variants:** Same language can have regional differences (e.g., European Spanish vs Latin American Spanish, European Portuguese vs Brazilian Portuguese)
-- **Names/proper nouns:** Keep unchanged (Callibrate, n8n, Zapier, OpenAI, etc.)
+- **Names/proper nouns:** Keep unchanged (your project name, n8n, Zapier, OpenAI, etc.)
 - **Currency/date/number:** Use regional preferences to adapt formatting
 
 ---

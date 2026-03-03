@@ -53,7 +53,7 @@ When an agent starts (e.g., Discovery Agent invoked):
 Skills from `.gaai/core/skills/` (framework-level, generic)
 
 ### Project Skills
-Skills from `.gaai/project/skills/` (Callibrate-specific, domain knowledge)
+Skills from `.gaai/project/skills/` (project-specific, domain knowledge)
 
 ### Cross Skills
 Reusable across agents (content, analysis, validation, governance)

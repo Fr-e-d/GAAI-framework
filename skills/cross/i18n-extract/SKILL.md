@@ -1,6 +1,8 @@
 ---
 type: skill
 id: i18n-extract
+name: i18n-extract
+description: Scan codebase for hardcoded strings that should be internationalised, classify by domain and priority, and produce a structured extraction report for translation workflows.
 layer: cross
 category: analysis
 created_at: 2026-03-02
@@ -79,11 +81,11 @@ Scan a React/TypeScript codebase to identify all hardcoded user-facing strings (
     },
     {
       "id": "extract_003",
-      "source_string": "© 2026 Callibrate",
+      "source_string": "© 2026 YourProject",
       "file": "components/Footer.tsx",
       "line": 15,
       "component": "Footer",
-      "context_snippet": "© 2026 Callibrate",
+      "context_snippet": "© 2026 YourProject",
       "confidence": "low",
       "domain": "common",
       "priority": "low",
@@ -162,7 +164,7 @@ URLs, emails, phone numbers (mailto:, http://, tel:)
 Variable interpolations if already i18n-keyed
 Comments (usually developer notes, not UX text)
 Code blocks / regex patterns
-Callibrate proper nouns (keep as-is)
+Project-specific proper nouns (keep as-is)
 ```
 
 ### 3. **Context extraction:**
