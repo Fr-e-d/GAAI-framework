@@ -142,6 +142,7 @@ specialists:
     skill_paths:
       - project/skills/domains/content-production/  # override: domain skills live here, not in core/skills/
     context_bundle:
+      - contexts/memory/project/brand-identity.md                   # governing authority — values, doctrine, journalist test
       - contexts/memory/domains/content-production/index.md
       - contexts/memory/domains/content-production/voice-guide.md
       - contexts/memory/domains/content-production/gap-analysis.md  # skill coverage map
