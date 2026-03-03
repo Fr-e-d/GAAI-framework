@@ -1,7 +1,7 @@
 ---
 name: discovery-high-level-plan
 description: Transform vague or high-level human intent into a governed Discovery action plan. Activate when intent is unclear, broad, or when multiple discovery steps are required before any artefact is created.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

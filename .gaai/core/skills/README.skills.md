@@ -117,6 +117,24 @@ To regenerate after adding or modifying a skill:
 
 ---
 
+## Delivery Skills
+
+| Skill | ID | Description |
+|---|---|---|
+| `browser-journey-test` | — | Browser-based journey testing for UI validation |
+| `ci-watch-and-fix` | SKILL-DELIVERY-CI-WATCH-001 | Watch GitHub Actions CI after PR creation, detect failures, extract logs, apply minimal fixes, and re-push — up to 3 cycles before escalating |
+| `compose-team` | — | Read specialists registry and select the sub-agent team for a Story |
+| `coordinate-handoffs` | SKILL-DEL-009 | Validate sub-agent handoff artefacts, sequence phase transitions, manage retry and escalation logic |
+| `delivery-high-level-plan` | SKILL-DELIVERY-HIGH-LEVEL-PLAN-001 | Transform validated Stories into a clear, minimal, governed execution plan |
+| `evaluate-story` | — | Assess complexity, identify domains, determine delivery tier |
+| `frontend-design` | — | Domain-specific skill for frontend UI implementation |
+| `implement` | — | Implement a Story from an execution plan |
+| `prepare-execution-plan` | — | File-level decomposition of a high-level plan for Tier 2/3 Stories |
+| `qa-review` | SKILL-QA-REVIEW-001 | Validate implemented code against acceptance criteria — the hard quality gate |
+| `remediate-failures` | SKILL-REMEDIATE-FAILURES-001 | Correct failures detected during QA review |
+
+---
+
 → [discovery/](discovery/) — skills that produce artefacts
 → [delivery/](delivery/) — skills that orchestrate and execute
 → [cross/](cross/) — skills for memory, context, governance

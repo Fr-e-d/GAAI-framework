@@ -1,7 +1,7 @@
 ---
 name: create-prd
 description: Produce a lightweight strategic PRD that defines product vision, user problem, value hypothesis, success metrics, and scope boundaries. Activate only when starting a new product, launching a major initiative, or facing strategic uncertainty.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
