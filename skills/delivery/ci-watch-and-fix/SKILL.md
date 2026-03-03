@@ -16,7 +16,7 @@ inputs:
   - pr_number          (integer — from gh pr create output)
   - story_id           (string — e.g. E18S01)
   - story_branch       (string — e.g. story/E18S01)
-  - repo               (string — e.g. Fr-e-d/callibrate-core)
+  - repo               (string — e.g. your-org/your-repo)
   - worktree_path      (string — absolute path to story worktree)
   - log_dir            (string — absolute path to daemon log directory, for heartbeat lines)
 outputs:
