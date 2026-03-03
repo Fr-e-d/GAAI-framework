@@ -1,7 +1,7 @@
 ---
 name: memory-ingest
 description: Transform validated knowledge into structured long-term memory. Activate after Bootstrap scan, after Discovery produces validated artefacts, or after architecture insights are available.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

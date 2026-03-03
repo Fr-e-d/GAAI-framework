@@ -1,7 +1,7 @@
 ---
 name: context-building
 description: Assemble a minimal, high-signal execution context bundle from already-retrieved memory, governed artefacts, and applicable rules. Activate after memory-retrieve and before any reasoning or execution skill.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

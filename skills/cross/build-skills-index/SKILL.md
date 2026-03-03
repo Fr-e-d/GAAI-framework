@@ -1,7 +1,7 @@
 ---
 name: build-skills-index
 description: Scan all SKILL.md files in .gaai/core/skills/, extract YAML frontmatter, and generate a derived skills-index.yaml at .gaai/core/skills/skills-index.yaml. Activate after creating, modifying, or removing any skill.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

@@ -1,7 +1,7 @@
 ---
 name: coordinate-handoffs
 description: Validate sub-agent handoff artefacts, sequence phase transitions, and manage retry and escalation logic. Activate after each sub-agent terminates to determine next action.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
@@ -78,7 +78,7 @@ The Orchestrator cannot proceed to the next phase until it has validated the cur
      8. After successful merge: verify staging deploy CI (`gh run list --branch staging --limit 1`)
         - If staging deploy fails → **ESCALATE** with deploy logs (do not attempt infra fixes)
      9. If `{id}.memory-delta.md` exists in `contexts/artefacts/memory-deltas/`, flag it in the completion report for Discovery to action via `memory-ingest`.
-    10. Update backlog, commit artefacts, cleanup worktree + delete remote branch
+    10. Update backlog (push with retry — DEC-146), cleanup worktree + delete remote branch
      **NEVER leave a PR open. NEVER merge to production (staging only).**
    - **FAIL**: spawn count < 2? → **RE-SPAWN** Implementation Sub-Agent with qa-report, then re-spawn QA Sub-Agent
    - **FAIL** after 2 cycles: → **ESCALATE**

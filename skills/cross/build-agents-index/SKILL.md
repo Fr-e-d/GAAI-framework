@@ -1,7 +1,7 @@
 ---
 name: build-agents-index
 description: Scan all agent and sub-agent definition files in .gaai/core/agents/, extract YAML frontmatter, merge with specialists.registry.yaml, and generate a derived agents-index.yaml at .gaai/core/agents/agents-index.yaml. Activate after adding, modifying, or removing any agent, sub-agent, or specialist entry.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

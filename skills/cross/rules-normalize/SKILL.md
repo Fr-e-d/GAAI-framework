@@ -1,7 +1,7 @@
 ---
 name: rules-normalize
 description: Convert implicit or scattered project conventions into governed GAAI rule files, and create or modify rule files with integrity. Activate during Bootstrap, when creating a new rule, or when modifying an existing rule.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
