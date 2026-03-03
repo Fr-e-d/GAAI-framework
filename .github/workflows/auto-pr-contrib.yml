@@ -39,6 +39,7 @@ jobs:
           echo "merge_branch=$MERGE_BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Replace .gaai/core/ with contrib branch content
+        id: merge
         env:
           MERGE_BRANCH: ${{ steps.meta.outputs.merge_branch }}
           PROJECT: ${{ steps.meta.outputs.project }}
@@ -50,14 +51,22 @@ jobs:
           # Remove current .gaai/core/ and replace with contrib branch content
           git rm -rf .gaai/core/
           git read-tree --prefix=.gaai/core/ -u FETCH_HEAD
-          git commit -m "sync(.gaai/core): merge contrib from $PROJECT"
+          if git diff --cached --quiet; then
+            echo "No changes detected — .gaai/core/ is already in sync."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "sync(.gaai/core): merge contrib from $PROJECT"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Push merge branch
+        if: steps.merge.outputs.has_changes == 'true'
         env:
           MERGE_BRANCH: ${{ steps.meta.outputs.merge_branch }}
         run: git push origin "$MERGE_BRANCH" --force
 
       - name: Create or update PR
+        if: steps.merge.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MERGE_BRANCH: ${{ steps.meta.outputs.merge_branch }}
