@@ -38,7 +38,7 @@ jobs:
           echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
           echo "merge_branch=$MERGE_BRANCH" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch contrib branch and merge into .gaai/core/
+      - name: Replace .gaai/core/ with contrib branch content
         env:
           MERGE_BRANCH: ${{ steps.meta.outputs.merge_branch }}
           PROJECT: ${{ steps.meta.outputs.project }}
@@ -47,7 +47,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin "$CONTRIB_BRANCH"
           git checkout -b "$MERGE_BRANCH"
-          git subtree pull --prefix=.gaai/core origin "$CONTRIB_BRANCH" --squash -m "sync(.gaai/core): merge contrib from $PROJECT"
+          # Remove current .gaai/core/ and replace with contrib branch content
+          git rm -rf .gaai/core/
+          git read-tree --prefix=.gaai/core/ -u FETCH_HEAD
+          git commit -m "sync(.gaai/core): merge contrib from $PROJECT"
 
       - name: Push merge branch
         env:
