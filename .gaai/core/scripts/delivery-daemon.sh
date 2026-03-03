@@ -596,8 +596,9 @@ if ! "$SCHEDULER" --ready-ids "$BACKLOG" 2>/dev/null | grep -q "^${story_id}\$";
   exit 2
 fi
 
-# Step 3: Mark in_progress locally
+# Step 3: Mark in_progress locally + set started_at
 "$SCHEDULER" --set-status "$story_id" in_progress "$BACKLOG"
+"$SCHEDULER" --set-field "$story_id" started_at "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BACKLOG"
 git add "$BACKLOG_REL"
 git commit -m "chore($story_id): in_progress [daemon]" --quiet
 

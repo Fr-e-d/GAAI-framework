@@ -1,7 +1,7 @@
 ---
 name: generate-build-in-public-content
 description: Generate build-in-public content drafts from completed delivery artefacts. Applies the Golden Circle (WHY → HOW → WHAT) to transform stories, decisions, and metrics into ready-to-review content pieces (X threads, blog snippets, metrics posts). Activate automatically after each story reaches `done` status.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

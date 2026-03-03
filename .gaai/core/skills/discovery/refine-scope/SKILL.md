@@ -1,7 +1,7 @@
 ---
 name: refine-scope
 description: Iteratively refine Discovery artefacts (plans, epics, stories) when feedback, ambiguity, or uncertainty is detected. Activate when artefacts are incomplete, acceptance criteria are missing, or human feedback highlights gaps.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

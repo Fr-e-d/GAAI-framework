@@ -74,6 +74,7 @@ specialists:
       - client-side
     skills:
       - implement
+      - frontend-design  # SKILL-FRONTEND-DESIGN-001 — distinctive UI, avoids generic AI aesthetics
     context_bundle:
       - contexts/memory/patterns/conventions.md  # ui conventions if present
 
@@ -113,3 +114,35 @@ specialists:
       - implement
     context_bundle:
       - contexts/memory/patterns/conventions.md
+
+  - id: content-production
+    description: Content creation, SEO, social media adaptation, keyword research, trend intelligence, repurposing — the full content blueprint pipeline
+    triggers:
+      - blog post
+      - content
+      - SEO
+      - keyword
+      - trend
+      - social media
+      - X thread
+      - LinkedIn
+      - Reddit post
+      - repurpose
+      - Google Trends
+      - content plan
+      - editorial
+      - copywriting
+      - article
+      - newsletter
+    skills:
+      - google-trends      # CNT-012 — trend intelligence via Playwright
+      - social-adapt       # CNT-007 — transform content for X/LinkedIn/Reddit
+      - repurpose          # CNT-010 — repurposing cadence and decision tree
+      - content-plan       # CNT-011 — monthly content planning
+    skill_paths:
+      - project/skills/domains/content-production/  # override: domain skills live here, not in core/skills/
+    context_bundle:
+      - contexts/memory/project/brand-identity.md                   # governing authority — values, doctrine, journalist test
+      - contexts/memory/domains/content-production/index.md
+      - contexts/memory/domains/content-production/voice-guide.md
+      - contexts/memory/domains/content-production/gap-analysis.md  # skill coverage map

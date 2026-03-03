@@ -1,7 +1,7 @@
 ---
 name: approach-evaluation
 description: Research industry standards and best practices, identify viable approaches for a given technical or architectural problem, and produce a structured factual comparison against project-specific constraints. Reports options — does not decide.
-license: ELv2
+license: MIT
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
