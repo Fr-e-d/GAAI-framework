@@ -1,8 +1,14 @@
 name: Auto-PR from contrib branch
 
+# Trigger: branch creation (runs from default branch) + manual dispatch for re-pushes
 on:
-  push:
-    branches: ['contrib/**']
+  create:
+  workflow_dispatch:
+    inputs:
+      contrib_branch:
+        description: 'Contrib branch name (e.g. contrib/callibrate)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,8 +17,13 @@ permissions:
 jobs:
   create-pr:
     runs-on: ubuntu-latest
+    # For 'create' events: only run for contrib/** branches
+    # For 'workflow_dispatch': always run (branch provided as input)
+    if: >-
+      (github.event_name == 'create' && github.ref_type == 'branch' && startsWith(github.ref_name, 'contrib/'))
+      || github.event_name == 'workflow_dispatch'
     env:
-      CONTRIB_BRANCH: ${{ github.ref_name }}
+      CONTRIB_BRANCH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.contrib_branch || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
