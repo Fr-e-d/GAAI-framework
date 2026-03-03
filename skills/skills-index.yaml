@@ -3,9 +3,9 @@
 # Regenerate: invoke build-skills-indices skill
 
 generated_at: 2026-03-02
-total: 54
+total: 55
 core: 46
-project: 8
+project: 9
 
 discovery:
   - id: SKILL-CNT-011
@@ -17,6 +17,15 @@ discovery:
     tags: []
     updated_at: 2026-02-26
     path: project/skills/domains/content-production/content-plan/SKILL.md
+  - id: SKILL-CNT-012
+    name: content-research
+    source: project
+    description: "Research-first content creation protocol. Triggers before writing any content piece. Performs deep search to map current search intent, audience pain points, existing content landscape, and information gaps. Produces a structured research brief that feeds into drafting. Implements Content-Market-Fit methodology, Pain Point SEO, and the Content Cyborg model. Mandatory prerequisite for all hub content — AI training data is stale at draft time, only live research produces current, relevant content."
+    category: content
+    track: discovery
+    tags: []
+    updated_at: 2026-03-02
+    path: project/skills/domains/content-production/content-research/SKILL.md
   - id: SKILL-CREATE-PRD-001
     name: create-prd
     source: core
