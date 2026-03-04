@@ -37,6 +37,19 @@ This project uses GAAI — a governance layer for AI coding tools.
 
 ---
 
+## Optional: Autonomous Delivery
+
+If your project uses git with a `staging` branch, the **Delivery Daemon** can automate everything:
+
+1. Setup: `bash .gaai/core/scripts/daemon-setup.sh`
+2. Start: `bash .gaai/core/scripts/daemon-start.sh`
+3. Stop: `bash .gaai/core/scripts/daemon-start.sh --stop`
+
+The daemon polls for `refined` stories and delivers them in parallel — no human in the loop.
+Full reference: see `GAAI.md` → "Branch Model & Automation".
+
+---
+
 ## AI Operating Instructions
 
 **You are operating under GAAI governance.** The instructions below apply to any AI coding tool — Claude Code, OpenCode, Codex CLI, Gemini CLI, Cursor, Windsurf, Antigravity, or any other.

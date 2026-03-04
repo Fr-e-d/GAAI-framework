@@ -30,6 +30,9 @@ Delivery:   "E03S01 complete. No further Stories in backlog."
 
 Two slash commands. Discovery reasons — it never executes. Delivery executes — it never decides scope. The backlog is the contract between them.
 
+> **Want it fully autonomous?** The Delivery Daemon polls your backlog and auto-delivers
+> stories in parallel — no human in the loop. [See Automation →](#automation-optional)
+
 > [Full walkthrough in Quick Start](docs/guides/quick-start.md)
 
 ---
@@ -126,6 +129,26 @@ your-project/
 ```
 
 No SDK. No npm package. No pip install. Markdown + YAML + bash. Readable by humans and any AI tool.
+
+---
+
+## Automation (Optional)
+
+GAAI works manually with `/gaai-deliver`. But if your project uses git with a `staging` branch, the **Delivery Daemon** runs deliveries autonomously:
+
+- Polls the backlog for `refined` stories
+- Launches parallel Claude Code sessions (configurable concurrency)
+- Coordinates across devices via git push
+- Monitors health, retries failures, archives completed work
+
+**Setup (2 minutes):**
+
+```bash
+bash .gaai/core/scripts/daemon-setup.sh   # checks prereqs, configures
+bash .gaai/core/scripts/daemon-start.sh   # starts the daemon
+```
+
+> Requires: git repo, `staging` branch, [Claude Code CLI](https://claude.com/claude-code), python3, tmux (Linux) or Terminal.app (macOS).
 
 ---
 

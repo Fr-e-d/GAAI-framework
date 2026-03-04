@@ -36,4 +36,16 @@ Nothing gets built that isn't in the backlog. Discovery decides *what*. Delivery
 
 ---
 
+## Daemon (Optional — requires git + staging branch)
+
+```bash
+bash .gaai/core/scripts/daemon-setup.sh              # one-time setup
+bash .gaai/core/scripts/daemon-start.sh               # start daemon
+bash .gaai/core/scripts/daemon-start.sh --status      # check state
+bash .gaai/core/scripts/daemon-start.sh --stop        # stop daemon
+bash .gaai/core/scripts/daemon-start.sh --max-concurrent 3  # parallel mode
+```
+
+---
+
 > [Full documentation](https://github.com/Fr-e-d/GAAI-framework/tree/main/docs)
