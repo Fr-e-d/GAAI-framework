@@ -1,0 +1,389 @@
+# GAAI Core Skills Index
+# Source of truth: .gaai/core/skills/*/SKILL.md ONLY
+# Does NOT include project skills — see .gaai/project/skills/skills-index.yaml
+# Regenerate: invoke build-skills-indices skill
+
+generated_at: 2026-03-03
+total: 47
+
+discovery:
+  - id: SKILL-CREATE-PRD-001
+    name: create-prd
+    description: "Produce a lightweight strategic PRD that defines product vision, user problem, value hypothesis, success metrics, and scope boundaries. Activate only when starting a new product, launching a major initiative, or facing strategic uncertainty."
+    category: discovery
+    track: discovery
+    tags: []
+    updated_at: 2026-01-27
+    path: core/skills/discovery/create-prd/SKILL.md
+  - id: SKILL-DISCOVERY-HIGH-LEVEL-PLAN-001
+    name: discovery-high-level-plan
+    description: "Transform vague or high-level human intent into a governed Discovery action plan. Activate when intent is unclear, broad, or when multiple discovery steps are required before any artefact is created."
+    category: discovery
+    track: discovery
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/discovery/discovery-high-level-plan/SKILL.md
+  - id: SKILL-GENERATE-EPICS-001
+    name: generate-epics
+    description: "Translate product intent or a PRD into a small set of outcome-driven Epics (3–7 max). Activate when starting a new product, adding a significant feature domain, or breaking down a PRD into actionable user outcomes."
+    category: discovery
+    track: discovery
+    tags: []
+    updated_at: 2026-01-27
+    path: core/skills/discovery/generate-epics/SKILL.md
+  - id: SKILL-GENERATE-STORIES-001
+    name: generate-stories
+    description: "Translate a single Epic into clear, actionable User Stories with explicit acceptance criteria. Activate when an Epic is defined and work needs to be prepared for Delivery execution."
+    category: discovery
+    track: discovery
+    tags: []
+    updated_at: 2026-01-27
+    path: core/skills/discovery/generate-stories/SKILL.md
+  - id: SKILL-REFINE-SCOPE-001
+    name: refine-scope
+    description: "Iteratively refine Discovery artefacts (plans, epics, stories) when feedback, ambiguity, or uncertainty is detected. Activate when artefacts are incomplete, acceptance criteria are missing, or human feedback highlights gaps."
+    category: discovery
+    track: discovery
+    tags: []
+    updated_at: 2026-01-28
+    path: core/skills/discovery/refine-scope/SKILL.md
+  - id: SKILL-VALIDATE-ARTEFACTS-001
+    name: validate-artefacts
+    description: "Validate that all Discovery artefacts (Epics, Stories) are clear, governed, complete, and safe to pass into Delivery. Activate after generating Epics or Stories and before any Delivery planning. This is the mandatory Discovery → Delivery gate."
+    category: discovery
+    track: discovery
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/discovery/validate-artefacts/SKILL.md
+
+delivery:
+  - id: SKILL-BROWSER-JOURNEY-TEST-001
+    name: browser-journey-test
+    description: "Validate user stories by simulating real user journeys in a live browser against deployed application. Activate after implementation to verify actual user experience against acceptance criteria, not just code logic."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/delivery/browser-journey-test/SKILL.md
+  - id: SKILL-DELIVERY-CI-WATCH-001
+    name: ci-watch-and-fix
+    description: "Watch GitHub Actions CI after PR creation, detect failures, extract logs, apply minimal fixes, and re-push — keeping the delivery session alive until CI resolves or escalating after 3 cycles. Activate immediately after gh pr create and before marking the story done."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-03-02
+    path: core/skills/delivery/ci-watch-and-fix/SKILL.md
+  - id: SKILL-DEL-008
+    name: compose-team
+    description: "Assemble the context bundles for each sub-agent based on evaluate-story output. Produces spawn-ready packages for Planning, Implementation, QA, or MicroDelivery sub-agents. Activate after evaluate-story, before spawning any sub-agent."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-02-18
+    path: core/skills/delivery/compose-team/SKILL.md
+  - id: SKILL-DEL-009
+    name: coordinate-handoffs
+    description: "Validate sub-agent handoff artefacts, sequence phase transitions, and manage retry and escalation logic. Activate after each sub-agent terminates to determine next action."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-02-18
+    path: core/skills/delivery/coordinate-handoffs/SKILL.md
+  - id: SKILL-DELIVERY-HIGH-LEVEL-PLAN-001
+    name: delivery-high-level-plan
+    description: "Transform validated Stories into a clear, minimal, governed execution plan. Used by the Planning Sub-Agent as the first planning pass before prepare-execution-plan for Tier 2/3, or as the sole planning output for simple Stories."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-03-02
+    path: core/skills/delivery/delivery-high-level-plan/SKILL.md
+  - id: SKILL-DEL-007
+    name: evaluate-story
+    description: "Assess Story complexity, identify required domains, and determine delivery tier (MicroDelivery / Core Team / Core Team + Specialists). Activate as the first step of every delivery orchestration cycle."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/delivery/evaluate-story/SKILL.md
+  - id: SKILL-FRONTEND-DESIGN-001
+    name: frontend-design
+    description: "Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, or applications. Generates creative, polished code that avoids generic AI aesthetics."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-03-01
+    path: core/skills/delivery/frontend-design/SKILL.md
+  - id: SKILL-IMPLEMENT-001
+    name: implement
+    description: "Generate correct, minimal, maintainable code that satisfies a validated Story's acceptance criteria against an execution plan. Activate when a Story is validated, a plan exists, and all prerequisites are unambiguous."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/delivery/implement/SKILL.md
+  - id: SKILL-DEL-006
+    name: prepare-execution-plan
+    description: "Decompose a high-level delivery plan into a precise, file-level execution sequence with explicit ordering, edge cases, and test checkpoints. Activate after delivery-high-level-plan for complex or multi-phase Stories before implementation begins."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/delivery/prepare-execution-plan/SKILL.md
+  - id: SKILL-QA-REVIEW-001
+    name: qa-review
+    description: "Validate that implemented code fully satisfies Story acceptance criteria, respects rules, and introduces no regressions. This is the hard quality gate — no pass means no delivery. Activate after implementation is complete."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/delivery/qa-review/SKILL.md
+  - id: SKILL-REMEDIATE-FAILURES-001
+    name: remediate-failures
+    description: "Correct failures, rule violations, and acceptance criteria gaps detected during QA review. Activate when qa-review returns FAIL. Fixes without redefining scope — loops until all quality gates pass."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-01-27
+    path: core/skills/delivery/remediate-failures/SKILL.md
+
+cross:
+  - id: SKILL-APPROACH-EVALUATION-001
+    name: approach-evaluation
+    description: "Research industry standards and best practices, identify viable approaches for a given technical or architectural problem, and produce a structured factual comparison against project-specific constraints. Reports options — does not decide."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/approach-evaluation/SKILL.md
+  - id: SKILL-ARCHITECTURE-EXTRACT-001
+    name: architecture-extract
+    description: "Convert raw project structure into clear architectural understanding — module boundaries, data flows, service relationships, and architectural patterns. Activate after codebase-scan during Bootstrap."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/architecture-extract/SKILL.md
+  - id: SKILL-CRS-018
+    name: build-agents-index
+    description: "Scan all agent and sub-agent definition files in .gaai/core/agents/, extract YAML frontmatter, merge with specialists.registry.yaml, and generate a derived agents-index.yaml at .gaai/core/agents/agents-index.yaml. Activate after adding, modifying, or removing any agent, sub-agent, or specialist entry."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/build-agents-index/SKILL.md
+  - id: SKILL-CRS-017
+    name: build-skills-index
+    description: "Scan all SKILL.md files in .gaai/core/skills/, extract YAML frontmatter, and generate a derived skills-index.yaml at .gaai/core/skills/skills-index.yaml. Activate after creating, modifying, or removing any skill."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/build-skills-index/SKILL.md
+  - id: build-skills-indices
+    name: build-skills-indices
+    description: "Scan SKILL.md files in .gaai/core/skills/ and .gaai/project/skills/ separately, extract YAML frontmatter, and regenerate two independent indexes — one per scope. Core index stays clean for OSS sync."
+    category: governance
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-03
+    path: core/skills/cross/build-skills-indices/SKILL.md
+  - id: SKILL-CODEBASE-SCAN-001
+    name: codebase-scan
+    description: "Create a high-level map of the project structure and identify architectural pillars, entry points, and module boundaries. Activate at Bootstrap initialization or before architecture extraction."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/codebase-scan/SKILL.md
+  - id: SKILL-CONSISTENCY-CHECK-001
+    name: consistency-check
+    description: "Detect inconsistencies across related artefacts and governance constraints. Activate after story generation, after plan preparation, before implementation, or after remediation attempts. Reports issues — does not fix them."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-01-30
+    path: core/skills/cross/consistency-check/SKILL.md
+  - id: SKILL-CONTEXT-BUILDING-001
+    name: context-building
+    description: "Assemble a minimal, high-signal execution context bundle from already-retrieved memory, governed artefacts, and applicable rules. Activate after memory-retrieve and before any reasoning or execution skill."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/context-building/SKILL.md
+  - id: SKILL-CRS-016
+    name: create-skill
+    description: "Guide creation of a new GAAI skill following the agentskills.io spec and GAAI best practices. Activate when adding a new skill to the .gaai/core/skills/ catalog."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/create-skill/SKILL.md
+  - id: SKILL-DECISION-EXTRACTION-001
+    name: decision-extraction
+    description: "Identify and formalize durable product and technical decisions from agent outputs into long-term memory. Activate after Discovery produces artefacts, Delivery resolves trade-offs, or product direction materially changes. Always runs after Delivery QA PASS — mandatory gate includes updating index.md."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-03
+    path: core/skills/cross/decision-extraction/SKILL.md
+  - id: SKILL-CRS-019
+    name: delivery-readiness-audit
+    description: "Spot-check AC internal consistency and scan for pending revisions on delivery-ready stories. Activated by `/gaai-status --audit` as Section 5. Complements the standard status checks with depth checks that standard status skips for speed."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-23
+    path: core/skills/cross/delivery-readiness-audit/SKILL.md
+  - id: SKILL-FRICTION-RETROSPECTIVE-001
+    name: friction-retrospective
+    description: "Scan delivery artefacts for friction log entries, detect recurring patterns, and produce retrospective reports. Invoked by Discovery Agent (never by Delivery) to identify systemic improvement opportunities from friction captured during delivery."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-01
+    path: core/skills/cross/friction-retrospective/SKILL.md
+  - id: SKILL-CRS-021
+    name: generate-build-in-public-content
+    description: "Generate build-in-public content drafts from completed delivery artefacts. Applies the Golden Circle (WHY → HOW → WHAT) to transform stories, decisions, and metrics into ready-to-review content pieces (X threads, blog snippets, metrics posts). Activate automatically after each story reaches `done` status."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/generate-build-in-public-content/SKILL.md
+  - id: i18n-extract
+    name: i18n-extract
+    description: ""
+    category: analysis
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-02
+    path: core/skills/cross/i18n-extract/SKILL.md
+  - id: i18n-glossary-sync
+    name: i18n-glossary-sync
+    description: ""
+    category: analysis
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-02
+    path: core/skills/cross/i18n-glossary-sync/SKILL.md
+  - id: i18n-validate
+    name: i18n-validate
+    description: ""
+    category: analysis
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-02
+    path: core/skills/cross/i18n-validate/SKILL.md
+  - id: idiomatique-translate
+    name: idiomatique-translate
+    description: ""
+    category: content
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-02
+    path: core/skills/cross/idiomatique-translate/SKILL.md
+  - id: SKILL-MEMORY-ALIGNMENT-CHECK-001
+    name: memory-alignment-check
+    description: "After QA PASS, compare the Story's implementation footprint against relevant memory entries. Reports confirmed entries, contradictions, and new knowledge candidates. Never writes to memory — produces a delta report for Discovery to action."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/memory-alignment-check/SKILL.md
+  - id: SKILL-MEMORY-COMPACT-001
+    name: memory-compact
+    description: "Emergency single-pass memory compression when context window pressure is high mid-task. Activate when approaching token limits during active work. For scheduled end-of-phase cleanup, use memory-refresh instead."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-01
+    path: core/skills/cross/memory-compact/SKILL.md
+  - id: SKILL-MEMORY-INGEST-001
+    name: memory-ingest
+    description: "Transform validated knowledge into structured long-term memory. Activate after Bootstrap scan, after Discovery produces validated artefacts, or after architecture insights are available."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/memory-ingest/SKILL.md
+  - id: SKILL-MEMORY-INDEX-SYNC-001
+    name: memory-index-sync
+    description: "Detect and heal index.md drift — finds memory files on disk not registered in index.md and registers them. Run when /gaai-status reports unregistered files, after batch memory operations, or as a post-delivery gate."
+    category: cross
+    track: cross-cutting
+    tags: [memory, index, sync, governance]
+    updated_at: 2026-03-03
+    path: core/skills/cross/memory-index-sync/SKILL.md
+  - id: SKILL-MEMORY-REFRESH-001
+    name: memory-refresh
+    description: "Periodic memory maintenance — archive session files, convert recurring knowledge into summaries, update the memory index. Activate at end of a major phase (Discovery complete, sprint done) or when memory spans many sessions. For emergency context-window pressure mid-task, use memory-compact instead."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-03
+    path: core/skills/cross/memory-refresh/SKILL.md
+  - id: SKILL-MEMORY-RETRIEVE-001
+    name: memory-retrieve
+    description: "Load only the minimum relevant memory for a task using 3-level progressive disclosure. Activate before context-building — never load full memory dumps. Never substitute summaries for durable memory."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-01
+    path: core/skills/cross/memory-retrieve/SKILL.md
+  - id: SKILL-CRS-024
+    name: memory-search
+    description: "Search memory by frontmatter fields, full-text keywords, or cross-reference graph. Returns ranked file list — never loads full content. Use when the agent needs to find relevant memory without knowing exact paths."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-01
+    path: core/skills/cross/memory-search/SKILL.md
+  - id: SKILL-POST-MORTEM-LEARNING-001
+    name: post-mortem-learning
+    description: "Analyze failures and suboptimal deliveries to identify root causes, contributing factors, and raw lessons. Activate after significant delivery failures, repeated QA failures, or when patterns of issues need to be understood."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/post-mortem-learning/SKILL.md
+  - id: SKILL-RISK-ANALYSIS-001
+    name: risk-analysis
+    description: "Systematically identify and structure product, delivery, and systemic risks before they become failures. Activate before finalizing Epics and Stories, before execution planning, after repeated QA failures, or after major scope changes."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-01-27
+    path: core/skills/cross/risk-analysis/SKILL.md
+  - id: SKILL-RULES-NORMALIZE-001
+    name: rules-normalize
+    description: "Convert implicit or scattered project conventions into governed GAAI rule files, and create or modify rule files with integrity. Activate during Bootstrap, when creating a new rule, or when modifying an existing rule."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/rules-normalize/SKILL.md
+  - id: SKILL-SECURITY-AUDIT-001
+    name: security-audit
+    description: "Detect security vulnerabilities and governance violations across delivered code, configurations, and deployed environments. Activate after implementation or periodically as a governance check."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/security-audit/SKILL.md
+  - id: SKILL-SUCCESS-METRICS-EVALUATION-001
+    name: success-metrics-evaluation
+    description: "Evaluate delivery outcomes against defined success metrics and acceptance goals. Activate after Delivery to verify that delivered work creates real business and technical impact, not just output."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-26
+    path: core/skills/cross/success-metrics-evaluation/SKILL.md
+  - id: SKILL-SUMMARIZATION-001
+    name: summarization
+    description: "Transform large, noisy, or short-term memory into compact, durable, high-signal summaries. Activate when session memory grows large, decisions accumulate, or memory retrieval starts returning too many files."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-01-30
+    path: core/skills/cross/summarization/SKILL.md
