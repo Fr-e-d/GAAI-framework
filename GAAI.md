@@ -19,7 +19,6 @@ Welcome. This is the `.gaai/` folder — the GAAI framework living inside your p
 │   ├── workflows/           ← how the pieces connect
 │   ├── scripts/             ← bash utilities
 │   ├── compat/              ← thin adapters per tool
-│   └── scaffolding/         ← templates for project/ setup
 │
 └── project/                 ← project-specific data & extensions
     ├── agents/              ← custom agents (project-specific)
