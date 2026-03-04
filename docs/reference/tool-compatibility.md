@@ -15,7 +15,7 @@ GAAI works with any AI coding tool that can read files. This document covers set
 | Antigravity | ❌ | Via `AGENTS.md` | Manual | `AGENTS.md` |
 | Cursor | ❌ | Via `.mdc` always-active | Via `.mdc` reference | `.cursor/rules/*.mdc` |
 | Windsurf | ❌ | Via `AGENTS.md` | Manual | `AGENTS.md` |
-| Any other | ❌ | Manual | Manual | Read `.gaai/core/GAAI.md` directly |
+| Any other | ❌ | Manual | Manual | Read `.gaai/README.md` directly |
 
 **Claude Code** has the deepest integration. All other tools provide full GAAI capability via manual activation — the framework works identically, the difference is convenience.
 

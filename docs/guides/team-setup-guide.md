@@ -144,7 +144,7 @@ When a new engineer joins:
 
 1. Clone the repo (they get `.gaai/` automatically)
 2. Run: `bash .gaai/core/scripts/health-check.sh` — verifies framework integrity
-3. Read: `.gaai/core/GAAI.md` — 5 minutes
+3. Read: `.gaai/README.md` — 2 minutes, then `.gaai/GAAI.md` — 5 minutes
 4. Read: `.gaai/project/contexts/memory/project/context.md` — project context
 5. Read: `.gaai/project/contexts/memory/patterns/conventions.md` — team conventions
 6. First task: pick a `refined` Story from the backlog, run Delivery

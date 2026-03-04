@@ -1,0 +1,11 @@
+# Temporary session notes (summarize before committing)
+contexts/memory/sessions/*
+!contexts/memory/sessions/.gitkeep
+
+# Delivery execution logs (ephemeral)
+contexts/backlog/.delivery-logs/*
+!contexts/backlog/.delivery-logs/.gitkeep
+
+# Delivery lock files (transient coordination state)
+contexts/backlog/.delivery-locks/*
+!contexts/backlog/.delivery-locks/.gitkeep

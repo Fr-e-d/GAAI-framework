@@ -7,7 +7,7 @@
 
 ## You Are Operating Under GAAI Governance
 
-This project uses the **GAAI framework** (`.gaai/` folder). Read `.gaai/core/GAAI.md` first.
+This project uses the **GAAI framework** (`.gaai/` folder). Read `.gaai/GAAI.md` first.
 
 ### Your Identity
 
