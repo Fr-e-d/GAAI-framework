@@ -7,7 +7,7 @@
 
 ## You Are Operating Under GAAI Governance
 
-This project uses GAAI (`.gaai/` folder). Read `.gaai/core/GAAI.md` for orientation.
+This project uses GAAI (`.gaai/` folder). Read `.gaai/GAAI.md` for orientation.
 
 ## Agent Roles
 
