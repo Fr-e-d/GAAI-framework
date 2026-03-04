@@ -36,6 +36,12 @@ Typos, unclear wording, broken links in `docs/` or `.gaai/**/*.md`? Open a PR wi
 
 ---
 
+## Working on This Repo
+
+If you're fixing bugs or improving docs, read [docs/contributing/DEVELOPMENT.md](docs/contributing/DEVELOPMENT.md) for repo structure, constraints, commit conventions, and CI info.
+
+---
+
 ## Feedback
 
 Have thoughts about the framework's design? Open a [feedback issue](.github/ISSUE_TEMPLATE/feedback.md). We read everything, but we may not act on every suggestion.

@@ -21,7 +21,7 @@ What should have happened.
 
 ## Environment
 
-- GAAI version (from `.gaai/core/VERSION`):
+- GAAI version (from `.gaai/VERSION`):
 - AI tool used (Claude Code / Cursor / Windsurf / Other):
 - OS:
 

@@ -54,6 +54,9 @@ if [[ -z "$PROJECT_DIR" ]]; then
   fi
 fi
 
+# .gaai/ root (parent of core/)
+GAAI_ROOT="$(cd "$CORE_DIR/.." && pwd)"
+
 PASS=0
 FAIL=0
 WARN_COUNT=0
@@ -88,11 +91,11 @@ echo "  core:    $CORE_DIR"
 echo "  project: $PROJECT_DIR"
 echo "================================"
 
-# 1. Required framework files (in core/)
+# 1. Required framework files (in .gaai/ root)
 echo ""
 echo "[ Core Files ]"
-for f in "GAAI.md" "VERSION"; do
-  [[ -f "$CORE_DIR/$f" ]] && check "$f exists" "ok" || check "$f exists" "MISSING"
+for f in "GAAI.md" "VERSION" "README.md" "QUICK-REFERENCE.md"; do
+  [[ -f "$GAAI_ROOT/$f" ]] && check "$f exists" "ok" || check "$f exists" "MISSING"
 done
 
 # 2. Required framework directories (in core/)
@@ -186,8 +189,8 @@ done
 # 9. VERSION format
 echo ""
 echo "[ Version ]"
-if [[ -f "$CORE_DIR/VERSION" ]]; then
-  version=$(cat "$CORE_DIR/VERSION" | tr -d '[:space:]')
+if [[ -f "$GAAI_ROOT/VERSION" ]]; then
+  version=$(cat "$GAAI_ROOT/VERSION" | tr -d '[:space:]')
   if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     check "VERSION format ($version)" "ok"
   else

@@ -50,7 +50,7 @@ The Bootstrap Agent scans your codebase and builds project memory.
 **Claude Code:** `/gaai-bootstrap`
 
 **Cursor / Windsurf / Other:** Ask your AI:
-> "Read `.gaai/core/GAAI.md`, then `.gaai/core/agents/bootstrap.agent.md`, then follow `.gaai/core/workflows/context-bootstrap.workflow.md`."
+> "Read `.gaai/README.md` and bootstrap this project."
 
 Bootstrap will:
 1. Scan your codebase

@@ -84,7 +84,7 @@ tool_label() {
 # ── Wizard mode ────────────────────────────────────────────
 
 if [[ "$WIZARD" == "true" ]]; then
-  VERSION="$(cat "$SCRIPT_DIR/.gaai/core/VERSION" 2>/dev/null || echo '?')"
+  VERSION="$(cat "$SCRIPT_DIR/.gaai/VERSION" 2>/dev/null || echo '?')"
   echo ""
   echo "╔══════════════════════════════════════════╗"
   echo "║        GAAI Setup Wizard v$VERSION           ║"
@@ -170,7 +170,7 @@ fi
 # ── Pre-flight ─────────────────────────────────────────────
 
 echo ""
-echo "GAAI Installer v$(cat "$SCRIPT_DIR/.gaai/core/VERSION" 2>/dev/null || echo '?')"
+echo "GAAI Installer v$(cat "$SCRIPT_DIR/.gaai/VERSION" 2>/dev/null || echo '?')"
 echo "================================================"
 echo ""
 
@@ -201,29 +201,19 @@ fi
 # ── Copy .gaai/ ───────────────────────────────────────────
 
 echo ""
-info "Copying .gaai/core/ to $TARGET..."
-mkdir -p "$TARGET/.gaai"
-cp -r "$SCRIPT_DIR/.gaai/core" "$TARGET/.gaai/core"
-success ".gaai/core/ installed (framework)"
 
-# Create project/ from scaffolding (if not already present)
-if [[ ! -d "$TARGET/.gaai/project" ]]; then
-  info "Creating .gaai/project/ (project data)..."
-  mkdir -p "$TARGET/.gaai/project/contexts"
-  cp -r "$TARGET/.gaai/core/scaffolding/contexts/rules"        "$TARGET/.gaai/project/contexts/rules"
-  cp -r "$TARGET/.gaai/core/scaffolding/memory"                "$TARGET/.gaai/project/contexts/memory"
-  cp -r "$TARGET/.gaai/core/scaffolding/backlog"               "$TARGET/.gaai/project/contexts/backlog"
-  cp -r "$TARGET/.gaai/core/scaffolding/artefacts"             "$TARGET/.gaai/project/contexts/artefacts"
-  cp -r "$TARGET/.gaai/core/scaffolding/.delivery-locks"       "$TARGET/.gaai/project/contexts/backlog/.delivery-locks"
-  cp -r "$TARGET/.gaai/core/scaffolding/.delivery-logs"        "$TARGET/.gaai/project/contexts/backlog/.delivery-logs"
-  cp -r "$TARGET/.gaai/core/scaffolding/agents"                "$TARGET/.gaai/project/agents"
-  cp -r "$TARGET/.gaai/core/scaffolding/skills"                "$TARGET/.gaai/project/skills"
-  cp -r "$TARGET/.gaai/core/scaffolding/workflows"             "$TARGET/.gaai/project/workflows"
-  cp -r "$TARGET/.gaai/core/scaffolding/scripts"               "$TARGET/.gaai/project/scripts"
-  cp -r "$TARGET/.gaai/core/scaffolding/content"               "$TARGET/.gaai/project/content"
-  success ".gaai/project/ created"
+if [[ -d "$TARGET/.gaai" ]]; then
+  # Existing install: update core/, preserve project/
+  info "Updating .gaai/core/ (framework)..."
+  rm -rf "$TARGET/.gaai/core"
+  cp -r "$SCRIPT_DIR/.gaai/core" "$TARGET/.gaai/core"
+  success ".gaai/core/ updated"
+  warn ".gaai/project/ preserved (existing project data kept)"
 else
-  warn ".gaai/project/ already exists — preserving existing project data"
+  # Fresh install: copy entire .gaai/
+  info "Copying .gaai/ to $TARGET..."
+  cp -r "$SCRIPT_DIR/.gaai" "$TARGET/.gaai"
+  success ".gaai/ installed (core/ + project/)"
 fi
 
 # ── Select tool ──────────────────────────────────────────
@@ -347,5 +337,5 @@ case "$TOOL" in
 esac
 
 echo ""
-echo "  Documentation: .gaai/core/GAAI.md"
+echo "  Documentation: .gaai/README.md"
 echo ""
