@@ -2,22 +2,20 @@
 type: skill
 id: build-skills-indices
 name: build-skills-indices
-description: Scan SKILL.md files in .gaai/core/skills/ and .gaai/project/skills/ separately, extract YAML frontmatter, and regenerate two independent indexes — one per scope. Core index stays clean for OSS sync.
+description: Scan SKILL.md files in .gaai/core/skills/ and .gaai/project/skills/, extract YAML frontmatter, and regenerate a single unified skills index for fast discovery across all skill repositories.
 layer: cross
 category: governance
 created_at: 2026-03-02
-updated_at: 2026-03-03
+updated_at: 2026-03-02
 ---
 
-# Skill: Build Skills Indices (Core + Project — Separate)
+# Skill: Build Skills Index (Core + Project Unified)
 
 ## Purpose
 
-Scan SKILL.md files in `.gaai/core/skills/` and `.gaai/project/skills/` **separately**, extract YAML frontmatter, and regenerate **two independent indexes** — one per scope. This separation is critical: `.gaai/core/` is synced to the GAAI OSS repo via subtree, so project-specific skills must never appear in the core index.
+Scan SKILL.md files in **both** `.gaai/core/skills/` and `.gaai/project/skills/`, extract YAML frontmatter, and regenerate a **single unified index** containing all skills. No separate indices — one source for fast discovery across all skill repositories.
 
-> **Usage context:** After creating, modifying, or removing any skill (core or project). Maintains two indexes:
-> - `.gaai/core/skills/skills-index.yaml` — core skills only (synced to OSS)
-> - `.gaai/project/skills/skills-index.yaml` — project skills only (never synced)
+> **Usage context:** After creating, modifying, or removing any skill (core or project). Maintains a single merged index at `.gaai/core/skills/skills-index.yaml`.
 
 ---
 
@@ -27,21 +25,16 @@ No parameters required. This skill scans the local filesystem.
 
 ## Output
 
-Returns summary of both index regenerations:
+Returns summary of unified index regeneration:
 
 ```json
 {
-  "core_index": {
-    "path": ".gaai/core/skills/skills-index.yaml",
-    "status": "regenerated",
-    "total_skills": 47
-  },
-  "project_index": {
-    "path": ".gaai/project/skills/skills-index.yaml",
-    "status": "regenerated",
-    "total_skills": 9
-  },
-  "generated_at": "2026-03-03T14:30:00Z",
+  "path": ".gaai/core/skills/skills-index.yaml",
+  "status": "regenerated",
+  "total_skills": 52,
+  "core_skills": 44,
+  "project_skills": 8,
+  "generated_at": "2026-03-02T14:30:00Z",
   "errors": 0,
   "warnings": []
 }
@@ -51,67 +44,85 @@ Returns summary of both index regenerations:
 
 ## Process
 
-### Phase 1 — Scan Core Directory
+### Phase 1 — Scan Both Directories
 
-Scan `.gaai/core/skills/` recursively. Collect every file named `SKILL.md`.
+Scan `.gaai/core/skills/` and `.gaai/project/skills/` recursively.
+Collect every file named `SKILL.md`.
 Ignore non-SKILL.md files, `README.*`, and `skills-index.yaml`.
 
 For each `SKILL.md` found:
 - Read YAML frontmatter block (between `---` delimiters)
 - Extract: `id`, `name` (from directory path), `description`, `category`, `track`, `tags`, `updated_at`
 - If required field missing, log warning but include entry for visibility
-- Log any duplicate `id` values
+- Track which repository (core vs project) each skill came from
+- Log any duplicate `id` values globally
 
-### Phase 2 — Scan Project Directory
+### Phase 2 — Organize and Write Unified Index
 
-Scan `.gaai/project/skills/` recursively using the same logic as Phase 1.
+Group all entries (core + project) by category and track:
+- **By track:** `discovery`, `delivery`, `cross`
+- **Within each track:** Sort by category, then alphabetically by name
 
-### Phase 3 — Write Two Separate Indexes
-
-**Core index** → `.gaai/core/skills/skills-index.yaml` (core skills ONLY):
+Write **single unified index** to `.gaai/core/skills/skills-index.yaml`:
 
 ```yaml
-# GAAI Core Skills Index
-# Source of truth: .gaai/core/skills/*/SKILL.md ONLY
-# Does NOT include project skills — see .gaai/project/skills/skills-index.yaml
+# GAAI Skills Index (Unified)
+# Source of truth: .gaai/core/skills/*/SKILL.md and .gaai/project/skills/*/SKILL.md
 # Regenerate: invoke build-skills-indices skill
 generated_at: YYYY-MM-DD
-total: 47
+total: 52
+core: 44
+project: 8
 
 discovery:
   - id: SKILL-DSC-001
     name: create-prd
+    source: core
     description: "..."
-    # ... fields
-```
+    category: discovery
+    track: discovery
+    tags: []
+    updated_at: YYYY-MM-DD
+    path: core/skills/discovery/create-prd/SKILL.md
 
-**Project index** → `.gaai/project/skills/skills-index.yaml` (project skills ONLY):
+  # ... more discovery skills ...
 
-```yaml
-# GAAI Project Skills Index
-# Source of truth: .gaai/project/skills/*/SKILL.md ONLY
-# Does NOT include core skills — see .gaai/core/skills/skills-index.yaml
-# Regenerate: invoke build-skills-indices skill
-generated_at: YYYY-MM-DD
-total: 9
-
-discovery:
-  - id: SKILL-CNT-011
+  - id: SKILL-PROJECT-CONTENT-001
     name: content-plan
+    source: project
     description: "..."
+    category: content
+    track: discovery
+    tags: []
+    updated_at: YYYY-MM-DD
+    path: project/skills/domains/content-production/content-plan/SKILL.md
+
+delivery:
+  - id: SKILL-DEL-001
+    name: evaluate-story
+    source: core
+    # ... fields
+
+cross:
+  - id: SKILL-CRS-001
+    name: memory-ingest
+    source: core
+    # ... fields
+
+  - id: SKILL-PROJECT-CROSS-001
+    name: analytics-query
+    source: project
     # ... fields
 ```
 
-> **CRITICAL:** No `source:` field needed — each index is scoped to its own directory. Project skills must NEVER appear in the core index (it is synced to the OSS repo).
-
-### Phase 4 — Report Results
+### Phase 3 — Report Results
 
 Return summary:
-- Core skills scanned and written
-- Project skills scanned and written
+- Total skills scanned (core + project)
+- Breakdown (core count, project count)
 - Any missing required fields (names + fields)
-- Any duplicate IDs across both indexes (cross-index collision warning)
-- Confirmation both files were written
+- Any duplicate IDs globally
+- Confirmation file was written to `.gaai/core/skills/skills-index.yaml`
 
 ---
 
@@ -120,15 +131,14 @@ Return summary:
 - [ ] **AC1:** Scans all SKILL.md files in `.gaai/core/skills/` without skipping
 - [ ] **AC2:** Scans all SKILL.md files in `.gaai/project/skills/` without skipping
 - [ ] **AC3:** Extracts frontmatter fields (id, name, description, category, track, tags, updated_at)
-- [ ] **AC4:** Core index contains ONLY core skills — zero project skills
-- [ ] **AC5:** Project index contains ONLY project skills — zero core skills
-- [ ] **AC6:** Groups skills by track (discovery, delivery, cross), sorts by category then name
-- [ ] **AC7:** Generates valid YAML for both indexes
-- [ ] **AC8:** Writes core index to `.gaai/core/skills/skills-index.yaml`
-- [ ] **AC9:** Writes project index to `.gaai/project/skills/skills-index.yaml`
-- [ ] **AC10:** Each index includes metadata: total, generated_at
-- [ ] **AC11:** Reports warnings (missing fields) and cross-index duplicate ID detection
-- [ ] **AC12:** Each index is independently regenerable (can delete and re-run)
+- [ ] **AC4:** Tags each skill with its source (core or project)
+- [ ] **AC5:** Groups all skills (core + project) by track (discovery, delivery, cross)
+- [ ] **AC6:** Within each track, sorts by category then alphabetically by name
+- [ ] **AC7:** Generates valid YAML for single unified index
+- [ ] **AC8:** Writes to `.gaai/core/skills/skills-index.yaml` only
+- [ ] **AC9:** Index includes metadata: total, core count, project count, generated_at
+- [ ] **AC10:** Reports total skills scanned, warnings (missing fields), and duplicate ID detection
+- [ ] **AC11:** Single index is independently regenerable (can delete and re-run)
 
 ---
 
@@ -174,7 +184,7 @@ Recommendation: Add to pre-commit hook to ensure indices stay in sync:
 # .git/hooks/pre-commit
 if git diff --cached --name-only | grep -q '.gaai/.*/skills/.*SKILL.md'; then
   invoke build-skills-indices
-  git add .gaai/core/skills/skills-index.yaml .gaai/project/skills/skills-index.yaml
+  git add .gaai/*/skills/skills-index.yaml
 fi
 ```
 
