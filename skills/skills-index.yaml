@@ -3,9 +3,9 @@
 # Regenerate: invoke build-skills-indices skill
 
 generated_at: 2026-03-05
-total: 62
+total: 63
 core: 47
-project: 15
+project: 16
 
 discovery:
   - id: SKILL-CNT-011
@@ -136,6 +136,15 @@ delivery:
     tags: []
     updated_at: 2026-03-05
     path: project/skills/domains/content-production/content-outline/SKILL.md
+  - id: SKILL-CNT-014
+    name: content-visual
+    source: project
+    description: "Produce visual assets for content pieces by routing each Visual Brief to the appropriate generator and applying the 5-layer prompt construction pipeline. Handles illustration/hero, diagram/flow/architecture, infographic (2-phase), social-card, and product-screenshot types. Single skill with deterministic internal routing by Visual Brief type field."
+    category: content
+    track: delivery
+    tags: []
+    updated_at: 2026-03-05
+    path: project/skills/domains/content-production/content-visual/SKILL.md
   - id: SKILL-DEL-009
     name: coordinate-handoffs
     source: core
