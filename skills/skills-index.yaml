@@ -336,15 +336,6 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: project/skills/cross/domain-knowledge-research/SKILL.md
-  - id: SKILL-PRJ-001
-    name: framework-sync
-    source: project
-    description: "Sync the GAAI framework between this project and the GAAI-framework OSS repo via git subtree. Covers pull (OSS → project), push (project → OSS), and status check."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-02-28
-    path: project/skills/cross/framework-sync/SKILL.md
   - id: SKILL-FRICTION-RETROSPECTIVE-001
     name: friction-retrospective
     source: core
