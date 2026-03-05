@@ -2,10 +2,10 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md and .gaai/project/skills/*/SKILL.md
 # Regenerate: invoke build-skills-indices skill
 
-generated_at: 2026-03-03
-total: 56
+generated_at: 2026-03-05
+total: 62
 core: 47
-project: 9
+project: 15
 
 discovery:
   - id: SKILL-CNT-011
@@ -17,14 +17,14 @@ discovery:
     tags: []
     updated_at: 2026-02-26
     path: project/skills/domains/content-production/content-plan/SKILL.md
-  - id: SKILL-CNT-012
+  - id: SKILL-CNT-001
     name: content-research
     source: project
     description: "Research-first content creation protocol. Triggers before writing any content piece. Performs deep search to map current search intent, audience pain points, existing content landscape, and information gaps. Produces a structured research brief that feeds into drafting. Implements Content-Market-Fit methodology, Pain Point SEO, and the Content Cyborg model. Mandatory prerequisite for all hub content — AI training data is stale at draft time, only live research produces current, relevant content."
     category: content
     track: discovery
     tags: []
-    updated_at: 2026-03-02
+    updated_at: 2026-03-05
     path: project/skills/domains/content-production/content-research/SKILL.md
   - id: SKILL-CREATE-PRD-001
     name: create-prd
@@ -109,6 +109,33 @@ delivery:
     tags: []
     updated_at: 2026-02-18
     path: core/skills/delivery/compose-team/SKILL.md
+  - id: SKILL-CNT-003
+    name: content-draft
+    source: project
+    description: "Write the first draft of a content piece from a validated outline. Applies voice guide, audience perception files, and humanization techniques. Produces prose that is audience-aligned, source-backed, and detection-resistant. Implements the Content Cyborg model — AI elaborates, human provides structure and original insight."
+    category: content
+    track: delivery
+    tags: []
+    updated_at: 2026-03-05
+    path: project/skills/domains/content-production/content-draft/SKILL.md
+  - id: SKILL-CNT-004
+    name: content-edit
+    source: project
+    description: "Editorial review and humanization pass on a first draft. Performs three editing passes — structural, line-level, and authenticity. Catches factual errors, voice violations, redundancy, and AI tells. Produces a publication-ready draft. Implements the Content Cyborg principle — the editorial layer is where human judgment is most critical."
+    category: content
+    track: delivery
+    tags: []
+    updated_at: 2026-03-05
+    path: project/skills/domains/content-production/content-edit/SKILL.md
+  - id: SKILL-CNT-002
+    name: content-outline
+    source: project
+    description: "Transform a research brief into a structured article outline. Maps intent, audience awareness stage, and persuasion model to heading hierarchy. Produces a section-by-section blueprint with word targets, source assignments, and CTA placement. Prerequisite for CNT-003 (drafting). Never outline without a brief."
+    category: content
+    track: delivery
+    tags: []
+    updated_at: 2026-03-05
+    path: project/skills/domains/content-production/content-outline/SKILL.md
   - id: SKILL-DEL-009
     name: coordinate-handoffs
     source: core
@@ -145,6 +172,15 @@ delivery:
     tags: []
     updated_at: 2026-03-01
     path: core/skills/delivery/frontend-design/SKILL.md
+  - id: SKILL-CNT-006
+    name: geo-optimize
+    source: project
+    description: "Generative Engine Optimization pass on content. Optimizes for AI search citation (Perplexity, ChatGPT, Google AIO, Brave) by applying GEO-specific interventions — answer-first structure, citation density, entity alignment, specificity premium, and machine-readable freshness signals. Runs after or alongside SEO-optimize (CNT-005). Distinct from traditional SEO because GEO citation is decoupled from organic rankings."
+    category: content
+    track: delivery
+    tags: []
+    updated_at: 2026-03-05
+    path: project/skills/domains/content-production/geo-optimize/SKILL.md
   - id: SKILL-CNT-012
     name: google-trends
     source: project
@@ -181,6 +217,15 @@ delivery:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/delivery/qa-review/SKILL.md
+  - id: SKILL-CNT-009
+    name: quality-gate
+    source: project
+    description: "Final quality gate before publication. Validates that a content piece meets all pipeline standards — editorial, SEO, authenticity, brand, and credibility. Produces a pass/fail verdict with specific remediation actions for any failures. This is the last automated check before human approval."
+    category: content
+    track: delivery
+    tags: []
+    updated_at: 2026-03-05
+    path: project/skills/domains/content-production/quality-gate/SKILL.md
   - id: SKILL-REMEDIATE-FAILURES-001
     name: remediate-failures
     source: core
@@ -199,6 +244,15 @@ delivery:
     tags: []
     updated_at: 2026-02-26
     path: project/skills/domains/content-production/repurpose/SKILL.md
+  - id: SKILL-CNT-005
+    name: seo-optimize
+    source: project
+    description: "On-page SEO and GEO optimization pass on an edited draft. Applies technical SEO checklist (meta tags, structured data, internal links, image alt text) and Generative Engine Optimization (answer capsules, citation density, semantic HTML). Does not change editorial content — optimizes discoverability without compromising readability."
+    category: content
+    track: delivery
+    tags: []
+    updated_at: 2026-03-05
+    path: project/skills/domains/content-production/seo-optimize/SKILL.md
   - id: SKILL-CNT-007
     name: social-adapt
     source: project
@@ -258,7 +312,7 @@ cross:
   - id: build-skills-indices
     name: build-skills-indices
     source: core
-    description: ""
+    description: "Scan SKILL.md files in .gaai/core/skills/ and .gaai/project/skills/, extract YAML frontmatter, and regenerate a single unified skills index for fast discovery across all skill repositories."
     category: governance
     track: cross-cutting
     tags: []
@@ -312,7 +366,7 @@ cross:
   - id: SKILL-DECISION-EXTRACTION-001
     name: decision-extraction
     source: core
-    description: "Identify and formalize durable product and technical decisions from agent outputs into long-term memory. Activate after Discovery produces artefacts, Delivery resolves trade-offs, or product direction materially changes. Always runs after Delivery QA PASS — mandatory gate includes updating index.md."
+    description: "Identify and formalize durable product and technical decisions from agent outputs into long-term memory. Activate after Discovery produces artefacts, Delivery resolves trade-offs, or product direction materially changes."
     category: cross
     track: cross-cutting
     tags: []
@@ -336,6 +390,15 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: project/skills/cross/domain-knowledge-research/SKILL.md
+  - id: SKILL-PRJ-001
+    name: framework-sync
+    source: project
+    description: "Sync the GAAI framework between this project and the GAAI-framework OSS repo via git subtree. Covers pull (OSS → project), push (project → OSS), and status check."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-02-28
+    path: project/skills/cross/framework-sync/SKILL.md
   - id: SKILL-FRICTION-RETROSPECTIVE-001
     name: friction-retrospective
     source: core
@@ -357,7 +420,7 @@ cross:
   - id: i18n-extract
     name: i18n-extract
     source: core
-    description: ""
+    description: "Scan codebase for hardcoded strings that should be internationalised, classify by domain and priority, and produce a structured extraction report for translation workflows."
     category: analysis
     track: cross-cutting
     tags: []
@@ -366,7 +429,7 @@ cross:
   - id: i18n-glossary-sync
     name: i18n-glossary-sync
     source: core
-    description: ""
+    description: "Maintain a canonical i18n glossary file — sync new terms across all language pairs, detect drift, flag missing translations, and enforce consistent terminology across the codebase."
     category: analysis
     track: cross-cutting
     tags: []
@@ -375,7 +438,7 @@ cross:
   - id: i18n-validate
     name: i18n-validate
     source: core
-    description: ""
+    description: "Validate translation completeness and consistency across all locale files — detect missing keys, untranslated strings, format mismatches, and glossary violations."
     category: analysis
     track: cross-cutting
     tags: []
@@ -384,7 +447,7 @@ cross:
   - id: idiomatique-translate
     name: idiomatique-translate
     source: core
-    description: ""
+    description: "Translate strings idiomatically across multiple target languages using a project glossary, preserving tone, domain terminology, and format placeholders while flagging untranslatable content."
     category: content
     track: cross-cutting
     tags: []
@@ -408,6 +471,15 @@ cross:
     tags: []
     updated_at: 2026-03-01
     path: core/skills/cross/memory-compact/SKILL.md
+  - id: SKILL-MEMORY-INDEX-SYNC-001
+    name: memory-index-sync
+    source: core
+    description: "Detect and heal index.md drift — finds memory files on disk not registered in index.md and registers them. Run when /gaai-status reports unregistered files, after batch memory operations, or as a post-delivery gate."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-03
+    path: core/skills/cross/memory-index-sync/SKILL.md
   - id: SKILL-MEMORY-INGEST-001
     name: memory-ingest
     source: core
@@ -417,19 +489,6 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/cross/memory-ingest/SKILL.md
-  - id: SKILL-MEMORY-INDEX-SYNC-001
-    name: memory-index-sync
-    source: core
-    description: "Detect and heal index.md drift — finds memory files on disk not registered in index.md and registers them. Run when /gaai-status reports unregistered files, after batch memory operations, or as a post-delivery gate."
-    category: cross
-    track: cross-cutting
-    tags:
-      - memory
-      - index
-      - sync
-      - governance
-    updated_at: 2026-03-03
-    path: core/skills/cross/memory-index-sync/SKILL.md
   - id: SKILL-MEMORY-REFRESH-001
     name: memory-refresh
     source: core
