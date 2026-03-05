@@ -2,7 +2,7 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md and .gaai/project/skills/*/SKILL.md
 # Regenerate: invoke build-skills-indices skill
 
-generated_at: 2026-03-03
+generated_at: 2026-03-05
 total: 56
 core: 47
 project: 9
@@ -258,7 +258,7 @@ cross:
   - id: build-skills-indices
     name: build-skills-indices
     source: core
-    description: ""
+    description: "Scan SKILL.md files in .gaai/core/skills/ and .gaai/project/skills/, extract YAML frontmatter, and regenerate a single unified skills index for fast discovery across all skill repositories."
     category: governance
     track: cross-cutting
     tags: []
@@ -312,7 +312,7 @@ cross:
   - id: SKILL-DECISION-EXTRACTION-001
     name: decision-extraction
     source: core
-    description: "Identify and formalize durable product and technical decisions from agent outputs into long-term memory. Activate after Discovery produces artefacts, Delivery resolves trade-offs, or product direction materially changes. Always runs after Delivery QA PASS — mandatory gate includes updating index.md."
+    description: "Identify and formalize durable product and technical decisions from agent outputs into long-term memory. Activate after Discovery produces artefacts, Delivery resolves trade-offs, or product direction materially changes."
     category: cross
     track: cross-cutting
     tags: []
@@ -366,7 +366,7 @@ cross:
   - id: i18n-extract
     name: i18n-extract
     source: core
-    description: ""
+    description: "Scan codebase for hardcoded strings that should be internationalised, classify by domain and priority, and produce a structured extraction report for translation workflows."
     category: analysis
     track: cross-cutting
     tags: []
@@ -375,7 +375,7 @@ cross:
   - id: i18n-glossary-sync
     name: i18n-glossary-sync
     source: core
-    description: ""
+    description: "Maintain a canonical i18n glossary file — sync new terms across all language pairs, detect drift, flag missing translations, and enforce consistent terminology across the codebase."
     category: analysis
     track: cross-cutting
     tags: []
@@ -384,7 +384,7 @@ cross:
   - id: i18n-validate
     name: i18n-validate
     source: core
-    description: ""
+    description: "Validate translation completeness and consistency across all locale files — detect missing keys, untranslated strings, format mismatches, and glossary violations."
     category: analysis
     track: cross-cutting
     tags: []
@@ -393,7 +393,7 @@ cross:
   - id: idiomatique-translate
     name: idiomatique-translate
     source: core
-    description: ""
+    description: "Translate strings idiomatically across multiple target languages using a project glossary, preserving tone, domain terminology, and format placeholders while flagging untranslatable content."
     category: content
     track: cross-cutting
     tags: []
@@ -417,6 +417,15 @@ cross:
     tags: []
     updated_at: 2026-03-01
     path: core/skills/cross/memory-compact/SKILL.md
+  - id: SKILL-MEMORY-INDEX-SYNC-001
+    name: memory-index-sync
+    source: core
+    description: "Detect and heal index.md drift — finds memory files on disk not registered in index.md and registers them. Run when /gaai-status reports unregistered files, after batch memory operations, or as a post-delivery gate."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-03
+    path: core/skills/cross/memory-index-sync/SKILL.md
   - id: SKILL-MEMORY-INGEST-001
     name: memory-ingest
     source: core
@@ -426,19 +435,6 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/cross/memory-ingest/SKILL.md
-  - id: SKILL-MEMORY-INDEX-SYNC-001
-    name: memory-index-sync
-    source: core
-    description: "Detect and heal index.md drift — finds memory files on disk not registered in index.md and registers them. Run when /gaai-status reports unregistered files, after batch memory operations, or as a post-delivery gate."
-    category: cross
-    track: cross-cutting
-    tags:
-      - memory
-      - index
-      - sync
-      - governance
-    updated_at: 2026-03-03
-    path: core/skills/cross/memory-index-sync/SKILL.md
   - id: SKILL-MEMORY-REFRESH-001
     name: memory-refresh
     source: core
