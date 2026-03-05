@@ -140,11 +140,25 @@ Optional subdirectories (create only if needed):
 - `references/` — supporting documents the skill references
 - `assets/` — templates or static files the skill produces
 
-### Step 6 — Regenerate the skills index
+### Step 6 — Update ALL relevant indices (MANDATORY)
 
-Invoke `build-skills-index` (`.gaai/core/skills/cross/build-skills-index/SKILL.md`) to regenerate `.gaai/core/skills/skills-index.yaml` from the updated frontmatter.
+This step is non-negotiable. A skill that is not indexed is invisible to agents.
 
-Do not manually edit `skills-index.yaml` — it is a derived artifact.
+**6a. Skills index YAML:**
+- Core skills: invoke `build-skills-index` to regenerate `.gaai/core/skills/skills-index.yaml`
+- Project skills: invoke `build-skills-indices` to regenerate `.gaai/project/skills/skills-index.yaml`
+- Verify the new skill appears in the generated index with correct `id`, `name`, `path`, and `tags`
+
+**6b. Skills README:**
+- Core skills: update `.gaai/core/skills/README.skills.md` — add the skill to the appropriate category section
+- Project skills: update `.gaai/project/skills/README.md` — add the skill to the appropriate section
+
+**6c. Domain index (if domain-scoped skill):**
+- If the skill belongs to a domain (e.g., `domains/content-production/`), update the domain's `index.md` in memory:
+  - `.gaai/project/contexts/memory/domains/{domain}/index.md` — add a row to the skills table
+- This ensures domain sub-agents discover the skill when loading their domain context
+
+**Failure to update any of these indices means the skill is effectively invisible** — agents cannot discover it, and it will not be loaded during delivery or discovery sessions.
 
 ### Step 7 — Reference in agent file
 
