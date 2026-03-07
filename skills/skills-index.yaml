@@ -2,10 +2,10 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md and .gaai/project/skills/*/SKILL.md
 # Regenerate: invoke build-skills-indices skill
 
-generated_at: 2026-03-05
-total: 63
+generated_at: 2026-03-06
+total: 64
 core: 47
-project: 16
+project: 17
 
 discovery:
   - id: SKILL-CNT-011
@@ -136,6 +136,15 @@ delivery:
     tags: []
     updated_at: 2026-03-05
     path: project/skills/domains/content-production/content-outline/SKILL.md
+  - id: SKILL-CNT-015
+    name: content-video
+    source: project
+    description: "Produce short-form video assets from content pieces using the Editorial Curator Pattern. Curator reads source documents and produces a purpose-driven editorial brief with scene breakdown. Renderer generates Remotion React components from the brief. Handles explainer clips, data visualizations, and social video variants."
+    category: content
+    track: delivery
+    tags: []
+    updated_at: 2026-03-06
+    path: project/skills/domains/content-production/content-video/SKILL.md
   - id: SKILL-CNT-014
     name: content-visual
     source: project
