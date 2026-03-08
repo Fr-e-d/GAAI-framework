@@ -1,6 +1,6 @@
 # GAAI — Claude Code Integration
 
-> This file is deployed to your project root as `CLAUDE.md` by `install.sh`.
+> This file is deployed to your project root as `CLAUDE.md` by the installer.
 > It activates GAAI governance when working in Claude Code.
 
 ---

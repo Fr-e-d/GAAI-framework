@@ -10,7 +10,7 @@ set -euo pipefail
 #   AGENTS.md).
 #
 # Usage:
-#   bash install.sh [--target <path>] [--tool <tool>] [--yes] [--wizard]
+#   bash .gaai/core/scripts/install.sh [--target <path>] [--tool <tool>] [--yes] [--wizard]
 #
 # Options:
 #   --target  directory to install into (default: current dir)
@@ -25,6 +25,7 @@ set -euo pipefail
 ############################################################
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GAAI_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TARGET="."
 TOOL=""
 YES=false
@@ -84,7 +85,7 @@ tool_label() {
 # ── Wizard mode ────────────────────────────────────────────
 
 if [[ "$WIZARD" == "true" ]]; then
-  VERSION="$(cat "$SCRIPT_DIR/.gaai/VERSION" 2>/dev/null || echo '?')"
+  VERSION="$(cat "$GAAI_ROOT/VERSION" 2>/dev/null || echo '?')"
   echo ""
   echo "╔══════════════════════════════════════════╗"
   echo "║        GAAI Setup Wizard v$VERSION           ║"
@@ -170,7 +171,7 @@ fi
 # ── Pre-flight ─────────────────────────────────────────────
 
 echo ""
-echo "GAAI Installer v$(cat "$SCRIPT_DIR/.gaai/VERSION" 2>/dev/null || echo '?')"
+echo "GAAI Installer v$(cat "$GAAI_ROOT/VERSION" 2>/dev/null || echo '?')"
 echo "================================================"
 echo ""
 
@@ -206,13 +207,17 @@ if [[ -d "$TARGET/.gaai" ]]; then
   # Existing install: update core/, preserve project/
   info "Updating .gaai/core/ (framework)..."
   rm -rf "$TARGET/.gaai/core"
-  cp -r "$SCRIPT_DIR/.gaai/core" "$TARGET/.gaai/core"
+  cp -r "$GAAI_ROOT/core" "$TARGET/.gaai/core"
+  # Also update root-level .gaai/ files (VERSION, GAAI.md, etc.)
+  for f in "$GAAI_ROOT"/VERSION "$GAAI_ROOT"/GAAI.md "$GAAI_ROOT"/README.md "$GAAI_ROOT"/QUICK-REFERENCE.md; do
+    [[ -f "$f" ]] && cp "$f" "$TARGET/.gaai/"
+  done
   success ".gaai/core/ updated"
   warn ".gaai/project/ preserved (existing project data kept)"
 else
   # Fresh install: copy entire .gaai/
   info "Copying .gaai/ to $TARGET..."
-  cp -r "$SCRIPT_DIR/.gaai" "$TARGET/.gaai"
+  cp -r "$GAAI_ROOT" "$TARGET/.gaai"
   success ".gaai/ installed (core/ + project/)"
 fi
 
