@@ -10,6 +10,7 @@ project: 17
 discovery:
   - id: SKILL-CNT-011
     name: content-plan
+    tier: production
     source: project
     description: "Generate a monthly content production plan by evaluating current GTM phase, inventorying existing content, and recommending 2-3 hub content pieces positioned on all 6 CONTENT-STRATEGY-001 dimensions (Layer, Phase, Audience, Channel, Objective, ARL) with BP scoring. Activate at the start of each month or when /gaai-status flags that no current-month plan exists."
     category: content
@@ -19,6 +20,7 @@ discovery:
     path: project/skills/domains/content-production/content-plan/SKILL.md
   - id: SKILL-CNT-001
     name: content-research
+    tier: production
     source: project
     description: "Research-first content creation protocol. Triggers before writing any content piece. Performs deep search to map current search intent, audience pain points, existing content landscape, and information gaps. Produces a structured research brief that feeds into drafting. Implements Content-Market-Fit methodology, Pain Point SEO, and the Content Cyborg model. Mandatory prerequisite for all hub content — AI training data is stale at draft time, only live research produces current, relevant content."
     category: content
@@ -28,6 +30,7 @@ discovery:
     path: project/skills/domains/content-production/content-research/SKILL.md
   - id: SKILL-CREATE-PRD-001
     name: create-prd
+    tier: meta
     source: core
     description: "Produce a lightweight strategic PRD that defines product vision, user problem, value hypothesis, success metrics, and scope boundaries. Activate only when starting a new product, launching a major initiative, or facing strategic uncertainty."
     category: discovery
@@ -37,6 +40,7 @@ discovery:
     path: core/skills/discovery/create-prd/SKILL.md
   - id: SKILL-DISCOVERY-HIGH-LEVEL-PLAN-001
     name: discovery-high-level-plan
+    tier: support
     source: core
     description: "Transform vague or high-level human intent into a governed Discovery action plan. Activate when intent is unclear, broad, or when multiple discovery steps are required before any artefact is created."
     category: discovery
@@ -46,6 +50,7 @@ discovery:
     path: core/skills/discovery/discovery-high-level-plan/SKILL.md
   - id: SKILL-GENERATE-EPICS-001
     name: generate-epics
+    tier: meta
     source: core
     description: "Translate product intent or a PRD into a small set of outcome-driven Epics (3–7 max). Activate when starting a new product, adding a significant feature domain, or breaking down a PRD into actionable user outcomes."
     category: discovery
@@ -55,6 +60,7 @@ discovery:
     path: core/skills/discovery/generate-epics/SKILL.md
   - id: SKILL-GENERATE-STORIES-001
     name: generate-stories
+    tier: support
     source: core
     description: "Translate a single Epic into clear, actionable User Stories with explicit acceptance criteria. Activate when an Epic is defined and work needs to be prepared for Delivery execution."
     category: discovery
@@ -64,6 +70,7 @@ discovery:
     path: core/skills/discovery/generate-stories/SKILL.md
   - id: SKILL-REFINE-SCOPE-001
     name: refine-scope
+    tier: support
     source: core
     description: "Iteratively refine Discovery artefacts (plans, epics, stories) when feedback, ambiguity, or uncertainty is detected. Activate when artefacts are incomplete, acceptance criteria are missing, or human feedback highlights gaps."
     category: discovery
@@ -73,6 +80,7 @@ discovery:
     path: core/skills/discovery/refine-scope/SKILL.md
   - id: SKILL-VALIDATE-ARTEFACTS-001
     name: validate-artefacts
+    tier: support
     source: core
     description: "Validate that all Discovery artefacts (Epics, Stories) are clear, governed, complete, and safe to pass into Delivery. Activate after generating Epics or Stories and before any Delivery planning. This is the mandatory Discovery → Delivery gate."
     category: discovery
@@ -84,6 +92,7 @@ discovery:
 delivery:
   - id: SKILL-BROWSER-JOURNEY-TEST-001
     name: browser-journey-test
+    tier: support
     source: core
     description: "Validate user stories by simulating real user journeys in a live browser against deployed application. Activate after implementation to verify actual user experience against acceptance criteria, not just code logic."
     category: delivery
@@ -93,6 +102,7 @@ delivery:
     path: core/skills/delivery/browser-journey-test/SKILL.md
   - id: SKILL-DELIVERY-CI-WATCH-001
     name: ci-watch-and-fix
+    tier: production
     source: core
     description: "Watch GitHub Actions CI after PR creation, detect failures, extract logs, apply minimal fixes, and re-push — keeping the delivery session alive until CI resolves or escalating after 3 cycles. Activate immediately after gh pr create and before marking the story done."
     category: delivery
@@ -102,6 +112,7 @@ delivery:
     path: core/skills/delivery/ci-watch-and-fix/SKILL.md
   - id: SKILL-DEL-008
     name: compose-team
+    tier: production
     source: core
     description: "Assemble the context bundles for each sub-agent based on evaluate-story output. Produces spawn-ready packages for Planning, Implementation, QA, or MicroDelivery sub-agents. Activate after evaluate-story, before spawning any sub-agent."
     category: delivery
@@ -111,6 +122,7 @@ delivery:
     path: core/skills/delivery/compose-team/SKILL.md
   - id: SKILL-CNT-003
     name: content-draft
+    tier: production
     source: project
     description: "Write the first draft of a content piece from a validated outline. Applies voice guide, audience perception files, and humanization techniques. Produces prose that is audience-aligned, source-backed, and detection-resistant. Implements the Content Cyborg model — AI elaborates, human provides structure and original insight."
     category: content
@@ -120,6 +132,7 @@ delivery:
     path: project/skills/domains/content-production/content-draft/SKILL.md
   - id: SKILL-CNT-004
     name: content-edit
+    tier: production
     source: project
     description: "Editorial review and humanization pass on a first draft. Performs three editing passes — structural, line-level, and authenticity. Catches factual errors, voice violations, redundancy, and AI tells. Produces a publication-ready draft. Implements the Content Cyborg principle — the editorial layer is where human judgment is most critical."
     category: content
@@ -129,6 +142,7 @@ delivery:
     path: project/skills/domains/content-production/content-edit/SKILL.md
   - id: SKILL-CNT-002
     name: content-outline
+    tier: production
     source: project
     description: "Transform a research brief into a structured article outline. Maps intent, audience awareness stage, and persuasion model to heading hierarchy. Produces a section-by-section blueprint with word targets, source assignments, and CTA placement. Prerequisite for CNT-003 (drafting). Never outline without a brief."
     category: content
@@ -138,6 +152,7 @@ delivery:
     path: project/skills/domains/content-production/content-outline/SKILL.md
   - id: SKILL-CNT-015
     name: content-video
+    tier: support
     source: project
     description: "Produce short-form video assets from content pieces using the Editorial Curator Pattern. Curator reads source documents and produces a purpose-driven editorial brief with scene breakdown. Renderer generates Remotion React components from the brief. Handles explainer clips, data visualizations, and social video variants."
     category: content
@@ -147,6 +162,7 @@ delivery:
     path: project/skills/domains/content-production/content-video/SKILL.md
   - id: SKILL-CNT-014
     name: content-visual
+    tier: support
     source: project
     description: "Produce visual assets for content pieces by routing each Visual Brief to the appropriate generator. Uses the Editorial Curator Pattern (purpose-driven briefs, not layout specifications) for all Gemini API routes. Generates 3-5 variants per brief, scores with BENCH-VIS, selects best. Human review mandatory before publication."
     category: content
@@ -156,6 +172,7 @@ delivery:
     path: project/skills/domains/content-production/content-visual/SKILL.md
   - id: SKILL-DEL-009
     name: coordinate-handoffs
+    tier: production
     source: core
     description: "Validate sub-agent handoff artefacts, sequence phase transitions, and manage retry and escalation logic. Activate after each sub-agent terminates to determine next action."
     category: delivery
@@ -165,6 +182,7 @@ delivery:
     path: core/skills/delivery/coordinate-handoffs/SKILL.md
   - id: SKILL-DELIVERY-HIGH-LEVEL-PLAN-001
     name: delivery-high-level-plan
+    tier: production
     source: core
     description: "Transform validated Stories into a clear, minimal, governed execution plan. Used by the Planning Sub-Agent as the first planning pass before prepare-execution-plan for Tier 2/3, or as the sole planning output for simple Stories."
     category: delivery
@@ -174,6 +192,7 @@ delivery:
     path: core/skills/delivery/delivery-high-level-plan/SKILL.md
   - id: SKILL-DEL-007
     name: evaluate-story
+    tier: production
     source: core
     description: "Assess Story complexity, identify required domains, and determine delivery tier (MicroDelivery / Core Team / Core Team + Specialists). Activate as the first step of every delivery orchestration cycle."
     category: delivery
@@ -183,6 +202,7 @@ delivery:
     path: core/skills/delivery/evaluate-story/SKILL.md
   - id: SKILL-FRONTEND-DESIGN-001
     name: frontend-design
+    tier: support
     source: core
     description: "Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, or applications. Generates creative, polished code that avoids generic AI aesthetics."
     category: delivery
@@ -192,6 +212,7 @@ delivery:
     path: core/skills/delivery/frontend-design/SKILL.md
   - id: SKILL-CNT-006
     name: geo-optimize
+    tier: production
     source: project
     description: "Generative Engine Optimization pass on content. Optimizes for AI search citation (Perplexity, ChatGPT, Google AIO, Brave) by applying GEO-specific interventions — answer-first structure, citation density, entity alignment, specificity premium, and machine-readable freshness signals. Runs after or alongside SEO-optimize (CNT-005). Distinct from traditional SEO because GEO citation is decoupled from organic rankings."
     category: content
@@ -201,6 +222,7 @@ delivery:
     path: project/skills/domains/content-production/geo-optimize/SKILL.md
   - id: SKILL-CNT-012
     name: google-trends
+    tier: production
     source: project
     description: "Extract trend intelligence from Google Trends via Playwright browser navigation and return structured interest, related queries, and geographic breakdown data — without any third-party package. Activate when CNT-001-research or content planning requires search demand signals, seasonal patterns, or topic comparison data."
     category: content
@@ -210,6 +232,7 @@ delivery:
     path: project/skills/domains/content-production/google-trends/SKILL.md
   - id: SKILL-IMPLEMENT-001
     name: implement
+    tier: production
     source: core
     description: "Generate correct, minimal, maintainable code that satisfies a validated Story's acceptance criteria against an execution plan. Activate when a Story is validated, a plan exists, and all prerequisites are unambiguous."
     category: delivery
@@ -219,6 +242,7 @@ delivery:
     path: core/skills/delivery/implement/SKILL.md
   - id: SKILL-DEL-006
     name: prepare-execution-plan
+    tier: production
     source: core
     description: "Decompose a high-level delivery plan into a precise, file-level execution sequence with explicit ordering, edge cases, and test checkpoints. Activate after delivery-high-level-plan for complex or multi-phase Stories before implementation begins."
     category: delivery
@@ -228,6 +252,7 @@ delivery:
     path: core/skills/delivery/prepare-execution-plan/SKILL.md
   - id: SKILL-QA-REVIEW-001
     name: qa-review
+    tier: production
     source: core
     description: "Validate that implemented code fully satisfies Story acceptance criteria, respects rules, and introduces no regressions. This is the hard quality gate — no pass means no delivery. Activate after implementation is complete."
     category: delivery
@@ -237,6 +262,7 @@ delivery:
     path: core/skills/delivery/qa-review/SKILL.md
   - id: SKILL-CNT-009
     name: quality-gate
+    tier: production
     source: project
     description: "Final quality gate before publication. Validates that a content piece meets all pipeline standards — editorial, SEO, authenticity, brand, and credibility. Produces a pass/fail verdict with specific remediation actions for any failures. This is the last automated check before human approval."
     category: content
@@ -246,6 +272,7 @@ delivery:
     path: project/skills/domains/content-production/quality-gate/SKILL.md
   - id: SKILL-REMEDIATE-FAILURES-001
     name: remediate-failures
+    tier: production
     source: core
     description: "Correct failures, rule violations, and acceptance criteria gaps detected during QA review. Activate when qa-review returns FAIL. Fixes without redefining scope — loops until all quality gates pass."
     category: delivery
@@ -255,6 +282,7 @@ delivery:
     path: core/skills/delivery/remediate-failures/SKILL.md
   - id: SKILL-CNT-010
     name: repurpose
+    tier: support
     source: project
     description: "Evaluate existing content for refresh, repurposing, or retirement. Activate when content is >90 days old, traffic has declined >20%, or a new content cycle begins. Produces refresh briefs and repurposing plans."
     category: content
@@ -264,6 +292,7 @@ delivery:
     path: project/skills/domains/content-production/repurpose/SKILL.md
   - id: SKILL-CNT-005
     name: seo-optimize
+    tier: production
     source: project
     description: "On-page SEO and GEO optimization pass on an edited draft. Applies technical SEO checklist (meta tags, structured data, internal links, image alt text) and Generative Engine Optimization (answer capsules, citation density, semantic HTML). Does not change editorial content — optimizes discoverability without compromising readability."
     category: content
@@ -273,6 +302,7 @@ delivery:
     path: project/skills/domains/content-production/seo-optimize/SKILL.md
   - id: SKILL-CNT-007
     name: social-adapt
+    tier: production
     source: project
     description: "Transform a published blog post or content piece into platform-specific social media formats (X thread, LinkedIn post, Reddit post, carousel outline). Activate after CNT-004-edit or CNT-006-geo-optimize produces a final draft."
     category: content
@@ -284,6 +314,7 @@ delivery:
 cross:
   - id: SKILL-CRS-020
     name: analytics-query
+    tier: meta
     source: project
     description: "Query PostHog analytics data and surface data-driven growth insights for your project's funnels using the PostHog MCP server. Activate when a Discovery Agent session requires funnel diagnosis, activation analysis, lifecycle check, conversion trend analysis, or friction scanning."
     category: cross
@@ -293,6 +324,7 @@ cross:
     path: project/skills/cross/analytics-query/SKILL.md
   - id: SKILL-APPROACH-EVALUATION-001
     name: approach-evaluation
+    tier: support
     source: core
     description: "Research industry standards and best practices, identify viable approaches for a given technical or architectural problem, and produce a structured factual comparison against project-specific constraints. Reports options — does not decide."
     category: cross
@@ -302,6 +334,7 @@ cross:
     path: core/skills/cross/approach-evaluation/SKILL.md
   - id: SKILL-ARCHITECTURE-EXTRACT-001
     name: architecture-extract
+    tier: meta
     source: core
     description: "Convert raw project structure into clear architectural understanding — module boundaries, data flows, service relationships, and architectural patterns. Activate after codebase-scan during Bootstrap."
     category: cross
@@ -311,6 +344,7 @@ cross:
     path: core/skills/cross/architecture-extract/SKILL.md
   - id: SKILL-CRS-018
     name: build-agents-index
+    tier: meta
     source: core
     description: "Scan all agent and sub-agent definition files in .gaai/core/agents/, extract YAML frontmatter, merge with specialists.registry.yaml, and generate a derived agents-index.yaml at .gaai/core/agents/agents-index.yaml. Activate after adding, modifying, or removing any agent, sub-agent, or specialist entry."
     category: cross
@@ -320,6 +354,7 @@ cross:
     path: core/skills/cross/build-agents-index/SKILL.md
   - id: SKILL-CRS-017
     name: build-skills-index
+    tier: meta
     source: core
     description: "Scan all SKILL.md files in .gaai/core/skills/, extract YAML frontmatter, and generate a derived skills-index.yaml at .gaai/core/skills/skills-index.yaml. Activate after creating, modifying, or removing any skill."
     category: cross
@@ -329,6 +364,7 @@ cross:
     path: core/skills/cross/build-skills-index/SKILL.md
   - id: build-skills-indices
     name: build-skills-indices
+    tier: meta
     source: core
     description: "Scan SKILL.md files in .gaai/core/skills/ and .gaai/project/skills/, extract YAML frontmatter, and regenerate a single unified skills index for fast discovery across all skill repositories."
     category: governance
@@ -338,6 +374,7 @@ cross:
     path: core/skills/cross/build-skills-indices/SKILL.md
   - id: SKILL-CODEBASE-SCAN-001
     name: codebase-scan
+    tier: meta
     source: core
     description: "Create a high-level map of the project structure and identify architectural pillars, entry points, and module boundaries. Activate at Bootstrap initialization or before architecture extraction."
     category: cross
@@ -347,6 +384,7 @@ cross:
     path: core/skills/cross/codebase-scan/SKILL.md
   - id: SKILL-CONSISTENCY-CHECK-001
     name: consistency-check
+    tier: support
     source: core
     description: "Detect inconsistencies across related artefacts and governance constraints. Activate after story generation, after plan preparation, before implementation, or after remediation attempts. Reports issues — does not fix them."
     category: cross
@@ -356,6 +394,7 @@ cross:
     path: core/skills/cross/consistency-check/SKILL.md
   - id: SKILL-CONTEXT-BUILDING-001
     name: context-building
+    tier: production
     source: core
     description: "Assemble a minimal, high-signal execution context bundle from already-retrieved memory, governed artefacts, and applicable rules. Activate after memory-retrieve and before any reasoning or execution skill."
     category: cross
@@ -365,6 +404,7 @@ cross:
     path: core/skills/cross/context-building/SKILL.md
   - id: SKILL-CRS-022
     name: cost-analysis
+    tier: meta
     source: project
     description: "Analyze API usage costs from delivery logs and produce a per-story and per-period cost report. Activate when estimating theoretical pay-per-use costs, evaluating value produced, or tracking project spend."
     category: cross
@@ -374,6 +414,7 @@ cross:
     path: project/skills/cross/cost-analysis/SKILL.md
   - id: SKILL-CRS-016
     name: create-skill
+    tier: meta
     source: core
     description: "Guide creation of a new GAAI skill following the agentskills.io spec and GAAI best practices. Activate when adding a new skill to the .gaai/core/skills/ catalog."
     category: cross
@@ -383,6 +424,7 @@ cross:
     path: core/skills/cross/create-skill/SKILL.md
   - id: SKILL-DECISION-EXTRACTION-001
     name: decision-extraction
+    tier: production
     source: core
     description: "Identify and formalize durable product and technical decisions from agent outputs into long-term memory. Activate after Discovery produces artefacts, Delivery resolves trade-offs, or product direction materially changes."
     category: cross
@@ -392,6 +434,7 @@ cross:
     path: core/skills/cross/decision-extraction/SKILL.md
   - id: SKILL-CRS-019
     name: delivery-readiness-audit
+    tier: support
     source: core
     description: "Spot-check AC internal consistency and scan for pending revisions on delivery-ready stories. Activated by `/gaai-status --audit` as Section 5. Complements the standard status checks with depth checks that standard status skips for speed."
     category: cross
@@ -401,6 +444,7 @@ cross:
     path: core/skills/cross/delivery-readiness-audit/SKILL.md
   - id: SKILL-CRS-023
     name: domain-knowledge-research
+    tier: meta
     source: project
     description: "Research current industry best practices and standards for a given domain, structure findings into GAAI-compatible Atomic Knowledge Units (AKUs) with evidence grading and anti-hallucination safeguards, and produce a classified knowledge report. Activate when Discovery identifies a knowledge gap during capability readiness assessment or before designing skills in an unfamiliar domain."
     category: cross
@@ -410,6 +454,7 @@ cross:
     path: project/skills/cross/domain-knowledge-research/SKILL.md
   - id: SKILL-PRJ-001
     name: framework-sync
+    tier: meta
     source: project
     description: "Sync the GAAI framework between this project and the GAAI-framework OSS repo via git subtree. Covers pull (OSS → project), push (project → OSS), and status check."
     category: cross
@@ -419,6 +464,7 @@ cross:
     path: project/skills/cross/framework-sync/SKILL.md
   - id: SKILL-FRICTION-RETROSPECTIVE-001
     name: friction-retrospective
+    tier: support
     source: core
     description: "Scan delivery artefacts for friction log entries, detect recurring patterns, and produce retrospective reports. Invoked by Discovery Agent (never by Delivery) to identify systemic improvement opportunities from friction captured during delivery."
     category: cross
@@ -428,6 +474,7 @@ cross:
     path: core/skills/cross/friction-retrospective/SKILL.md
   - id: SKILL-CRS-021
     name: generate-build-in-public-content
+    tier: production
     source: core
     description: "Generate build-in-public content drafts from completed delivery artefacts. Applies the Golden Circle (WHY → HOW → WHAT) to transform stories, decisions, and metrics into ready-to-review content pieces (X threads, blog snippets, metrics posts). Activate automatically after each story reaches `done` status."
     category: cross
@@ -437,6 +484,7 @@ cross:
     path: core/skills/cross/generate-build-in-public-content/SKILL.md
   - id: i18n-extract
     name: i18n-extract
+    tier: meta
     source: core
     description: "Scan codebase for hardcoded strings that should be internationalised, classify by domain and priority, and produce a structured extraction report for translation workflows."
     category: analysis
@@ -446,6 +494,7 @@ cross:
     path: core/skills/cross/i18n-extract/SKILL.md
   - id: i18n-glossary-sync
     name: i18n-glossary-sync
+    tier: meta
     source: core
     description: "Maintain a canonical i18n glossary file — sync new terms across all language pairs, detect drift, flag missing translations, and enforce consistent terminology across the codebase."
     category: analysis
@@ -455,6 +504,7 @@ cross:
     path: core/skills/cross/i18n-glossary-sync/SKILL.md
   - id: i18n-validate
     name: i18n-validate
+    tier: meta
     source: core
     description: "Validate translation completeness and consistency across all locale files — detect missing keys, untranslated strings, format mismatches, and glossary violations."
     category: analysis
@@ -464,6 +514,7 @@ cross:
     path: core/skills/cross/i18n-validate/SKILL.md
   - id: idiomatique-translate
     name: idiomatique-translate
+    tier: meta
     source: core
     description: "Translate strings idiomatically across multiple target languages using a project glossary, preserving tone, domain terminology, and format placeholders while flagging untranslatable content."
     category: content
@@ -473,6 +524,7 @@ cross:
     path: core/skills/cross/idiomatique-translate/SKILL.md
   - id: SKILL-MEMORY-ALIGNMENT-CHECK-001
     name: memory-alignment-check
+    tier: production
     source: core
     description: "After QA PASS, compare the Story's implementation footprint against relevant memory entries. Reports confirmed entries, contradictions, and new knowledge candidates. Never writes to memory — produces a delta report for Discovery to action."
     category: cross
@@ -482,6 +534,7 @@ cross:
     path: core/skills/cross/memory-alignment-check/SKILL.md
   - id: SKILL-MEMORY-COMPACT-001
     name: memory-compact
+    tier: support
     source: core
     description: "Emergency single-pass memory compression when context window pressure is high mid-task. Activate when approaching token limits during active work. For scheduled end-of-phase cleanup, use memory-refresh instead."
     category: cross
@@ -491,6 +544,7 @@ cross:
     path: core/skills/cross/memory-compact/SKILL.md
   - id: SKILL-MEMORY-INDEX-SYNC-001
     name: memory-index-sync
+    tier: support
     source: core
     description: "Detect and heal index.md drift — finds memory files on disk not registered in index.md and registers them. Run when /gaai-status reports unregistered files, after batch memory operations, or as a post-delivery gate."
     category: cross
@@ -500,6 +554,7 @@ cross:
     path: core/skills/cross/memory-index-sync/SKILL.md
   - id: SKILL-MEMORY-INGEST-001
     name: memory-ingest
+    tier: meta
     source: core
     description: "Transform validated knowledge into structured long-term memory. Activate after Bootstrap scan, after Discovery produces validated artefacts, or after architecture insights are available."
     category: cross
@@ -509,6 +564,7 @@ cross:
     path: core/skills/cross/memory-ingest/SKILL.md
   - id: SKILL-MEMORY-REFRESH-001
     name: memory-refresh
+    tier: support
     source: core
     description: "Periodic memory maintenance — archive session files, convert recurring knowledge into summaries, update the memory index. Activate at end of a major phase (Discovery complete, sprint done) or when memory spans many sessions. For emergency context-window pressure mid-task, use memory-compact instead."
     category: cross
@@ -518,6 +574,7 @@ cross:
     path: core/skills/cross/memory-refresh/SKILL.md
   - id: SKILL-MEMORY-RETRIEVE-001
     name: memory-retrieve
+    tier: production
     source: core
     description: "Load only the minimum relevant memory for a task using 3-level progressive disclosure. Activate before context-building — never load full memory dumps. Never substitute summaries for durable memory."
     category: cross
@@ -527,6 +584,7 @@ cross:
     path: core/skills/cross/memory-retrieve/SKILL.md
   - id: SKILL-CRS-024
     name: memory-search
+    tier: support
     source: core
     description: "Search memory by frontmatter fields, full-text keywords, or cross-reference graph. Returns ranked file list — never loads full content. Use when the agent needs to find relevant memory without knowing exact paths."
     category: cross
@@ -536,6 +594,7 @@ cross:
     path: core/skills/cross/memory-search/SKILL.md
   - id: SKILL-POST-MORTEM-LEARNING-001
     name: post-mortem-learning
+    tier: support
     source: core
     description: "Analyze failures and suboptimal deliveries to identify root causes, contributing factors, and raw lessons. Activate after significant delivery failures, repeated QA failures, or when patterns of issues need to be understood."
     category: cross
@@ -545,6 +604,7 @@ cross:
     path: core/skills/cross/post-mortem-learning/SKILL.md
   - id: SKILL-RISK-ANALYSIS-001
     name: risk-analysis
+    tier: support
     source: core
     description: "Systematically identify and structure product, delivery, and systemic risks before they become failures. Activate before finalizing Epics and Stories, before execution planning, after repeated QA failures, or after major scope changes."
     category: cross
@@ -554,6 +614,7 @@ cross:
     path: core/skills/cross/risk-analysis/SKILL.md
   - id: SKILL-RULES-NORMALIZE-001
     name: rules-normalize
+    tier: meta
     source: core
     description: "Convert implicit or scattered project conventions into governed GAAI rule files, and create or modify rule files with integrity. Activate during Bootstrap, when creating a new rule, or when modifying an existing rule."
     category: cross
@@ -563,6 +624,7 @@ cross:
     path: core/skills/cross/rules-normalize/SKILL.md
   - id: SKILL-SECURITY-AUDIT-001
     name: security-audit
+    tier: support
     source: core
     description: "Detect security vulnerabilities and governance violations across delivered code, configurations, and deployed environments. Activate after implementation or periodically as a governance check."
     category: cross
@@ -572,6 +634,7 @@ cross:
     path: core/skills/cross/security-audit/SKILL.md
   - id: SKILL-SUCCESS-METRICS-EVALUATION-001
     name: success-metrics-evaluation
+    tier: support
     source: core
     description: "Evaluate delivery outcomes against defined success metrics and acceptance goals. Activate after Delivery to verify that delivered work creates real business and technical impact, not just output."
     category: cross
@@ -581,6 +644,7 @@ cross:
     path: core/skills/cross/success-metrics-evaluation/SKILL.md
   - id: SKILL-SUMMARIZATION-001
     name: summarization
+    tier: support
     source: core
     description: "Transform large, noisy, or short-term memory into compact, durable, high-signal summaries. Activate when session memory grows large, decisions accumulate, or memory retrieval starts returning too many files."
     category: cross
@@ -588,4 +652,3 @@ cross:
     tags: []
     updated_at: 2026-01-30
     path: core/skills/cross/summarization/SKILL.md
-
