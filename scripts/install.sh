@@ -204,7 +204,18 @@ fi
 echo ""
 
 if [[ -d "$TARGET/.gaai" ]]; then
-  # Existing install: update core/, preserve project/
+  # ── Guard: never touch project/ ────────────────────────
+  # Backup project/ before any changes so user data is recoverable
+  if [[ -d "$TARGET/.gaai/project" ]]; then
+    BACKUP_DIR="$TARGET/.gaai/.backup"
+    BACKUP_TS="$(date +%Y%m%d-%H%M%S)"
+    BACKUP_PATH="$BACKUP_DIR/project-$BACKUP_TS"
+    mkdir -p "$BACKUP_DIR"
+    cp -r "$TARGET/.gaai/project" "$BACKUP_PATH"
+    success "Backup created: .gaai/.backup/project-$BACKUP_TS"
+  fi
+
+  # Existing install: update core/ ONLY — never touch project/
   info "Updating .gaai/core/ (framework)..."
   rm -rf "$TARGET/.gaai/core"
   cp -r "$GAAI_ROOT/core" "$TARGET/.gaai/core"
@@ -212,8 +223,16 @@ if [[ -d "$TARGET/.gaai" ]]; then
   for f in "$GAAI_ROOT"/VERSION "$GAAI_ROOT"/GAAI.md "$GAAI_ROOT"/README.md "$GAAI_ROOT"/QUICK-REFERENCE.md; do
     [[ -f "$f" ]] && cp "$f" "$TARGET/.gaai/"
   done
-  success ".gaai/core/ updated"
-  warn ".gaai/project/ preserved (existing project data kept)"
+
+  # Guard: verify project/ was not altered
+  if [[ -n "${BACKUP_PATH:-}" ]] && diff -rq "$TARGET/.gaai/project" "$BACKUP_PATH" >/dev/null 2>&1; then
+    success ".gaai/core/ updated"
+    success ".gaai/project/ preserved (verified unchanged)"
+  elif [[ -n "${BACKUP_PATH:-}" ]]; then
+    fail ".gaai/project/ was unexpectedly modified during update. Backup available at .gaai/.backup/project-$BACKUP_TS"
+  else
+    success ".gaai/core/ updated"
+  fi
 else
   # Fresh install: copy entire .gaai/
   info "Copying .gaai/ to $TARGET..."
