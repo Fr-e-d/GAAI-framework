@@ -2,7 +2,7 @@
 
 Thin adapter files for each supported AI coding tool.
 
-`install.sh` deploys the correct adapter to the right location in your project. You do not use these files directly.
+The installer (`core/scripts/install.sh`) deploys the correct adapter to the right location in your project. You do not use these files directly.
 
 ---
 
@@ -40,12 +40,12 @@ If your tool is not listed above:
 
 ## Changing Your AI Tool After Install
 
-To switch to a different AI tool, re-run `install.sh` from the GAAI framework repo with `--tool` set explicitly:
+To switch to a different AI tool, re-run the installer with `--tool` set explicitly:
 
 ```bash
 rm -rf /tmp/gaai
 git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai
-bash /tmp/gaai/install.sh --target /path/to/your/project --tool claude-code --yes
+bash /tmp/gaai/.gaai/core/scripts/install.sh --target /path/to/your/project --tool claude-code --yes
 rm -rf /tmp/gaai
 ```
 
@@ -53,7 +53,7 @@ Replace `--tool claude-code` with `--tool cursor`, `--tool windsurf`, or `--tool
 
 Always pass `--tool` explicitly. Do not rely on auto-detection — it requires the tool's config directory to already exist in the target project.
 
-There is no separate `deploy-adapter.sh` script. `install.sh` is the only installer.
+There is no separate `deploy-adapter.sh` script. `core/scripts/install.sh` is the only installer.
 
 ---
 

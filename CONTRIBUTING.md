@@ -6,7 +6,7 @@ GAAI is not a library you contribute skills or features to. It is a **design pat
 
 **The right way to use GAAI:**
 1. Fork or clone this repo
-2. Copy `.gaai/` into your project with `install.sh`
+2. Copy `.gaai/` into your project with `.gaai/core/scripts/install.sh`
 3. Adapt the rules, memory, and skills to your project's needs
 4. The fork is yours — you own it
 

@@ -95,7 +95,7 @@ Templates for each artefact type are in `contexts/artefacts/_template.*.md`.
 
 ## Specialists Registry
 
-**Location:** `.gaai/core/contexts/specialists.registry.yaml`
+**Location:** `.gaai/core/agents/specialists.registry.yaml`
 
 Defines domain-specific sub-agents available for Tier 3 delivery. The Implementation Sub-Agent reads this file, matches trigger keywords from the execution plan, and spawns matching specialists.
 

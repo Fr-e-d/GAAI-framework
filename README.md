@@ -58,7 +58,7 @@ If you cannot determine it, ask the user before proceeding.
 Then run:
   rm -rf /tmp/gaai
   git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai
-  bash /tmp/gaai/install.sh --target . --tool {user-tool} --yes
+  bash /tmp/gaai/.gaai/core/scripts/install.sh --target . --tool {user-tool} --yes
   rm -rf /tmp/gaai
 
 After install, show the user the next steps exactly as printed by the
@@ -74,7 +74,7 @@ The installer copies `.gaai/` and deploys the right adapter for your tool (CLAUD
 
 ```bash
 git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai && \
-  bash /tmp/gaai/install.sh --wizard && \
+  bash /tmp/gaai/.gaai/core/scripts/install.sh --wizard && \
   rm -rf /tmp/gaai
 ```
 

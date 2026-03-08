@@ -8,21 +8,22 @@ Runs the GAAI Setup Wizard interactively:
 1. Asks which directory to install into (defaults to current working directory)
 2. Auto-detects the AI tool in use (Claude Code, Cursor, Windsurf)
 3. Shows a summary and asks for confirmation
-4. Runs `install.sh --wizard` and reports the result
+4. Runs `.gaai/core/scripts/install.sh --wizard` and reports the result
 5. Displays next steps for the installed tool
 
 ## When to Use
 
 - First-time install of GAAI into a project
-- Run from the cloned GAAI repo before the framework exists in your project
+- Updating an existing GAAI installation
+- Works from the GAAI framework repo **or** from any project that already has `.gaai/` installed
 
 ## Instructions for Claude Code
 
-You are running a guided GAAI installation from within the GAAI framework repository.
+You are running a guided GAAI installation.
 
 **Step 1 — Find the installer**
 
-Locate `install.sh` in the current working directory (the GAAI repo root). If it is not present, tell the user: "This command must be run from the GAAI framework repo. Clone it first, then open it in Claude Code."
+Look for `.gaai/core/scripts/install.sh` in the current working directory. If it is not present, tell the user: "No `.gaai/core/scripts/install.sh` found. Either clone the GAAI framework repo first, or ensure `.gaai/` is present in this project."
 
 **Step 2 — Ask the user for the target directory**
 
@@ -35,7 +36,7 @@ Wait for their answer.
 Execute:
 
 ```bash
-bash install.sh --wizard --target <target-dir>
+bash .gaai/core/scripts/install.sh --wizard --target <target-dir>
 ```
 
 Pass the target directory the user specified, or `.` if they accepted the default.

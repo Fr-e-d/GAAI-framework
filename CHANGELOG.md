@@ -48,5 +48,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Four workflows: delivery loop, context bootstrap, discovery-to-delivery, emergency rollback
 - Six bash utility scripts
 - Tool compatibility adapters: Claude Code, Cursor, Windsurf
-- Interactive installer (`install.sh`) with pre-flight check (`install-check.sh`)
+- Interactive installer (`.gaai/core/scripts/install.sh`) with pre-flight check (`install-check.sh`)
 - Full documentation in `docs/`

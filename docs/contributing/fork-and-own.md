@@ -58,7 +58,7 @@ Once you have GAAI in your project, adapt it:
 
 **Modify skills** — adapt skill content to match your project's conventions. The SKILL.md format stays the same; the content is yours.
 
-**Add skills** — GAAI ships 37 skills. Your project may need more. Follow the `SKILL.md` format (agentskills.io spec) and add to the appropriate category.
+**Add skills** — GAAI ships 47 skills. Your project may need more. Follow the `SKILL.md` format (agentskills.io spec) and add to the appropriate category.
 
 ---
 

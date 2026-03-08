@@ -50,12 +50,13 @@ This repo contains:
     │   └── *.workflow.md  (4 workflow files)
     ├── scripts/
     │   ├── README.scripts.md
-    │   └── *.sh           (5 bash scripts)
+    │   └── *.sh           (11 bash scripts, including install.sh)
     └── compat/
         ├── COMPAT.md
-        ├── claude-code/
-        ├── cursor/
-        └── windsurf/
+        ├── claude-code.md
+        ├── cursor.mdc
+        ├── windsurf.md
+        └── commands/    ← slash command definitions
 ```
 
 ### Running the Health Check
