@@ -43,7 +43,7 @@ Two slash commands. Discovery reasons — it never executes. Delivery executes �
 
 Download from GitHub, drop `.gaai/` into your project root, and tell your AI tool: *"Read `.gaai/README.md` and bootstrap this project."*
 
-<details>
+<details open>
 <summary>Option A — Ask your AI tool to do it</summary>
 
 Paste this into your AI tool's chat:
@@ -69,7 +69,7 @@ The installer copies `.gaai/` and deploys the right adapter for your tool (CLAUD
 
 </details>
 
-<details>
+<details open>
 <summary>Option B — CLI</summary>
 
 ```bash
