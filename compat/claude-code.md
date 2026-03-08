@@ -48,3 +48,4 @@ After install, these commands are available in Claude Code:
 - `/gaai-discover` — Activate Discovery Agent for a new feature or problem
 - `/gaai-deliver` — Run Delivery Loop for next ready backlog item
 - `/gaai-status` — Show current backlog and memory state
+- `/gaai-update` — Update framework core or switch AI tool adapter
