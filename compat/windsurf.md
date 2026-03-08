@@ -1,6 +1,6 @@
 # GAAI — Agent Instructions
 
-> This file is deployed to your project root as `AGENTS.md` by `install.sh`.
+> This file is deployed to your project root as `AGENTS.md` by the installer.
 > Compatible with Windsurf, Gemini CLI, and any tool that reads `AGENTS.md`.
 
 ---
