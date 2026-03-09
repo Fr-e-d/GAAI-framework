@@ -3,9 +3,9 @@
 # Regenerate: invoke build-skills-indices skill
 
 generated_at: 2026-03-09
-total: 64
+total: 67
 core: 47
-project: 17
+project: 20
 
 discovery:
   - id: SKILL-CNT-011
@@ -217,6 +217,15 @@ delivery:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/delivery/implement/SKILL.md
+  - id: SKILL-CNT-016
+    name: link-retrofit
+    source: project
+    description: "Post-publication internal link retrofit. Within 48h of publishing a new article, scan existing articles for cross-link opportunities, generate intent-aligned anchor text, and submit edits. Enforces cross-language isolation (FR→FR, EN→EN) and anchor text uniqueness. Includes a monthly orphan page and dead-end audit checklist."
+    category: content
+    track: delivery
+    tags: []
+    updated_at: 2026-03-09
+    path: project/skills/domains/content-production/link-retrofit/SKILL.md
   - id: SKILL-DEL-006
     name: prepare-execution-plan
     source: core
@@ -226,6 +235,15 @@ delivery:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/delivery/prepare-execution-plan/SKILL.md
+  - id: SKILL-PROJ-PROVISION-001
+    name: provision-staging
+    source: project
+    description: "Ensure staging environment has the minimum test data required for E2E verification. Idempotent — safe to run multiple times. Creates smoke-runner expert, test prospects, and validates DB state."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-03-09
+    path: project/skills/delivery/provision-staging/SKILL.md
   - id: SKILL-QA-REVIEW-001
     name: qa-review
     source: core
@@ -274,12 +292,21 @@ delivery:
   - id: SKILL-CNT-007
     name: social-adapt
     source: project
-    description: "Transform a published blog post or content piece into platform-specific social media formats (X thread, LinkedIn post, Reddit post, carousel outline). Activate after CNT-004-edit or CNT-006-geo-optimize produces a final draft."
+    description: "Transform a published blog post or content piece into platform-specific social media formats (X thread, LinkedIn post, Reddit post, carousel outline) using the Editorial Curator Pattern. Platform Curator reads source deeply and produces one isolated Platform Brief per target platform. Platform Renderers (parallelizable) produce formatted posts from briefs only. Main agent runs Cross-platform Consistency Check. Activate after CNT-004-edit or CNT-006-geo-optimize produces a final draft."
     category: content
     track: delivery
     tags: []
-    updated_at: 2026-02-26
+    updated_at: 2026-03-08
     path: project/skills/domains/content-production/social-adapt/SKILL.md
+  - id: SKILL-PROJ-VERIFY-001
+    name: verify-story
+    source: project
+    description: "Execute live E2E verification of a delivered Story against its acceptance criteria on staging. Runs curl + Playwright checks to confirm the feature works end-to-end, not just that the code compiles."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-03-09
+    path: project/skills/delivery/verify-story/SKILL.md
 
 cross:
   - id: SKILL-CRS-020
