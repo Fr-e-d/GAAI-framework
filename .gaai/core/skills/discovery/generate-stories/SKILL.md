@@ -9,13 +9,14 @@ metadata:
   category: discovery
   track: discovery
   id: SKILL-GENERATE-STORIES-001
-  updated_at: 2026-01-27
+  updated_at: 2026-03-10
   status: stable
 inputs:
   - one_epic: contexts/artefacts/epics/{id}.epic.md (the parent Epic file)
   - prd  (optional)
 outputs:
   - contexts/artefacts/stories/*.md
+  - contexts/backlog/active.backlog.yaml (mandatory — every story must be registered)
 ---
 
 # Generate Stories
@@ -41,6 +42,15 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 6. Avoid technical solutions in story body
 7. For each story, answer: "What should the user be able to do or experience?"
 8. Output using canonical Story template
+9. **MANDATORY — Register in backlog.** After writing all story files, add each story to `contexts/backlog/active.backlog.yaml` with:
+   - `id`, `epic`, `title` (from story frontmatter)
+   - `status: refined` (if validated) or `status: draft` (if pending validation)
+   - `priority` (derived from Epic priority or explicit input)
+   - `artefact` path pointing to the story file
+   - `dependencies` (from story frontmatter `depends_on` or Epic execution order)
+   - `notes` (source context — e.g., Discovery session date, governing DEC)
+
+   **A story that exists only as an artefact file but is not in the backlog is invisible to Delivery and will never be executed.** This step is non-negotiable.
 
 ---
 
@@ -69,6 +79,7 @@ Acceptance Criteria:
 - Each story maps to a single Epic
 - Stories are independent and deliverable individually
 - Each story file's frontmatter `id` and `related_backlog_id` match the parent Epic's ID prefix
+- **Every generated story has a corresponding entry in `active.backlog.yaml`** — verify by counting story files vs backlog entries for this Epic. Mismatch = FAIL.
 
 ---
 
