@@ -137,7 +137,7 @@ Applies to every output that:
 - produces or modifies Epics, Stories, or plans
 
 Does NOT apply to:
-- factual questions to the human
+- factual questions to the human, including diagnostic framings that do not recommend a specific direction
 - status reports with no recommendation
 - memory retrieval results (raw data)
 
@@ -171,6 +171,8 @@ This protocol is NOT a replacement for `approach-evaluation`. The distinction:
 - **`approach-evaluation`** = heavyweight, research-driven, selective (decision points with 2-3 competing approaches, standalone artefact with external sources)
 
 When self-assessment reveals that the chosen direction is non-obvious or that a viable alternative exists, the agent SHOULD escalate to `approach-evaluation` for a full comparison before proceeding.
+
+**Mandatory escalation rule:** If verdict is `uncertain-needs-discussion` AND the self-assessment identifies ≥2 viable competing approaches, the agent MUST invoke `approach-evaluation` to produce a formal comparison artefact before escalating the decision to the human. Do not produce inline comparison tables as a substitute — the structured artefact ensures traceability and reusability.
 
 ---
 
