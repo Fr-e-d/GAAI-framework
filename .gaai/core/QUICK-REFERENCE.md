@@ -8,7 +8,6 @@
 | `/gaai-discover` | Start Discovery — clarify intent, create Stories with acceptance criteria |
 | `/gaai-deliver` | Start Delivery — execute the next refined Story from the backlog |
 | `/gaai-status` | Show current backlog state and memory summary |
-| `/gaai-update` | Update framework core or switch AI tool adapter |
 
 ## Starting a Session
 
@@ -29,7 +28,7 @@
 | `.gaai/project/contexts/backlog/active.backlog.yaml` | What's authorized for execution |
 | `.gaai/project/contexts/memory/project/context.md` | What the agent knows about your project |
 | `.gaai/project/contexts/memory/decisions/_log.md` | Decisions that persist across sessions |
-| `.gaai/GAAI.md` | Full framework orientation |
+| `.gaai/core/GAAI.md` | Full framework orientation |
 
 ## Core Rule
 

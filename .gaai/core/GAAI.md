@@ -64,7 +64,7 @@ Welcome. This is the `.gaai/` folder — the GAAI framework living inside your p
 
 **If you want to switch to a different AI tool:**
 → Read `core/compat/COMPAT.md` for the compatibility matrix and instructions.
-→ Re-run `bash .gaai/core/scripts/install.sh --tool <tool> --yes`. There is no other adapter deployment mechanism.
+→ Re-run `install.sh --tool <tool> --yes` from the GAAI framework repo. There is no other adapter deployment mechanism.
 
 ---
 
