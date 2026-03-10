@@ -118,6 +118,19 @@ Specialists are dispatched by the Implementation Sub-Agent, not by the Orchestra
 - `decision-extraction` — **always runs after QA PASS** — scan impl-report + qa-report; write DEC-{N}.md + update _log.md + index.md; no-op if no durable decisions found
 - `risk-analysis` — pre-flight for Tier 3 or high-risk Stories before spawning Planning Sub-Agent
 
+### Skill Tier Preference
+
+When selecting skills for a task, prefer `production` tier skills first — they are battle-tested
+and invoked in every session. Use `support` tier skills when their specific trigger condition is met.
+Avoid invoking `meta` tier skills unless performing bootstrap, framework maintenance, or skill
+authoring — these are not part of the regular delivery loop.
+
+Tier assignments are documented in:
+- `.gaai/core/skills/skills-index.yaml` (field: `tier`)
+- `.gaai/project/skills/skills-index.yaml` (field: `tier`)
+
+Full audit with cleanup candidates: `.gaai/project/contexts/memory/governance/skills-audit-report.md`
+
 ---
 
 ## Git Workflow (Non-Negotiable)

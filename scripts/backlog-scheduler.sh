@@ -260,6 +260,45 @@ else
   FROM_STDIN_BACKUP=false
 fi
 
+# ── Collect done IDs from done/ archive ──────────────────────
+# Stories archived out of the active backlog still count as resolved
+# dependencies. Scan done/*.yaml for their IDs.
+DONE_DIR=""
+if [[ -n "$BACKLOG_FILE" ]]; then
+  DONE_DIR="$(dirname "$BACKLOG_FILE")/done"
+else
+  # When using --stdin, infer done/ from script location
+  SCRIPT_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+  INFERRED_BACKLOG_DIR="$(cd "$SCRIPT_SELF_DIR/../../project/contexts/backlog" 2>/dev/null && pwd)" || true
+  if [[ -n "$INFERRED_BACKLOG_DIR" && -d "$INFERRED_BACKLOG_DIR/done" ]]; then
+    DONE_DIR="$INFERRED_BACKLOG_DIR/done"
+  fi
+fi
+
+ARCHIVED_DONE_IDS=""
+if [[ -n "$DONE_DIR" && -d "$DONE_DIR" ]]; then
+  ARCHIVED_DONE_IDS=$(python3 -c "
+import sys, re, os, glob
+
+done_dir = sys.argv[1]
+ids = set()
+for f in glob.glob(os.path.join(done_dir, '*.yaml')):
+    with open(f) as fh:
+        current_id = None
+        for line in fh:
+            stripped = line.strip()
+            if stripped.startswith('- id:'):
+                current_id = stripped.split(':', 1)[1].strip()
+            elif current_id and stripped.startswith('status:'):
+                status = stripped.split(':', 1)[1].strip().strip('\"\\\"')
+                if status in ('done', 'cancelled', 'superseded'):
+                    ids.add(current_id)
+                current_id = None
+for i in sorted(ids):
+    print(i)
+" "$DONE_DIR" 2>/dev/null) || ARCHIVED_DONE_IDS=""
+fi
+
 # ── Python parser + all read modes ───────────────────────────
 # The Python script is stored in a variable to avoid quoting issues
 # with python3 -c. Content is piped via stdin, mode via argv.
@@ -268,6 +307,7 @@ import sys
 import re
 
 mode = sys.argv[1]
+archived_done_ids_raw = sys.argv[2] if len(sys.argv) > 2 else ""
 content = sys.stdin.read()
 
 # -- YAML block parser --
@@ -327,6 +367,9 @@ if current:
 # -- Helpers --
 priority_order = {"critical": -1, "high": 0, "medium": 1, "low": 2}
 done_ids = {i["id"] for i in items if i.get("status") in ("done", "cancelled", "superseded")}
+# Merge archived done IDs (stories moved out of active backlog)
+if archived_done_ids_raw:
+    done_ids.update(archived_done_ids_raw.split("\n"))
 
 def is_ready(item):
     if item.get("status") not in ("refined", "ready"):
@@ -462,4 +505,4 @@ if [[ ! -s "$TEMP_BACKLOG" ]]; then
 fi
 
 # Execute with stdin redirected from temp file (more reliable)
-python3 -c "$PYTHON_PARSER" "$MODE" < "$TEMP_BACKLOG"
+python3 -c "$PYTHON_PARSER" "$MODE" "$ARCHIVED_DONE_IDS" < "$TEMP_BACKLOG"
