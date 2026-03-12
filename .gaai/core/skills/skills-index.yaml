@@ -2,10 +2,10 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md and .gaai/project/skills/*/SKILL.md
 # Regenerate: invoke build-skills-indices skill
 
-generated_at: 2026-03-09
-total: 67
+generated_at: 2026-03-11
+total: 68
 core: 47
-project: 20
+project: 21
 
 discovery:
   - id: SKILL-CNT-011
@@ -60,7 +60,7 @@ discovery:
     category: discovery
     track: discovery
     tags: []
-    updated_at: 2026-01-27
+    updated_at: 2026-03-10
     path: core/skills/discovery/generate-stories/SKILL.md
   - id: SKILL-REFINE-SCOPE-001
     name: refine-scope
@@ -100,6 +100,15 @@ delivery:
     tags: []
     updated_at: 2026-03-02
     path: core/skills/delivery/ci-watch-and-fix/SKILL.md
+  - id: SKILL-CNT-020
+    name: community-engage
+    source: project
+    description: "Scan Reddit posts for new comments, triage for reply-worthiness, draft value-first replies, and post via Playwright MCP with anti-spam pacing. Operates on the community-replies-backlog.yaml as single source of truth. Three phases — Scan, Draft, Post — each can run independently."
+    category: content
+    track: delivery
+    tags: []
+    updated_at: 2026-03-11
+    path: project/skills/domains/content-production/community-engage/SKILL.md
   - id: SKILL-DEL-008
     name: compose-team
     source: core
@@ -152,7 +161,7 @@ delivery:
     category: content
     track: delivery
     tags: []
-    updated_at: 2026-03-07
+    updated_at: 2026-03-09
     path: project/skills/domains/content-production/content-visual/SKILL.md
   - id: SKILL-DEL-009
     name: coordinate-handoffs
