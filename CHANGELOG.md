@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.1] - 2026-03-13
+
+### Changed
+- README sections reordered: Install moved after value proposition (See It in Action → Problem → How It Works → Who This Is For → Install)
+- BMAD-METHOD comparison updated for v6 accuracy (generalized persona list, removed outdated Node.js claim)
+
+### Added
+- "Who This Is For" section in README — self-selection for solo founders and senior engineers
+- "Compared to Other Approaches" section in README — vs AGENTS.md, BMAD-METHOD, LangGraph/AutoGen/CrewAI
+- "Honest Trade-offs" section in README — 4 limitations stated upfront
+- Research basis sections in ADRs 002, 003, 004, 006, 009 (15 verified sources across 5 ADRs)
+
+### Removed
+- `docs/hackernews-post.md` — distribution content, not documentation (useful sections absorbed into README)
+
+---
+
 ## [2.1.0] - 2026-03-04
 
 ### Changed
