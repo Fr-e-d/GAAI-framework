@@ -2,7 +2,7 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md and .gaai/project/skills/*/SKILL.md
 # Regenerate: invoke build-skills-indices skill
 
-generated_at: 2026-03-11
+generated_at: 2026-03-12
 total: 68
 core: 47
 project: 21
@@ -103,11 +103,11 @@ delivery:
   - id: SKILL-CNT-020
     name: community-engage
     source: project
-    description: "Scan Reddit posts for new comments, triage for reply-worthiness, draft value-first replies, and post via Playwright MCP with anti-spam pacing. Operates on the community-replies-backlog.yaml as single source of truth. Three phases — Scan, Draft, Post — each can run independently."
+    description: "Scan Reddit and Facebook posts for new comments, triage for reply-worthiness, draft value-first replies, fact-check against GAAI source of truth, present for human review, and post via Playwright MCP with anti-spam pacing. Operates on platform-specific backlogs as single source of truth. Four phases — Scan, Draft, Fact-Check + Review, Post — each can run independently."
     category: content
     track: delivery
     tags: []
-    updated_at: 2026-03-11
+    updated_at: 2026-03-12
     path: project/skills/domains/content-production/community-engage/SKILL.md
   - id: SKILL-DEL-008
     name: compose-team

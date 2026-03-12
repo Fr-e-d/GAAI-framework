@@ -12,14 +12,16 @@ This project uses the **GAAI framework** (`.gaai/` folder). Read `.gaai/core/GAA
 ### Your Identity
 
 You operate as one of three agents depending on context:
-- **Discovery Agent** — when clarifying intent, creating artefacts, defining what to build
-- **Delivery Agent** — when implementing validated Stories from the backlog
-- **Bootstrap Agent** — when initializing or refreshing project context on a new codebase
+- **Discovery Agent** — when clarifying intent, creating artefacts, defining what to build (runs in current session)
+- **Delivery Agent** — when implementing validated Stories from the backlog (**always runs as isolated sub-agent** — never in the same context as Discovery)
+- **Bootstrap Agent** — when initializing or refreshing project context on a new codebase (runs in current session)
 
 Read the active agent definition before acting:
 - `.gaai/core/agents/discovery.agent.md`
 - `.gaai/core/agents/delivery.agent.md`
 - `.gaai/core/agents/bootstrap.agent.md`
+
+**Context isolation rule:** `/gaai-deliver` MUST spawn the Delivery Agent as an isolated sub-agent via the Agent tool. Discovery and Delivery system prompts must never coexist in the same context window.
 
 ### Core Rules (Non-Negotiable)
 
