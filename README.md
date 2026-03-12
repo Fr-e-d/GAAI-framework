@@ -142,6 +142,28 @@ No SDK. No npm package. No pip install. Markdown + YAML + bash. Readable by huma
 
 ---
 
+## Who This Is For
+
+GAAI is built for the developer — solo founder, small team, senior engineer — who is already using AI coding tools seriously and has started running into the governance problems that come with that.
+
+It is particularly well-suited for **solo SaaS founders who know what they want to build**. You do not need to simulate a 12-person product team. You need an agent that helps you turn what's in your head into executable Stories, and another that ships them reliably without going off-script.
+
+Discovery in GAAI is conversational and intentionally lightweight: it structures your thinking, not a committee's deliberation. If you already have product clarity, this is a feature — not a limitation.
+
+If you are still in the "getting AI to write my first feature" phase, GAAI adds more structure than you need right now. If you have ever said "the agent broke something it wasn't supposed to touch" — GAAI is for you.
+
+---
+
+## Compared to Other Approaches
+
+**vs. AGENTS.md / cursor rules:** A well-written AGENTS.md solves context loss for a single session. It does not solve scope drift, cross-session memory, or the authorization problem. GAAI is what comes after you've maxed out what a good AGENTS.md can do.
+
+**vs. BMAD-METHOD:** BMAD simulates a multi-agent Agile team with specialized personas (PM, Architect, Developer, QA, and more) and rich collaborative workflows. It is powerful when you want AI to co-drive product thinking. GAAI makes a different trade-off: a lighter Discovery track optimized for developers who already have clarity on what to build, paired with a Delivery track that is more rigidly governed. Different tools for adjacent problems — the key difference is in Delivery: GAAI's governance model is structural, not persona-based.
+
+**vs. LangGraph / AutoGen / CrewAI:** Code-first orchestration frameworks for building AI systems. GAAI is a governance layer for using AI coding tools. Different abstraction level entirely.
+
+---
+
 ## Automation (Optional)
 
 GAAI works manually with `/gaai-deliver`. But if your project uses git with a `staging` branch, the **Delivery Daemon** runs deliveries autonomously:
@@ -185,6 +207,15 @@ bash .gaai/core/scripts/daemon-start.sh   # starts the daemon
 One canonical source (`.gaai/`). Thin adapters per tool. No duplication. The framework functions identically across all tools — the difference is activation convenience, not capability.
 
 > [Full compatibility details](docs/reference/tool-compatibility.md)
+
+---
+
+## Honest Trade-offs
+
+- Discovery is conversational and intentionally lightweight. It helps you structure what you know — it does not replace deep product research or collaborative brainstorming across a team.
+- Trivial tasks still need a backlog item. You can make it a one-liner, but the gate is always there.
+- The framework relies on the agent following the files. There is no programmatic enforcement.
+- The repo is freshly open-sourced. Community is just getting started.
 
 ---
 
