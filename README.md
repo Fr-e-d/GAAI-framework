@@ -42,51 +42,6 @@ Two slash commands. Two **isolated contexts**. Discovery reasons — it never ex
 
 ---
 
-## Install (30 seconds)
-
-**Copy the `.gaai/` folder into your project.** That's it.
-
-Download from GitHub, drop `.gaai/` into your project root, and tell your AI tool: *"Read `.gaai/core/README.md` and bootstrap this project."*
-
-<details open>
-<summary>Option A — Ask your AI tool to do it</summary>
-
-Paste this into your AI tool's chat:
-
-```
-Install the GAAI framework into my current project.
-
-Determine {user-tool} by identifying which AI coding tool is running this
-prompt. Valid values: claude-code | cursor | windsurf | other.
-If you cannot determine it, ask the user before proceeding.
-
-Then run:
-  rm -rf /tmp/gaai
-  git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai
-  bash /tmp/gaai/.gaai/core/scripts/install.sh --target . --tool {user-tool} --yes
-  rm -rf /tmp/gaai
-
-After install, show the user the next steps exactly as printed by the
-installer.
-```
-
-The installer copies `.gaai/` and deploys the right adapter for your tool (CLAUDE.md, AGENTS.md, or .cursor/rules/).
-
-</details>
-
-<details open>
-<summary>Option B — CLI</summary>
-
-```bash
-git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai && \
-  bash /tmp/gaai/.gaai/core/scripts/install.sh --wizard && \
-  rm -rf /tmp/gaai
-```
-
-</details>
-
----
-
 ## The Problem It Solves
 
 Your AI coding tool writes code fast. But without a governance layer, speed creates drift:
@@ -151,6 +106,51 @@ It is particularly well-suited for **solo SaaS founders who know what they want 
 Discovery in GAAI is conversational and intentionally lightweight: it structures your thinking, not a committee's deliberation. If you already have product clarity, this is a feature — not a limitation.
 
 If you are still in the "getting AI to write my first feature" phase, GAAI adds more structure than you need right now. If you have ever said "the agent broke something it wasn't supposed to touch" — GAAI is for you.
+
+---
+
+## Install (30 seconds)
+
+**Copy the `.gaai/` folder into your project.** That's it.
+
+Download from GitHub, drop `.gaai/` into your project root, and tell your AI tool: *"Read `.gaai/core/README.md` and bootstrap this project."*
+
+<details open>
+<summary>Option A — Ask your AI tool to do it</summary>
+
+Paste this into your AI tool's chat:
+
+```
+Install the GAAI framework into my current project.
+
+Determine {user-tool} by identifying which AI coding tool is running this
+prompt. Valid values: claude-code | cursor | windsurf | other.
+If you cannot determine it, ask the user before proceeding.
+
+Then run:
+  rm -rf /tmp/gaai
+  git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai
+  bash /tmp/gaai/.gaai/core/scripts/install.sh --target . --tool {user-tool} --yes
+  rm -rf /tmp/gaai
+
+After install, show the user the next steps exactly as printed by the
+installer.
+```
+
+The installer copies `.gaai/` and deploys the right adapter for your tool (CLAUDE.md, AGENTS.md, or .cursor/rules/).
+
+</details>
+
+<details open>
+<summary>Option B — CLI</summary>
+
+```bash
+git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai && \
+  bash /tmp/gaai/.gaai/core/scripts/install.sh --wizard && \
+  rm -rf /tmp/gaai
+```
+
+</details>
 
 ---
 
