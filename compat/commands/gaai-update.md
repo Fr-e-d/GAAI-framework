@@ -1,3 +1,7 @@
+---
+description: Update the GAAI framework or switch AI tool adapter
+---
+
 # /gaai-update
 
 Update the GAAI framework or switch AI tool adapter.
