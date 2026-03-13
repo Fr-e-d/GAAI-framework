@@ -30,6 +30,15 @@ CORE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 GAAI_DIR="$(cd "$CORE_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$GAAI_DIR/.." && pwd)"
 
+# ── Platform guard ────────────────────────────────────────────────────
+case "$(uname -s)" in
+  Darwin|Linux) ;;
+  MINGW*|MSYS*|CYGWIN*)
+    echo "ERROR: Native Windows is not supported. Use WSL instead."
+    exit 1
+    ;;
+esac
+
 DAEMON_SCRIPT="$SCRIPT_DIR/delivery-daemon.sh"
 PID_FILE="$GAAI_DIR/project/contexts/backlog/.delivery-locks/.daemon.pid"
 LOG_FILE="$GAAI_DIR/project/contexts/backlog/.delivery-daemon.log"
@@ -131,12 +140,10 @@ do_start() {
   echo "  Log: $LOG_FILE"
 
   # Platform detection: prefer tmux, fallback to nohup
-  OS="$(uname -s)"
-
   if command -v tmux &>/dev/null; then
-    # Launch in a tmux session
-    tmux new-session -d -s gaai-daemon \
-      "bash '$DAEMON_SCRIPT' ${PASSTHROUGH_ARGS[*]:-} 2>&1 | tee -a '$LOG_FILE'"
+    # Build tmux command string (args are simple flags, safe to join)
+    local daemon_cmd="bash '${DAEMON_SCRIPT}' ${PASSTHROUGH_ARGS[*]:-} 2>&1 | tee -a '${LOG_FILE}'"
+    tmux new-session -d -s gaai-daemon "$daemon_cmd"
 
     # Give it a moment to start, then grab the PID
     sleep 1
@@ -158,7 +165,7 @@ do_start() {
     fi
   else
     # Fallback: nohup
-    nohup bash "$DAEMON_SCRIPT" ${PASSTHROUGH_ARGS[*]:-} >> "$LOG_FILE" 2>&1 &
+    nohup bash "$DAEMON_SCRIPT" "${PASSTHROUGH_ARGS[@]}" >> "$LOG_FILE" 2>&1 &
     local bg_pid=$!
     echo "$bg_pid" > "$PID_FILE"
     echo "  PID: $bg_pid (nohup)"

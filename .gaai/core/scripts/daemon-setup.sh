@@ -32,6 +32,16 @@ CORE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 GAAI_DIR="$(cd "$CORE_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$GAAI_DIR/.." && pwd)"
 
+# ── Platform guard ────────────────────────────────────────────────────
+OS="$(uname -s)"
+case "$OS" in
+  Darwin|Linux) ;;
+  MINGW*|MSYS*|CYGWIN*)
+    echo "ERROR: Native Windows is not supported. Use WSL instead."
+    exit 1
+    ;;
+esac
+
 echo ""
 echo "GAAI Daemon Setup"
 echo "  project: $PROJECT_ROOT"
@@ -56,8 +66,7 @@ else
   fail "claude CLI not found — install from https://claude.com/claude-code"
 fi
 
-# Terminal (platform-specific)
-OS="$(uname -s)"
+# Terminal (platform-specific — OS set in platform guard above)
 if [[ "$OS" == "Darwin" ]]; then
   if [[ -d "/System/Applications/Utilities/Terminal.app" ]] || [[ -d "/Applications/Utilities/Terminal.app" ]]; then
     pass "Terminal.app available (macOS)"
@@ -114,23 +123,27 @@ CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 mkdir -p "$HOME/.claude"
 if [[ -f "$CLAUDE_SETTINGS" ]]; then
   if python3 -c "
-import json, sys
-with open('$CLAUDE_SETTINGS') as f:
+import json, sys, os
+with open(os.environ['CLAUDE_SETTINGS']) as f:
     d = json.load(f)
 sys.exit(0 if d.get('skipDangerousModePermissionPrompt') == True else 1)
 " 2>/dev/null; then
     pass "skipDangerousModePermissionPrompt already set"
   else
     # Merge into existing settings
-    python3 -c "
-import json
-with open('$CLAUDE_SETTINGS') as f:
+    if CLAUDE_SETTINGS="$CLAUDE_SETTINGS" python3 -c "
+import json, os
+p = os.environ['CLAUDE_SETTINGS']
+with open(p) as f:
     d = json.load(f)
 d['skipDangerousModePermissionPrompt'] = True
-with open('$CLAUDE_SETTINGS', 'w') as f:
+with open(p, 'w') as f:
     json.dump(d, f, indent=2)
-" 2>/dev/null && pass "skipDangerousModePermissionPrompt added to existing settings" \
-              || fail "Could not update $CLAUDE_SETTINGS"
+" 2>/dev/null; then
+      pass "skipDangerousModePermissionPrompt added to existing settings"
+    else
+      fail "Could not update $CLAUDE_SETTINGS"
+    fi
   fi
 else
   echo '{ "skipDangerousModePermissionPrompt": true }' > "$CLAUDE_SETTINGS"
