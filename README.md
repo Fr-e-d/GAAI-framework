@@ -47,7 +47,7 @@ git fetch gaai-framework
 git subtree pull --prefix=.gaai gaai-framework main --squash
 
 # Or pin to a specific release tag
-git subtree pull --prefix=.gaai gaai-framework v2.1.1 --squash
+git subtree pull --prefix=.gaai gaai-framework v2.1.0 --squash
 ```
 
 ---
