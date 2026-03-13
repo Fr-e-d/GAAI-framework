@@ -2,10 +2,10 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md and .gaai/project/skills/*/SKILL.md
 # Regenerate: invoke build-skills-indices skill
 
-generated_at: 2026-03-13
-total: 73
-core: 46
-project: 27
+generated_at: 2026-03-12
+total: 66
+core: 40
+project: 26
 
 discovery:
   - id: SKILL-CNT-011
@@ -307,15 +307,6 @@ delivery:
     tags: []
     updated_at: 2026-03-09
     path: project/skills/delivery/verify-story/SKILL.md
-  - id: SKILL-CNT-021
-    name: youtube-engage
-    source: project
-    description: "Discover high-value YouTube videos, post outbound value comments, scan for replies, draft and post responses. Full YouTube engagement lifecycle with fact-check gate and human review. Four phases — Discover, Comment, Scan, Reply."
-    category: content
-    track: delivery
-    tags: []
-    updated_at: 2026-03-13
-    path: project/skills/domains/content-production/youtube-engage/SKILL.md
 
 cross:
   - id: SKILL-CRS-020
@@ -354,15 +345,6 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/cross/build-agents-index/SKILL.md
-  - id: SKILL-CRS-017
-    name: build-skills-index
-    source: core
-    description: "Scan all SKILL.md files in .gaai/core/skills/, extract YAML frontmatter, and generate a derived skills-index.yaml at .gaai/core/skills/skills-index.yaml. Activate after creating, modifying, or removing any skill."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-02-26
-    path: core/skills/cross/build-skills-index/SKILL.md
   - id: build-skills-indices
     name: build-skills-indices
     source: core
@@ -464,15 +446,6 @@ cross:
     path: core/skills/cross/friction-retrospective/SKILL.md
   - id: SKILL-CRS-021
     name: generate-build-in-public-content
-    source: core
-    description: "Generate build-in-public content drafts from completed delivery artefacts. Applies the Golden Circle (WHY → HOW → WHAT) to transform stories, decisions, and metrics into ready-to-review content pieces (X threads, blog snippets, metrics posts). Activate automatically after each story reaches `done` status."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-02-26
-    path: core/skills/cross/generate-build-in-public-content/SKILL.md
-  - id: SKILL-CRS-021
-    name: generate-build-in-public-content
     source: project
     description: "Generate build-in-public content drafts from completed delivery artefacts. Applies the Golden Circle (WHY → HOW → WHAT) to transform stories, decisions, and metrics into ready-to-review content pieces (X threads, blog snippets, metrics posts). Activate automatically after each story reaches `done` status."
     category: cross
@@ -480,15 +453,6 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: project/skills/cross/generate-build-in-public-content/SKILL.md
-  - id: i18n-extract
-    name: i18n-extract
-    source: core
-    description: "Scan codebase for hardcoded strings that should be internationalised, classify by domain and priority, and produce a structured extraction report for translation workflows."
-    category: analysis
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-03-02
-    path: core/skills/cross/i18n-extract/SKILL.md
   - id: i18n-extract
     name: i18n-extract
     source: project
@@ -500,15 +464,6 @@ cross:
     path: project/skills/cross/i18n-extract/SKILL.md
   - id: i18n-glossary-sync
     name: i18n-glossary-sync
-    source: core
-    description: "Maintain a canonical i18n glossary file — sync new terms across all language pairs, detect drift, flag missing translations, and enforce consistent terminology across the codebase."
-    category: analysis
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-03-02
-    path: core/skills/cross/i18n-glossary-sync/SKILL.md
-  - id: i18n-glossary-sync
-    name: i18n-glossary-sync
     source: project
     description: "Maintain a canonical i18n glossary file — sync new terms across all language pairs, detect drift, flag missing translations, and enforce consistent terminology across the codebase."
     category: analysis
@@ -518,15 +473,6 @@ cross:
     path: project/skills/cross/i18n-glossary-sync/SKILL.md
   - id: i18n-validate
     name: i18n-validate
-    source: core
-    description: "Validate translation completeness and consistency across all locale files — detect missing keys, untranslated strings, format mismatches, and glossary violations."
-    category: analysis
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-03-02
-    path: core/skills/cross/i18n-validate/SKILL.md
-  - id: i18n-validate
-    name: i18n-validate
     source: project
     description: "Validate translation completeness and consistency across all locale files — detect missing keys, untranslated strings, format mismatches, and glossary violations."
     category: analysis
@@ -534,15 +480,6 @@ cross:
     tags: []
     updated_at: 2026-03-02
     path: project/skills/cross/i18n-validate/SKILL.md
-  - id: idiomatique-translate
-    name: idiomatique-translate
-    source: core
-    description: "Translate strings idiomatically across multiple target languages using a project glossary, preserving tone, domain terminology, and format placeholders while flagging untranslatable content."
-    category: content
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-03-02
-    path: core/skills/cross/idiomatique-translate/SKILL.md
   - id: idiomatique-translate
     name: idiomatique-translate
     source: project

@@ -127,6 +127,7 @@ To regenerate after adding or modifying a skill:
 | `coordinate-handoffs` | SKILL-DEL-009 | Validate sub-agent handoff artefacts, sequence phase transitions, manage retry and escalation logic |
 | `delivery-high-level-plan` | SKILL-DELIVERY-HIGH-LEVEL-PLAN-001 | Transform validated Stories into a clear, minimal, governed execution plan |
 | `evaluate-story` | — | Assess complexity, identify domains, determine delivery tier |
+| `frontend-design` | — | Domain-specific skill for frontend UI implementation |
 | `implement` | — | Implement a Story from an execution plan |
 | `prepare-execution-plan` | — | File-level decomposition of a high-level plan for Tier 2/3 Stories |
 | `qa-review` | SKILL-QA-REVIEW-001 | Validate implemented code against acceptance criteria — the hard quality gate |
