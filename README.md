@@ -1,4 +1,4 @@
-![Version](https://img.shields.io/badge/version-2.1.1-blue)
+![Version](https://img.shields.io/badge/version-2.1.0-blue)
 ![License: ELv2](https://img.shields.io/badge/license-ELv2-green)
 ![No SDK](https://img.shields.io/badge/stack-markdown%20%2B%20yaml%20%2B%20bash-orange)
 
@@ -39,73 +39,6 @@ Two slash commands. Two **isolated contexts**. Discovery reasons — it never ex
 > stories in parallel — no human in the loop. [See Automation →](#automation-optional)
 
 > [Full walkthrough in Quick Start](docs/guides/quick-start.md)
-
----
-
-## The Problem It Solves
-
-Your AI coding tool writes code fast. But without a governance layer, speed creates drift:
-
-- The agent ships the feature — and quietly refactors two unrelated modules you didn't mention
-- You agreed three sessions ago: no ORM, raw SQL only. The agent just introduced an ORM dependency — it had no memory of that decision
-- Acceptance criteria were written after implementation. No one can verify the agent built the right thing
-- A critical bug appears. You open a new session. The agent has no idea what the system does or what was decided last week
-- You're not sure what the agent touched or what it was allowed to touch. There's no record either way
-
-None of these are bugs in the AI. They are symptoms of using a powerful execution engine without a governance layer.
-
----
-
-## How It Works
-
-**Discovery** — you talk to the Discovery Agent in your current session. Clarify what to build. Output: a Story with acceptance criteria in the backlog. Discovery reasons. It does not execute.
-
-**Delivery** — always runs in an **isolated context**. `/gaai-deliver` spawns a separate agent with a clean context window — no Discovery residue, no conversation history bleed. The Delivery Agent orchestrates specialized sub-agents (Planning, Implementation, QA) per Story. No improvisation. No scope drift. No context contamination.
-
-**The backlog is the contract.** Nothing gets built that isn't in it.
-
-```
-your-project/
-└── .gaai/
-    ├── core/                  ← framework engine (updated via git subtree)
-    │   ├── README.md          ← start here (human + AI onboarding)
-    │   ├── GAAI.md            ← full reference
-    │   ├── QUICK-REFERENCE.md ← daily cheat sheet
-    │   ├── VERSION
-    │   ├── agents/            ← Discovery + Delivery + Bootstrap agent specs
-    │   ├── skills/            ← 47 execution units
-    │   ├── contexts/rules/    ← framework rules
-    │   ├── workflows/         ← delivery loop, bootstrap, handoffs
-    │   ├── scripts/           ← bash utilities
-    │   ├── hooks/             ← git hook dispatcher + core hooks
-    │   └── compat/            ← thin adapters per AI tool
-    └── project/               ← your project data (never overwritten by updates)
-        ├── agents/            ← custom project agents
-        ├── skills/            ← custom project skills
-        ├── scripts/           ← project-specific scripts
-        ├── hooks/             ← project-specific git hooks
-        ├── workflows/         ← custom workflow overrides
-        ├── content/           ← content production assets
-        └── contexts/
-            ├── rules/         ← project rule overrides
-            ├── memory/        ← persistent memory (decisions, patterns, context)
-            ├── backlog/       ← execution queue (active, blocked, done)
-            └── artefacts/     ← stories, epics, plans, reports
-```
-
-No SDK. No npm package. No pip install. Markdown + YAML + bash. Readable by humans and any AI tool.
-
----
-
-## Who This Is For
-
-GAAI is built for the developer — solo founder, small team, senior engineer — who is already using AI coding tools seriously and has started running into the governance problems that come with that.
-
-It is particularly well-suited for **solo SaaS founders who know what they want to build**. You do not need to simulate a 12-person product team. You need an agent that helps you turn what's in your head into executable Stories, and another that ships them reliably without going off-script.
-
-Discovery in GAAI is conversational and intentionally lightweight: it structures your thinking, not a committee's deliberation. If you already have product clarity, this is a feature — not a limitation.
-
-If you are still in the "getting AI to write my first feature" phase, GAAI adds more structure than you need right now. If you have ever said "the agent broke something it wasn't supposed to touch" — GAAI is for you.
 
 ---
 
@@ -154,13 +87,58 @@ git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai && \
 
 ---
 
-## Compared to Other Approaches
+## The Problem It Solves
 
-**vs. AGENTS.md / cursor rules:** A well-written AGENTS.md solves context loss for a single session. It does not solve scope drift, cross-session memory, or the authorization problem. GAAI is what comes after you've maxed out what a good AGENTS.md can do.
+Your AI coding tool writes code fast. But without a governance layer, speed creates drift:
 
-**vs. BMAD-METHOD:** BMAD simulates a multi-agent Agile team with specialized personas (PM, Architect, Developer, QA, and more) and rich collaborative workflows. It is powerful when you want AI to co-drive product thinking. GAAI makes a different trade-off: a lighter Discovery track optimized for developers who already have clarity on what to build, paired with a Delivery track that is more rigidly governed. Different tools for adjacent problems — the key difference is in Delivery: GAAI's governance model is structural, not persona-based.
+- The agent ships the feature — and quietly refactors two unrelated modules you didn't mention
+- You agreed three sessions ago: no ORM, raw SQL only. The agent just introduced an ORM dependency — it had no memory of that decision
+- Acceptance criteria were written after implementation. No one can verify the agent built the right thing
+- A critical bug appears. You open a new session. The agent has no idea what the system does or what was decided last week
+- You're not sure what the agent touched or what it was allowed to touch. There's no record either way
 
-**vs. LangGraph / AutoGen / CrewAI:** Code-first orchestration frameworks for building AI systems. GAAI is a governance layer for using AI coding tools. Different abstraction level entirely.
+None of these are bugs in the AI. They are symptoms of using a powerful execution engine without a governance layer.
+
+---
+
+## How It Works
+
+**Discovery** — you talk to the Discovery Agent in your current session. Clarify what to build. Output: a Story with acceptance criteria in the backlog. Discovery reasons. It does not execute.
+
+**Delivery** — always runs in an **isolated context**. `/gaai-deliver` spawns a separate agent with a clean context window — no Discovery residue, no conversation history bleed. The Delivery Agent orchestrates specialized sub-agents (Planning, Implementation, QA) per Story. No improvisation. No scope drift. No context contamination.
+
+**The backlog is the contract.** Nothing gets built that isn't in it.
+
+```
+your-project/
+└── .gaai/
+    ├── core/                  ← framework engine (updated via git subtree)
+    │   ├── README.md          ← start here (human + AI onboarding)
+    │   ├── GAAI.md            ← full reference
+    │   ├── QUICK-REFERENCE.md ← daily cheat sheet
+    │   ├── VERSION
+    │   ├── agents/            ← Discovery + Delivery + Bootstrap agent specs
+    │   ├── skills/            ← 40 execution units
+    │   ├── contexts/rules/    ← framework rules
+    │   ├── workflows/         ← delivery loop, bootstrap, handoffs
+    │   ├── scripts/           ← bash utilities
+    │   ├── hooks/             ← git hook dispatcher + core hooks
+    │   └── compat/            ← thin adapters per AI tool
+    └── project/               ← your project data (never overwritten by updates)
+        ├── agents/            ← custom project agents
+        ├── skills/            ← custom project skills
+        ├── scripts/           ← project-specific scripts
+        ├── hooks/             ← project-specific git hooks
+        ├── workflows/         ← custom workflow overrides
+        ├── content/           ← content production assets
+        └── contexts/
+            ├── rules/         ← project rule overrides
+            ├── memory/        ← persistent memory (decisions, patterns, context)
+            ├── backlog/       ← execution queue (active, blocked, done)
+            └── artefacts/     ← stories, epics, plans, reports
+```
+
+No SDK. No npm package. No pip install. Markdown + YAML + bash. Readable by humans and any AI tool.
 
 ---
 
@@ -210,15 +188,6 @@ One canonical source (`.gaai/`). Thin adapters per tool. No duplication. The fra
 
 ---
 
-## Honest Trade-offs
-
-- Discovery is conversational and intentionally lightweight. It helps you structure what you know — it does not replace deep product research or collaborative brainstorming across a team.
-- Trivial tasks still need a backlog item. You can make it a one-liner, but the gate is always there.
-- The framework relies on the agent following the files. There is no programmatic enforcement.
-- The repo is freshly open-sourced. Community is just getting started.
-
----
-
 ## Documentation
 
 - [Quick Start](docs/guides/quick-start.md) — first working Story in 30 minutes
@@ -226,7 +195,7 @@ One canonical source (`.gaai/`). Thin adapters per tool. No duplication. The fra
 - [Core Concepts](docs/02-core-concepts.md) — dual track, backlog, memory, skills, artefacts
 - [Vibe Coder Guide](docs/guides/vibe-coder-guide.md) — fast daily workflow
 - [Senior Engineer Guide](docs/guides/senior-engineer-guide.md) — governance, rules, CI
-- [Skills Index](.gaai/core/skills/README.skills.md) — all 47 skills
+- [Skills Index](.gaai/core/skills/README.skills.md) — all 40 skills
 - [Tool Compatibility](docs/reference/tool-compatibility.md) — Claude Code, OpenCode, Codex CLI, Gemini CLI, Antigravity, Cursor, Windsurf
 - [Design Decisions](docs/architecture/design-decisions.md) — why GAAI is structured the way it is (ADRs + research basis)
 
