@@ -3,9 +3,9 @@
 # Regenerate: invoke build-skills-indices skill
 
 generated_at: 2026-03-12
-total: 68
-core: 47
-project: 21
+total: 66
+core: 40
+project: 26
 
 discovery:
   - id: SKILL-CNT-011
@@ -190,15 +190,6 @@ delivery:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/delivery/evaluate-story/SKILL.md
-  - id: SKILL-FRONTEND-DESIGN-001
-    name: frontend-design
-    source: core
-    description: "Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, or applications. Generates creative, polished code that avoids generic AI aesthetics."
-    category: delivery
-    track: delivery
-    tags: []
-    updated_at: 2026-03-01
-    path: core/skills/delivery/frontend-design/SKILL.md
   - id: SKILL-CNT-006
     name: geo-optimize
     source: project
@@ -354,15 +345,6 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/cross/build-agents-index/SKILL.md
-  - id: SKILL-CRS-017
-    name: build-skills-index
-    source: core
-    description: "Scan all SKILL.md files in .gaai/core/skills/, extract YAML frontmatter, and generate a derived skills-index.yaml at .gaai/core/skills/skills-index.yaml. Activate after creating, modifying, or removing any skill."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-02-26
-    path: core/skills/cross/build-skills-index/SKILL.md
   - id: build-skills-indices
     name: build-skills-indices
     source: core
@@ -464,49 +446,49 @@ cross:
     path: core/skills/cross/friction-retrospective/SKILL.md
   - id: SKILL-CRS-021
     name: generate-build-in-public-content
-    source: core
+    source: project
     description: "Generate build-in-public content drafts from completed delivery artefacts. Applies the Golden Circle (WHY → HOW → WHAT) to transform stories, decisions, and metrics into ready-to-review content pieces (X threads, blog snippets, metrics posts). Activate automatically after each story reaches `done` status."
     category: cross
     track: cross-cutting
     tags: []
     updated_at: 2026-02-26
-    path: core/skills/cross/generate-build-in-public-content/SKILL.md
+    path: project/skills/cross/generate-build-in-public-content/SKILL.md
   - id: i18n-extract
     name: i18n-extract
-    source: core
+    source: project
     description: "Scan codebase for hardcoded strings that should be internationalised, classify by domain and priority, and produce a structured extraction report for translation workflows."
     category: analysis
     track: cross-cutting
     tags: []
     updated_at: 2026-03-02
-    path: core/skills/cross/i18n-extract/SKILL.md
+    path: project/skills/cross/i18n-extract/SKILL.md
   - id: i18n-glossary-sync
     name: i18n-glossary-sync
-    source: core
+    source: project
     description: "Maintain a canonical i18n glossary file — sync new terms across all language pairs, detect drift, flag missing translations, and enforce consistent terminology across the codebase."
     category: analysis
     track: cross-cutting
     tags: []
     updated_at: 2026-03-02
-    path: core/skills/cross/i18n-glossary-sync/SKILL.md
+    path: project/skills/cross/i18n-glossary-sync/SKILL.md
   - id: i18n-validate
     name: i18n-validate
-    source: core
+    source: project
     description: "Validate translation completeness and consistency across all locale files — detect missing keys, untranslated strings, format mismatches, and glossary violations."
     category: analysis
     track: cross-cutting
     tags: []
     updated_at: 2026-03-02
-    path: core/skills/cross/i18n-validate/SKILL.md
+    path: project/skills/cross/i18n-validate/SKILL.md
   - id: idiomatique-translate
     name: idiomatique-translate
-    source: core
+    source: project
     description: "Translate strings idiomatically across multiple target languages using a project glossary, preserving tone, domain terminology, and format placeholders while flagging untranslatable content."
     category: content
     track: cross-cutting
     tags: []
     updated_at: 2026-03-02
-    path: core/skills/cross/idiomatique-translate/SKILL.md
+    path: project/skills/cross/idiomatique-translate/SKILL.md
   - id: SKILL-MEMORY-ALIGNMENT-CHECK-001
     name: memory-alignment-check
     source: core
