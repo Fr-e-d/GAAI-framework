@@ -123,6 +123,19 @@ fi
 
 # ── Platform detection ──────────────────────────────────────────────────
 PLATFORM="$(uname)"
+case "$PLATFORM" in
+  Darwin|Linux) ;;
+  MINGW*|MSYS*|CYGWIN*)
+    echo -e "${RED:-}ERROR: Native Windows (Git Bash/MSYS2) is not supported.${NC:-}"
+    echo "Use WSL (Windows Subsystem for Linux) instead:"
+    echo "  wsl --install && wsl"
+    echo "  cd /mnt/c/path/to/project && .gaai/core/scripts/delivery-daemon.sh"
+    exit 1
+    ;;
+  *)
+    echo -e "${RED:-}WARNING: Untested platform '$PLATFORM' — proceeding with Linux defaults${NC:-}"
+    ;;
+esac
 
 # --dangerously-skip-permissions: required for -p mode (headless).
 # Without it, permission prompts hang forever since there's no interactive input.
@@ -176,7 +189,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run)        DRY_RUN=true; shift ;;
     --status)         STATUS_MODE=true; shift ;;
     --help|-h)
-      sed -n '/^# Description:/,/^# ═══.*═══$/p' "$0" | head -n -1
+      sed -n '/^# Description:/,/^# ═══.*═══$/{ /^# ═══.*═══$/d; p; }' "$0"
       exit 0
       ;;
     *)
@@ -203,7 +216,8 @@ fi
 log() {
   local msg="[$(date '+%H:%M:%S')] $*"
   echo -e "$msg"
-  echo -e "$msg" | sed 's/\x1B\[[0-9;]*m//g' >> "$LOG_FILE"
+  local ESC=$'\033'
+  echo -e "$msg" | sed "s/${ESC}\[[0-9;]*m//g" >> "$LOG_FILE"
 }
 
 # ── Preflight checks ─────────────────────────────────────────────────────
@@ -707,7 +721,8 @@ unset CLAUDECODE 2>/dev/null || true
 : > "$delivery_log"
 
 # Slash commands don't work in -p mode — expand the command file into a prompt
-DELIVERY_PROMPT=\$(cat "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
+# Strip YAML frontmatter (--+\n...\n--+) — claude -p treats leading dashes as a CLI option
+DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
 # --output-format stream-json streams NDJSON events in real-time, so:
 #   - tee updates the log file continuously (natural heartbeat for daemon monitor)
@@ -810,8 +825,9 @@ unset CLAUDECODE 2>/dev/null || true
 : > "$delivery_log"
 
 # Slash commands don't work in -p mode — expand the command file into a prompt
+# Strip YAML frontmatter (--+\n...\n--+) — claude -p treats leading dashes as a CLI option
 # See: https://code.claude.com/docs/en/headless
-DELIVERY_PROMPT=\$(cat "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
+DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
 # Print mode (-p): claude processes the prompt and exits, freeing the daemon slot.
 # --dangerously-skip-permissions handles tool approval (required for headless).
