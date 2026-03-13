@@ -905,38 +905,21 @@ shutdown() {
 trap shutdown SIGINT SIGTERM
 
 # ── Banner ────────────────────────────────────────────────────────────────
-BANNER_W=58  # inner width between ║ and ║
-banner_row() {
-  local label="$1" value="$2"
-  local content="  ${label}${value}"
-  local pad=$(( BANNER_W - ${#content} ))
-  printf "  ║%s%${pad}s║\n" "${content}" ""
-}
-banner_row_styled() {
-  local label="$1" value="$2"
-  local content="  ${label}${value}"
-  local pad=$(( BANNER_W - ${#content} ))
-  local spaces=""
-  (( pad > 0 )) && spaces=$(printf '%*s' "$pad" "")
-  echo -e "  ║${NC}${CYAN}  ${label}${BOLD}${value}${NC}${CYAN}${spaces}║"
-}
-
 echo -e "${CYAN}${BOLD}"
-echo "  ╔$(printf '═%.0s' $(seq 1 $BANNER_W))╗"
-banner_row "" "$(printf '%*s' $(( (BANNER_W - 22) / 2 )) '')GAAI Delivery Daemon"
-echo "  ╠$(printf '═%.0s' $(seq 1 $BANNER_W))╣"
-echo -e "${NC}${CYAN}"
-banner_row_styled "Branch:         " "$TARGET_BRANCH"
-banner_row_styled "Poll interval:  " "${POLL_INTERVAL}s"
-banner_row_styled "Max concurrent: " "$MAX_CONCURRENT"
-banner_row_styled "Model:          " "$CLAUDE_MODEL"
-banner_row_styled "Launcher:       " "$LAUNCHER"
-banner_row_styled "Skip perms:     " "$SKIP_PERMISSIONS"
-banner_row_styled "Max turns:      " "$MAX_TURNS"
-banner_row_styled "Heartbeat:      " "${HEARTBEAT_STALE}s"
-banner_row_styled "Hard timeout:   " "${DELIVERY_TIMEOUT}s"
-banner_row_styled "Dry run:        " "$DRY_RUN"
-echo -e "  ${BOLD}╚$(printf '═%.0s' $(seq 1 $BANNER_W))╝${NC}"
+echo "  ╔══════════════════════════════════════════════════════════╗"
+echo "  ║              GAAI Delivery Daemon                       ║"
+echo "  ╠══════════════════════════════════════════════════════════╣"
+echo -e "  ║${NC}${CYAN}  Branch:         ${BOLD}${TARGET_BRANCH}${NC}${CYAN}                               ║"
+echo -e "  ║${NC}${CYAN}  Poll interval:  ${BOLD}${POLL_INTERVAL}s${NC}${CYAN}                                 ║"
+echo -e "  ║${NC}${CYAN}  Max concurrent: ${BOLD}${MAX_CONCURRENT}${NC}${CYAN}                                  ║"
+echo -e "  ║${NC}${CYAN}  Model:          ${BOLD}${CLAUDE_MODEL}${NC}${CYAN}                             ║"
+echo -e "  ║${NC}${CYAN}  Launcher:       ${BOLD}${LAUNCHER}${NC}${CYAN}                           ║"
+echo -e "  ║${NC}${CYAN}  Skip perms:     ${BOLD}${SKIP_PERMISSIONS}${NC}${CYAN}                              ║"
+echo -e "  ║${NC}${CYAN}  Max turns:      ${BOLD}${MAX_TURNS}${NC}${CYAN}                                ║"
+echo -e "  ║${NC}${CYAN}  Heartbeat:      ${BOLD}${HEARTBEAT_STALE}s${NC}${CYAN}                               ║"
+echo -e "  ║${NC}${CYAN}  Hard timeout:   ${BOLD}${DELIVERY_TIMEOUT}s${NC}${CYAN}                             ║"
+echo -e "  ║${NC}${CYAN}  Dry run:        ${BOLD}${DRY_RUN}${NC}${CYAN}                              ║"
+echo -e "  ${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  ${YELLOW}Ctrl+C to stop (active sessions keep running)${NC}"
 echo ""
