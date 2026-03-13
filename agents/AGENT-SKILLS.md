@@ -7,7 +7,7 @@ Each agent has a skill index recommending which skills to load and when.
 | Agent | File | Skills | Required |
 |---|---|---|---|
 | **Discovery** | `.gaai/core/agents/discovery.agent-skills.yaml` | 10 available | 2 required |
-| **Delivery** | `.gaai/core/agents/delivery.agent-skills.yaml` | 10 available | 2 required |
+| **Delivery** | `.gaai/core/agents/delivery.agent-skills.yaml` | 11 available | 2 required |
 | **Bootstrap** | `.gaai/core/agents/bootstrap.agent-skills.yaml` | 4 available | 2 required |
 
 ## How to Use These Indices
@@ -70,6 +70,7 @@ required_skills:
   - framework-sync      (always needed for compliance)
 
 optional_skills:
+  - frontend-design     (only if building UI)
   - idiomatique-translate (only if translating copy)
 ```
 

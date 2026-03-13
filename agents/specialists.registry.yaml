@@ -74,6 +74,7 @@ specialists:
       - client-side
     skills:
       - implement
+      - frontend-design  # SKILL-FRONTEND-DESIGN-001 — distinctive UI, avoids generic AI aesthetics
     context_bundle:
       - contexts/memory/patterns/conventions.md  # ui conventions if present
 
