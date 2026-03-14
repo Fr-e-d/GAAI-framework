@@ -905,21 +905,40 @@ shutdown() {
 trap shutdown SIGINT SIGTERM
 
 # ── Banner ────────────────────────────────────────────────────────────────
+# Dynamic padding so the right border always aligns
+BANNER_WIDTH=58  # inner width between ║ chars (matches ══ count)
+banner_row() {
+  local label="$1" value="$2"
+  local content="  ${label}${value}"
+  local pad=$(( BANNER_WIDTH - ${#content} ))
+  printf "  ║%s%${pad}s║\n" "${content}" ""
+}
+banner_row_styled() {
+  local label="$1" value="$2"
+  local content="  ${label}${value}"
+  local pad=$(( BANNER_WIDTH - ${#content} ))
+  local spaces
+  printf -v spaces '%*s' "$pad" ''
+  echo -e "  ║${NC}${CYAN}  ${label}${BOLD}${value}${NC}${CYAN}${spaces}║"
+}
+
 echo -e "${CYAN}${BOLD}"
-echo "  ╔══════════════════════════════════════════════════════════╗"
-echo "  ║              GAAI Delivery Daemon                       ║"
-echo "  ╠══════════════════════════════════════════════════════════╣"
-echo -e "  ║${NC}${CYAN}  Branch:         ${BOLD}${TARGET_BRANCH}${NC}${CYAN}                               ║"
-echo -e "  ║${NC}${CYAN}  Poll interval:  ${BOLD}${POLL_INTERVAL}s${NC}${CYAN}                                 ║"
-echo -e "  ║${NC}${CYAN}  Max concurrent: ${BOLD}${MAX_CONCURRENT}${NC}${CYAN}                                  ║"
-echo -e "  ║${NC}${CYAN}  Model:          ${BOLD}${CLAUDE_MODEL}${NC}${CYAN}                             ║"
-echo -e "  ║${NC}${CYAN}  Launcher:       ${BOLD}${LAUNCHER}${NC}${CYAN}                           ║"
-echo -e "  ║${NC}${CYAN}  Skip perms:     ${BOLD}${SKIP_PERMISSIONS}${NC}${CYAN}                              ║"
-echo -e "  ║${NC}${CYAN}  Max turns:      ${BOLD}${MAX_TURNS}${NC}${CYAN}                                ║"
-echo -e "  ║${NC}${CYAN}  Heartbeat:      ${BOLD}${HEARTBEAT_STALE}s${NC}${CYAN}                               ║"
-echo -e "  ║${NC}${CYAN}  Hard timeout:   ${BOLD}${DELIVERY_TIMEOUT}s${NC}${CYAN}                             ║"
-echo -e "  ║${NC}${CYAN}  Dry run:        ${BOLD}${DRY_RUN}${NC}${CYAN}                              ║"
-echo -e "  ${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
+echo "  ╔$(printf '═%.0s' $(seq 1 $BANNER_WIDTH))╗"
+TITLE="GAAI Delivery Daemon"
+TITLE_LEN=${#TITLE}
+printf "  ║%*s%s%*s║\n" $(( (BANNER_WIDTH - TITLE_LEN) / 2 )) "" "$TITLE" $(( (BANNER_WIDTH - TITLE_LEN + 1) / 2 )) ""
+echo "  ╠$(printf '═%.0s' $(seq 1 $BANNER_WIDTH))╣"
+banner_row_styled "Branch:         " "$TARGET_BRANCH"
+banner_row_styled "Poll interval:  " "${POLL_INTERVAL}s"
+banner_row_styled "Max concurrent: " "$MAX_CONCURRENT"
+banner_row_styled "Model:          " "$CLAUDE_MODEL"
+banner_row_styled "Launcher:       " "$LAUNCHER"
+banner_row_styled "Skip perms:     " "$SKIP_PERMISSIONS"
+banner_row_styled "Max turns:      " "$MAX_TURNS"
+banner_row_styled "Heartbeat:      " "${HEARTBEAT_STALE}s"
+banner_row_styled "Hard timeout:   " "${DELIVERY_TIMEOUT}s"
+banner_row_styled "Dry run:        " "$DRY_RUN"
+echo -e "  ${BOLD}╚$(printf '═%.0s' $(seq 1 $BANNER_WIDTH))╝${NC}"
 echo ""
 echo -e "  ${YELLOW}Ctrl+C to stop (active sessions keep running)${NC}"
 echo ""
