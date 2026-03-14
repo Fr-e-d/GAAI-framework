@@ -142,7 +142,7 @@ do_start() {
   # Platform detection: prefer tmux, fallback to nohup
   if command -v tmux &>/dev/null; then
     # Build tmux command string (args are simple flags, safe to join)
-    local daemon_cmd="bash '${DAEMON_SCRIPT}' ${PASSTHROUGH_ARGS[*]:-} 2>&1 | tee -a '${LOG_FILE}'"
+    local daemon_cmd="bash '${DAEMON_SCRIPT}' ${PASSTHROUGH_ARGS[*]+${PASSTHROUGH_ARGS[*]}} 2>&1 | tee -a '${LOG_FILE}'"
     tmux new-session -d -s gaai-daemon "$daemon_cmd"
 
     # Give it a moment to start, then grab the PID
@@ -165,7 +165,7 @@ do_start() {
     fi
   else
     # Fallback: nohup
-    nohup bash "$DAEMON_SCRIPT" "${PASSTHROUGH_ARGS[@]}" >> "$LOG_FILE" 2>&1 &
+    nohup bash "$DAEMON_SCRIPT" ${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"} >> "$LOG_FILE" 2>&1 &
     local bg_pid=$!
     echo "$bg_pid" > "$PID_FILE"
     echo "  PID: $bg_pid (nohup)"
