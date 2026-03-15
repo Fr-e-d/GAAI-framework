@@ -3,9 +3,9 @@
 # Regenerate: invoke build-skills-indices skill
 
 generated_at: 2026-03-15
-total: 72
+total: 73
 core: 47
-project: 25
+project: 26
 
 discovery:
   - id: SKILL-CNT-011
@@ -298,6 +298,15 @@ delivery:
     tags: []
     updated_at: 2026-03-08
     path: project/skills/domains/content-production/social-adapt/SKILL.md
+  - id: SKILL-PROJ-UI-IMPLEMENT-001
+    name: ui-implement
+    source: project
+    description: "Research, structure, implement, and self-verify dashboard UI pages. Applies UX Competitive Analysis (Curator Pattern) before coding and screenshot-based verification after. Replaces frontend-design for application pages (dashboard, settings, forms). Ensures consistent, intuitive, well-structured interfaces from the first iteration."
+    category: delivery
+    track: delivery
+    tags: []
+    updated_at: 2026-03-15
+    path: project/skills/delivery/ui-implement/SKILL.md
   - id: SKILL-CNT-021
     name: youtube-engage
     source: project
