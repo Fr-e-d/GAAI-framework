@@ -112,9 +112,12 @@ draft → refined → in_progress → done | failed
 
 All AI-driven execution targets the **`staging`** branch. The `production` branch is human-only.
 
+**INVARIANT: The main working tree stays on `staging` at ALL times.** Deliveries operate in isolated worktrees (`git worktree add`). The main working tree is never checked out to another branch — the daemon and other processes depend on it remaining on staging.
+
 - AI agents MUST NOT push to, merge to, or interact with `production`
-- Delivery creates story branches from staging: `git branch story/{id} staging` (no checkout)
-- All implementation happens in worktrees (`git worktree add`)
+- Delivery creates story branches from staging: `git branch story/{id} staging` (no checkout — main stays on staging)
+- All implementation happens in worktrees: `git worktree add ../{id}-workspace story/{id}`
+- Sub-agents work exclusively inside their worktree — never in the main repo directory
 - Squash merges back to staging are serialized via `flock`
 - Promotion staging → production is a human action via GitHub PR
 - Before creating a story branch, verify that the **previous story's PR is merged** into staging.
