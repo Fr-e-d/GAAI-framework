@@ -24,7 +24,8 @@ if [[ ! "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-OLD_VERSION="$(cat "$REPO_ROOT/core/VERSION" 2>/dev/null | tr -d '[:space:]')"
+CORE_DIR="$REPO_ROOT/.gaai/core"
+OLD_VERSION="$(cat "$CORE_DIR/VERSION" 2>/dev/null | tr -d '[:space:]')"
 
 if [[ "$OLD_VERSION" == "$NEW_VERSION" ]]; then
   echo "Version is already $NEW_VERSION — nothing to do."
@@ -35,20 +36,20 @@ echo "Bumping GAAI: $OLD_VERSION → $NEW_VERSION"
 echo ""
 
 # ── 1. core/VERSION (source of truth) ──────────────────────────────
-echo "$NEW_VERSION" > "$REPO_ROOT/core/VERSION"
+echo "$NEW_VERSION" > "$CORE_DIR/VERSION"
 echo "  ✓ core/VERSION"
 
 # ── 2. core/README.md — title line ─────────────────────────────────
-if [[ -f "$REPO_ROOT/core/README.md" ]]; then
-  sed -i '' "s/GAAI Framework (v[0-9]*\.[0-9]*\.[0-9]*)/GAAI Framework (v$NEW_VERSION)/" "$REPO_ROOT/core/README.md"
+if [[ -f "$CORE_DIR/README.md" ]]; then
+  sed -i '' "s/GAAI Framework (v[0-9]*\.[0-9]*\.[0-9]*)/GAAI Framework (v$NEW_VERSION)/" "$CORE_DIR/README.md"
   echo "  ✓ core/README.md title"
 else
   echo "  ⚠ core/README.md not found — skipped"
 fi
 
 # ── 3. core/README.md — subtree example tag ────────────────────────
-if [[ -f "$REPO_ROOT/core/README.md" ]]; then
-  sed -i '' "s/gaai-framework v[0-9]*\.[0-9]*\.[0-9]* --squash/gaai-framework v$NEW_VERSION --squash/" "$REPO_ROOT/core/README.md"
+if [[ -f "$CORE_DIR/README.md" ]]; then
+  sed -i '' "s/gaai-framework v[0-9]*\.[0-9]*\.[0-9]* --squash/gaai-framework v$NEW_VERSION --squash/" "$CORE_DIR/README.md"
   echo "  ✓ core/README.md subtree example"
 fi
 
