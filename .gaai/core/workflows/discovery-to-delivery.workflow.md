@@ -31,16 +31,20 @@ This workflow prevents all of the above.
 
 Discovery may hand off to Delivery **only when ALL of the following are true**:
 
-| Condition | Check |
-|---|---|
-| All Stories have explicit acceptance criteria | ✅ |
-| `validate-artefacts` returned PASS for all Stories | ✅ |
-| Each Story maps to a parent Epic | ✅ |
-| Backlog items are status: `refined` | ✅ |
-| No open blocking questions remain | ✅ |
-| No rule violations in artefacts | ✅ |
+| Condition | Check | Bug Triage |
+|---|---|---|
+| All Stories have explicit acceptance criteria | ✅ | ✅ |
+| `validate-artefacts` returned PASS for all Stories | ✅ | ✅ |
+| Each Story maps to a parent Epic | ✅ | ⬚ not required |
+| Backlog items are status: `refined` | ✅ | ✅ |
+| No open blocking questions remain | ✅ | ✅ |
+| No rule violations in artefacts | ✅ | ✅ |
+| Story includes root cause analysis | — | ✅ |
+| Story includes reproduction scenario | — | ✅ |
 
-If any condition is not met → return to Discovery. Use `refine-scope` or `validate-artefacts` to resolve.
+If any required condition is not met → return to Discovery. Use `refine-scope` or `validate-artefacts` to resolve.
+
+**Bug Triage fast-path:** Stories produced by Bug Triage (track: `bug-triage`) do not require a parent Epic or PRD. They are standalone, validated Stories with root cause analysis and reproduction scenarios. All other gate conditions apply identically.
 
 ---
 
@@ -77,6 +81,7 @@ The Discovery Agent guarantees:
 - Artefacts are outcome-driven and unambiguous
 - Acceptance criteria are testable
 - Scope is locked
+- For bug triage: root cause analysis and reproduction scenario are included
 
 The Delivery Agent commits to:
 - Implementing exactly what the artefacts define

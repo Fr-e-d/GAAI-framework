@@ -219,11 +219,73 @@ Use Discovery Agent for:
 - product changes and iteration
 - ambiguous ideas
 - **new projects with no existing codebase** — Discovery seeds project memory by asking questions about the project (purpose, constraints, tech stack, target users) and ingesting answers via `memory-ingest`
+- **complex bugs with unclear root cause** — Discovery runs a Bug Triage flow (see below)
 
 Do NOT use for:
-- bug fixes
+- bugs with obvious root cause (backlog direct → Delivery)
+- regressions with identifiable commit (revert or fix direct)
 - refactors
 - pure technical maintenance
+
+## Bug Triage — Investigation Flow (Spike Pattern)
+
+When activated on a bug with unclear root cause, Discovery runs a streamlined flow inspired by the Scrum spike pattern and validated by phased AI-agent research (AutoCodeRover, Agentless).
+
+**Principle:** Discovery defines WHAT the fix must achieve (expected behavior), never HOW to implement it (technical approach). The investigation narrows the problem space; Delivery solves it.
+
+### When to Use Bug Triage
+
+- Root cause is unknown or ambiguous
+- Multiple subsystems might be involved
+- The bug is not reproducible yet
+- The team cannot estimate the fix with confidence
+
+### When NOT to Use Bug Triage (Go Straight to Backlog)
+
+- Root cause is obvious from the report
+- Regression with a clear commit to revert
+- Simple cosmetic or configuration fix
+
+### Bug Triage Flow
+
+```
+Receive bug report (symptom, reproduction steps if available)
+  ↓
+Investigate: read code, logs, error traces — narrow root cause
+  ↓
+Risk Analysis: assess impact, blast radius, urgency
+  ↓
+IF multiple viable root causes → approach-evaluation
+  ↓
+Produce Story directly (skip PRD, skip Epic):
+  - title: "Fix: {symptom description}"
+  - acceptance criteria:
+    - reproduction scenario (Given/When/Then)
+    - expected behavior after fix
+    - regression test requirement
+    - existing test suite must pass
+  - root_cause_analysis: {findings from investigation}
+  - track: bug-triage (marks provenance)
+  ↓
+Validate Story (validate-artefacts — same gate as features)
+  ↓
+Add to backlog as status: refined
+  ↓
+Ready for Delivery
+```
+
+### Artefacts Produced (Bug Triage)
+
+- **Story** — with acceptance criteria, root cause analysis, and reproduction scenario. No PRD or Epic parent required.
+
+### Constraints (Bug Triage Specific)
+
+- Discovery MAY read code and logs to investigate root cause (this is investigation, not implementation)
+- Discovery MUST NOT write code, propose patches, or define the fix approach
+- Discovery MUST NOT skip the validation gate — bug Stories get the same rigor as feature Stories
+- Time-box: if investigation does not converge within the session, escalate to human with findings so far
+
+---
 
 ## New Project — Memory Seeding
 
