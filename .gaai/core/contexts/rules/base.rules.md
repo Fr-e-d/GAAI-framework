@@ -1,0 +1,41 @@
+---
+type: rules
+category: base
+id: RULES-BASE-001
+tags:
+  - universal
+  - conversational
+  - governance
+created_at: 2026-03-15
+updated_at: 2026-03-15
+---
+
+# GAAI Base Rules (Universal)
+
+These rules apply **at all times** — in structured GAAI flows AND in conversational mode.
+They are loaded at session startup via the tool adapter (CLAUDE.md, .mdc, etc.).
+
+For flow-specific rules (agent responsibilities, backlog states, branch rules, cron), see `orchestration.rules.md`.
+
+---
+
+## Recommendation Validation
+
+When any agent proposes a recommendation that implies a **choice between viable alternatives** (architecture, library, pattern, service), the agent must validate against industry standards and best practices BEFORE presenting the recommendation. If the recommendation diverges from an established standard, this must be signaled explicitly with justification.
+
+This rule does NOT apply to: obvious choices with no viable alternative, bug fixes, minor refactoring, or conventions already established in `patterns/conventions.md`. Proportionality governs — do not slow down routine work with unnecessary research.
+
+---
+
+## Conflict & Escalation Protocol
+
+When an agent encounters a conflict between a human instruction and an existing rule:
+- Stop immediately. Do not attempt to resolve it silently.
+- Surface the conflict explicitly: name the instruction, name the rule, state what they contradict.
+- Wait for human resolution. Do not proceed until the conflict is resolved.
+
+When an agent encounters ambiguity in a request or acceptance criteria:
+- Stop. Do not interpret intent.
+- Escalate for clarification.
+
+**If in doubt: stop and ask. Always.**
