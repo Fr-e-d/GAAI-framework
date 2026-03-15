@@ -288,12 +288,12 @@ Every delivery session must update the following fields on the Story's backlog e
 
 | Field | When to set | Format | How |
 |-------|-------------|--------|-----|
-| `started_at` | When marking `in_progress` (first session only) | ISO 8601 datetime with timezone (e.g. `"2026-02-28T22:00:00Z"`) | `backlog-scheduler.sh --set-field {id} started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"` |
-| `completed_at` | When marking `done` (QA PASS) | ISO 8601 datetime with timezone | `backlog-scheduler.sh --set-field {id} completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"` |
-| `pr_url` | After `gh pr create` | Full GitHub PR URL (e.g. `"https://github.com/your-org/your-repo/pull/71"`) | `backlog-scheduler.sh --set-field {id} pr_url "$(gh pr view --json url -q .url)"` |
-| `pr_number` | After `gh pr create` | Integer — PR number | `backlog-scheduler.sh --set-field {id} pr_number "$(gh pr view --json number -q .number)"` |
-| `pr_status` | After `gh pr merge` | `merged` / `open` / `escalated` | `backlog-scheduler.sh --set-field {id} pr_status merged` |
-| `cost_usd` | Post-session (cumulative across sessions) | Number — Claude Code `costUSD` value | Auto-captured by `post-delivery-hook.sh` (Stop event). Manual fallback: `backlog-scheduler.sh --set-field {id} cost_usd <value>` |
+| `started_at` | When marking `in_progress` (first session only) | ISO 8601 datetime with timezone (e.g. `"2026-02-28T22:00:00Z"`) | `.gaai/core/scripts/backlog-scheduler.sh --set-field {id} started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"` |
+| `completed_at` | When marking `done` (QA PASS) | ISO 8601 datetime with timezone | `.gaai/core/scripts/backlog-scheduler.sh --set-field {id} completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"` |
+| `pr_url` | After `gh pr create` | Full GitHub PR URL (e.g. `"https://github.com/your-org/your-repo/pull/71"`) | `.gaai/core/scripts/backlog-scheduler.sh --set-field {id} pr_url "$(gh pr view --json url -q .url)"` |
+| `pr_number` | After `gh pr create` | Integer — PR number | `.gaai/core/scripts/backlog-scheduler.sh --set-field {id} pr_number "$(gh pr view --json number -q .number)"` |
+| `pr_status` | After `gh pr merge` | `merged` / `open` / `escalated` | `.gaai/core/scripts/backlog-scheduler.sh --set-field {id} pr_status merged` |
+| `cost_usd` | Post-session (cumulative across sessions) | Number — Claude Code `costUSD` value | Auto-captured by `post-delivery-hook.sh` (Stop event). Manual fallback: `.gaai/core/scripts/backlog-scheduler.sh --set-field {id} cost_usd <value>` |
 
 **`cost_usd` source:** The Claude Code CLI `/cost` command shows cumulative session cost at any time. The value displayed at session end (`costUSD` = `total_cost_usd`) is the authoritative total for that session. If a Story spans multiple sessions, sum all session costs. The `post-delivery-hook.sh` Stop hook captures this automatically from the session transcript.
 

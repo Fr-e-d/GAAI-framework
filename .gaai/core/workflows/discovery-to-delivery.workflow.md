@@ -61,12 +61,12 @@ If any condition is not met → return to Discovery. Use `refine-scope` or `vali
 
 6. Run `decision-extraction` on Discovery session to capture any decisions not yet in memory
 7. Run `memory-ingest` if new knowledge was produced during Discovery
-8. Verify `contexts/memory/memory/project/context.md` reflects current project state
+8. Verify `.gaai/project/contexts/memory/project/context.md` reflects current project state
 
 ### 4. Activate Delivery
 
 9. Activate Delivery Agent
-10. Hand off: point Delivery Agent to `contexts/backlog/active.backlog.yaml`
+10. Hand off: point Delivery Agent to `.gaai/project/contexts/backlog/active.backlog.yaml`
 11. Start `delivery-loop.workflow.md`
 
 ---
