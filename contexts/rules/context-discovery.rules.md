@@ -56,7 +56,7 @@ If track selection is ambiguous:
 
 Before the Discovery Agent begins, it MUST have:
 - explicit human intent (written or verbal)
-- access to `contexts/memory/memory/project/context.md`
+- access to `.gaai/project/contexts/memory/project/context.md`
 - access to current backlog state (`contexts/backlog/active.backlog.yaml`)
 
 The Discovery Agent MAY retrieve additional memory selectively.

@@ -29,7 +29,7 @@ Activate this skill when:
 - You don't know which skills to run first
 - Refinement is needed before committing to artefacts
 
-Typical triggers: "I have an idea for a feature", "Users are dropping during onboarding", "We should rethink pricing"
+Typical triggers: "I have an idea for a feature", "Users are dropping during onboarding", "We should rethink pricing", "There's a bug where X happens but we don't know why"
 
 **This skill plans — it does not produce artefacts.**
 
@@ -38,7 +38,7 @@ Typical triggers: "I have an idea for a feature", "Users are dropping during onb
 ## Process
 
 1. Understand the real problem or opportunity
-2. Determine Discovery scope: new initiative / feature addition / iteration / removal / clarification
+2. Determine Discovery scope: new initiative / feature addition / iteration / removal / clarification / **bug triage** (complex bug with unclear root cause)
 3. Identify required artefacts
 4. Select necessary skills in logical order
 5. Insert validation and refinement gates
