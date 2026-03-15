@@ -23,6 +23,10 @@ Read the active agent definition before acting:
 
 **Context isolation rule:** `/gaai-deliver` MUST spawn the Delivery Agent as an isolated sub-agent via the Agent tool. Discovery and Delivery system prompts must never coexist in the same context window.
 
+### Base Rules (Always Active)
+
+@.gaai/core/contexts/rules/base.rules.md
+
 ### Core Rules (Non-Negotiable)
 
 1. **Every execution unit must be in the backlog.** Check `.gaai/project/contexts/backlog/active.backlog.yaml` before starting work.
