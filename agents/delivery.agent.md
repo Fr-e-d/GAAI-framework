@@ -133,105 +133,15 @@ Full audit with cleanup candidates: `.gaai/project/contexts/memory/governance/sk
 
 ---
 
-## Git Workflow (Non-Negotiable)
+## Git Workflow & Orchestration Flow
 
-The Delivery Orchestrator is responsible for the full git lifecycle of every Story.
+→ Defined in `workflows/delivery-loop.workflow.md` (the authoritative source for git lifecycle, step-by-step execution, and PR creation).
 
-**INVARIANT: The main working tree stays on `staging` at ALL times.** The daemon polls in the main working tree. Deliveries work in worktrees. All staging operations are serialized via `flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock`.
-
-```
-BEFORE execution  → flock: git pull origin staging
-                    mark in_progress + commit + push staging (if not already done by daemon)
-                    git branch story/{id} staging   (NO checkout — main stays on staging)
-                    git worktree add ../{id}-workspace story/{id}
-
-AFTER impl PASS   → atomic commit inside ../{id}-workspace
-
-AFTER QA PASS     → decision-extraction (scan impl-report + qa-report → write DEC files + update _log.md + index.md; no-op if no durable decisions found)
-                    commit artefacts to story branch (includes new DEC files, _log.md, index.md — DEC-146)
-                    git merge staging into story branch (in worktree — catch staleness BEFORE push)
-                    npx tsc --noEmit + npx vitest run (in worktree — verify integration)
-                    if story-introduced failures → fix and re-commit
-                    if pre-existing failures only → proceed
-                    push story/{id} to origin
-                    gh pr create --base staging --head story/{id}
-                    gh run watch → wait for PR CI green (if red: same triage — fix or ESCALATE)
-                    gh pr merge --squash story/{id}           ← immediate merge (DEC-71: never leave PRs open)
-                    if merge fails (conflict) → merge staging into story branch, resolve, push, retry merge
-                    if merge rejected (checks/review) → wait for checks, retry
-                    verify staging deploy CI (gh run list --branch staging --limit 1)
-                    if staging deploy fails → ESCALATE with logs (do not attempt infra fixes)
-                    flock: mark done + push staging (with retry — DEC-146)
-                    cleanup: worktree remove + delete remote branch
-
-NEVER             → interact with the production branch
-                    merge to production (staging → production is HUMAN ONLY via GitHub PR)
-                    leave PRs open — every PR is merged immediately after QA PASS (DEC-71)
-                    git checkout away from staging in the main working tree
-                    implement without a branch
-                    leave stale worktrees or branches
-```
-
-Promotion staging → production is a human action via GitHub PR. The AI never touches production.
-
----
-
-## Orchestration Flow
-
-```
-Read backlog (git show origin/staging:...) → select next ready Story
-       ↓
-flock: git pull staging → mark in_progress → commit → push staging
-       ↓
-git branch story/{id} staging (NO checkout) + worktree add ../{id}-workspace
-       ↓
-invoke evaluate-story
-       ↓
-Tier 1? → spawn MicroDelivery Sub-Agent
-           ↓
-           collect delivery/{id}.micro-delivery-report.md → PASS/FAIL/ESCALATE
-       ↓
-Tier 2 or 3? → assemble context bundle
-           ↓
-           spawn Planning Sub-Agent
-           ↓
-           collect plans/{id}.execution-plan.md (validate)
-           ↓
-           spawn Implementation Sub-Agent
-           ↓
-           collect impl-reports/{id}.impl-report.md (validate)
-           ↓
-           spawn QA Sub-Agent
-           ↓
-           collect qa-reports/{id}.qa-report.md
-           ↓
-           PASS → collect memory-deltas/{id}.memory-delta.md
-                  → decision-extraction (scan impl-report + qa-report → DEC-{N}.md + _log.md + index.md; no-op if no durable decisions found)
-                  → if verdict DRIFT_DETECTED or NEW_KNOWLEDGE_FOUND or DRIFT_AND_NEW_KNOWLEDGE:
-                      flag Discovery with delta report before marking done
-                  → commit artefacts to story branch (includes new DEC files, _log.md, index.md — DEC-146)
-                  → git merge staging into story branch (in worktree)
-                  → tsc --noEmit + vitest run (in worktree — verify integration)
-                  → if story-introduced failures → fix; pre-existing → proceed; unclear → ESCALATE
-                  → push story/{id} → gh pr create --base staging
-                  → /review-pr (pr-review-toolkit plugin — complementary code review before merge, optional for Tier 1)
-                  → gh run watch (wait for PR CI green; if red: triage or ESCALATE)
-                  → gh pr merge --squash story/{id}  (immediate — DEC-71)
-                  → if merge fails: merge staging into branch, resolve, push, retry
-                  → if merge rejected (checks): wait, retry
-                  → verify staging deploy CI; if fails → ESCALATE with logs
-                  → BACKLOG VALIDATION CHECKPOINT (see below)
-                  → flock: mark done → push staging (with retry — DEC-146)
-                  → cleanup worktree + delete remote branch
-                  → generate-build-in-public-content (non-blocking, best-effort)
-                    inputs: story artefact, impl-report, qa-report, referenced DEC- entries, backlog metrics
-                    output: content/drafts/{id}-thread.md (+ blog snippet if milestone story)
-                    failure: silent — content is a byproduct, not a dependency
-           FAIL → re-spawn Implementation Sub-Agent with qa-report (max 2 re-spawns)
-                  → re-spawn QA Sub-Agent
-                  → if still FAIL after 2 cycles → ESCALATE
-           ESCALATE → stop, surface to human
-```
+**Key invariants (repeated here for emphasis):**
+- The main working tree stays on `staging` at ALL times
+- All staging operations serialized via `flock`
+- AI never interacts with `production`
+- PRs are merged immediately after QA PASS (DEC-71)
 
 ---
 

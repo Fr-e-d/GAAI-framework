@@ -79,6 +79,12 @@ Delivery **must NOT**:
 - ingest decisions into memory
 - bypass backlog rules
 
+### Context Isolation (Non-Negotiable)
+
+Discovery and Delivery must **never coexist in the same context window**. The Delivery Agent always runs as an isolated sub-agent with a clean context — only its own agent definition, the workflow, rules, and the story context bundle. This prevents cross-contamination between human-facing reasoning (Discovery) and pure execution (Delivery).
+
+Sub-agents spawned by Delivery (Planning, Implementation, QA, Specialists) each run in their own isolated context with a targeted context bundle. See `agents/delivery.agent.md` for team composition and bundle definitions.
+
 ## 🗂️ Backlog Orchestration
 
 ### Backlog States
@@ -165,10 +171,10 @@ Cron jobs and the **Delivery Daemon** are **allowed and encouraged**, but limite
 
 ### Delivery Daemon (`scripts/delivery-daemon.sh`)
 
-The daemon automates backlog polling and Claude Code session launch:
+The daemon automates backlog polling and AI agent session launch:
 - Polls staging for `refined` stories at a configurable interval
 - Marks stories `in_progress` on staging before launch (cross-device coordination)
-- Launches Claude Code in isolated worktrees (tmux on VPS, Terminal.app on macOS)
+- Launches the AI coding agent in isolated worktrees
 - Monitors session health (heartbeat, `--max-turns` limit)
 - Marks stories `failed` on non-zero exit (human must review and reset to `refined`)
 
@@ -211,33 +217,7 @@ Cron MUST NOT:
 
 ## 🔁 Canonical Execution Flows
 
-### Human → Feature Flow
-
-```
-Human
-→ Discovery
-→ memory-retrieve (selective)
-→ story creation → validation → backlog.refined
-→ Delivery → implement → test → PASS → done
-```
-
-### Human → Quick Fix Flow
-
-```
-Human
-→ Discovery → classify as quick fix
-→ minimal backlog entry
-→ Delivery → implement → test → PASS → done
-```
-
-### Memory Hygiene Flow
-
-```
-Cron / Discovery
-→ memory-refresh
-→ memory-compact (if thresholds exceeded)
-→ index update
-```
+→ See `workflows/delivery-loop.workflow.md` (delivery) and `workflows/discovery-to-delivery.workflow.md` (end-to-end).
 
 ## ⚠️ Conflict & Escalation Protocol
 

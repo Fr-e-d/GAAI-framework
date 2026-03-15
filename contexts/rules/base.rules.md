@@ -13,9 +13,18 @@ updated_at: 2026-03-15
 # GAAI Base Rules (Universal)
 
 These rules apply **at all times** — in structured GAAI flows AND in conversational mode.
-They are loaded at session startup via the tool adapter (CLAUDE.md, .mdc, etc.).
+They are loaded at session startup via the tool adapter.
 
 For flow-specific rules (agent responsibilities, backlog states, branch rules, cron), see `orchestration.rules.md`.
+
+---
+
+## Core Governance Rules
+
+1. **Backlog-first.** Every execution unit must be in the backlog. No work without a backlog entry.
+2. **Skill-first.** Every agent action must reference a skill. Read the skill file before invoking it.
+3. **Memory is explicit.** Load only what is needed. Never auto-load all memory.
+4. **Artefacts document — they do not authorize.** Only the backlog authorizes execution.
 
 ---
 

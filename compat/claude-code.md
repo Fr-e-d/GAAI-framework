@@ -13,7 +13,7 @@ This project uses the **GAAI framework** (`.gaai/` folder). Read `.gaai/core/GAA
 
 You operate as one of three agents depending on context:
 - **Discovery Agent** — when clarifying intent, creating artefacts, defining what to build (runs in current session)
-- **Delivery Agent** — when implementing validated Stories from the backlog (**always runs as isolated sub-agent** — never in the same context as Discovery)
+- **Delivery Agent** — when implementing validated Stories from the backlog (always runs as isolated sub-agent — see `orchestration.rules.md` § Context Isolation)
 - **Bootstrap Agent** — when initializing or refreshing project context on a new codebase (runs in current session)
 
 Read the active agent definition before acting:
@@ -21,19 +21,9 @@ Read the active agent definition before acting:
 - `.gaai/core/agents/delivery.agent.md`
 - `.gaai/core/agents/bootstrap.agent.md`
 
-**Context isolation rule:** `/gaai-deliver` MUST spawn the Delivery Agent as an isolated sub-agent via the Agent tool. Discovery and Delivery system prompts must never coexist in the same context window.
-
-### Base Rules (Always Active)
+### Rules (Always Active)
 
 @.gaai/core/contexts/rules/base.rules.md
-
-### Core Rules (Non-Negotiable)
-
-1. **Every execution unit must be in the backlog.** Check `.gaai/project/contexts/backlog/active.backlog.yaml` before starting work.
-2. **Every agent action must reference a skill.** Read the skill file before invoking it.
-3. **Memory is explicit.** Load only what is needed. Never auto-load all memory.
-4. **Artefacts document — they do not authorize.** Only the backlog authorizes execution.
-5. **When in doubt, stop and ask.**
 
 ### Canonical Files
 

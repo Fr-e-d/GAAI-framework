@@ -22,13 +22,11 @@ Activate based on context:
 **Bootstrap Agent** (`.gaai/core/agents/bootstrap.agent.md`)
 → Use when: first setup on an existing codebase, or refreshing project context
 
-## Five Operating Rules
+## Rules
 
-1. Every execution unit must be in the backlog (`.gaai/project/contexts/backlog/active.backlog.yaml`)
-2. Every agent action must reference a skill (`.gaai/core/skills/README.skills.md`)
-3. Memory is explicit — select what to load, never auto-inject all memory
-4. Artefacts document — they do not authorize. Only the backlog authorizes execution.
-5. When in doubt, stop and ask.
+**Read `.gaai/core/contexts/rules/base.rules.md` at the start of every session.** These are the universal governance rules (backlog-first, skill-first, memory explicit, recommendation validation, conflict protocol).
+
+For flow-specific rules (agent responsibilities, context isolation, backlog states, branch rules): `.gaai/core/contexts/rules/orchestration.rules.md`
 
 ## Key Paths
 

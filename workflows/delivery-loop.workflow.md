@@ -264,64 +264,9 @@ If `gh pr create` fails (e.g., branch conflict, auth issue):
 
 ---
 
-## Flow Diagram
-
-```
-active.backlog.yaml (read via git show origin/staging:...)
-       ↓
-Pick next ready Story
-       ↓
-flock: git pull staging → mark in_progress → commit → push staging (with retry)
-       ↓
-git branch story/{id} staging (NO checkout) + worktree add ../{id}-workspace
-       ↓
-evaluate-story
-       ↓
-Tier 1? ──→ spawn MicroDelivery Sub-Agent
-             ↓
-             coordinate-handoffs
-             ↓
-             PASS→done
-             FAIL(recoverable)→retry once→FAIL again→Tier2
-             FAIL(structural)→ESCALATE+post-mortem immediately
-             ESCALATE→human+post-mortem  COMPLEX→Tier2
-       ↓
-Tier 2/3? ──→ compose-team (+ risk-analysis if needed)
-             ↓
-             spawn Planning Sub-Agent ──→ {id}.execution-plan.md
-             ↓
-             spawn Implementation Sub-Agent ──→ {id}.impl-report.md
-             │    (+ Specialists if Tier 3)
-             ↓ atomic commit in worktree
-             spawn QA Sub-Agent ──→ {id}.qa-report.md
-             ↓
-             PASS → commit artefacts to story branch (step 7b)
-                      → push story/{id} → gh pr create --base staging
-                      → flock: mark done → push staging (with retry)
-                      → cleanup worktree (keep branch for PR)
-                      → STOP + report PR URL (human reviews + merges on GitHub)
-             FAIL → re-spawn Impl + re-spawn QA (max 3 cycles)
-             ESCALATE → human intervention required
-             ↓ (on ESCALATE or 3 QA cycles)
-             post-mortem-learning → [FRICTION] entry in decisions.memory.md
-             ↓ (human merges PR staging→production)
-             CI/CD auto-deploys production
-```
-
----
-
 ## Sub-Agent Lifecycle (Invariant)
 
-Every sub-agent, without exception:
-
-```
-SPAWN   ← Orchestrator provides explicit context bundle
-EXECUTE ← Runs autonomously, no runtime communication
-HANDOFF ← Writes structured artefact to known file path
-DIE     ← Terminates, context window released
-```
-
-The Orchestrator only acts after a sub-agent has terminated and its artefact has been collected.
+Every sub-agent follows: `SPAWN (with context bundle) → EXECUTE (autonomous) → HANDOFF (artefact to known path) → DIE (context released)`. The Orchestrator only acts after a sub-agent has terminated and its artefact has been collected.
 
 ---
 
