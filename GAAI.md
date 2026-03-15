@@ -96,8 +96,8 @@ production  ←── Deploy via GitHub Actions
 The **Delivery Daemon** (`core/scripts/delivery-daemon.sh`) automates delivery:
 - Polls the backlog for `refined` stories
 - Marks them `in_progress` on staging (cross-device coordination via git push)
-- Launches Claude Code sessions in isolated worktrees
-- Supports parallel execution (`--max-concurrent`) via tmux (VPS) or Terminal.app (macOS)
+- Launches AI agent sessions in isolated worktrees
+- Supports parallel execution (`--max-concurrent`)
 - Monitors session health via heartbeat and `--max-turns` safety limits
 
 A pre-push hook (`.githooks/pre-push`) blocks all pushes to `production` from the development environment. Activate with `git config core.hooksPath .githooks`.
@@ -106,11 +106,25 @@ A pre-push hook (`.githooks/pre-push`) blocks all pushes to `production` from th
 
 ## Core Principles (Non-Negotiable)
 
-1. **Every execution unit must be in the backlog.** If it's not in the backlog, it must not be executed.
-2. **Every agent action must reference a skill.** Agents reason. Skills execute.
-3. **Memory is explicit.** Agents select what to remember. Memory is never auto-loaded.
+The governance rules are defined in `core/contexts/rules/base.rules.md` (universal) and `core/contexts/rules/orchestration.rules.md` (flow-specific). The foundational principles:
+
+1. **Backlog-first.** If it's not in the backlog, it must not be executed.
+2. **Skill-first.** Agents reason. Skills execute.
+3. **Memory is explicit.** Load only what is needed. Never auto-load all memory.
 4. **Artefacts document — they do not authorize.** Only the backlog authorizes execution.
 5. **When in doubt, stop and ask.** Ambiguity is always resolved before execution.
+
+## Progressive Disclosure (Architectural Principle)
+
+GAAI never loads everything at once. Context is assembled on demand, in layers:
+
+1. **Session startup** — only `base.rules.md` is auto-loaded (via tool adapter `@import`). Lightweight, universal rules.
+2. **Agent activation** — the active agent definition is loaded when a flow starts (`/gaai-discover`, `/gaai-deliver`). Only one agent at a time.
+3. **Sub-agent spawn** — each sub-agent receives a minimal, targeted context bundle. No full rule set, no full memory — only what the task requires.
+4. **Memory retrieval** — 3-level progressive disclosure: index scan → targeted file load → cross-domain (rare). See `memory-retrieve` skill.
+5. **Skills** — discovered via index frontmatter, loaded individually when invoked. Never bulk-loaded.
+
+**Why:** LLM instruction-following degrades with context size (see DEC-194). Every token of context must earn its place. The right amount of context is the minimum needed for the current task.
 
 ---
 

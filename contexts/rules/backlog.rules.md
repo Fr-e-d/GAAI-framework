@@ -31,15 +31,15 @@ Any behavior violating these rules is **invalid by design**.
 Only the **Discovery Agent** may:
 - create backlog items
 - modify scope or acceptance criteria
-- validate items
-- move items to `validated` or `ready`
+- validate and refine items
+- move items to `refined`
 
 No other agent or skill has this authority.
 
 ### R2 — Delivery Executes the Backlog
 
 The **Delivery Agent** may:
-- consume items marked `ready`
+- consume items marked `refined`
 - update execution status (`in_progress`, `done`, `failed`)
 - attach execution artefacts or notes
 
@@ -53,26 +53,25 @@ Delivery MUST NOT:
 Every backlog item MUST follow this lifecycle:
 
 ```
-draft → validated → ready → in_progress → done | failed
+draft → refined → in_progress → done | failed
 ```
 
 No state may be skipped.
 
 | State | Description |
 |---|---|
-| `draft` | Item is being shaped by Discovery |
-| `validated` | Scope and acceptance criteria approved |
-| `ready` | Executable by Delivery |
-| `in_progress` | Delivery has started execution |
-| `done` | Acceptance criteria PASS |
-| `failed` | Execution failed; requires Discovery review |
+| `draft` | Item is being shaped by Discovery; acceptance criteria incomplete |
+| `refined` | Story is validated, acceptance criteria present and unambiguous, ready for Delivery |
+| `in_progress` | Delivery is actively executing |
+| `done` | Acceptance criteria PASS; moved to `done/` archive |
+| `failed` | Execution failed; requires human intervention |
 
 ## 🧭 Orchestration Rules
 
 ### R3 — Backlog Is the Only Orchestration Signal
 
 - Cron jobs MAY poll the backlog
-- Delivery MAY consume only `ready` items
+- Delivery MAY consume only `refined` items
 - No artefact, memory file, or skill output may trigger execution
 
 If execution occurs, it MUST be traceable to a backlog item.
