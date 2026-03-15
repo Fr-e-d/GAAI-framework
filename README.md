@@ -1,4 +1,4 @@
-# .gaai/ — GAAI Framework (v2.1.2)
+# .gaai/ — GAAI Framework (v2.1.3)
 
 ## Directory Structure
 
@@ -47,7 +47,7 @@ git fetch gaai-framework
 git subtree pull --prefix=.gaai gaai-framework main --squash
 
 # Or pin to a specific release tag
-git subtree pull --prefix=.gaai gaai-framework v2.1.2 --squash
+git subtree pull --prefix=.gaai gaai-framework v2.1.3 --squash
 ```
 
 ---
