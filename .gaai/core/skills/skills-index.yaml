@@ -3,9 +3,9 @@
 # Regenerate: invoke build-skills-indices skill
 
 generated_at: 2026-03-15
-total: 71
+total: 72
 core: 47
-project: 24
+project: 25
 
 discovery:
   - id: SKILL-CNT-011
@@ -298,6 +298,15 @@ delivery:
     tags: []
     updated_at: 2026-03-08
     path: project/skills/domains/content-production/social-adapt/SKILL.md
+  - id: SKILL-CNT-021
+    name: youtube-engage
+    source: project
+    description: "Discover high-value YouTube videos, post outbound value comments, scan for replies, draft and post responses. Full YouTube engagement lifecycle with fact-check gate and human review. Four phases — Discover, Comment, Scan, Reply."
+    category: content
+    track: delivery
+    tags: []
+    updated_at: 2026-03-13
+    path: project/skills/domains/content-production/youtube-engage/SKILL.md
 
 cross:
   - id: SKILL-CRS-020
