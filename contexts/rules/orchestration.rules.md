@@ -139,6 +139,10 @@ Before marking a Story as `refined` in a domain where no relevant knowledge exis
 
 This rule applies to **domains not yet covered** in `contexts/memory/`. For well-covered domains with recent memory entries, Discovery may proceed directly — no overhead on routine work.
 
+### Recommendation Validation (All Agents)
+
+→ Defined in `base.rules.md` (loaded at session startup). Applies in both structured flows and conversational mode.
+
 **Discovery does NOT need to verify skill coverage** — it defines *what* to build, not *how* to build it. Skill coverage is Delivery's responsibility.
 
 ### Skill Coverage (Delivery — during `evaluate-story`)
@@ -237,17 +241,9 @@ Cron / Discovery
 
 ## ⚠️ Conflict & Escalation Protocol
 
-When an agent encounters a conflict between a human instruction and an existing rule:
-- Stop immediately. Do not attempt to resolve it silently.
-- Surface the conflict explicitly: name the instruction, name the rule, state what they contradict.
-- Wait for human resolution. Do not proceed until the conflict is resolved.
+→ Base protocol defined in `base.rules.md` (loaded at session startup).
 
-When an agent encounters ambiguity in a backlog item or acceptance criteria:
-- Stop. Do not interpret intent.
-- Escalate to Discovery for clarification.
-- Delivery must not begin on ambiguous criteria.
-
-**If in doubt: stop and ask. Always.**
+**Flow-specific addition:** When ambiguity is in a backlog item or acceptance criteria, Delivery must escalate to Discovery. Delivery must not begin on ambiguous criteria.
 
 ## 🚫 Forbidden Patterns
 
