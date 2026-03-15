@@ -2,7 +2,7 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md and .gaai/project/skills/*/SKILL.md
 # Regenerate: invoke build-skills-indices skill
 
-generated_at: 2026-03-14
+generated_at: 2026-03-15
 total: 71
 core: 47
 project: 24

@@ -82,7 +82,7 @@ flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
 # If daemon-launched: already done by the daemon. Skip if status is already in_progress.
 # If manual launch: the delivery agent does this itself.
 flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
-  scripts/backlog-scheduler.sh --set-status {id} in_progress contexts/backlog/active.backlog.yaml
+  .gaai/core/scripts/backlog-scheduler.sh --set-status {id} in_progress .gaai/project/contexts/backlog/active.backlog.yaml
   git add .gaai/project/contexts/backlog/active.backlog.yaml
   git commit -m "chore({id}): in_progress [delivery]"
   for attempt in 1 2 3; do
@@ -102,7 +102,7 @@ All sub-agents operate exclusively inside `../{id}-workspace/`. The main working
 
 ### 1. Select Next Story
 
-Read `contexts/backlog/active.backlog.yaml`. Select the highest-priority ready Story (status: `refined`, no unresolved dependencies). Use `scripts/backlog-scheduler.sh --next` for automated selection.
+Read `.gaai/project/contexts/backlog/active.backlog.yaml`. Select the highest-priority ready Story (status: `refined`, no unresolved dependencies). Use `.gaai/core/scripts/backlog-scheduler.sh --next .gaai/project/contexts/backlog/active.backlog.yaml` for automated selection.
 
 ### 2. Evaluate Story
 
@@ -224,7 +224,7 @@ git worktree remove ../{id}-workspace
 # Update backlog (push with retry — DEC-146)
 flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
   git pull origin staging
-  scripts/backlog-scheduler.sh --set-status {id} done contexts/backlog/active.backlog.yaml
+  .gaai/core/scripts/backlog-scheduler.sh --set-status {id} done .gaai/project/contexts/backlog/active.backlog.yaml
   git add .gaai/project/contexts/backlog/active.backlog.yaml
   git commit -m "chore({id}): done [delivery]"
   for attempt in 1 2 3; do
@@ -345,6 +345,6 @@ The Delivery Orchestrator MUST escalate on any structural failure regardless of 
 
 ## Automation
 
-Shell automation available at `scripts/backlog-scheduler.sh` (selects next Story).
+Shell automation available at `.gaai/core/scripts/backlog-scheduler.sh` (selects next Story).
 
 See `scripts/README.scripts.md` for usage.
