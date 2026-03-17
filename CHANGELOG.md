@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automated CHANGELOG updates on framework sync (sync-framework-to-oss.sh)
 
 ### Changed
+- fix(gaai-core): correct cost avg to divide by total done, not just tracked stories
 - fix(gaai-core): audit resolution — align authority boundaries, formalize lifecycle, add tooling
 - docs: contributions → issues and feedback welcome (ELv2 IP protection)
 - fix(daemon): status bar improvements + sync script immediate merge
