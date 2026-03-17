@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - fix(governance): anti-collision guards + E52→E53 renumbering + CI/CD docs
+- chore(ci): CF Workers Builds for staging + skills cleanup (DEC-197, DEC-198)
 - chore(gaai): anonymize sync script + skills/scripts updates
 - Memory retrieval upgraded from optional skill to mandatory workflow step in both agents (DEC-195)
 
