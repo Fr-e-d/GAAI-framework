@@ -669,6 +669,87 @@ EXITING=false  # Re-entry guard for on_exit
 LOCK_FILE="$LOCK_DIR/$story_id.lock"
 echo \$\$ > "\$LOCK_FILE"
 
+capture_metadata() {
+  # Capture delivery metadata directly from delivery log + git log.
+  # This runs in the wrapper because claude -p (headless) does not trigger
+  # the Claude Code Stop hook — metadata would never be captured otherwise.
+  local delivery_log="$LOG_DIR/${story_id}.log"
+  local fields_updated=0
+
+  # cost_usd — from delivery log (type:result → total_cost_usd)
+  if [[ -f "\$delivery_log" ]]; then
+    local cost
+    cost=\$(python3 - "\$delivery_log" <<'PYEOF'
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        for line in f:
+            try:
+                d = json.loads(line.strip())
+                if d.get('type') == 'result':
+                    c = d.get('total_cost_usd') or d.get('costUSD') or 0
+                    if c:
+                        print(round(float(c), 4))
+                        sys.exit(0)
+            except: pass
+except: pass
+PYEOF
+    2>/dev/null) || cost=""
+    if [[ -n "\$cost" && "\$cost" != "0" ]]; then
+      "$SCHEDULER" --set-field "$story_id" cost_usd "\$cost" "$BACKLOG" 2>/dev/null && {
+        fields_updated=1
+        echo "[WRAPPER] cost_usd=\$cost"
+      }
+    fi
+  fi
+
+  # started_at — from git log
+  local started
+  started=\$(git log --all --format='%aI' --grep="chore(${story_id}): in_progress" -1 2>/dev/null) || started=""
+  if [[ -n "\$started" ]]; then
+    "$SCHEDULER" --set-field "$story_id" started_at "\$started" "$BACKLOG" 2>/dev/null && {
+      fields_updated=1
+      echo "[WRAPPER] started_at=\$started"
+    }
+  fi
+
+  # completed_at — from git log
+  local completed
+  completed=\$(git log --all --format='%aI' --grep="chore(${story_id}): done" -1 2>/dev/null) || completed=""
+  if [[ -n "\$completed" ]]; then
+    "$SCHEDULER" --set-field "$story_id" completed_at "\$completed" "$BACKLOG" 2>/dev/null && {
+      fields_updated=1
+      echo "[WRAPPER] completed_at=\$completed"
+    }
+  fi
+
+  # PR fields — from gh CLI
+  if command -v gh &>/dev/null; then
+    local pr_json
+    pr_json=\$(gh pr list --state all --search "$story_id" --json url,number,state,mergedAt --limit 1 2>/dev/null) || pr_json=""
+    if [[ -n "\$pr_json" && "\$pr_json" != "[]" ]]; then
+      local pr_url pr_number pr_state
+      pr_url=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('url',''))" 2>/dev/null) || pr_url=""
+      pr_number=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('number',''))" 2>/dev/null) || pr_number=""
+      pr_state=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); s=d[0]; print('merged' if s.get('mergedAt') else s.get('state','open').lower())" 2>/dev/null) || pr_state=""
+      [[ -n "\$pr_url" ]] && "$SCHEDULER" --set-field "$story_id" pr_url "\$pr_url" "$BACKLOG" 2>/dev/null && fields_updated=1
+      [[ -n "\$pr_number" ]] && "$SCHEDULER" --set-field "$story_id" pr_number "\$pr_number" "$BACKLOG" 2>/dev/null && fields_updated=1
+      [[ -n "\$pr_state" ]] && "$SCHEDULER" --set-field "$story_id" pr_status "\$pr_state" "$BACKLOG" 2>/dev/null && fields_updated=1
+    fi
+  fi
+
+  # Commit + push if any field was updated
+  if [[ "\$fields_updated" -eq 1 ]]; then
+    (
+      git add "$BACKLOG_REL" 2>/dev/null || exit 1
+      git diff --cached --quiet 2>/dev/null && exit 0
+      git commit -m "chore($story_id): delivery-metadata [daemon-wrapper]" --quiet 2>/dev/null || exit 1
+      git push origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+      echo "[WRAPPER] delivery metadata committed for $story_id"
+    ) || echo "[WRAPPER] Warning: could not commit metadata for $story_id"
+  fi
+}
+
 on_exit() {
   # Prevent re-entry (cleanup_children sends signals that re-trigger trap)
   \$EXITING && return
@@ -679,32 +760,34 @@ on_exit() {
   kill \$(jobs -p) 2>/dev/null || true
 
   rm -f "\$LOCK_FILE" "$wrapper"
-  if [[ \$EXIT_CODE -ne 0 ]]; then
-    # Check if the delivery already marked the story as done
-    cd "$PROJECT_DIR"
-    git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
-    local current_status
-    current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
-    if [[ "\$current_status" == "done" ]]; then
-      echo "[WRAPPER] Story $story_id already done — ignoring non-zero exit code (\$EXIT_CODE)."
-    else
-      echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
-      (
-        if command -v flock &>/dev/null; then
-          flock "$STAGING_LOCK" bash -c "
-            '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
-            git add '$BACKLOG_REL' 2>/dev/null
-            git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
-            git push origin '$TARGET_BRANCH' --quiet 2>&1
-          "
-        else
+
+  # Check story status to decide: capture metadata or mark failed
+  cd "$PROJECT_DIR"
+  git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
+  local current_status
+  current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
+
+  if [[ "\$current_status" == "done" ]]; then
+    # Story done — capture delivery metadata (stop hook doesn't fire in -p mode)
+    echo "[WRAPPER] Story $story_id done. Capturing metadata..."
+    capture_metadata
+  elif [[ \$EXIT_CODE -ne 0 ]]; then
+    echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
+    (
+      if command -v flock &>/dev/null; then
+        flock "$STAGING_LOCK" bash -c "
           '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
           git add '$BACKLOG_REL' 2>/dev/null
           git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
-          git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
-        fi
-      ) || echo "[WRAPPER] Warning: could not mark $story_id as failed (will be caught by staleness detection)"
-    fi
+          git push origin '$TARGET_BRANCH' --quiet 2>&1
+        "
+      else
+        '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
+        git add '$BACKLOG_REL' 2>/dev/null
+        git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
+        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+      fi
+    ) || echo "[WRAPPER] Warning: could not mark $story_id as failed (will be caught by staleness detection)"
   fi
 }
 trap on_exit EXIT INT TERM
@@ -786,6 +869,65 @@ EXITING=false  # Re-entry guard for on_exit
 LOCK_FILE="$LOCK_DIR/$story_id.lock"
 echo \$\$ > "\$LOCK_FILE"
 
+capture_metadata() {
+  # Capture delivery metadata directly from delivery log + git log.
+  # Same as tmux wrapper — stop hook doesn't fire in -p mode.
+  local delivery_log="$LOG_DIR/${story_id}.log"
+  local fields_updated=0
+
+  if [[ -f "\$delivery_log" ]]; then
+    local cost
+    cost=\$(python3 - "\$delivery_log" <<'PYEOF'
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        for line in f:
+            try:
+                d = json.loads(line.strip())
+                if d.get('type') == 'result':
+                    c = d.get('total_cost_usd') or d.get('costUSD') or 0
+                    if c:
+                        print(round(float(c), 4))
+                        sys.exit(0)
+            except: pass
+except: pass
+PYEOF
+    2>/dev/null) || cost=""
+    if [[ -n "\$cost" && "\$cost" != "0" ]]; then
+      "$SCHEDULER" --set-field "$story_id" cost_usd "\$cost" "$BACKLOG" 2>/dev/null && fields_updated=1
+    fi
+  fi
+
+  local started completed
+  started=\$(git log --all --format='%aI' --grep="chore(${story_id}): in_progress" -1 2>/dev/null) || started=""
+  completed=\$(git log --all --format='%aI' --grep="chore(${story_id}): done" -1 2>/dev/null) || completed=""
+  [[ -n "\$started" ]] && "$SCHEDULER" --set-field "$story_id" started_at "\$started" "$BACKLOG" 2>/dev/null && fields_updated=1
+  [[ -n "\$completed" ]] && "$SCHEDULER" --set-field "$story_id" completed_at "\$completed" "$BACKLOG" 2>/dev/null && fields_updated=1
+
+  if command -v gh &>/dev/null; then
+    local pr_json
+    pr_json=\$(gh pr list --state all --search "$story_id" --json url,number,state,mergedAt --limit 1 2>/dev/null) || pr_json=""
+    if [[ -n "\$pr_json" && "\$pr_json" != "[]" ]]; then
+      local pr_url pr_number pr_state
+      pr_url=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('url',''))" 2>/dev/null) || pr_url=""
+      pr_number=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('number',''))" 2>/dev/null) || pr_number=""
+      pr_state=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); s=d[0]; print('merged' if s.get('mergedAt') else s.get('state','open').lower())" 2>/dev/null) || pr_state=""
+      [[ -n "\$pr_url" ]] && "$SCHEDULER" --set-field "$story_id" pr_url "\$pr_url" "$BACKLOG" 2>/dev/null && fields_updated=1
+      [[ -n "\$pr_number" ]] && "$SCHEDULER" --set-field "$story_id" pr_number "\$pr_number" "$BACKLOG" 2>/dev/null && fields_updated=1
+      [[ -n "\$pr_state" ]] && "$SCHEDULER" --set-field "$story_id" pr_status "\$pr_state" "$BACKLOG" 2>/dev/null && fields_updated=1
+    fi
+  fi
+
+  if [[ "\$fields_updated" -eq 1 ]]; then
+    (
+      git add "$BACKLOG_REL" 2>/dev/null || exit 1
+      git diff --cached --quiet 2>/dev/null && exit 0
+      git commit -m "chore($story_id): delivery-metadata [daemon-wrapper]" --quiet 2>/dev/null || exit 1
+      git push origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+    ) || true
+  fi
+}
+
 on_exit() {
   # Prevent re-entry (kill signals can re-trigger trap)
   \$EXITING && return
@@ -796,24 +938,23 @@ on_exit() {
   kill \$(jobs -p) 2>/dev/null || true
 
   rm -f "\$LOCK_FILE" "$wrapper"
-  if [[ \$EXIT_CODE -ne 0 ]]; then
-    # Check if the delivery already marked the story as done
-    # (interactive mode: user closes terminal after successful delivery → non-zero exit)
-    cd "$PROJECT_DIR"
-    git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
-    local current_status
-    current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
-    if [[ "\$current_status" == "done" ]]; then
-      echo "[WRAPPER] Story $story_id already done — ignoring non-zero exit code (\$EXIT_CODE)."
-    else
-      echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
-      (
-        '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
-        git add '$BACKLOG_REL' 2>/dev/null
-        git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
-        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
-      ) || echo "[WRAPPER] Warning: could not mark $story_id as failed"
-    fi
+
+  cd "$PROJECT_DIR"
+  git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
+  local current_status
+  current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
+
+  if [[ "\$current_status" == "done" ]]; then
+    echo "[WRAPPER] Story $story_id done. Capturing metadata..."
+    capture_metadata
+  elif [[ \$EXIT_CODE -ne 0 ]]; then
+    echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
+    (
+      '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
+      git add '$BACKLOG_REL' 2>/dev/null
+      git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
+      git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+    ) || echo "[WRAPPER] Warning: could not mark $story_id as failed"
   fi
 }
 trap on_exit EXIT INT TERM
