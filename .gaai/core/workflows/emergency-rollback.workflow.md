@@ -51,6 +51,23 @@ Human reviews:
 - What changed since then?
 - Is the change reversible via git?
 
+### 2b. Clean Up Active Worktrees
+
+If the affected story was running in an isolated worktree:
+
+```bash
+# List active worktrees
+git worktree list
+
+# Remove worktrees for affected stories
+git worktree remove ../{id}-workspace
+
+# Delete story branches if no longer needed
+git branch -d story/{id}
+```
+
+Worktree cleanup prevents ghost worktrees from interfering with subsequent deliveries.
+
 ### 3. Revert if Possible
 
 ```bash

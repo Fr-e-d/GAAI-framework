@@ -1,0 +1,61 @@
+skill: implement
+version: "1.0"
+description: "Baseline eval set for implementation reports — validates structure, AC mapping, scope discipline, and commit format"
+assertions:
+
+  - id: A01
+    type: code
+    description: "Implementation report lists files changed"
+    check: regex_match
+    params:
+      pattern: "\\.(ts|tsx|js|jsx|css|md|yaml|json|sql|sh)\\b"
+    expected: "At least one file extension reference (implementation touched files)"
+
+  - id: A02
+    type: code
+    description: "Implementation report maps changes to acceptance criteria"
+    check: regex_match
+    params:
+      pattern: "\\bAC[- ]?\\d+"
+    expected: "At least one AC reference mapping implementation to criteria"
+
+  - id: A03
+    type: code
+    description: "Implementation report does not claim scope expansion"
+    check: regex_not_match
+    params:
+      pattern: "\\b(also (added|implemented|included)|bonus|extra|additionally (added|created|built))\\b"
+    expected: "Zero matches — implementation must be exactly what the plan defines"
+
+  - id: A04
+    type: code
+    description: "Report contains a summary of changes section"
+    check: structure_present
+    params:
+      marker: "## "
+    expected: "At least one markdown H2 section header present"
+
+  - id: A05
+    type: llm-judge
+    description: "Implementation stays within the scope defined by the execution plan"
+    prompt: |
+      You are evaluating an implementation report produced by an Implementation Sub-Agent in the GAAI framework.
+      A core rule is that the Implementation Sub-Agent implements exactly what the execution plan defines — no additions, no shortcuts, no scope expansion.
+
+      Review the output below and determine: Does the report describe changes that stay strictly within the planned scope, without mentioning unplanned additions or "while I was at it" improvements?
+      Answer PASS or FAIL, then explain in one sentence.
+    rubric:
+      pass_if: "All changes described map to planned work items, with no unplanned additions"
+      fail_if: "The report mentions changes beyond the plan scope, refactoring not in the plan, or opportunistic improvements"
+
+  - id: A06
+    type: llm-judge
+    description: "Report provides enough detail for QA to validate without re-reading the code"
+    prompt: |
+      You are evaluating an implementation report. The QA Sub-Agent will use this report (along with the Story and execution plan) to validate the implementation.
+
+      Review the output below and determine: Does the report provide sufficient detail about what was changed, where, and why — enough that a QA reviewer could validate the work without reading every line of code?
+      Answer PASS or FAIL, then explain in one sentence.
+    rubric:
+      pass_if: "The report clearly describes what changed in each file, how it maps to ACs, and any notable decisions"
+      fail_if: "The report is too vague, lists files without explaining changes, or omits the AC mapping"

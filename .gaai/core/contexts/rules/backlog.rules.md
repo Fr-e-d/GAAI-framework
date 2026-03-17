@@ -54,9 +54,13 @@ Every backlog item MUST follow this lifecycle:
 
 ```
 draft → refined → in_progress → done | failed
+                ↘                ↗
+              blocked ──────────┘
+
+Any state → cancelled | superseded
 ```
 
-No state may be skipped.
+No primary state may be skipped.
 
 | State | Description |
 |---|---|
@@ -65,6 +69,18 @@ No state may be skipped.
 | `in_progress` | Delivery is actively executing |
 | `done` | Acceptance criteria PASS; moved to `done/` archive |
 | `failed` | Execution failed; requires human intervention |
+| `blocked` | Delivery cannot proceed — dependency unmet, skill missing, or external blocker. Resolves to `refined` when unblocked by Discovery. |
+| `cancelled` | Deliberately removed from backlog by Discovery. Terminal state. |
+| `superseded` | Replaced by a newer backlog item. Must reference replacement ID. Terminal state. |
+
+### Auxiliary State Transitions
+
+| Transition | Who | Condition |
+|---|---|---|
+| `in_progress` → `blocked` | Delivery | Dependency unmet, required skill absent, or external blocker |
+| `blocked` → `refined` | Discovery | Blocker resolved; item re-enters the ready pool |
+| any → `cancelled` | Discovery | Deliberate removal; must include rationale |
+| any → `superseded` | Discovery | Replaced by newer item; must reference replacement ID |
 
 ## 🧭 Orchestration Rules
 

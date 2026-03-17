@@ -115,7 +115,7 @@ Specialists are dispatched by the Implementation Sub-Agent, not by the Orchestra
 - `memory-search` — find relevant memory by frontmatter, keywords, or cross-references
 - `memory-retrieve` — load minimal relevant memory before composing context bundles
 - `context-building` — assemble context bundles for sub-agents
-- `decision-extraction` — **always runs after QA PASS** — scan impl-report + qa-report; write DEC-{N}.md + update _log.md + index.md; no-op if no durable decisions found
+- `decision-extraction` — **invoked after QA PASS when notable architectural or governance decisions emerged** — scan impl-report + qa-report; write DEC-{N}.md + update _log.md + index.md; no-op if no durable decisions found
 - `risk-analysis` — pre-flight for Tier 3 or high-risk Stories before spawning Planning Sub-Agent
 
 ### Skill Tier Preference
