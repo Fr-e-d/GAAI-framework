@@ -1,0 +1,63 @@
+skill: qa-review
+version: "1.0"
+description: "Baseline eval set for QA review reports — validates structure, verdict, AC coverage, and rule compliance"
+assertions:
+
+  - id: A01
+    type: code
+    description: "QA report contains a verdict (PASS, FAIL, or ESCALATE)"
+    check: regex_match
+    params:
+      pattern: "\\b(PASS|FAIL|ESCALATE)\\b"
+    expected: "At least one verdict keyword present"
+
+  - id: A02
+    type: code
+    description: "QA report contains per-criterion results section"
+    check: structure_present
+    params:
+      marker: "## "
+    expected: "At least one markdown H2 section header present"
+
+  - id: A03
+    type: code
+    description: "QA report does not contain partial approval language"
+    check: regex_not_match
+    params:
+      pattern: "\\b(partial(ly)? pass|conditionally? (pass|approv))\\b"
+    expected: "Zero matches — QA is binary (PASS/FAIL/ESCALATE), never partial"
+
+  - id: A04
+    type: code
+    description: "QA report references acceptance criteria by identifier"
+    check: regex_match
+    params:
+      pattern: "\\bAC[- ]?\\d+"
+    expected: "At least one AC reference (e.g. AC1, AC-1, AC 1)"
+
+  - id: A05
+    type: llm-judge
+    description: "Every acceptance criterion has an explicit pass/fail verdict with evidence"
+    prompt: |
+      You are evaluating a QA review report produced by a QA Sub-Agent in the GAAI framework.
+      The report must evaluate each acceptance criterion individually and provide:
+      1. An explicit verdict (pass or fail) for each criterion
+      2. Evidence supporting that verdict (what was checked, what was observed)
+
+      Review the output below and determine: Does every acceptance criterion listed have both an explicit verdict AND supporting evidence?
+      Answer PASS or FAIL, then explain in one sentence.
+    rubric:
+      pass_if: "Every AC has a clear pass/fail verdict with specific evidence (not just 'checked' or 'verified')"
+      fail_if: "Any AC lacks a verdict, or has a verdict without evidence, or uses vague language like 'looks good'"
+
+  - id: A06
+    type: llm-judge
+    description: "QA report does not modify or reinterpret acceptance criteria"
+    prompt: |
+      You are evaluating a QA review report. A core GAAI rule is that QA treats acceptance criteria as a hard contract — it cannot modify, weaken, or reinterpret them to make a PASS verdict easier.
+
+      Review the output below and determine: Does the report evaluate criteria exactly as stated, without redefining, weakening, or adding caveats that make PASS easier?
+      Answer PASS or FAIL, then explain in one sentence.
+    rubric:
+      pass_if: "Criteria are evaluated as-is, without modification or reinterpretation"
+      fail_if: "Any criterion is rephrased, weakened, or given a caveat that lowers the bar for PASS"

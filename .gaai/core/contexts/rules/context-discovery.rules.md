@@ -41,7 +41,7 @@ The Discovery track MUST be activated when:
 ### R2 — Use Delivery Track When
 
 The Delivery track MUST be activated when:
-- a backlog item exists with status `ready`
+- a backlog item exists with status `refined`
 - acceptance criteria are explicit and approved
 - scope is locked
 
@@ -65,7 +65,7 @@ It MUST NOT auto-load full memory.
 ## 🚫 Forbidden Activation Patterns
 
 The following are **explicitly forbidden**:
-- Delivery activating without a `ready` backlog item
+- Delivery activating without a `refined` backlog item
 - Discovery activating without a human intent input
 - Auto-switching between tracks without agent decision
 - Implicit track inference from file state

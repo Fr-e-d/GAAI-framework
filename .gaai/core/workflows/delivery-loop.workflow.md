@@ -240,7 +240,7 @@ Move completed Story to `contexts/backlog/done/{YYYY-MM}.done.yaml`.
 
 Invoke `decision-extraction` if notable architectural or governance decisions emerged.
 
-Invoke `memory-retrieve` + `memory-ingest` if new patterns worth persisting were identified.
+Flag any new patterns worth persisting as a memory-delta artefact (`memory-deltas/{id}.memory-delta.md`) for Discovery to review and ingest in the next session. Delivery does not invoke `memory-ingest` directly — see `orchestration.rules.md` §Memory Ingestion.
 
 **If the Story required human intervention or reached 3 QA cycles:** invoke `post-mortem-learning`. Record the friction signal (domain, root cause hypothesis, AC gap if applicable) as a `[FRICTION]` entry in `contexts/memory/decisions.memory.md`. This informs future Discovery refinement.
 
