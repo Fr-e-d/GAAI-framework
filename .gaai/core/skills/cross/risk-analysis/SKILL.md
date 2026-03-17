@@ -35,6 +35,15 @@ This skill makes risks **explicit, prioritized, and actionable**. It does not so
 
 ## Process
 
+**CRITICAL — Anti-Collision Guard (MUST execute before writing any output file):**
+Before writing `contexts/artefacts/risk-reports/{story_id}.risk-report.md`, check if the target file already exists on disk:
+- If it does NOT exist → proceed normally.
+- If it DOES exist → **read the existing file first**. Then decide:
+  - If the existing content is from a **different entity** (different story ID, different epic) → **STOP immediately**, surface the ID collision to the human, do not proceed.
+  - If the existing content is from the **same entity** and an update is warranted → proceed, but preserve any human edits or prior findings that remain relevant. Treat this as an **update**, not a replacement.
+  - If the existing content is identical or still valid → skip writing, report "no changes needed".
+This guard prevents the silent data loss incident of 2026-03-17 where concurrent sessions overwrote story files.
+
 1. Read provided artefacts fully
 2. Load relevant memory (if supplied)
 3. Scan for: ambiguity, assumptions, complexity spikes, constraint conflicts, missing validations

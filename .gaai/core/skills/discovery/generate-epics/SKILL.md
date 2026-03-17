@@ -34,6 +34,14 @@ Works with or without a PRD.
 ## Process
 
 1. Read the Epic template at `contexts/artefacts/epics/_template.epic.md` before writing any Epic file.
+
+   **CRITICAL — ID Collision Guard (MUST execute before assigning any Epic ID):**
+   - **a)** Scan `contexts/backlog/active.backlog.yaml` to find the **highest existing Epic number** (e.g., if E52 is the last, the next Epic must be E53 or higher).
+   - **b)** Also scan `contexts/artefacts/epics/` for existing `.epic.md` files to catch any that may not yet be in the backlog.
+   - **c)** For each Epic file to be created, **check if the file already exists** at `contexts/artefacts/epics/{id}.epic.md`. If it exists with different content, **STOP immediately** — surface the conflict to the human.
+   - **d)** The new Epic ID = `max(existing IDs) + 1`. Never reuse an Epic ID, even if the previous Epic was deleted or superseded.
+   - **Rationale:** On 2026-03-17, two concurrent sessions both assigned E52 to different epics. The second overwrote the first's stories. This guard prevents recurrence.
+
 2. Think in **user outcomes**, not features
 3. Keep Epics high-level and value-focused
 4. Avoid implementation detail
@@ -65,6 +73,7 @@ Key sections per Epic:
 - Maximum 7 Epics per initiative
 - No implementation detail present
 - Each Epic is independently valuable
+- **No Epic ID collision** — the assigned ID does not exist in the backlog or on disk with different content
 
 ---
 
