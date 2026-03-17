@@ -169,7 +169,7 @@ avg_lead = sum(delivery_durations) / len(delivery_durations) if delivery_duratio
 med_lead = sorted(delivery_durations)[len(delivery_durations)//2] if delivery_durations else None
 total_cost = sum(costs) if costs else 0
 stories_with_cost = len(costs)
-avg_cost = total_cost / len(done) if done else None  # avg over ALL done stories
+avg_cost = total_cost / stories_with_cost if stories_with_cost else None  # avg over stories with cost data
 
 if json_mode:
     print(json.dumps({
