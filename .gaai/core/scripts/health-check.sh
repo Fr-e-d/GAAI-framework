@@ -169,7 +169,7 @@ if [[ -d "$PROJECT_DIR/skills" ]]; then
     else
       check_warn "project/skills/$skill_name/SKILL.md" "missing name or description in frontmatter"
     fi
-  done < <(find "$PROJECT_DIR/skills" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sort)
+  done < <(find "$PROJECT_DIR/skills" -name "SKILL.md" -exec dirname {} \; 2>/dev/null | sort -u)
 fi
 
 # 7. Rule files (in core/)
