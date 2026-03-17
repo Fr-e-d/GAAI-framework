@@ -167,8 +167,9 @@ else:
 failure_rate = (len(failed) / total_executed * 100) if total_executed > 0 else 0
 avg_lead = sum(delivery_durations) / len(delivery_durations) if delivery_durations else None
 med_lead = sorted(delivery_durations)[len(delivery_durations)//2] if delivery_durations else None
-avg_cost = sum(costs) / len(costs) if costs else None
 total_cost = sum(costs) if costs else 0
+stories_with_cost = len(costs)
+avg_cost = total_cost / len(done) if done else None  # avg over ALL done stories
 
 if json_mode:
     print(json.dumps({
@@ -181,6 +182,7 @@ if json_mode:
         'delivery_duration_median_min': round(med_lead, 1) if med_lead else None,
         'cost_total_usd': round(total_cost, 2),
         'cost_avg_usd': round(avg_cost, 2) if avg_cost else None,
+        'stories_with_cost_data': stories_with_cost,
         'velocity_stories_per_week': round(velocity, 1) if velocity else None,
         'complexity_distribution': complexity_dist,
     }, indent=2))
@@ -199,7 +201,7 @@ else:
         print(f'| Delivery duration (median) | {med_lead:.0f}min |')
     else:
         print(f'| Delivery duration | no timing data |')
-    print(f'| Total cost | \${total_cost:.2f} |')
+    print(f'| Total cost | \${total_cost:.2f} ({stories_with_cost}/{len(done)} stories tracked) |')
     if avg_cost:
         print(f'| Cost per story (avg) | \${avg_cost:.2f} |')
     if velocity:
