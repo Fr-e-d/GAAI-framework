@@ -7,7 +7,7 @@ tags:
   - conversational
   - governance
 created_at: 2026-03-15
-updated_at: 2026-03-15
+updated_at: 2026-03-17
 ---
 
 # GAAI Base Rules (Universal)
@@ -25,6 +25,7 @@ For flow-specific rules (agent responsibilities, backlog states, branch rules, c
 2. **Skill-first.** Every agent action must reference a skill. Read the skill file before invoking it.
 3. **Memory is explicit.** Load only what is needed. Never auto-load all memory.
 4. **Artefacts document — they do not authorize.** Only the backlog authorizes execution.
+5. **Artefacts are never overwritten blindly.** Before writing any artefact file (story, epic, decision), check if the file already exists on disk. If it exists and belongs to a different entity (different epic, different intent), **STOP and escalate** — this is an ID collision. Never silently overwrite an existing artefact. This rule is absolute and applies even in conversational mode.
 
 ---
 

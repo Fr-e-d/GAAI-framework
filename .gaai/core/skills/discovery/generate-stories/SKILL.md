@@ -35,6 +35,13 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 ## Process
 
 1. Read the Story template at `contexts/artefacts/stories/_template.story.md`. Read the parent Epic file. Derive story IDs using the parent Epic ID prefix (e.g., Epic E01 produces stories E01S01, E01S02, etc.).
+
+   **CRITICAL — Collision Guard (MUST execute before writing any file):**
+   - **a)** Scan `contexts/backlog/active.backlog.yaml` for any existing entries with the same Epic ID prefix. If entries exist, determine the **next available story number** (e.g., if E52S01–E52S05 exist, start at E52S06).
+   - **b)** For each story file to be created, **check if the file already exists** on disk at `contexts/artefacts/stories/{id}.story.md`. If the file exists and its `id` frontmatter matches a **different** epic or title, **STOP immediately** — this means an ID collision between two epics. Surface the conflict to the human and do not proceed.
+   - **c)** If the file exists and its content matches the current Epic (same epic ID, same intent), treat it as an update — read the existing content first and preserve any human edits.
+   - **Rationale:** On 2026-03-17, two concurrent sessions assigned E52 to different epics. The second session overwrote E52S01–S04 story files without checking, destroying the admin Worker stories. This guard prevents recurrence.
+
 2. Write from the user's perspective
 3. Focus on behavior, not UI or technology
 4. Keep stories small and independent
@@ -87,6 +94,7 @@ Acceptance Criteria:
 - Stories are independent and deliverable individually
 - Each story file's frontmatter `id` and `related_backlog_id` match the parent Epic's ID prefix
 - **Every generated story has a corresponding entry in `active.backlog.yaml`** — verify by counting story files vs backlog entries for this Epic. Mismatch = FAIL.
+- **No existing story file was overwritten with a different Epic's content** — verify each written file's `epic` frontmatter matches the intended Epic. Mismatch = CRITICAL FAILURE.
 
 ---
 

@@ -38,6 +38,15 @@ Activate after:
 
 ## Process
 
+**CRITICAL — Anti-Collision Guard (MUST execute before writing any memory file):**
+Before writing any file under `contexts/memory/**`, check if the target file already exists on disk:
+- If it does NOT exist → proceed normally.
+- If it DOES exist → **read the existing file first**. Then decide:
+  - If the existing content covers a **different topic or entity** than what you are about to write → **STOP immediately**, surface the collision to the human, do not proceed.
+  - If the existing content covers the **same topic** and an update is warranted → proceed, but preserve any human edits or prior knowledge that remains valid. Treat this as an **update**, not a replacement.
+  - If the existing content is identical or still valid → skip writing, report "no changes needed".
+This guard prevents the silent data loss incident of 2026-03-17 where concurrent sessions overwrote memory files.
+
 1. Read new validated knowledge (discovery results, decisions, architecture insights, validated hypotheses, GTM decisions)
 2. Read `contexts/memory/index.md` to discover available categories (shared and domain). Classify knowledge into the most appropriate existing category. If no existing category fits, create a new one — name it clearly, create the directory, and register it in `index.md` before writing any file.
 3. Create or update corresponding memory files using standard templates

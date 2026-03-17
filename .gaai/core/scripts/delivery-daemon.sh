@@ -146,11 +146,14 @@ else
   SKIP_PERMISSIONS=true
 fi
 
-# Launcher: Terminal.app on macOS, tmux on Linux/VPS
-if [[ "$PLATFORM" == "Darwin" ]] && command -v osascript &>/dev/null; then
+# Launcher: prefer tmux (background, robust, cross-platform), fallback to Terminal.app on macOS
+if command -v tmux &>/dev/null; then
+  LAUNCHER="tmux"
+elif [[ "$PLATFORM" == "Darwin" ]] && command -v osascript &>/dev/null; then
   LAUNCHER="terminal-app"
 else
-  LAUNCHER="tmux"
+  echo -e "${RED:-}ERROR: Neither tmux nor Terminal.app available. Install tmux: brew install tmux (macOS) / apt install tmux (Linux)${NC:-}"
+  exit 1
 fi
 
 # Claude flags (expanded into wrapper scripts at generation time)
@@ -857,7 +860,6 @@ WRAPPER_EOF
 
   osascript <<APPLE_EOF
     tell application "Terminal"
-      activate
       do script "'$wrapper'"
     end tell
 APPLE_EOF

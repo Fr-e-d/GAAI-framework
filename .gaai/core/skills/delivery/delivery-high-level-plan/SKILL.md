@@ -38,6 +38,15 @@ Do NOT activate if Stories are unclear, acceptance criteria are missing, or prod
 
 ## Process
 
+**CRITICAL — Anti-Collision Guard (MUST execute before writing any output file):**
+Before writing `contexts/artefacts/plans/{id}.plan.md`, check if the target file already exists on disk:
+- If it does NOT exist → proceed normally.
+- If it DOES exist → **read the existing file first**. Then decide:
+  - If the existing content is from a **different entity** (different story ID, different epic) → **STOP immediately**, surface the ID collision to the human, do not proceed.
+  - If the existing content is from the **same entity** and an update is warranted → proceed, but preserve any human edits or prior findings that remain relevant. Treat this as an **update**, not a replacement.
+  - If the existing content is identical or still valid → skip writing, report "no changes needed".
+This guard prevents the silent data loss incident of 2026-03-17 where concurrent sessions overwrote story files.
+
 1. Load only relevant memory and rules
 2. Read each Story and acceptance criteria fully
 3. Identify required behavior and boundaries
