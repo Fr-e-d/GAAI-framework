@@ -103,7 +103,53 @@ The **Delivery Daemon** automates delivery end-to-end:
 
 Usage: `/gaai-daemon` to start, `/gaai-daemon --stop` to stop. One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`.
 
-A pre-push hook (`.githooks/pre-push`) blocks all pushes to `production` from the development environment. Activate with `git config core.hooksPath .githooks`.
+Git hooks are managed via dispatchers in `.githooks/` that delegate to scripts in `.gaai/core/hooks/<hook>.d/` (framework) and `.gaai/project/hooks/<hook>.d/` (project-specific). The installer (`install.sh`) sets up all dispatchers automatically.
+
+Active hooks:
+- **pre-push** — blocks pushes to protected branches (`production`, `main`) via `core/hooks/pre-push.d/01-block-production.sh`
+- **post-commit** — runs framework maintenance (skills index, lint, memory check) and project hooks
+
+<details>
+<summary>How the dispatcher pattern works</summary>
+
+Each git hook in `.githooks/` is a thin dispatcher — it does not contain business logic. Instead, it iterates over executable scripts in two directories, in order:
+
+```
+.gaai/core/hooks/<hook>.d/     ← framework scripts (shipped with GAAI)
+.gaai/project/hooks/<hook>.d/  ← project scripts (yours to customize)
+```
+
+**Safe installation:** The installer never overwrites an existing `.githooks/<hook>` file. If you already have a hook (e.g. from Husky, lint-staged, or custom scripts), the installer appends a GAAI dispatcher block at the end — your existing logic runs first, then GAAI scripts run after. The appended block is marked with `# ── GAAI dispatcher ──` so the installer can detect it on subsequent runs and skip re-injection.
+
+**To add a new hook script:** create an executable file in the appropriate `.d/` directory. Use numeric prefixes for ordering (e.g. `01-check.sh`, `02-notify.sh`).
+
+**To add a new hook type** (e.g. `pre-commit`):
+
+1. Create the dispatcher template in `.gaai/core/hooks/pre-commit`:
+   ```bash
+   #!/bin/bash
+   # pre-commit dispatcher — executes hooks from core/ then project/
+   ROOT="$(git rev-parse --show-toplevel)"
+   CORE_DIR="$ROOT/.gaai/core/hooks/pre-commit.d"
+   PROJECT_DIR="$ROOT/.gaai/project/hooks/pre-commit.d"
+
+   for dir in "$CORE_DIR" "$PROJECT_DIR"; do
+       [ -d "$dir" ] || continue
+       for script in "$dir"/*; do
+           [ -x "$script" ] || continue
+           "$script" || exit $?
+       done
+   done
+   exit 0
+   ```
+2. Create `.gaai/core/hooks/pre-commit.d/` and add your scripts.
+3. Run `install.sh` — it auto-discovers all dispatcher templates in `core/hooks/` and installs them to `.githooks/`.
+
+**Blocking vs non-blocking:** For hooks where failure should abort the git operation (pre-push, pre-commit), use `|| exit $?`. For informational hooks (post-commit), use `|| echo "warning"` to continue on failure.
+
+**stdin-aware hooks:** Hooks like `pre-push` receive data on stdin from git. Their dispatchers capture stdin once and replay it to each script so multiple scripts can inspect the same data.
+
+</details>
 
 ---
 
