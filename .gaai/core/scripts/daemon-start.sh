@@ -98,7 +98,11 @@ do_stop() {
   fi
 
   rm -f "$PID_FILE"
-  echo "✅ Daemon stopped."
+
+  # Truncate daemon log to avoid unbounded growth
+  [[ -f "$LOG_FILE" ]] && : > "$LOG_FILE"
+
+  echo "✅ Daemon stopped. Log truncated."
 }
 
 do_status() {

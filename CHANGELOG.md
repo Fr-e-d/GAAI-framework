@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.3.1] - 2026-03-18
+
+### Changed
+- chore: consolidate daemon log path + relocate sync artifacts to .github/
+
+
 ## [2.3.0] - 2026-03-18
 
 ### Changed
