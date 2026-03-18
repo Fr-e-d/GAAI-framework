@@ -147,9 +147,10 @@ git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai && \
 GAAI works manually with `/gaai-deliver`. But if your project uses git with a `staging` branch, the **Delivery Daemon** runs deliveries autonomously:
 
 - Polls the backlog for `refined` stories
-- Launches parallel Claude Code sessions (configurable concurrency)
+- Launches parallel Claude Code sessions (default: 3 concurrent slots)
 - Coordinates across devices via git push
 - Monitors health, retries failures, archives completed work
+- Auto-opens a monitoring dashboard on macOS (tmux split: daemon config + active deliveries)
 
 **Three scripts, three roles:**
 
@@ -174,8 +175,8 @@ bash .gaai/core/scripts/delivery-daemon.sh --max-concurrent 2
 **Run as background service** (VPS/headless):
 
 ```bash
-bash .gaai/core/scripts/daemon-start.sh --max-concurrent 3   # starts in tmux/nohup
-bash .gaai/core/scripts/daemon-start.sh --status              # check state
+bash .gaai/core/scripts/daemon-start.sh                       # starts in tmux (3 concurrent slots)
+bash .gaai/core/scripts/daemon-start.sh --status              # monitoring dashboard
 bash .gaai/core/scripts/daemon-start.sh --stop                # graceful shutdown
 ```
 
