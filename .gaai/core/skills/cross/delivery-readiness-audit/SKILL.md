@@ -95,7 +95,7 @@ Verdict: PASS | N issues found
 
 | Backlog Item | DEC | Pending Action | Story Exists? |
 |---|---|---|---|
-| E02S04 | DEC-12 | auth middleware refactor to support RBAC | No |
+| E02S04 | DEC-{N} | auth middleware refactor to support RBAC | No |
 
 **5c. Delivery Verdict**
 

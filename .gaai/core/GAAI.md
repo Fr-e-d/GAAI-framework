@@ -173,7 +173,7 @@ GAAI never loads everything at once. Context is assembled on demand, in layers:
 4. **Memory retrieval** — 3-level progressive disclosure: index scan → targeted file load → cross-domain (rare). See `memory-retrieve` skill.
 5. **Skills** — discovered via index frontmatter, loaded individually when invoked. Never bulk-loaded.
 
-**Why:** LLM instruction-following degrades with context size (see DEC-194). Every token of context must earn its place. The right amount of context is the minimum needed for the current task.
+**Why:** LLM instruction-following degrades with context size. Every token of context must earn its place. The right amount of context is the minimum needed for the current task.
 
 ---
 

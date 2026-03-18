@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.6.2] - 2026-03-18
+
+### Changed
+- fix(core): remove all project-specific DEC references from framework files
+
+
 ## [2.6.1] - 2026-03-18
 
 ### Changed

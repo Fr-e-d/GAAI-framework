@@ -126,7 +126,7 @@ All AI-driven execution targets the **`staging`** branch. The `production` branc
   If a prior story's PR is open (not yet merged), the Delivery Agent must wait before starting the next story.
   This prevents chained branch conflicts and ensures each story builds on a clean staging base.
 
-> **Concurrent mode note:** This sequential constraint applies in `--max-concurrent 1` mode (default). In concurrent delivery (`--max-concurrent > 1`), each session manages its own branch independently from staging HEAD; conflicts are resolved at PR merge time via the retry-with-rebase pattern (DEC-146). See DEC-71 (origin: 19 unmerged PRs incident).
+> **Concurrent mode note:** This sequential constraint applies in `--max-concurrent 1` mode (default). In concurrent delivery (`--max-concurrent > 1`), each session manages its own branch independently from staging HEAD; conflicts are resolved at PR merge time via the retry-with-rebase pattern (see delivery-loop.workflow.md §Staging Push Retry Pattern).
 - After creating a PR, immediately enable GitHub auto-merge: `gh pr merge --auto --squash story/{id}`.
   This ensures PRs merge automatically when CI passes, without human intervention.
 
@@ -215,7 +215,7 @@ Cron MUST NOT:
 - Only validated knowledge may be ingested
 - Raw chat transcripts are forbidden
 
-**Governed exception — `decision-extraction`:** Delivery may invoke `decision-extraction` after QA PASS to scan for durable architectural or governance decisions. This is the sole Delivery-permitted memory write, governed by the skill's deduplication gate (DEC-130) and consistency checks. All other memory ingestion (project knowledge, patterns, domain memory) remains Discovery-only.
+**Governed exception — `decision-extraction`:** Delivery may invoke `decision-extraction` after QA PASS to scan for durable architectural or governance decisions. This is the sole Delivery-permitted memory write, governed by the skill's deduplication gate and consistency checks. All other memory ingestion (project knowledge, patterns, domain memory) remains Discovery-only.
 
 ### Memory Maintenance
 

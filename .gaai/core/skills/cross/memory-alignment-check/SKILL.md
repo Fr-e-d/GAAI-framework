@@ -100,7 +100,7 @@ verdict: ALIGNED | DRIFT_DETECTED | NEW_KNOWLEDGE_FOUND | DRIFT_AND_NEW_KNOWLEDG
 
 ## Contradicted Entries
 
-- memory_id: DEC-2026-01-15-01
+- memory_id: DEC-{N}
   status: CONTRADICTED
   severity: high | medium | low
   description: Memory states [X]. Implementation did [Y]. These are incompatible.

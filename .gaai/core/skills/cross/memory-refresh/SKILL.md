@@ -40,7 +40,7 @@ This skill governs and optimizes **existing memory only** — it does not create
 3. Convert recurring or validated information into summary memory
 4. Archive raw session files to `contexts/memory/archive/`
 5. **Compact with R7 category-aware rules:**
-   - **Durable memory** (decisions, patterns, project, ops, contacts, domains): only entries with explicit supersession markers (`> SUPERSEDED by DEC-XX`, `> RETRACTED`, `> OBSOLETE — {reason}`) may be archived. All other entries are ACTIVE and MUST NOT be archived. Decisions are already individual ADR files per DEC-138 (`decisions/DEC-{N}.md`) — no compaction needed. For other oversized durable files → domain-split, not archive.
+   - **Durable memory** (decisions, patterns, project, ops, contacts, domains): only entries with explicit supersession markers (`> SUPERSEDED by DEC-XX`, `> RETRACTED`, `> OBSOLETE — {reason}`) may be archived. All other entries are ACTIVE and MUST NOT be archived. Decisions are already individual ADR files (`decisions/DEC-{N}.md`) — no compaction needed. For other oversized durable files → domain-split, not archive.
    - **Ephemeral memory** (sessions): standard compaction — summarize and archive.
 5b. **Summary lifecycle — mandatory when extending summary coverage:** When creating or extending a decisions summary file that supersedes an existing one (e.g., `decisions-90-145.summary.md` → `decisions-90-155.summary.md`):
    a. Write the new summary file with updated frontmatter (`id`, `updated_at`, source range).

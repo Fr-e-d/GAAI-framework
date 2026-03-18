@@ -15,7 +15,7 @@ inputs:
   - recent_agent_outputs: session outputs from the invoking agent, or file paths to artefacts produced in the current session (e.g., evaluation reports, refined stories, approach-evaluation outputs)
   - contexts/artefacts/**  (governed)
 outputs:
-  - contexts/memory/decisions/DEC-{N}.md  (individual ADR file per DEC-138)
+  - contexts/memory/decisions/DEC-{N}.md  (individual ADR file)
   - contexts/memory/decisions/_log.md  (next ID updated)
   - contexts/memory/index.md  (registry + file count updated)
 ---
@@ -36,7 +36,7 @@ Do NOT use for trivial steps, implementation details, brainstorming, or reversib
 
 ## Process
 
-0. **Decision Consistency Gate (mandatory, DEC-130).** Before extracting any new decision:
+0. **Decision Consistency Gate (mandatory).** Before extracting any new decision:
    - Read `contexts/memory/index.md` → scan the Decision Registry by domain to identify relevant existing decisions
    - Load the specific `decisions/DEC-{ID}.md` files for decisions in the affected domain(s)
    - Verify the proposed decision does NOT contradict any active decision
@@ -60,7 +60,7 @@ Do NOT use for trivial steps, implementation details, brainstorming, or reversib
 
 ---
 
-## Output Format (DEC-138)
+## Output Format
 
 Each decision is an individual ADR file: `decisions/DEC-{N}.md` (sequential numeric ID).
 
@@ -79,7 +79,7 @@ supersedes: null          # or DEC-{old-id} if replacing
 superseded_by: null
 tags:
   - {relevant tags}
-related_to: []            # optional — max 5 DEC IDs (e.g. [DEC-66, DEC-130])
+related_to: []            # optional — max 5 DEC IDs
 ---
 
 # DEC-{N} — Decision Title

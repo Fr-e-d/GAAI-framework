@@ -153,7 +153,7 @@ This step is non-negotiable. Skipping it risks implementations that contradict e
 - The main working tree stays on `staging` at ALL times
 - All staging operations serialized via `flock`
 - AI never interacts with `production`
-- PRs are merged immediately after QA PASS (DEC-71)
+- PRs are merged immediately after QA PASS
 
 ---
 
