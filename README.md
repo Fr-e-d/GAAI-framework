@@ -73,7 +73,7 @@ your-project/
     │   ├── QUICK-REFERENCE.md ← daily cheat sheet
     │   ├── VERSION
     │   ├── agents/            ← Discovery + Delivery + Bootstrap agent specs
-    │   ├── skills/            ← 40 execution units
+    │   ├── skills/            ← 44 execution units
     │   ├── contexts/rules/    ← framework rules
     │   ├── workflows/         ← delivery loop, bootstrap, handoffs
     │   ├── scripts/           ← bash utilities
@@ -214,7 +214,7 @@ One canonical source (`.gaai/`). Thin adapters per tool. No duplication. The fra
 - [Core Concepts](docs/02-core-concepts.md) — dual track, backlog, memory, skills, artefacts
 - [Vibe Coder Guide](docs/guides/vibe-coder-guide.md) — fast daily workflow
 - [Senior Engineer Guide](docs/guides/senior-engineer-guide.md) — governance, rules, CI
-- [Skills Index](.gaai/core/skills/README.skills.md) — all 40 skills
+- [Skills Index](.gaai/core/skills/README.skills.md) — all 44 skills
 - [Tool Compatibility](docs/reference/tool-compatibility.md) — Claude Code, OpenCode, Codex CLI, Gemini CLI, Antigravity, Cursor, Windsurf
 - [Design Decisions](docs/architecture/design-decisions.md) — why GAAI is structured the way it is (ADRs + research basis)
 
