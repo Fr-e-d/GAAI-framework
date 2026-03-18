@@ -15,12 +15,6 @@ render_banner() {
   # shellcheck disable=SC1090
   source "$CONFIG_FILE" 2>/dev/null || return
 
-  # Caffeinate line
-  if [[ -n "${CAFFEINATE_PID:-}" ]]; then
-    echo -e "  ${GREEN}[${STARTED:-??:??:??}] caffeinate (PID $CAFFEINATE_PID) — Mac will stay awake${NC}"
-    echo ""
-  fi
-
   # 2-column banner (28 │ 29 = 58 inner width)
   local W=58
 
