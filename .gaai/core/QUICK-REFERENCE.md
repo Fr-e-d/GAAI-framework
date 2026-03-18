@@ -37,16 +37,15 @@ Nothing gets built that isn't in the backlog. Discovery decides *what*. Delivery
 
 ---
 
-## Daemon (Optional — requires git + staging branch)
+## Daemon (Optional — autonomous delivery)
 
-```bash
-bash .gaai/core/scripts/daemon-setup.sh         # one-time setup
-bash .gaai/core/scripts/daemon-start.sh          # start (default: 3 concurrent slots)
-bash .gaai/core/scripts/daemon-start.sh --status # monitoring dashboard
-bash .gaai/core/scripts/daemon-start.sh --stop   # stop daemon
-```
+1. Create stories with `/gaai-discover`
+2. `/gaai-daemon` — starts the daemon (default: 3 concurrent slots, auto-opens monitoring)
+3. `/gaai-daemon --stop` — graceful shutdown
 
-On macOS, starting the daemon auto-opens a monitoring dashboard (tmux) showing daemon config and active deliveries.
+Override concurrency: `/gaai-daemon --max-concurrent 5`
+
+One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`
 
 ---
 
