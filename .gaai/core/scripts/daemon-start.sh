@@ -17,7 +17,7 @@ set -euo pipefail
 #   daemon-start.sh --restart          Stop + start
 #
 # Options (passed through to delivery-daemon.sh):
-#   --max-concurrent N     Parallel delivery slots (default: 1)
+#   --max-concurrent N     Parallel delivery slots (default: 3)
 #   --interval N           Poll interval in seconds (default: 30)
 #   --dry-run              Show what would launch, don't execute
 #
@@ -63,6 +63,7 @@ PASSTHROUGH_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --start)   ACTION="start";   shift ;;
     --stop)    ACTION="stop";    shift ;;
     --status)  ACTION="status";  shift ;;
     --monitor) ACTION="status";  shift ;;
@@ -70,6 +71,35 @@ while [[ $# -gt 0 ]]; do
     *)         PASSTHROUGH_ARGS+=("$1"); shift ;;
   esac
 done
+
+# ── Auto-launch monitoring terminal ────────────────────────────────────────
+
+_launch_monitor() {
+  local daemon_start_path="$SCRIPT_DIR/daemon-start.sh"
+
+  case "$(uname -s)" in
+    Darwin)
+      # Open a new Terminal.app window with the monitoring dashboard
+      osascript -e "
+        tell application \"Terminal\"
+          do script \"cd '$PROJECT_ROOT' && bash '$daemon_start_path' --status\"
+          activate
+        end tell
+      " 2>/dev/null && echo "  Monitor: opened in new Terminal.app window" \
+                    || echo "  Monitor: bash $daemon_start_path --status"
+      ;;
+    *)
+      # On Linux: create the monitor tmux session detached (user can attach)
+      if command -v tmux &>/dev/null; then
+        bash "$daemon_start_path" --status &
+        disown 2>/dev/null || true
+        echo "  Monitor: tmux attach -t gaai-monitor"
+      else
+        echo "  Monitor: bash $daemon_start_path --status"
+      fi
+      ;;
+  esac
+}
 
 # ── Actions ───────────────────────────────────────────────────────────────
 
@@ -98,6 +128,17 @@ do_stop() {
   fi
 
   rm -f "$PID_FILE"
+
+  # Kill the monitoring session if it exists
+  if command -v tmux &>/dev/null && tmux has-session -t gaai-monitor 2>/dev/null; then
+    tmux kill-session -t gaai-monitor 2>/dev/null || true
+    echo "  Monitor session (gaai-monitor) closed."
+  fi
+
+  # Kill the daemon tmux session if it's still around
+  if command -v tmux &>/dev/null && tmux has-session -t gaai-daemon 2>/dev/null; then
+    tmux kill-session -t gaai-daemon 2>/dev/null || true
+  fi
 
   # Truncate daemon log to avoid unbounded growth
   [[ -f "$LOG_FILE" ]] && : > "$LOG_FILE"
@@ -213,8 +254,10 @@ do_start() {
       echo ""
       echo "✅ Daemon started."
       echo ""
-      echo "  Monitor: bash .gaai/core/scripts/daemon-start.sh --status"
       echo "  Stop:    bash .gaai/core/scripts/daemon-start.sh --stop"
+
+      # Auto-launch monitoring in a new terminal
+      _launch_monitor
     else
       echo "⚠️  tmux session created but could not read PID."
       echo "  Check:   tmux attach -t gaai-daemon"
