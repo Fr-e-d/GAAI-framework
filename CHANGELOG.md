@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.0] - 2026-03-18
+
+### Changed
+- chore(gaai-core): trigger sync to fix OSS version revert
+- feat(E55S06): implement billing email notification handlers (#323)
+
+
 ## [2.3.0] - 2026-03-18
 
 ### Changed
