@@ -150,34 +150,20 @@ GAAI works manually with `/gaai-deliver`. But if your project uses git with a `s
 - Launches parallel Claude Code sessions (default: 3 concurrent slots)
 - Coordinates across devices via git push
 - Monitors health, retries failures, archives completed work
-- Auto-opens a monitoring dashboard on macOS (tmux split: daemon config + active deliveries)
+- Auto-opens a monitoring dashboard (tmux split: daemon config + active deliveries)
 
-**Three scripts, three roles:**
-
-| Script | Role |
-|--------|------|
-| `daemon-setup.sh` | One-time setup — checks prerequisites, configures git hooks and permissions |
-| `delivery-daemon.sh` | The daemon itself — runs in the foreground, polls the backlog, launches deliveries |
-| `daemon-start.sh` | Lifecycle wrapper — start/stop/status/restart, runs the daemon in background (tmux or nohup) |
-
-**Setup (2 minutes):**
+**Setup (one-time):**
 
 ```bash
-bash .gaai/core/scripts/daemon-setup.sh        # one-time: checks prereqs, configures
+bash .gaai/core/scripts/daemon-setup.sh
 ```
 
-**Run interactively** (macOS — recommended for visibility):
+**Usage:**
 
-```bash
-bash .gaai/core/scripts/delivery-daemon.sh --max-concurrent 2
 ```
-
-**Run as background service** (VPS/headless):
-
-```bash
-bash .gaai/core/scripts/daemon-start.sh                       # starts in tmux (3 concurrent slots)
-bash .gaai/core/scripts/daemon-start.sh --status              # monitoring dashboard
-bash .gaai/core/scripts/daemon-start.sh --stop                # graceful shutdown
+/gaai-daemon                    # start daemon (3 concurrent slots, auto-opens monitor)
+/gaai-daemon --max-concurrent 5 # override concurrency
+/gaai-daemon --stop             # graceful shutdown
 ```
 
 > Requires: git repo, `staging` branch, [Claude Code CLI](https://claude.com/claude-code), python3, tmux (recommended) or Terminal.app (macOS fallback).
