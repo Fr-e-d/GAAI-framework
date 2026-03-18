@@ -7,20 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.4.1] - 2026-03-18
-
-### Changed
-- fix(gaai-core): stash uncommitted work before git reset --hard in daemon
-- fix(sync): filter out story delivery commits from auto-bump and changelog
-
-
-## [2.4.0] - 2026-03-18
-
-### Changed
-- chore(gaai-core): trigger sync to fix OSS version revert
-- feat(sync): auto-bump version from conventional commits on OSS sync
-
-
 ## [2.3.0] - 2026-03-18
 
 ### Changed
