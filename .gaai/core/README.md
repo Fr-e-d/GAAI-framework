@@ -1,4 +1,4 @@
-# .gaai/ — GAAI Framework (v2.5.1)
+# .gaai/ — GAAI Framework (v2.5.2)
 
 ## Directory Structure
 
@@ -34,12 +34,11 @@ Logs: `.github/.sync-log`.
 
 If your project uses git with a `staging` branch, the **Delivery Daemon** can automate everything:
 
-1. Setup: `bash .gaai/core/scripts/daemon-setup.sh`
-2. Start: `bash .gaai/core/scripts/daemon-start.sh` (default: 3 concurrent slots)
-3. Stop: `bash .gaai/core/scripts/daemon-start.sh --stop`
+1. One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`
+2. `/gaai-daemon` — starts the daemon (3 concurrent slots, auto-opens monitoring)
+3. `/gaai-daemon --stop` — graceful shutdown
 
 The daemon polls for `refined` stories and delivers them in parallel — no human in the loop.
-On macOS, a monitoring dashboard auto-opens showing daemon config and active deliveries.
 Full reference: see `GAAI.md` → "Branch Model & Automation".
 
 > **Tested on:** macOS (Apple Silicon). Linux and WSL (Windows) are expected to work but not yet validated — issues and feedback welcome.
