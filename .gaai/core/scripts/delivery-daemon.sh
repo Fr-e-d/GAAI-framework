@@ -27,7 +27,7 @@ set -euo pipefail
 #   Override with GAAI_SKIP_PERMISSIONS=false to force interactive (not recommended).
 #
 # Usage:
-#   .gaai/core/scripts/delivery-daemon.sh                     # defaults: 30s, 1 slot
+#   .gaai/core/scripts/delivery-daemon.sh                     # defaults: 30s, 3 slots
 #   .gaai/core/scripts/delivery-daemon.sh --interval 15       # poll every 15s
 #   .gaai/core/scripts/delivery-daemon.sh --max-concurrent 2  # parallel deliveries
 #   .gaai/core/scripts/delivery-daemon.sh --dry-run           # show what would launch
@@ -95,7 +95,7 @@ fi
 
 # ── Configuration ─────────────────────────────────────────────────────────
 POLL_INTERVAL="${GAAI_POLL_INTERVAL:-30}"
-MAX_CONCURRENT="${GAAI_MAX_CONCURRENT:-1}"
+MAX_CONCURRENT="${GAAI_MAX_CONCURRENT:-3}"
 TARGET_BRANCH="${GAAI_TARGET_BRANCH:-staging}"
 DELIVERY_TIMEOUT="${GAAI_DELIVERY_TIMEOUT:-14400}"   # 4h hard kill (last resort)
 MAX_TURNS="${GAAI_MAX_TURNS:-200}"                    # primary safety net
