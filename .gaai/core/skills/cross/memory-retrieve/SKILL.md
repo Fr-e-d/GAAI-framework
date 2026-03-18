@@ -44,7 +44,7 @@ Level 2 — INDIVIDUAL ADR FILES (~300 tokens/file)
 
 Level 3 — CROSS-DOMAIN SCAN (only for Decision Consistency Gate)
   Grep frontmatter across all DEC-*.md files for conflicts
-  Only triggered when recording a new decision (DEC-130)
+  Only triggered when recording a new decision (see Decision Consistency Gate in decision-extraction skill)
 ```
 
 ---
@@ -71,7 +71,7 @@ Level 3 — CROSS-DOMAIN SCAN (only for Decision Consistency Gate)
    **Ephemeral memory** (sessions):
    → Prefer summaries if available (lower token cost).
 
-4. **For Decision Consistency Gate (DEC-130):**
+4. **For Decision Consistency Gate:**
    → Scan the Decision Registry in index.md for ALL entries in the relevant domain
    → Load the specific `DEC-{ID}.md` files to check for conflicts
    → If uncertain about boundaries, also load decisions from adjacent domains

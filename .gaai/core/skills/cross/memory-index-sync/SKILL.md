@@ -75,12 +75,12 @@ Update `index.md` frontmatter `updated_at` field:
 # Memory Index Sync — {date}
 
 ## Changes Applied
-- Registered: DEC-146, DEC-147, ..., DEC-155 (10 entries added to registry)
-- Supersession markers added: DEC-68 (→ DEC-149)
-- File count updated: 145 → 155
+- Registered: DEC-{A}, DEC-{B}, ..., DEC-{Z} (10 entries added to registry)
+- Supersession markers added: DEC-{X} (→ DEC-{Y})
+- File count updated: N → M
 
 ## Anomalies Flagged (requires human review)
-- ⚠️ MISSING FILE: DEC-093 registered but no file on disk
+- ⚠️ MISSING FILE: DEC-{N} registered but no file on disk
 - ⚠️ ORPHAN SUMMARY: decisions-80-89.summary.md on disk, not in index
 
 ## Result: CLEAN | DRIFT_HEALED | ANOMALIES_FOUND

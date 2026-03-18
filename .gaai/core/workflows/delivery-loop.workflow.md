@@ -56,7 +56,7 @@ Before starting the loop:
 
 ### Staging Push Retry Pattern
 
-With `--max-concurrent > 1`, concurrent `git push origin staging` can fail (non-fast-forward). All staging push operations use a retry-with-rebase pattern (DEC-146):
+With `--max-concurrent > 1`, concurrent `git push origin staging` can fail (non-fast-forward). All staging push operations use a retry-with-rebase pattern:
 
 ```bash
 # Retry pattern: pull --rebase + push, 3 attempts, exponential backoff
@@ -169,7 +169,7 @@ Invoke `coordinate-handoffs`:
 
 ### 7b. Commit Delivery Artefacts to Story Branch
 
-After QA PASS, commit all delivery artefacts (execution-plan, impl-report, qa-report, memory-delta) to the story branch in the worktree. This ensures artefacts flow to staging via the PR merge — never pushed directly to staging (DEC-146).
+After QA PASS, commit all delivery artefacts (execution-plan, impl-report, qa-report, memory-delta) to the story branch in the worktree. This ensures artefacts flow to staging via the PR merge — never pushed directly to staging.
 
 ```bash
 # Step 7b: Commit delivery artefacts to story branch (in worktree)
@@ -213,7 +213,7 @@ EOF
 
 > The AI never merges to staging. It creates a PR for human review. The human merges when satisfied.
 
-**8b. Delivery artefacts:** Delivery artefacts are committed to the story branch before PR creation (step 7b) and merge to staging via the PR (DEC-146). No separate staging push needed.
+**8b. Delivery artefacts:** Delivery artefacts are committed to the story branch before PR creation (step 7b) and merge to staging via the PR. No separate staging push needed.
 
 **8c. Mark Story done + cleanup worktree:**
 
@@ -221,7 +221,7 @@ EOF
 # Remove worktree (but keep story branch — needed for the PR)
 git worktree remove ../{id}-workspace
 
-# Update backlog (push with retry — DEC-146)
+# Update backlog (push with retry-rebase pattern)
 flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
   git pull origin staging
   .gaai/core/scripts/backlog-scheduler.sh --set-status {id} done .gaai/project/contexts/backlog/active.backlog.yaml

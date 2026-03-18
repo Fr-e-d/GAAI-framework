@@ -71,14 +71,14 @@ The Orchestrator cannot proceed to the next phase until it has validated the cur
      6. Wait for PR CI check to reach a terminal state (`gh run watch`)
         - If CI fails → diagnose: same triage as steps 2–3 (fix story issues, ignore pre-existing)
         - If CI fails on infra (missing secrets, missing bindings) → **ESCALATE** with logs
-     7. `gh pr merge --squash` — immediate merge to staging (DEC-71)
+     7. `gh pr merge --squash` — immediate merge to staging
         - If merge fails (conflict): merge staging into branch, resolve, push, retry merge
         - If merge still fails after 2 attempts: **ESCALATE** with conflict details
         - If merge rejected (branch protection / checks required): wait for checks, then retry
      8. After successful merge: verify staging deploy CI (`gh run list --branch staging --limit 1`)
         - If staging deploy fails → **ESCALATE** with deploy logs (do not attempt infra fixes)
      9. If `{id}.memory-delta.md` exists in `contexts/artefacts/memory-deltas/`, flag it in the completion report for Discovery to action via `memory-ingest`.
-    10. Update backlog (push with retry — DEC-146), cleanup worktree + delete remote branch
+    10. Update backlog (push with retry-rebase pattern), cleanup worktree + delete remote branch
      **NEVER leave a PR open. NEVER merge to production (staging only).**
    - **FAIL**: spawn count < 2? → **RE-SPAWN** Implementation Sub-Agent with qa-report, then re-spawn QA Sub-Agent
    - **FAIL** after 2 cycles: → **ESCALATE**

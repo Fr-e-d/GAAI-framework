@@ -35,7 +35,7 @@ This skill **locates** memory — it does not **load** it. After results are ret
 Use cases:
 - "Which decisions relate to Hyperdrive?" → Mode A (frontmatter: domain=infrastructure, tags contains hyperdrive)
 - "Where did we discuss pool exhaustion?" → Mode B (full-text keyword: "pool exhaustion")
-- "What decisions are related to DEC-132?" → Mode C (cross-reference: DEC-132 → related_to + mentions)
+- "What decisions are related to DEC-42?" → Mode C (cross-reference: DEC-42 → related_to + mentions)
 
 ---
 
@@ -45,7 +45,7 @@ Use cases:
 
 Search YAML frontmatter fields across `decisions/DEC-*.md` files.
 
-1. Accept query as field-value pairs: `{domain: "infrastructure", level: "operational"}` and/or `{tags: ["hyperdrive"]}` and/or `{related_to: ["DEC-66"]}` and/or `{status: "active"}`
+1. Accept query as field-value pairs: `{domain: "infrastructure", level: "operational"}` and/or `{tags: ["hyperdrive"]}` and/or `{related_to: ["DEC-5"]}` and/or `{status: "active"}`
 2. Grep frontmatter blocks (between `---` delimiters) of all `decisions/DEC-*.md` files
 3. Match files where ALL specified fields match (AND logic)
 4. Extract `id`, `title`, and matched field values from each hit
@@ -71,8 +71,8 @@ Full-text keyword search across ALL memory files.
 
 For a given DEC ID, find all files that reference it + traverse `related_to` (depth 1).
 
-1. Accept query as a single DEC ID (e.g., `DEC-132`)
-2. **Direct mentions:** grep all files under `contexts/memory/` for the literal string `DEC-132`
+1. Accept query as a single DEC ID (e.g., `DEC-42`)
+2. **Direct mentions:** grep all files under `contexts/memory/` for the literal string `DEC-42`
 3. **Frontmatter `related_to`:** grep `related_to:` lines in `decisions/DEC-*.md` for the target ID
 4. **Outbound relations:** read the target file's own `related_to` field → list those DEC IDs
 5. Deduplicate and merge results into a single list
@@ -99,11 +99,11 @@ For a given DEC ID, find all files that reference it + traverse `related_to` (de
 **`search_results`** — ranked list of memory file references:
 
 ```yaml
-- file_path: decisions/DEC-132.md
-  id: DEC-132
-  title: "Centralized SQL connection cleanup"
+- file_path: decisions/DEC-42.md
+  id: DEC-42
+  title: "Use connection pooling for database access"
   relevance: related_to_inbound  # or: frontmatter_match | content_match | direct_mention | related_to_outbound
-  excerpt: "safety net for Hyperdrive pool exhaustion"  # ~50 tokens max, absent in Mode A
+  excerpt: "prevents connection exhaustion under load"  # ~50 tokens max, absent in Mode A
 ```
 
 Agent receives this list and decides which files to load via `memory-retrieve`.

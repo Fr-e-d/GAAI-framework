@@ -38,7 +38,7 @@ More focused than `memory-refresh` — this is a single-pass compression operati
 1. **Select memory by category or tags.** Read `contexts/memory/index.md`. Prioritize categories by: (a) largest file count first, (b) oldest entries first, (c) categories not referenced by the current task last. Under extreme pressure, compact the single largest category only.
 
 2. **Classify entries by durability (R7 gate).** Before compacting, classify each entry:
-   - **Durable** (decisions, patterns, project, ops, contacts, domains): only entries with explicit supersession markers (`> SUPERSEDED by DEC-XX`, `> RETRACTED`, `> OBSOLETE — {reason}`) may be archived. All other entries are ACTIVE and MUST NOT be archived regardless of file size. Note: decisions are already individual ADR files per DEC-138 (`decisions/DEC-{N}.md`). For other oversized durable files → domain-split, not archive.
+   - **Durable** (decisions, patterns, project, ops, contacts, domains): only entries with explicit supersession markers (`> SUPERSEDED by DEC-XX`, `> RETRACTED`, `> OBSOLETE — {reason}`) may be archived. All other entries are ACTIVE and MUST NOT be archived regardless of file size. Note: decisions are already individual ADR files (`decisions/DEC-{N}.md`). For other oversized durable files → domain-split, not archive.
    - **Ephemeral** (sessions): standard compaction applies — summarize and archive.
 
 3. Extract key decisions, constraints, priorities
