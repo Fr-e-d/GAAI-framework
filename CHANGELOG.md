@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.1] - 2026-03-18
+
+### Changed
+- chore(gaai-core): revert framework version to 2.3.0
+- fix(gaai-core): stash uncommitted work before git reset --hard in daemon
+
+
 ## [2.3.0] - 2026-03-18
 
 ### Changed
