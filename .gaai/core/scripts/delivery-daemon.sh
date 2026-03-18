@@ -1064,22 +1064,36 @@ shutdown() {
 
 trap shutdown SIGINT SIGTERM
 
-# ── Banner ────────────────────────────────────────────────────────────────
-# Dynamic padding so the right border always aligns
-BANNER_WIDTH=58  # inner width between ║ chars (matches ══ count)
-banner_row() {
-  local label="$1" value="$2"
-  local content="  ${label}${value}"
-  local pad=$(( BANNER_WIDTH - ${#content} ))
-  printf "  ║%s%${pad}s║\n" "${content}" ""
-}
-banner_row_styled() {
-  local label="$1" value="$2"
-  local content="  ${label}${value}"
-  local pad=$(( BANNER_WIDTH - ${#content} ))
-  local spaces
-  printf -v spaces '%*s' "$pad" ''
-  echo -e "  ║${NC}${CYAN}  ${label}${BOLD}${value}${NC}${CYAN}${spaces}║"
+# ── Save config for monitor ──────────────────────────────────────────────
+cat > "$LOCK_DIR/.daemon-config" << EOF
+BRANCH="$TARGET_BRANCH"
+INTERVAL="$POLL_INTERVAL"
+CONCURRENT="$MAX_CONCURRENT"
+MODEL="$CLAUDE_MODEL"
+LAUNCHER="$LAUNCHER"
+SKIP_PERMS="$SKIP_PERMISSIONS"
+MAX_TURNS="$MAX_TURNS"
+HEARTBEAT="$HEARTBEAT_STALE"
+TIMEOUT="$DELIVERY_TIMEOUT"
+DRY_RUN="$DRY_RUN"
+HOST="$(hostname -s 2>/dev/null || hostname)"
+CAFFEINATE_PID="${CAFFEINATE_PID:-}"
+STARTED="$(date '+%H:%M:%S')"
+EOF
+
+# ── Banner (2-column) ────────────────────────────────────────────────────
+BANNER_WIDTH=58  # inner width between ║ chars
+# Left column: 28 chars, separator: │ (1 char), right column: 29 chars
+banner_row_2col() {
+  local l1="$1" v1="$2" l2="$3" v2="$4"
+  local left_pad=$(( 14 - ${#v1} ))
+  local right_pad=$(( 15 - ${#v2} ))
+  [[ $left_pad -lt 0 ]] && left_pad=0
+  [[ $right_pad -lt 0 ]] && right_pad=0
+  local lsp rsp
+  printf -v lsp '%*s' "$left_pad" ''
+  printf -v rsp '%*s' "$right_pad" ''
+  echo -e "  ║${NC}${CYAN}  $(printf '%-12s' "$l1")${BOLD}${v1}${NC}${CYAN}${lsp}│  $(printf '%-12s' "$l2")${BOLD}${v2}${NC}${CYAN}${rsp}║"
 }
 
 echo -e "${CYAN}${BOLD}"
@@ -1088,16 +1102,11 @@ TITLE="GAAI Delivery Daemon"
 TITLE_LEN=${#TITLE}
 printf "  ║%*s%s%*s║\n" $(( (BANNER_WIDTH - TITLE_LEN) / 2 )) "" "$TITLE" $(( (BANNER_WIDTH - TITLE_LEN + 1) / 2 )) ""
 echo "  ╠$(printf '═%.0s' $(seq 1 $BANNER_WIDTH))╣"
-banner_row_styled "Branch:         " "$TARGET_BRANCH"
-banner_row_styled "Poll interval:  " "${POLL_INTERVAL}s"
-banner_row_styled "Max concurrent: " "$MAX_CONCURRENT"
-banner_row_styled "Model:          " "$CLAUDE_MODEL"
-banner_row_styled "Launcher:       " "$LAUNCHER"
-banner_row_styled "Skip perms:     " "$SKIP_PERMISSIONS"
-banner_row_styled "Max turns:      " "$MAX_TURNS"
-banner_row_styled "Heartbeat:      " "${HEARTBEAT_STALE}s"
-banner_row_styled "Hard timeout:   " "${DELIVERY_TIMEOUT}s"
-banner_row_styled "Dry run:        " "$DRY_RUN"
+banner_row_2col "Branch:"      "$TARGET_BRANCH"      "Model:"       "$CLAUDE_MODEL"
+banner_row_2col "Interval:"    "${POLL_INTERVAL}s"    "Launcher:"    "$LAUNCHER"
+banner_row_2col "Concurrent:"  "$MAX_CONCURRENT"      "Skip perms:"  "$SKIP_PERMISSIONS"
+banner_row_2col "Max turns:"   "$MAX_TURNS"           "Heartbeat:"   "${HEARTBEAT_STALE}s"
+banner_row_2col "Timeout:"     "${DELIVERY_TIMEOUT}s" "Dry run:"     "$DRY_RUN"
 echo -e "  ${BOLD}╚$(printf '═%.0s' $(seq 1 $BANNER_WIDTH))╝${NC}"
 echo ""
 echo -e "  ${YELLOW}Ctrl+C to stop (active sessions keep running)${NC}"

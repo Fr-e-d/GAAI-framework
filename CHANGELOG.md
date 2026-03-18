@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.0] - 2026-03-18
+
+### Changed
+- feat(daemon): route /gaai-daemon through daemon-start.sh with auto-monitor
+
+
 ## [2.3.2] - 2026-03-18
 
 ### Changed

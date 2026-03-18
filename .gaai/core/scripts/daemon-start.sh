@@ -41,6 +41,7 @@ case "$(uname -s)" in
 esac
 
 DAEMON_SCRIPT="$SCRIPT_DIR/delivery-daemon.sh"
+MONITOR_TOP="$SCRIPT_DIR/daemon-monitor-top.sh"
 MONITOR_TAIL="$SCRIPT_DIR/daemon-monitor-tail.sh"
 PID_FILE="$GAAI_DIR/project/contexts/backlog/.delivery-locks/.daemon.pid"
 LOG_FILE="$GAAI_DIR/project/contexts/backlog/.delivery-daemon.log"
@@ -83,7 +84,6 @@ _launch_monitor() {
       osascript -e "
         tell application \"Terminal\"
           do script \"cd '$PROJECT_ROOT' && bash '$daemon_start_path' --status\"
-          activate
         end tell
       " 2>/dev/null && echo "  Monitor: opened in new Terminal.app window" \
                     || echo "  Monitor: bash $daemon_start_path --status"
@@ -165,23 +165,12 @@ do_status() {
       exec tmux attach -t "$monitor_session"
     fi
 
-    local daemon_snapshot="$LOG_DIR/.daemon-output.log"
+    local config_file="$GAAI_DIR/project/contexts/backlog/.delivery-locks/.daemon-config"
     mkdir -p "$LOG_DIR"
 
-    # Background: periodically capture visible daemon pane content (clean text, no escape sequences)
-    (
-      while tmux has-session -t gaai-daemon 2>/dev/null; do
-        tmux capture-pane -t gaai-daemon -p -S -50 > "$daemon_snapshot.tmp" 2>/dev/null
-        mv "$daemon_snapshot.tmp" "$daemon_snapshot"
-        sleep 2
-      done
-    ) &
-    local capture_pid=$!
-    trap "kill $capture_pid 2>/dev/null" EXIT
-
-    # Top pane: daemon output (bash loop instead of watch for macOS compatibility)
+    # Top pane: fixed banner (from config) + scrolling daemon logs
     tmux new-session -d -s "$monitor_session" \
-      "while true; do clear; echo '═══ GAAI Daemon Output ═══'; echo ''; cat '$daemon_snapshot' 2>/dev/null; sleep 2; done"
+      "bash '$MONITOR_TOP' '$config_file' '$LOG_FILE'"
 
     # Bottom pane: active deliveries summary
     tmux split-window -t "${monitor_session}:0" -v -p 50 \
@@ -240,7 +229,7 @@ do_start() {
   # Platform detection: prefer tmux, fallback to nohup
   if command -v tmux &>/dev/null; then
     # Build tmux command string (args are simple flags, safe to join)
-    local daemon_cmd="bash '${DAEMON_SCRIPT}' ${PASSTHROUGH_ARGS[*]+${PASSTHROUGH_ARGS[*]}} 2>&1 | tee -a '${LOG_FILE}'"
+    local daemon_cmd="bash '${DAEMON_SCRIPT}' ${PASSTHROUGH_ARGS[*]+${PASSTHROUGH_ARGS[*]}}"
     tmux new-session -d -s gaai-daemon "$daemon_cmd"
 
     # Give it a moment to start, then grab the PID
