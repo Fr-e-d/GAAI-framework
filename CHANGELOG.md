@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.1] - 2026-03-18
+
+### Changed
+- docs: update daemon docs — default concurrency, monitoring dashboard
+
+
 ## [2.5.0] - 2026-03-18
 
 ### Changed

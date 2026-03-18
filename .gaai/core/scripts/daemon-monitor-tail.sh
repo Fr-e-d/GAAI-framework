@@ -140,7 +140,7 @@ while true; do
     | sed 's/gaai-deliver-//' || true)
 
   if [[ -z "$active_sessions" ]]; then
-    echo -e "  ${DIM}No active deliveries.${NC}"
+    echo -e "  ${DIM}No active deliveries. Use /gaai-discover to create stories for the backlog.${NC}"
     sleep 5
     continue
   fi

@@ -97,8 +97,9 @@ The **Delivery Daemon** (`core/scripts/delivery-daemon.sh`) automates delivery:
 - Polls the backlog for `refined` stories
 - Marks them `in_progress` on staging (cross-device coordination via git push)
 - Launches AI agent sessions in isolated worktrees
-- Supports parallel execution (`--max-concurrent`)
+- Parallel execution (default: 3 concurrent slots, configurable via `--max-concurrent`)
 - Monitors session health via heartbeat and `--max-turns` safety limits
+- Auto-opens a monitoring dashboard on macOS (tmux split: daemon config + active deliveries)
 
 A pre-push hook (`.githooks/pre-push`) blocks all pushes to `production` from the development environment. Activate with `git config core.hooksPath .githooks`.
 
