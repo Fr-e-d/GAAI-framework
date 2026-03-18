@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.3] - 2026-03-18
+
+### Changed
+- chore: sync framework version to v2.5.2
+
+
 ## [2.5.2] - 2026-03-18
 
 ### Changed
