@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.0] - 2026-03-18
+
+### Changed
+- feat(daemon): 2-column monitor banner with fixed header
+
+
 ## [2.4.0] - 2026-03-18
 
 ### Changed
