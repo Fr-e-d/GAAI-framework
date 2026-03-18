@@ -98,6 +98,28 @@ else
   check ".gaai/ in target — ok (not present, clean install)" "ok"
 fi
 
+# 6. Git hooks
+echo ""
+echo "[ Git Hooks ]"
+HOOKS_PATH=$(cd "$TARGET" && git config --get core.hooksPath 2>/dev/null || echo "")
+if [[ "$HOOKS_PATH" == ".githooks" ]]; then
+  check "core.hooksPath set to .githooks" "ok"
+else
+  check "core.hooksPath" "not set to .githooks (installer will configure this)"
+fi
+
+if [[ -d "$TARGET/.githooks" ]]; then
+  for dispatcher in pre-push post-commit; do
+    if [[ -x "$TARGET/.githooks/$dispatcher" ]]; then
+      check ".githooks/$dispatcher dispatcher" "ok"
+    else
+      check ".githooks/$dispatcher dispatcher" "missing or not executable (installer will create it)"
+    fi
+  done
+else
+  check ".githooks/ directory" "not present (installer will create it)"
+fi
+
 # Summary
 echo ""
 echo "====================="

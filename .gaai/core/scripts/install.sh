@@ -324,6 +324,77 @@ case "$TOOL" in
     ;;
 esac
 
+# ── Install git hooks ────────────────────────────────────
+#
+# .githooks/ is the git entry point (core.hooksPath).
+# Each file in .gaai/core/hooks/ (not .d/ dirs) is a dispatcher template.
+#
+# IMPORTANT: never overwrite an existing hook file. If the user already
+# has a .githooks/<hook>, we append a GAAI dispatcher call to the end
+# so their existing logic is preserved.
+
+echo ""
+info "Installing git hooks..."
+
+GITHOOKS_DIR="$TARGET/.githooks"
+CORE_HOOKS_DIR="$TARGET/.gaai/core/hooks"
+GAAI_HOOK_MARKER="# ── GAAI dispatcher ──"
+
+mkdir -p "$GITHOOKS_DIR"
+
+HOOKS_INSTALLED=0
+for dispatcher in "$CORE_HOOKS_DIR"/*; do
+  [ -f "$dispatcher" ] || continue
+  hook_name="$(basename "$dispatcher")"
+
+  if [[ -f "$GITHOOKS_DIR/$hook_name" ]]; then
+    if grep -q "$GAAI_HOOK_MARKER" "$GITHOOKS_DIR/$hook_name"; then
+      info ".githooks/$hook_name already contains GAAI dispatcher — skipping"
+    else
+      # Append a call to the GAAI dispatcher at the end of the existing hook
+      cat >> "$GITHOOKS_DIR/$hook_name" <<HOOKEOF
+
+$GAAI_HOOK_MARKER
+# Delegate to GAAI hook scripts in .gaai/core/hooks/${hook_name}.d/
+# and .gaai/project/hooks/${hook_name}.d/ (added by install.sh)
+ROOT="\$(git rev-parse --show-toplevel)"
+for _gaai_dir in "\$ROOT/.gaai/core/hooks/${hook_name}.d" "\$ROOT/.gaai/project/hooks/${hook_name}.d"; do
+    [ -d "\$_gaai_dir" ] || continue
+    for _gaai_script in "\$_gaai_dir"/*; do
+        [ -x "\$_gaai_script" ] || continue
+        "\$_gaai_script" "\$@" || exit \$?
+    done
+done
+HOOKEOF
+      success ".githooks/$hook_name — GAAI dispatcher appended (existing content preserved)"
+    fi
+  else
+    cp "$dispatcher" "$GITHOOKS_DIR/$hook_name"
+    success ".githooks/$hook_name — dispatcher installed"
+  fi
+
+  chmod +x "$GITHOOKS_DIR/$hook_name"
+  HOOKS_INSTALLED=$((HOOKS_INSTALLED + 1))
+
+  # Ensure dispatch scripts are executable
+  if [ -d "$CORE_HOOKS_DIR/${hook_name}.d" ]; then
+    chmod +x "$CORE_HOOKS_DIR/${hook_name}.d"/* 2>/dev/null || true
+  fi
+done
+
+# Point git to .githooks/
+CURRENT_HOOKS_PATH=$(cd "$TARGET" && git config --get core.hooksPath 2>/dev/null || echo "")
+if [[ "$CURRENT_HOOKS_PATH" != ".githooks" ]]; then
+  (cd "$TARGET" && git config core.hooksPath .githooks)
+  info "Set core.hooksPath to .githooks"
+fi
+
+if [[ $HOOKS_INSTALLED -gt 0 ]]; then
+  success "$HOOKS_INSTALLED hook dispatcher(s) configured in .githooks/"
+else
+  warn "No dispatcher templates found in .gaai/core/hooks/"
+fi
+
 # ── Run health check ─────────────────────────────────────
 
 echo ""

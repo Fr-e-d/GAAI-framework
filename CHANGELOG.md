@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.6.1] - 2026-03-18
+
+### Changed
+- fix(hooks): never overwrite existing .githooks/ files — append GAAI dispatcher
+
+
 ## [2.5.2] - 2026-03-18
 
 ### Changed
