@@ -1,0 +1,22 @@
+#!/bin/bash
+# pre-push dispatcher — executes hooks from core/ then project/
+# Install: .gaai/project/scripts/install-hooks.sh
+#
+# Note: git sends push info on stdin. We capture it once and replay
+# it to each script so multiple scripts can inspect the same data.
+
+ROOT="$(git rev-parse --show-toplevel)"
+CORE_DIR="$ROOT/.gaai/core/hooks/pre-push.d"
+PROJECT_DIR="$ROOT/.gaai/project/hooks/pre-push.d"
+
+PUSH_INFO="$(cat)"
+
+for dir in "$CORE_DIR" "$PROJECT_DIR"; do
+    [ -d "$dir" ] || continue
+    for script in "$dir"/*; do
+        [ -x "$script" ] || continue
+        echo "$PUSH_INFO" | "$script" "$@" || exit $?
+    done
+done
+
+exit 0
