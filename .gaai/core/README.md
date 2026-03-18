@@ -1,4 +1,4 @@
-# .gaai/ — GAAI Framework (v2.4.1)
+# .gaai/ — GAAI Framework (v2.3.1)
 
 ## Directory Structure
 
@@ -26,7 +26,7 @@ When you commit changes to `.gaai/core/`, a post-commit hook automatically:
 **You don't need to do anything.** The sync is transparent and non-blocking.
 
 Setup: `git config core.hooksPath .githooks` (done by `install-hooks.sh`).
-Logs: `.gaai/project/.sync-log`.
+Logs: `.github/.sync-log`.
 
 ---
 

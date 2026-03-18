@@ -112,7 +112,7 @@ LOCK_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-locks"
 LOG_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-logs"
 STAGING_LOCK="$LOCK_DIR/.staging.lock"
 RETRY_FILE="$LOCK_DIR/.retry-counts"
-LOG_FILE="$GAAI_PROJECT_DIR/.delivery-daemon.log"
+LOG_FILE="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-daemon.log"
 MAX_RETRIES=3
 
 # Staleness: stories in_progress for longer than this are considered orphaned
