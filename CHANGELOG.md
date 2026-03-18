@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.1] - 2026-03-18
+
+### Changed
+- chore(E55S06): done [delivery]
+
+
 ## [2.4.0] - 2026-03-18
 
 ### Changed
