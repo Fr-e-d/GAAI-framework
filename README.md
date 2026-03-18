@@ -166,7 +166,7 @@ bash .gaai/core/scripts/daemon-setup.sh
 /gaai-daemon --stop             # graceful shutdown
 ```
 
-> Requires: git repo, `staging` branch, [Claude Code CLI](https://claude.com/claude-code), python3, tmux (recommended) or Terminal.app (macOS fallback).
+> Requires: git repo, `staging` branch, an AI coding tool with `/gaai-*` slash commands (e.g. [Claude Code](https://claude.com/claude-code)), python3, tmux (recommended) or Terminal.app (macOS fallback).
 >
 > **Tested on:** macOS (Apple Silicon). Linux and WSL (Windows) are expected to work but not yet validated — issues and feedback welcome.
 
