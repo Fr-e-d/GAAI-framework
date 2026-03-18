@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.6.3] - 2026-03-18
+
+### Changed
+- docs(memory): full memory refresh — fix stale data across 6 files
+
+
 ## [2.6.2] - 2026-03-18
 
 ### Changed
