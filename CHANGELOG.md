@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.3.0] - 2026-03-18
+
+### Changed
+- fix(sync): escape variable names adjacent to unicode in auto-bump log
+- docs(gaai-core): update framework link wording in GAAI.md
+- fix(gaai-core): capture delivery metadata in daemon wrapper (stop hook doesn't fire in -p mode)
+- fix(gaai-core): cost avg uses tracked stories only, not total done
+- fix(gaai-core): correct cost avg to divide by total done, not just tracked stories
+- fix(gaai-core): audit resolution — align authority boundaries, formalize lifecycle, add tooling
+- docs: contributions → issues and feedback welcome (ELv2 IP protection)
+- fix(daemon): status bar improvements + sync script immediate merge
+- feat(daemon): tmux monitor dashboard, cross-OS fixes, dependency checks
+- fix(governance): anti-collision guards + E52→E53 renumbering + CI/CD docs
+- fix(daemon): prefer tmux over Terminal.app, remove focus-stealing activate
+- chore(governance): reset interrupted deliveries E52S02 + update stories & skills
+- chore(ci): CF Workers Builds for staging + skills cleanup (DEC-197, DEC-198)
+- chore(gaai): anonymize sync script + skills/scripts updates
+
+
 ## [2.2.0] - 2026-03-16
 
 ### Added

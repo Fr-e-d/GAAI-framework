@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ═══════════════════════════════════════════════════════════════════════════
-# GAAI Delivery Daemon
+# GAAI Delivery Daemon — Autonomous story delivery loop
 # ═══════════════════════════════════════════════════════════════════════════
 #
 # Description:
