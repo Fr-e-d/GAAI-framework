@@ -523,6 +523,10 @@ for line in content.splitlines():
 set -euo pipefail
 cd "$PROJECT_DIR"
 if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
+  # Preserve any uncommitted work before force-syncing
+  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    git stash push -m "daemon-autosave-$(date +%s)" --quiet 2>/dev/null || true
+  fi
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
   git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null
 fi
@@ -601,6 +605,10 @@ cd "$PROJECT_DIR"
 
 # Step 1: Sync with latest remote
 if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
+  # Preserve any uncommitted work before force-syncing
+  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    git stash push -m "daemon-autosave-$(date +%s)" --quiet 2>/dev/null || true
+  fi
   # Local branch diverged (e.g. previous failed push) — force sync
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
   git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null
@@ -622,6 +630,10 @@ git commit -m "chore($story_id): in_progress [daemon]" --quiet
 # Step 4: Push — this is the atomic coordination point
 # If another VPS pushes between our pull and push, this fails (non-fast-forward)
 if ! git push origin "$TARGET_BRANCH" --quiet 2>&1; then
+  # Preserve any uncommitted work before force-syncing
+  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    git stash push -m "daemon-autosave-$(date +%s)" --quiet 2>/dev/null || true
+  fi
   # Concurrent push detected — reset local to match remote and abort
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
   git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null
