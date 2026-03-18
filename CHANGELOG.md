@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automated CHANGELOG updates on framework sync (sync-framework-to-oss.sh)
 
 ### Changed
+- fix(E55S05): CORS SQL connection leak + error handler origin validation (#322)
 - fix(gaai-core): capture delivery metadata in daemon wrapper (stop hook doesn't fire in -p mode)
 - fix(gaai-core): cost avg uses tracked stories only, not total done
 - fix(gaai-core): correct cost avg to divide by total done, not just tracked stories

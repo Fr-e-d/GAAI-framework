@@ -142,6 +142,6 @@ The complete documentation lives in `docs/` in the [GAAI framework repo](https:/
 
 ## Framework Version
 
-See `VERSION` in this folder. The framework is maintained at [gaai-framework](https://github.com/Fr-e-d/GAAI-framework).
+See `VERSION` in this folder. This framework was installed from [gaai-framework](https://github.com/Fr-e-d/GAAI-framework).
 
 To check framework integrity: `bash .gaai/core/scripts/health-check.sh --core-dir .gaai/core --project-dir .gaai/project`
