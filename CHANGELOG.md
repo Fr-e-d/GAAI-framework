@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.6.6] - 2026-03-19
+
+### Changed
+- chore(gaai): bump framework v2.6.5 + update retry counts
+
+
 ## [2.6.5] - 2026-03-19
 
 ### Changed
