@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.6.5] - 2026-03-19
+
+### Changed
+- chore: E55S04 provisioning + DEC-203 route migration discovery + memory refresh + admin RBAC
+
+
 ## [2.6.4] - 2026-03-19
 
 ### Changed
