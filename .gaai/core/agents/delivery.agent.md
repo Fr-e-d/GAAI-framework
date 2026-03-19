@@ -143,6 +143,17 @@ Before composing context bundles for sub-agents, the Delivery Orchestrator MUST:
 
 This step is non-negotiable. Skipping it risks implementations that contradict existing decisions or violate established conventions.
 
+### DEC Validation Gate (Non-Negotiable)
+
+After loading memory and before spawning sub-agents, the Orchestrator MUST validate that the planned implementation does not violate any constraining DEC:
+
+1. **Read the story's `related_decs` frontmatter field.** If the field lists DEC IDs, load each DEC file and extract the constraint (the "Decision" and "Impact" sections).
+2. **If `related_decs` is empty or missing**, perform a keyword scan: extract domain keywords from the story title + acceptance criteria (email, billing, booking, auth, cron, queue, GCal, GDPR, infrastructure) and grep the Decision Registry for matching DECs. This is a safety net for stories written before the cross-reference step was added.
+3. **Include constraining DECs in the context bundle** sent to the Planning Sub-Agent. The Planning Sub-Agent must verify that the execution plan complies with each listed DEC.
+4. **If the plan contradicts a DEC**: STOP. Do not proceed. Mark the story `blocked` with an explicit violation report: which DEC, which plan step, what the contradiction is. Escalate to Discovery for resolution (the DEC may need amendment, or the plan needs revision).
+
+**Rationale:** On 2026-02-28, 6 stories introduced synchronous `sendEmail()` calls despite DEC-11 explicitly prohibiting them. Neither Discovery (no cross-reference step) nor Delivery (no validation gate) caught the violation. 12 inline calls accumulated over 17 days before detection during a production incident. This gate ensures DECs are enforced at delivery time, not just documented at discovery time.
+
 ---
 
 ## Git Workflow & Orchestration Flow

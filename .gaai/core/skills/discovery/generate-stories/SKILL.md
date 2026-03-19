@@ -36,6 +36,14 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 
 1. Read the Story template at `contexts/artefacts/stories/_template.story.md`. Read the parent Epic file. Derive story IDs using the parent Epic ID prefix (e.g., Epic E01 produces stories E01S01, E01S02, etc.).
 
+   **CRITICAL — Decision Cross-Reference (MUST execute before writing any story):**
+   - **a)** Extract keywords from the Epic scope and each story's intent (e.g., "email", "billing", "booking", "auth", "cron", "queue", "GCal", "GDPR").
+   - **b)** Scan the Decision Registry in `contexts/memory/index.md` for DECs whose `domain`, `title`, or `tags` match these keywords. Use `grep` on `contexts/memory/decisions/` if the registry table is insufficient.
+   - **c)** For each matching DEC, read the decision file and assess whether it **constrains** the story's implementation (e.g., DEC-11 constrains how emails are sent, DEC-44 constrains reminder behavior).
+   - **d)** List constraining DECs in the story's `related_decs` frontmatter field. If a DEC imposes a specific implementation pattern (e.g., "all email via queues"), add an explicit AC referencing it (e.g., "AC-N: Email sent via CF Queue per DEC-11 — no synchronous sendEmail() calls").
+   - **e)** If no DECs match, set `related_decs: []` explicitly — never leave the field empty by omission.
+   - **Rationale:** On 2026-02-28, E06S39 created a synchronous `sendEmail()` utility despite DEC-11 (2026-02-19) explicitly prohibiting synchronous email calls. 6 subsequent stories reused it, creating 12 violations undetected for 17 days. The DEC was never referenced in any of the 6 stories because no cross-reference step existed.
+
    **CRITICAL — Collision Guard (MUST execute before writing any file):**
    - **a)** Scan `contexts/backlog/active.backlog.yaml` for any existing entries with the same Epic ID prefix. If entries exist, determine the **next available story number** (e.g., if E52S01–E52S05 exist, start at E52S06).
    - **b)** For each story file to be created, **check if the file already exists** on disk at `contexts/artefacts/stories/{id}.story.md`. If the file exists and its `id` frontmatter matches a **different** epic or title, **STOP immediately** — this means an ID collision between two epics. Surface the conflict to the human and do not proceed.
@@ -95,6 +103,7 @@ Acceptance Criteria:
 - Each story file's frontmatter `id` and `related_backlog_id` match the parent Epic's ID prefix
 - **Every generated story has a corresponding entry in `active.backlog.yaml`** — verify by counting story files vs backlog entries for this Epic. Mismatch = FAIL.
 - **No existing story file was overwritten with a different Epic's content** — verify each written file's `epic` frontmatter matches the intended Epic. Mismatch = CRITICAL FAILURE.
+- **Every story has a `related_decs` field in frontmatter** — either a non-empty list of constraining DECs, or an explicit empty list `[]`. Missing field = FAIL. Stories touching email, billing, booking, auth, or infrastructure domains with `related_decs: []` should be double-checked — these domains have the highest DEC density.
 
 ---
 
