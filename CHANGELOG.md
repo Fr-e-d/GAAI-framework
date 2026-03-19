@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.6.4] - 2026-03-19
+
+### Changed
+- fix(governance): enforce DECs across Discovery, Delivery, and code — 4-level protection
+
+
 ## [2.6.3] - 2026-03-18
 
 ### Changed
