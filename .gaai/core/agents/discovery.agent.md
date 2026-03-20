@@ -73,6 +73,8 @@ Only Epics and Stories are valid inputs for Delivery. Marketing and Strategy art
 - `context-building` — build minimal focused context bundles for skills
 - `decision-extraction` — capture durable decisions into memory
 - `summarization` — compact exploration into long-term knowledge
+- `skill-optimize` — run a structured evaluate-analyze-improve cycle on any skill to measure quality, detect regressions, and propose targeted improvements. Discovery orchestrates the full loop with human checkpoints.
+- `pattern-transfer` — discover structurally similar patterns across domains, assess transfer viability, and propose domain adaptations with risk gates. Activate when a problem may have been solved in another domain.
 
 ### Memory Skills (Agent-Owned)
 
