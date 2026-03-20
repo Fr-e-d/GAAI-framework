@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.6.7] - 2026-03-20
+
+### Changed
+- chore(content): YouTube session 4 — scan + reply + 5 new outbound comments
+
+
 ## [2.6.6] - 2026-03-19
 
 ### Changed
