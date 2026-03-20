@@ -140,6 +140,8 @@ To regenerate after adding or modifying a skill:
 | Skill | ID | Description |
 |---|---|---|
 | `eval-run` | SKILL-CRS-025 | Evaluate any output file against a structured evals.yaml assertions file and produce a score report with per-assertion pass/fail results. Activate when the Discovery Agent runs the Skill Optimize protocol to measure output quality or detect regressions. |
+| `skill-optimize` | SKILL-CRS-026 | Run a structured evaluate-analyze-improve cycle on any GAAI skill to measure quality, detect regressions, and propose targeted improvements. Activate when a skill needs baseline evaluation, after SKILL.md modifications, or when friction-retrospective flags a skill. |
+| `pattern-transfer` | SKILL-CRS-027 | Discover structurally similar patterns across domains, assess transfer viability via structural invariant checking, and propose domain adaptations with risk gates. Activate when Discovery identifies a problem that may have been solved in another domain. |
 
 ---
 

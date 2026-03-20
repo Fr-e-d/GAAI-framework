@@ -2,8 +2,8 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md — core framework skills only
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-03-19
-total: 44
+generated_at: 2026-03-20
+total: 46
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -352,6 +352,15 @@ cross:
     tags: []
     updated_at: 2026-03-01
     path: core/skills/cross/memory-search/SKILL.md
+  - id: SKILL-CRS-027
+    name: pattern-transfer
+    source: core
+    description: "Discover structurally similar patterns across domains, assess transfer viability via structural invariant checking, and propose domain adaptations with risk gates. Activate when Discovery identifies a problem that may have been solved in another domain."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-20
+    path: core/skills/cross/pattern-transfer/SKILL.md
   - id: SKILL-POST-MORTEM-LEARNING-001
     name: post-mortem-learning
     source: core
@@ -388,6 +397,15 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/cross/security-audit/SKILL.md
+  - id: SKILL-CRS-026
+    name: skill-optimize
+    source: core
+    description: "Run a structured evaluate-analyze-improve cycle on any GAAI skill to measure quality, detect regressions, and propose targeted improvements. Activate when a skill needs baseline evaluation, after SKILL.md modifications, or when friction-retrospective flags a skill."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-03-20
+    path: core/skills/cross/skill-optimize/SKILL.md
   - id: SKILL-SUCCESS-METRICS-EVALUATION-001
     name: success-metrics-evaluation
     source: core
