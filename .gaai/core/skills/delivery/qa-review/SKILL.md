@@ -1,7 +1,7 @@
 ---
 name: qa-review
 description: Validate that implemented code fully satisfies Story acceptance criteria, respects rules, and introduces no regressions. This is the hard quality gate — no pass means no delivery. Activate after implementation is complete.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

@@ -1,7 +1,7 @@
 ---
 name: post-mortem-learning
 description: Analyze failures and suboptimal deliveries to identify root causes, contributing factors, and raw lessons. Activate after significant delivery failures, repeated QA failures, or when patterns of issues need to be understood.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

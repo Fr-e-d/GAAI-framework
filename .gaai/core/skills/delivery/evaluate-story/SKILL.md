@@ -1,7 +1,7 @@
 ---
 name: evaluate-story
 description: Assess Story complexity, identify required domains, and determine delivery tier (MicroDelivery / Core Team / Core Team + Specialists). Activate as the first step of every delivery orchestration cycle.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

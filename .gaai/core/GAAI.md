@@ -32,8 +32,7 @@ Welcome. This is the `.gaai/` folder — the GAAI framework living inside your p
     │   ├── backlog/        ← execution queue
     │   └── artefacts/      ← evidence and traceability
     ├── workflows/          ← custom workflows
-    ├── scripts/            ← custom scripts
-    └── content/            ← content drafts
+    └── scripts/            ← custom scripts
 ```
 
 **Resolution pattern:** for agents, skills, and rules — the framework loads `core/` first, then `project/` as extension/override.

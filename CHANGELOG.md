@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.1] - 2026-03-22
+
+### Changed
+- fix: align license declarations to ELv2 and correct HackerNoon draft factual errors
+
+
 ## [2.8.0] - 2026-03-21
 
 ### Changed

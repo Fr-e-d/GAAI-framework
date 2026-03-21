@@ -1,7 +1,7 @@
 ---
 name: ci-watch-and-fix
 description: Watch GitHub Actions CI after PR creation, detect failures, extract logs, apply minimal fixes, and re-push — keeping the delivery session alive until CI resolves or escalating after 3 cycles. Activate immediately after gh pr create and before marking the story done.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent using GitHub Actions CI
 metadata:
   author: gaai-framework

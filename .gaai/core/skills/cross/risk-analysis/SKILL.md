@@ -1,7 +1,7 @@
 ---
 name: risk-analysis
 description: Systematically identify and structure product, delivery, and systemic risks before they become failures. Activate before finalizing Epics and Stories, before execution planning, after repeated QA failures, or after major scope changes.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

@@ -1,7 +1,7 @@
 ---
 name: coordinate-handoffs
 description: Validate sub-agent handoff artefacts, sequence phase transitions, and manage retry and escalation logic. Activate after each sub-agent terminates to determine next action.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

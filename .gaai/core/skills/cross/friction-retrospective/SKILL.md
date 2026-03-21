@@ -1,7 +1,7 @@
 ---
 name: friction-retrospective
 description: Scan delivery artefacts for friction log entries, detect recurring patterns, and produce retrospective reports. Invoked by Discovery Agent (never by Delivery) to identify systemic improvement opportunities from friction captured during delivery.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

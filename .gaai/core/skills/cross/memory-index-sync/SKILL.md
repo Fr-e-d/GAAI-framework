@@ -1,7 +1,7 @@
 ---
 name: memory-index-sync
 description: Detect and heal index.md drift — finds memory files on disk not registered in index.md and registers them. Run when /gaai-status reports unregistered files, after batch memory operations, or as a post-delivery gate.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

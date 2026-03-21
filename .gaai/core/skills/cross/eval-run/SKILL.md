@@ -1,7 +1,7 @@
 ---
 name: eval-run
 description: Evaluate any output file against a structured evals.yaml assertions file and produce a score report with per-assertion pass/fail results. Activate when the Discovery Agent runs the Skill Optimize protocol to measure output quality or detect regressions after skill instruction changes.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

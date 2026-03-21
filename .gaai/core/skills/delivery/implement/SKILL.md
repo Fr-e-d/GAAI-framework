@@ -1,7 +1,7 @@
 ---
 name: implement
 description: Generate correct, minimal, maintainable code that satisfies a validated Story's acceptance criteria against an execution plan. Activate when a Story is validated, a plan exists, and all prerequisites are unambiguous.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

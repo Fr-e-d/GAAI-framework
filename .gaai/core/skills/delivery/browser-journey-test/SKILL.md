@@ -1,7 +1,7 @@
 ---
 name: browser-journey-test
 description: Validate user stories by simulating real user journeys in a live browser against deployed application. Activate after implementation to verify actual user experience against acceptance criteria, not just code logic.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent (requires browser automation capability)
 metadata:
   author: gaai-framework
