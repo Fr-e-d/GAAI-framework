@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.7.1] - 2026-03-21
+
+### Changed
+- chore: version bump v2.7.0 + skills index refresh + Facebook engage session notes
+
+
 ## [2.7.0] - 2026-03-20
 
 ### Changed
