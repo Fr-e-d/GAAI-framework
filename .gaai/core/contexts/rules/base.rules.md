@@ -22,8 +22,8 @@ For flow-specific rules (agent responsibilities, backlog states, branch rules, c
 ## Core Governance Rules
 
 1. **Backlog-first.** Every execution unit must be in the backlog. No work without a backlog entry.
-2. **Skill-first.** Every agent action must reference a skill. Read the skill file before invoking it.
-3. **Memory is explicit.** Load only what is needed. Never auto-load all memory.
+2. **Skill-first.** Every agent action must reference a skill. Read the skill file before invoking it. **Never produce artefacts or execute processes from cached knowledge** — the skill file is the single source of truth for process steps, not just output format. Format familiarity does not substitute for reading. Every artefact must declare `skills_invoked` in its frontmatter to attest which skill files were read. An artefact without `skills_invoked` fails validation.
+3. **Memory is the source.** GAAI memory (`contexts/memory/`) is the authoritative source for project context, decisions, and patterns. Load relevant memory before any planning or artefact production. Never rely on internal/cached knowledge about the project — read the files. Load only what is needed; never auto-load all memory.
 4. **Artefacts document — they do not authorize.** Only the backlog authorizes execution.
 5. **Artefacts are never overwritten blindly.** Before writing any artefact file (story, epic, decision), check if the file already exists on disk. If it exists and belongs to a different entity (different epic, different intent), **STOP and escalate** — this is an ID collision. Never silently overwrite an existing artefact. This rule is absolute and applies even in conversational mode.
 

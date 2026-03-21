@@ -51,6 +51,8 @@ This is the **mandatory gate** between Discovery and Delivery. No Story proceeds
 - Is unambiguous and executable
 - Respects governance rules
 - Avoids solution design
+- Has `related_decs` field in frontmatter (list or explicit empty `[]`)
+- Has `skills_invoked` field in frontmatter (must list the skill IDs that were read to produce it)
 
 ### Cross-checks
 - No Story exists without a parent Epic
@@ -58,6 +60,14 @@ This is the **mandatory gate** between Discovery and Delivery. No Story proceeds
 - No rule violations
 - Marketing artefacts (if present): hypothesis statuses align with Story acceptance criteria
 - Strategy artefacts (if present): GTM phases align with Epic dependencies and gates
+
+### Skill Attestation (Base Rule #2 Enforcement)
+- **Every artefact** (Epic, Story, PRD) must have a `skills_invoked` field in its frontmatter
+- Epic artefacts must include `generate-epics` in `skills_invoked`
+- Story artefacts must include `generate-stories` in `skills_invoked`
+- PRD artefacts must include `create-prd` in `skills_invoked`
+- An artefact with a missing or empty `skills_invoked` field is an automatic **FAIL** — the producing agent did not follow Base Rule #2
+- This check exists because agents can produce format-correct artefacts from cached knowledge while silently skipping mandatory process steps defined in the skill file
 
 ---
 
@@ -73,6 +83,11 @@ Epics:
 Stories:
 - S01: PASS | FAIL — reason
 - S02: PASS | FAIL — reason
+
+Skill Attestation (Base Rule #2):
+- E01: skills_invoked: [generate-epics] ✓ | MISSING ✗
+- S01: skills_invoked: [generate-stories] ✓ | MISSING ✗
+- S01: related_decs: [DEC-11] ✓ | MISSING ✗
 
 Governance:
 - rules respected: yes | no
@@ -93,6 +108,8 @@ The skill MUST block progression if:
 - Scope is unclear or ambiguous
 - Governance rules are violated
 - Contradictions exist between artefacts
+- Any artefact is missing `skills_invoked` in frontmatter (Base Rule #2 violation)
+- Any Story is missing `related_decs` in frontmatter
 
 **No partial approval. No silent warnings.**
 

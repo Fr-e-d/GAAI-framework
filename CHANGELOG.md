@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.0] - 2026-03-21
+
+### Changed
+- feat(governance): enforce skill attestation — skills_invoked + audit skill (CRS-028)
+
+
+## [2.7.4] - 2026-03-21
+
+### Changed
+- fix(governance): add Mandatory Skill Read guard to Discovery Agent
+
+
 ## [2.7.3] - 2026-03-21
 
 ### Changed
