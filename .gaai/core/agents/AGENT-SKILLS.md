@@ -1,51 +1,43 @@
 # Agent Skills — Per-Agent Recommendations
 
-Each agent has a skill index recommending which skills to load and when.
+Each agent has a curated set of skills defined in its agent definition file.
 
-## Agent Skill Indices
+## Agent Skill Assignments
 
-| Agent | File | Skills | Required |
+| Agent | Definition File | Core Skills | Cross Skills |
 |---|---|---|---|
-| **Discovery** | `.gaai/core/agents/discovery.agent-skills.yaml` | 10 available | 2 required |
-| **Delivery** | `.gaai/core/agents/delivery.agent-skills.yaml` | 11 available | 2 required |
-| **Bootstrap** | `.gaai/core/agents/bootstrap.agent-skills.yaml` | 4 available | 2 required |
+| **Discovery** | `.gaai/core/agents/discovery.agent.md` | 6 discovery skills | 10 cross skills (memory, analysis, governance) |
+| **Delivery** | `.gaai/core/agents/delivery.agent.md` | 5 orchestration skills | 5 supporting skills (memory, context, risk) |
+| **Bootstrap** | `.gaai/core/agents/bootstrap.agent.md` | — | 5 cross skills (scan, extract, ingest, normalize, search) |
 
-## How to Use These Indices
+Specialists are defined in `.gaai/core/agents/specialists.registry.yaml` and dispatched by the Delivery Orchestrator for Tier 3 stories.
+
+## How Skills Are Loaded
 
 ### Agent Startup
 
-When an agent starts (e.g., Discovery Agent invoked):
+When an agent starts:
 
-1. **Load agent skills index:**
-   ```yaml
-   load: .gaai/core/agents/{agent}.agent-skills.yaml
+1. **Load agent definition:**
+   ```
+   read: .gaai/core/agents/{agent}.agent.md
    ```
 
-2. **Identify required skills:**
-   ```
-   required_skills: [SKILL-VALIDATE-ARTEFACTS-001, ...]
-   action: Preload these (non-negotiable)
-   ```
+2. **Identify required skills** from the agent's "Skills Used" section.
 
-3. **Scan available skills:**
-   ```
-   project_skills: [SKILL-DOMAIN-KNOWLEDGE-001, SKILL-ANALYTICS-QUERY-001, ...]
-   action: Load on demand (when task matches "when" condition)
-   ```
+3. **Discover available skills** via `skills-index.yaml` frontmatter (Phase 1 — filter by category/tags, not full load).
 
-### Example: Discovery Agent Startup
+4. **Load skill SKILL.md on demand** only when the task requires it (Phase 2).
 
-```
-1. Agent: discovery
-2. Load index: discovery.agent-skills.yaml
-3. Preload required:
-   - validate-artefacts (before handing off to Delivery)
-4. Available on demand:
-   - idiomatique-translate (IF writing international copy)
-   - domain-knowledge-research (IF researching market)
-   - analytics-query (IF analyzing user behavior)
-   - ... (8 more)
-```
+### Skill Discovery Protocol
+
+Skills are loaded in three phases — load the minimum needed, not everything:
+
+1. **Phase 1 — Filter by frontmatter** (read `skills-index.yaml` or SKILL.md frontmatter)
+2. **Phase 2 — Load full SKILL.md** (only for skills confirmed relevant in Phase 1)
+3. **Phase 3 — Load references/** (execution only, never at discovery time)
+
+Full protocol: `.gaai/core/skills/README.skills.md`
 
 ## Skill Categories
 
@@ -56,41 +48,26 @@ Skills from `.gaai/core/skills/` (framework-level, generic)
 Skills from `.gaai/project/skills/` (project-specific, domain knowledge)
 
 ### Cross Skills
-Reusable across agents (content, analysis, validation, governance)
+Reusable across agents (memory, context, analysis, validation, governance)
 
-## Required vs Optional
+## Skill Tier Preference
 
-- **Required:** Must preload before agent begins
-- **Optional:** Load on-demand when task context matches "when" condition
+When selecting skills, prefer `production` tier first — they are battle-tested.
+Use `support` tier when their specific trigger condition is met.
+Avoid `meta` tier unless performing bootstrap or framework maintenance.
 
-Example from Delivery Agent:
-```yaml
-required_skills:
-  - remediate-failures  (always needed for QA loop)
-  - framework-sync      (always needed for compliance)
-
-optional_skills:
-  - frontend-design     (only if building UI)
-  - idiomatique-translate (only if translating copy)
-```
+Tier assignments: `.gaai/core/skills/skills-index.yaml` (field: `tier`)
 
 ## Customization Per Project
 
-Project teams can extend or override agent skills:
-- Create `.gaai/project/agents/discovery.agent-skills.yaml`
-- Override or add project-specific skills
-- Example: Add `content-plan` as required for Discovery Agent on this project
-
-## Loading Sequence
-
-1. **Phase 1:** Load skills indices (`.gaai/core/skills/skills-index.yaml` + `.gaai/project/skills/skills-index.yaml`)
-2. **Phase 2:** Load agent skills index (`.gaai/core/agents/{agent}.agent-skills.yaml`)
-3. **Phase 3:** Preload required skills (SKILL.md frontmatter)
-4. **Phase 4:** Load optional skills on-demand (when task triggers "when" condition)
+Project teams can add domain-specific skills:
+- Create skills under `.gaai/project/skills/domains/` or `.gaai/project/skills/cross/`
+- Project skills are indexed separately in `.gaai/project/skills/skills-index.yaml`
+- Project skills extend core skills — they never override them
 
 ## Notes
 
-- Agent skills indices are **recommendations**, not requirements
-- Agents can deviate if task demands it (e.g., Delivery Agent using `domain-knowledge-research` if needed)
-- Indices are maintained manually (by project team) or via `build-agents-index` skill
+- Agent skill assignments are defined in agent definition files, not in separate YAML indices
+- Agents can load additional skills on demand if task context requires it
+- The `skills-index.yaml` is auto-generated by `build-skills-index` (post-commit hook)
 - Enables **fast agent startup** (preload known essentials, load others on-demand)

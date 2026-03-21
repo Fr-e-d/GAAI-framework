@@ -1,7 +1,7 @@
 ---
 name: skill-optimize
 description: Run a structured evaluate-analyze-improve cycle on any GAAI skill to measure quality, detect regressions, and propose targeted improvements. Activate when a skill needs baseline evaluation, after SKILL.md modifications, or when friction-retrospective flags a skill.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

@@ -1,7 +1,7 @@
 ---
 name: skill-usage-audit
 description: Scan all artefacts (epics, stories, PRDs) for Base Rule #2 compliance — verify that every artefact declares skills_invoked and related_decs in frontmatter. Produces an audit report with pass/fail per artefact and overall compliance rate.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

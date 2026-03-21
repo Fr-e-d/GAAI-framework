@@ -1,7 +1,7 @@
 ---
 name: memory-search
 description: Search memory by frontmatter fields, full-text keywords, or cross-reference graph. Returns ranked file list — never loads full content. Use when the agent needs to find relevant memory without knowing exact paths.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

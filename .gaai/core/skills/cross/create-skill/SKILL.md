@@ -1,7 +1,7 @@
 ---
 name: create-skill
 description: Guide creation of a new GAAI skill following the agentskills.io spec and GAAI best practices. Activate when adding a new skill to the .gaai/core/skills/ catalog.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
@@ -77,7 +77,7 @@ If inputs or outputs are unclear, the skill is not ready to be written. Clarify 
 ---
 name: {skill-name}                  # matches directory name exactly
 description: {one sentence}         # WHAT it does + WHEN to activate
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: {author}

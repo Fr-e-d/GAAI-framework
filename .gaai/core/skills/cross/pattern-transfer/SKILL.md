@@ -1,7 +1,7 @@
 ---
 name: pattern-transfer
 description: Discover structurally similar patterns across domains, assess transfer viability via structural invariant checking, and propose domain adaptations with risk gates. Activate when Discovery identifies a problem that may have been solved in another domain.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

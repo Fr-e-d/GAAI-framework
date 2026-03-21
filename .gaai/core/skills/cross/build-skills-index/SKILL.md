@@ -1,7 +1,7 @@
 ---
 name: build-skills-index
 description: Scan SKILL.md files in .gaai/core/skills/ and .gaai/project/skills/, extract YAML frontmatter, and regenerate separate skills indices for each layer. Core index ships with the OSS framework; project index is project-specific.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

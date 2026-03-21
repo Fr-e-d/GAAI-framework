@@ -1,7 +1,7 @@
 ---
 name: success-metrics-evaluation
 description: Evaluate delivery outcomes against defined success metrics and acceptance goals. Activate after Delivery to verify that delivered work creates real business and technical impact, not just output.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

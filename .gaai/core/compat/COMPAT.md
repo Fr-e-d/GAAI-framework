@@ -8,11 +8,22 @@ The installer (`core/scripts/install.sh`) deploys the correct adapter to the rig
 
 ## Compatibility Matrix
 
+### Deep Integration (slash commands, auto-loaded context, SKILL.md auto-discovery)
+
 | Tool | Adapter File | Deployed To | Status |
 |---|---|---|---|
 | Claude Code | `claude-code.md` | `CLAUDE.md` (project root) + `.claude/commands/` | ✅ Supported |
+
+### AGENTS.md Compatible (full GAAI capability via manual activation prompts)
+
+| Tool | Adapter File | Deployed To | Status |
+|---|---|---|---|
+| OpenCode | `windsurf.md` | `AGENTS.md` (project root) | ✅ Supported |
+| Codex CLI | `windsurf.md` | `AGENTS.md` (project root) | ✅ Supported |
+| Gemini CLI | `windsurf.md` | `AGENTS.md` (project root) | ✅ Supported |
+| Antigravity | `windsurf.md` | `AGENTS.md` (project root) | ✅ Supported |
 | Cursor | `cursor.mdc` | `.cursor/rules/gaai.mdc` | ✅ Supported |
-| Windsurf / Generic | `windsurf.md` | `AGENTS.md` (project root) | ✅ Supported |
+| Windsurf | `windsurf.md` | `AGENTS.md` (project root) | ✅ Supported |
 | Other tools | `windsurf.md` | Rename as needed | ⚠ Manual setup |
 
 ---

@@ -1,7 +1,7 @@
 ---
 name: memory-alignment-check
 description: After QA PASS, compare the Story's implementation footprint against relevant memory entries. Reports confirmed entries, contradictions, and new knowledge candidates. Never writes to memory — produces a delta report for Discovery to action.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework

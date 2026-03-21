@@ -1,7 +1,7 @@
 ---
 name: memory-retrieve
 description: Load only the minimum relevant memory for a task using 3-level progressive disclosure. Activate before context-building — never load full memory dumps. Never substitute summaries for durable memory.
-license: MIT
+license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
