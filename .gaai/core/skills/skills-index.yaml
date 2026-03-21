@@ -3,7 +3,7 @@
 # Regenerate: invoke build-skills-index skill
 
 generated_at: 2026-03-21
-total: 46
+total: 47
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -406,6 +406,15 @@ cross:
     tags: []
     updated_at: 2026-03-20
     path: core/skills/cross/skill-optimize/SKILL.md
+  - id: SKILL-CRS-028
+    name: skill-usage-audit
+    source: core
+    description: "Scan all artefacts (epics, stories, PRDs) for Base Rule #2 compliance — verify that every artefact declares skills_invoked and related_decs in frontmatter. Produces an audit report with pass/fail per artefact and overall compliance rate."
+    category: cross
+    track: governance
+    tags: []
+    updated_at: 2026-03-21
+    path: core/skills/cross/skill-usage-audit/SKILL.md
   - id: SKILL-SUCCESS-METRICS-EVALUATION-001
     name: success-metrics-evaluation
     source: core
