@@ -1,4 +1,4 @@
-# .gaai/ — GAAI Framework (v2.7.1)
+# .gaai/ — GAAI Framework (v2.7.2)
 
 ## Directory Structure
 
