@@ -2,7 +2,7 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md — core framework skills only
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-03-20
+generated_at: 2026-03-21
 total: 46
 
 discovery:
