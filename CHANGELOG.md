@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(governance): add Mandatory Skill Read guard to Discovery Agent
 
 
+## [2.7.3] - 2026-03-21
+
+### Changed
+- chore: version sync v2.7.2 + gotrue bump + billing badge color swap
+
+
 ## [2.7.2] - 2026-03-21
 
 ### Changed
