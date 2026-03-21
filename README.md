@@ -67,13 +67,13 @@ AI coding tools are fast — but without governance, speed creates drift: agents
 ```
 your-project/
 └── .gaai/
-    ├── core/                  ← framework engine (updated via git subtree)
+    ├── core/                  ← framework engine (auto-synced from your project)
     │   ├── README.md          ← start here (human + AI onboarding)
     │   ├── GAAI.md            ← full reference
     │   ├── QUICK-REFERENCE.md ← daily cheat sheet
     │   ├── VERSION
     │   ├── agents/            ← Discovery + Delivery + Bootstrap agent specs
-    │   ├── skills/            ← 44 execution units
+    │   ├── skills/            ← 47 execution units
     │   ├── contexts/rules/    ← framework rules
     │   ├── workflows/         ← delivery loop, bootstrap, handoffs
     │   ├── scripts/           ← bash utilities
@@ -85,7 +85,6 @@ your-project/
         ├── scripts/           ← project-specific scripts
         ├── hooks/             ← project-specific git hooks
         ├── workflows/         ← custom workflow overrides
-        ├── content/           ← content production assets
         └── contexts/
             ├── rules/         ← project rule overrides
             ├── memory/        ← persistent memory (decisions, patterns, context)
@@ -214,7 +213,7 @@ One canonical source (`.gaai/`). Thin adapters per tool. No duplication. The fra
 - [Core Concepts](docs/02-core-concepts.md) — dual track, backlog, memory, skills, artefacts
 - [Vibe Coder Guide](docs/guides/vibe-coder-guide.md) — fast daily workflow
 - [Senior Engineer Guide](docs/guides/senior-engineer-guide.md) — governance, rules, CI
-- [Skills Index](.gaai/core/skills/README.skills.md) — all 44 skills
+- [Skills Index](.gaai/core/skills/README.skills.md) — all 47 skills
 - [Tool Compatibility](docs/reference/tool-compatibility.md) — Claude Code, OpenCode, Codex CLI, Gemini CLI, Antigravity, Cursor, Windsurf
 - [Design Decisions](docs/architecture/design-decisions.md) — why GAAI is structured the way it is (ADRs + research basis)
 
