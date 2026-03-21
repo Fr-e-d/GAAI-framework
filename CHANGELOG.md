@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.7.2] - 2026-03-21
+
+### Changed
+- chore: sync local VERSION to v2.7.1 after OSS auto-bump
+
+
 ## [2.7.1] - 2026-03-21
 
 ### Changed
