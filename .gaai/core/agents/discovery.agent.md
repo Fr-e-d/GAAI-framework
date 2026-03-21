@@ -101,6 +101,20 @@ This step is non-negotiable. Skipping it risks producing artefacts that contradi
 
 ---
 
+## Mandatory Skill Read (Before Any Artefact Production)
+
+Before producing any artefact (Epic, Story, PRD), the Discovery Agent MUST:
+
+1. **Read the corresponding skill file** — `generate-epics/SKILL.md` for Epics, `generate-stories/SKILL.md` for Stories, `create-prd/SKILL.md` for PRDs.
+2. **Execute every numbered step** in the skill's Process section — including collision guards, decision cross-references, backlog registration, and commit & push.
+3. **Never produce artefacts from cached knowledge.** The skill file is the single source of truth for process steps. Format familiarity does not substitute for reading.
+
+This step is non-negotiable. Skipping it risks missing mandatory process steps (commit, `related_decs`, collision guards) that are invisible in the artefact format itself.
+
+**Rationale:** On 2026-03-21, Discovery produced E59 stories without reading `generate-stories/SKILL.md`. The artefact format was correct but 3 process steps were missed: commit & push to staging (step 10), `related_decs` frontmatter (step 1d/1e), and the correct commit message format. The agent's familiarity with the format masked the missing procedural steps.
+
+---
+
 ## 🔁 Governed Auto-Refinement Loop (Core Behavior)
 
 Discovery is not linear. The Discovery Agent iterates until artefacts are:
