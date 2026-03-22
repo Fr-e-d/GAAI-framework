@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.10] - 2026-03-22
+
+### Changed
+- chore: sync VERSION 2.8.9 + skills-index (SKILL-LP-001) + daemon retry counts
+
+
 ## [2.8.9] - 2026-03-22
 
 ### Changed
