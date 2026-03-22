@@ -67,12 +67,12 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 
    **A story that exists only as an artefact file but is not in the backlog is invisible to Delivery and will never be executed.** This step is non-negotiable.
 
-10. **MANDATORY — Commit & push to staging.** After all story files are written and registered in the backlog, commit all generated/modified files and push to `staging`:
+10. **MANDATORY — Commit & push to staging (ATOMIC).** After all story files are written and registered in the backlog, commit all generated/modified files **and push to `staging` in the same step**. Commit without push is a violation — Delivery cannot pick up stories that exist only locally.
     - Stage: story files (`contexts/artefacts/stories/*.story.md`), backlog (`contexts/backlog/active.backlog.yaml`), and any other modified GAAI context files (memory, decisions, etc.)
     - Commit message format: `chore(discovery): generate stories {id_range} for Epic {epic_id}`
       - Example: `chore(discovery): generate stories E06S46–E06S50 for Epic E06`
-    - Push to `staging` branch
-    - This ensures Delivery can pick up new stories immediately without a manual sync step.
+    - Push to `staging` branch **immediately after commit — never wait for human to request the push**
+    - **Rationale:** On 2026-03-22, Discovery committed E59S03 but did not push. The human had to explicitly request the push. The commit and push are a single atomic operation — separating them defeats the purpose of this step.
 
 ---
 
