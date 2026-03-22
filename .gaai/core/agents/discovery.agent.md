@@ -218,6 +218,50 @@ Standard categories (select those applicable to the Epic's domain):
 
 If a Story is missing an AC for a declared mandatory category, it is **not ready for delivery** and must be refined.
 
+### Story Alignment Review — Mandatory Gate Before Backlog
+
+After generating stories and passing `validate-artefacts` (format gate), the Discovery Agent MUST invoke `review-story-alignment` (SKILL-RSA-001) as an **adversarial alignment review** before registering stories in the backlog.
+
+**Flow:**
+
+```
+generate-stories → stories created
+    ↓
+validate-artefacts → format PASS
+    ↓
+review-story-alignment (isolated sub-agent)
+    → Receives: Session Brief + stories + Epic + DECs
+    → Checks: contradictions, DEC violations, DoR omissions
+    ↓
+┌── ALL PASS → register in backlog as status: draft
+│              → human quick-scan → status: refined → daemon picks up
+│
+└── ANY FAIL → Discovery reads findings
+                  ↓
+              For each finding, Discovery evaluates:
+                  ↓
+              ┌── "I have enough info in the Session Brief to fix this"
+              │     → Refine the story autonomously
+              │     → Re-invoke review-story-alignment on the fixed story
+              │
+              └── "I need clarification from the human"
+                    → Escalate with a SPECIFIC question:
+                      "Story E65S01 says [X] but the Session Brief says [Y].
+                       Which is correct? Or should the AC be [Z]?"
+                    → Wait for human answer
+                    → Refine → re-review
+```
+
+**Escalation format:** When escalating to the human, Discovery MUST:
+1. Quote the specific finding (not "there's a problem")
+2. Quote the Session Brief item it conflicts with
+3. Propose a resolution if possible ("I suggest changing AC1 to...")
+4. Ask a binary or narrow question ("Should the homepage target experts or prospects?")
+
+**Loop limit:** Maximum 2 review cycles per batch. If stories still FAIL after 2 rounds of refinement, escalate ALL remaining findings to the human regardless of whether Discovery thinks it can self-fix.
+
+**Skip condition:** If no Discovery Session Brief exists (e.g., stories created from a bug report or a DEC amendment without conversation), skip this gate entirely. The gate only applies when a Session Brief was compiled.
+
 ---
 
 ## 🔁 Governed Auto-Refinement Loop (Core Behavior)
