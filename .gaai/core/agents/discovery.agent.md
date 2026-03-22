@@ -117,7 +117,7 @@ This step is non-negotiable. Skipping it risks missing mandatory process steps (
 
 ## Mandatory Sub-Agent Delegation Protocol — Discovery Session Brief
 
-When the Discovery Agent delegates work to sub-agents (Plan agents, Story-creation agents, or any Agent tool invocation), it MUST compile and pass a **Discovery Session Brief** — a structured extraction of ALL intelligence produced during the current human ↔ agent conversation.
+When the Discovery Agent delegates work to sub-agents (Plan agents, Story-creation agents, or any Agent tool invocation), it MUST compile, **present for human validation**, and pass a **Discovery Session Brief** — a structured extraction of ALL intelligence produced during the current human ↔ agent conversation.
 
 ### Why This Exists
 
@@ -145,7 +145,19 @@ The brief captures **7 categories** of session intelligence — not just "decisi
 
 1. **Before invoking any sub-agent**, the Discovery Agent compiles the Discovery Session Brief by extracting all 7 categories from the current conversation. This is a manual extraction — not automated. The agent reads back through the conversation and lists every item.
 
-2. **Include the brief as a `DISCOVERY SESSION BRIEF` block** in the sub-agent prompt:
+2. **Present the Brief to the human for validation.** The Brief is the single source of truth for all downstream artefacts. If the Brief is wrong, everything downstream will be wrong — and no automated review can catch it. The human is the ONLY actor who can verify Brief ↔ Conversation fidelity.
+
+   Format: "Here is the Discovery Session Brief I compiled. Please confirm it's faithful to what we discussed, or flag anything missing/wrong."
+
+   - Human confirms → proceed
+   - Human corrects → Discovery updates the Brief, presents again
+   - Human adds missing items → Discovery incorporates
+
+   **This is the ONE mandatory human checkpoint in the entire Discovery flow.** It takes ~2 minutes (the Brief is 20-30 lines). Everything after this point is automated: story generation, alignment review, backlog registration.
+
+   **Why the Brief and not the stories:** The Brief is 20-30 lines condensing the entire session. Stories are 100+ lines each × N stories. Reviewing the Brief catches errors at the root. Reviewing stories catches errors at the leaves — too late and too costly.
+
+3. **Include the validated brief as a `DISCOVERY SESSION BRIEF` block** in the sub-agent prompt:
 
    ```
    DISCOVERY SESSION BRIEF
@@ -190,7 +202,7 @@ The brief captures **7 categories** of session intelligence — not just "decisi
    - "Faire avec > Faire à la place" doctrine for Formation content
    ```
 
-3. **The sub-agent MUST treat every item as a constraint.** It cannot:
+4. **The sub-agent MUST treat every item as a constraint.** It cannot:
    - Change a decision ("actually, prospect-first is better")
    - Narrow a scope ("let's skip the /businesses page")
    - Expand beyond stated boundaries ("let's also add a /pricing page")
@@ -199,9 +211,9 @@ The brief captures **7 categories** of session intelligence — not just "decisi
 
    If the sub-agent identifies a genuine conflict between a brief item and a technical constraint, it MUST STOP and return the conflict to the Discovery Agent with a clear explanation. Silent resolution is forbidden.
 
-4. **If no sub-agent is used** (Discovery writes artefacts directly in the main context), this protocol does not apply — the conversation history is already visible.
+5. **If no sub-agent is used** (Discovery writes artefacts directly in the main context), steps 2-3 still apply (compile and validate Brief with human) but step 4 does not (no sub-agent to constrain).
 
-5. **The brief is ephemeral.** It is NOT saved as a file. It exists only in the sub-agent prompt for the current session. If any item needs to persist across sessions, the Discovery Agent must create a DEC or update GAAI memory separately.
+6. **The brief is ephemeral.** It is NOT saved as a file. It exists only in the sub-agent prompt for the current session. If any item needs to persist across sessions, the Discovery Agent must create a DEC or update GAAI memory separately.
 
 ### Definition of Ready (DoR) per Epic
 
@@ -233,8 +245,7 @@ review-story-alignment (isolated sub-agent)
     → Receives: Session Brief + stories + Epic + DECs
     → Checks: contradictions, DEC violations, DoR omissions
     ↓
-┌── ALL PASS → register in backlog as status: draft
-│              → human quick-scan → status: refined → daemon picks up
+┌── ALL PASS → register in backlog as status: refined → daemon picks up
 │
 └── ANY FAIL → Discovery reads findings
                   ↓
