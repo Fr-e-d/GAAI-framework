@@ -157,7 +157,25 @@ The brief captures **7 categories** of session intelligence — not just "decisi
 
    **Why the Brief and not the stories:** The Brief is 20-30 lines condensing the entire session. Stories are 100+ lines each × N stories. Reviewing the Brief catches errors at the root. Reviewing stories catches errors at the leaves — too late and too costly.
 
-3. **Include the validated brief as a `DISCOVERY SESSION BRIEF` block** in the sub-agent prompt.
+3. **Filter the Brief by sub-agent scope, then include it as a `DISCOVERY SESSION BRIEF` block** in the sub-agent prompt.
+
+   **Scope filtering rule:** When multiple sub-agents are invoked (e.g., one per Epic), each sub-agent receives ONLY the Brief items relevant to its mission. Items that concern another Epic's scope are excluded to avoid noise and confusion.
+
+   Filtering process:
+   - For each Brief item, ask: "Does this item constrain or inform the stories THIS sub-agent will create?"
+   - YES → include
+   - NO → exclude
+   - Items that are cross-cutting (constraints like C-1 DEC-199, qualitative preferences like Q-2 native FR copy) go to ALL sub-agents
+   - Items that are Epic-specific (D-1 "homepage = expert-first" is E65 only) go to that Epic's sub-agent only
+
+   Example with two sub-agents (E66: Gate 1 + no-match, E67: SEO articles):
+   ```
+   Sub-agent E66 receives: D-7, D-8, D-9, D-10 + cross-cutting C-1, C-2, Q-1, Q-2
+   Sub-agent E67 receives: S-1 (article order), O-2 (zero competition) + cross-cutting C-1, C-2, Q-1, Q-2
+   Items D-1, D-2 (homepage/find architecture) go to NEITHER unless they constrain Gate 1 or articles
+   ```
+
+   **The full validated Brief remains the source of truth.** Filtering is done by Discovery at invocation time — the sub-agent never knows what was excluded. The reviewer (review-story-alignment) always checks against the FULL Brief, not the filtered version.
 
    **Format: Structured items with unique IDs.** Each item has a category prefix + sequence number for traceability. The reviewer can reference "D-3" instead of "the third decision."
 

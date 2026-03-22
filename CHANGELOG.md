@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.11.0] - 2026-03-23
+
+### Changed
+- feat(governance): scope-filtered Session Brief per sub-agent
+
+
 ## [2.10.2] - 2026-03-23
 
 ### Changed
