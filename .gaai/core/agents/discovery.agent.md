@@ -246,7 +246,7 @@ The brief captures **7 categories** of session intelligence — not just "decisi
    C-1: DEC-199 — EN primary, FR secondary
    C-2: DEC-155 — journalist test on every public-facing element
    C-3: LinkedIn blocked (founder employment constraint)
-   C-4: DEC-206 — Gemini Pro for deep search, Flash for utility only
+   C-4: DEC-206 — Gemini deep search via gemini-search.sh only (never manual curl), Flash for utility only
 
    QUALITATIVE PREFERENCES
    Q-1: Painkiller positioning — quantify cost of inaction, not features
