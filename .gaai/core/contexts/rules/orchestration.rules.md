@@ -110,6 +110,16 @@ Auxiliary states: `blocked`, `cancelled`, `superseded` — see `backlog.rules.md
 - Delivery must update status to `in_progress` when execution begins, then `done` on PASS
 - Failed executions must be marked `failed` with artefact notes
 
+### Archiving Rules
+
+A `done` item may only be archived (moved from `active.backlog.yaml` to `done/`) if **no non-done item depends on it** — directly or transitively. Before archiving:
+
+1. Collect all `dependencies` from every item whose status is NOT `done`
+2. Resolve transitively: if a dep itself has deps, include those too
+3. Any `done` item found in this transitive set **must stay in the active backlog**
+4. When a `done` item is kept as a dependency anchor, **clear its own `dependencies` field** to `[]` — its deps are historical (execution order), not operational. Only its presence and `done` status matter.
+5. After archiving, verify: every `dependencies` entry across the entire active backlog must resolve to an item present in the active backlog. Zero broken refs allowed.
+
 ## 🌿 Branch Rules
 
 All AI-driven execution targets the **`staging`** branch. The `production` branch is human-only.

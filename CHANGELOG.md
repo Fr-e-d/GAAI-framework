@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.4] - 2026-03-22
+
+### Changed
+- chore: daemon backlog hygiene — archiving rules + dependency cleanup
+
+
 ## [2.8.3] - 2026-03-22
 
 ### Changed
