@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.11] - 2026-03-22
+
+### Changed
+- docs: mention Discovery Session Brief in README + QUICK-REFERENCE
+
+
 ## [2.8.9] - 2026-03-22
 
 ### Changed

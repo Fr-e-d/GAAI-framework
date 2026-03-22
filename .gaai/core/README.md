@@ -15,6 +15,8 @@
 
 That's the day-1 surface area. Everything else (47 skills, 8 rule files, 4 workflows) is loaded on demand — you never interact with it directly.
 
+**Information preservation:** When Discovery delegates work to sub-agents, it compiles a *Discovery Session Brief* — a structured extraction of all conversation intelligence (decisions, observations, trade-offs, constraints). This prevents context loss between agents. See [`agents/discovery.agent.md`](agents/discovery.agent.md).
+
 ---
 
 `core/` contains the framework engine: agents, skills, rules, and workflows. These files are shared across all GAAI-powered projects and are managed by the installer. **Do not edit files in `core/` directly** — your changes will be overwritten the next time you update GAAI.
