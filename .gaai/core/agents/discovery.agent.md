@@ -233,8 +233,7 @@ review-story-alignment (isolated sub-agent)
     → Receives: Session Brief + stories + Epic + DECs
     → Checks: contradictions, DEC violations, DoR omissions
     ↓
-┌── ALL PASS → register in backlog as status: draft
-│              → human quick-scan → status: refined → daemon picks up
+┌── ALL PASS → register in backlog as status: refined → daemon picks up
 │
 └── ANY FAIL → Discovery reads findings
                   ↓

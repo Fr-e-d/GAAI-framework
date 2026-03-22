@@ -193,6 +193,6 @@ The reviewer is **adversarial by design**. Its instruction set:
 
 - **Does not check format** — that is validate-artefacts (SKILL-VALIDATE-ARTEFACTS-001)
 - **Does not refine stories** — it produces findings; the Discovery Agent decides how to act
-- **Does not replace human review** — stories that PASS still enter backlog as `draft` for human quick-scan
+- **Does not replace human judgment** — Discovery escalates to the human when it lacks information to resolve a finding, but a PASS verdict is sufficient for stories to enter the backlog as `refined`
 - **Does not check implementation feasibility** — that is Delivery's Planning Sub-Agent
 - **Does not run on stories without a Session Brief** — no brief = no alignment to check

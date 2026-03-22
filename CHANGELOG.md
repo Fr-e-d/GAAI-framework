@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.9.1] - 2026-03-22
+
+### Changed
+- fix(governance): review PASS → refined directly, no systematic human review
+
+
 ## [2.9.0] - 2026-03-22
 
 ### Changed
