@@ -157,27 +157,47 @@ The brief captures **7 categories** of session intelligence — not just "decisi
 
    **Why the Brief and not the stories:** The Brief is 20-30 lines condensing the entire session. Stories are 100+ lines each × N stories. Reviewing the Brief catches errors at the root. Reviewing stories catches errors at the leaves — too late and too costly.
 
-3. **Filter the Brief by sub-agent scope, then include it as a `DISCOVERY SESSION BRIEF` block** in the sub-agent prompt.
+3. **Compose a Mission Brief for each sub-agent invocation.**
 
-   **Scope filtering rule:** When multiple sub-agents are invoked (e.g., one per Epic), each sub-agent receives ONLY the Brief items relevant to its mission. Items that concern another Epic's scope are excluded to avoid noise and confusion.
+   The Master Brief is the source of truth (validated by the human). But sub-agents do NOT receive the Master Brief directly. Instead, Discovery composes a **Mission Brief** — a tailored context package designed for each sub-agent's specific mission.
 
-   Filtering process:
-   - For each Brief item, ask: "Does this item constrain or inform the stories THIS sub-agent will create?"
-   - YES → include
-   - NO → exclude
-   - Items that are cross-cutting (constraints like C-1 DEC-199, qualitative preferences like Q-2 native FR copy) go to ALL sub-agents
-   - Items that are Epic-specific (D-1 "homepage = expert-first" is E65 only) go to that Epic's sub-agent only
+   **Why not pass the Master Brief directly?** Different sub-agents need different context. A Plan agent needs architectural decisions and trade-offs. A Story agent needs constraints and ICP data. A Research agent needs topic scope and knowledge gaps. Passing the full Master Brief to all sub-agents pollutes their context with irrelevant information and increases the risk of misinterpretation.
 
-   Example with two sub-agents (E66: Gate 1 + no-match, E67: SEO articles):
+   **Mission Brief structure (4 sections):**
+
    ```
-   Sub-agent E66 receives: D-7, D-8, D-9, D-10 + cross-cutting C-1, C-2, Q-1, Q-2
-   Sub-agent E67 receives: S-1 (article order), O-2 (zero competition) + cross-cutting C-1, C-2, Q-1, Q-2
-   Items D-1, D-2 (homepage/find architecture) go to NEITHER unless they constrain Gate 1 or articles
+   MISSION BRIEF
+   ══════════════
+
+   ## Your Mission
+   [What this sub-agent must produce. Specific deliverable, format, file paths.]
+
+   ## Context (from Discovery Session Brief)
+   [Relevant Master Brief items — ONLY those that constrain or inform THIS mission.
+    Each item keeps its original ID (D-1, C-3, Q-2) for traceability.
+    Cross-cutting items (constraints, qualitative preferences) are always included.
+    Epic-specific items are included only if relevant to this sub-agent's scope.]
+
+   ## Additional Context
+   [Mission-specific information NOT in the Master Brief:
+    - Files to load (voice-guide.md, ICP empathy maps, specific DECs)
+    - Codebase patterns to follow (existing page as reference)
+    - Technical constraints (framework, infra)]
+
+   ## Output Expectations
+   [Format, quality checks, what to return, when to STOP and escalate.]
    ```
 
-   **The full validated Brief remains the source of truth.** Filtering is done by Discovery at invocation time — the sub-agent never knows what was excluded. The reviewer (review-story-alignment) always checks against the FULL Brief, not the filtered version.
+   **Composition rules:**
+   - **§Context:** Include every Master Brief item that answers "does this constrain or inform THIS sub-agent's deliverable?" Items irrelevant to the mission are excluded — not to hide information, but to reduce noise. The sub-agent cannot misinterpret what it doesn't receive.
+   - **§Additional Context:** Add mission-specific information that ISN'T in the Master Brief. A Story agent might need the Epic's `mandatory_ac_categories`. A Content agent might need voice-guide.md. A Research agent might need keyword data. This section is additive — it supplements the Brief, not filters it.
+   - **§Output Expectations:** Explicit format so Discovery knows exactly what to expect back. Prevents ambiguous returns.
 
-   **Format: Structured items with unique IDs.** Each item has a category prefix + sequence number for traceability. The reviewer can reference "D-3" instead of "the third decision."
+   **The reviewer (review-story-alignment) always checks against the FULL Master Brief**, not the Mission Brief. This catches cases where Discovery's scoping excluded something that was actually relevant.
+
+   **This applies to ALL sub-agent invocations** — not just story creation. Plan agents, research agents, content agents, reviewer agents all receive Mission Briefs tailored to their specific task.
+
+   **Master Brief format: Structured items with unique IDs.** Each item has a category prefix + sequence number for traceability across Mission Briefs.
 
    | Prefix | Category |
    |--------|----------|

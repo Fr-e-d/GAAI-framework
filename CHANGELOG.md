@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.12.0] - 2026-03-23
+
+### Changed
+- feat(governance): Mission Brief — tailored context per sub-agent invocation
+
+
 ## [2.11.0] - 2026-03-23
 
 ### Changed
