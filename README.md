@@ -1,4 +1,4 @@
-![Version](https://img.shields.io/badge/version-2.8.5-blue)
+![Version](https://img.shields.io/badge/version-2.8.6-blue)
 ![License: ELv2](https://img.shields.io/badge/license-ELv2-green)
 ![No SDK](https://img.shields.io/badge/stack-markdown%20%2B%20yaml%20%2B%20bash-orange)
 
