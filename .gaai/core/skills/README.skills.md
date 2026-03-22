@@ -6,6 +6,24 @@ Skills are **pure execution units**. They perform a single, well-defined operati
 
 ---
 
+## Core Skills — Week 1
+
+These are the 7 skills you will encounter in a normal workflow. You do not invoke skills directly — agents invoke them on your behalf. This list tells you what is happening under the hood.
+
+| Skill | When it runs |
+|---|---|
+| `generate-epics` | Discovery: translate product intent into outcome-driven Epics |
+| `generate-stories` | Discovery: translate an Epic into User Stories with acceptance criteria |
+| `evaluate-story` | Delivery: assess complexity and determine delivery tier |
+| `implement` | Delivery: write code that satisfies acceptance criteria |
+| `qa-review` | Delivery: validate implementation against acceptance criteria — the quality gate |
+| `memory-retrieve` | Any agent: load the minimum relevant memory before context-building |
+| `decision-extraction` | After QA PASS: formalize durable decisions into long-term memory |
+
+The full catalog (47 skills) is below. Skills outside this list are loaded on demand for advanced workflows.
+
+---
+
 ## Structure
 
 Each skill lives in its own directory with a `SKILL.md` file:

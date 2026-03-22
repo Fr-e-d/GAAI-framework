@@ -1,38 +1,37 @@
-# .gaai/ — GAAI Framework (v2.8.5)
+# .gaai/core/ — GAAI Framework Engine
 
-## New to GAAI?
-
-→ **[Start with the Quick Start guide](docs/guides/quick-start.md)** — first working Story in 30 minutes.
+**New to GAAI?** → [Start with the Quick Start guide](docs/guides/quick-start.md) — first working Story in 30 minutes.
 
 ---
 
-## Directory Structure
+## 4 Commands to Run Your AI-Assisted SDLC
+
+| Command | What it does |
+|---|---|
+| `/gaai-bootstrap` | Initialize project context on an existing codebase |
+| `/gaai-discover` | Activate Discovery Agent — clarify intent, create Stories |
+| `/gaai-deliver` | Run Delivery Loop — implement next ready Story end-to-end |
+| `/gaai-status` | Show backlog and memory state |
+
+That's the day-1 surface area. Everything else (47 skills, 8 rule files, 4 workflows) is loaded on demand — you never interact with it directly.
+
+---
+
+`core/` contains the framework engine: agents, skills, rules, and workflows. These files are shared across all GAAI-powered projects and are managed by the installer. **Do not edit files in `core/` directly** — your changes will be overwritten the next time you update GAAI.
+
+To update the framework, run the installer with the new version:
+
+```bash
+bash /tmp/gaai/install.sh --target . --tool claude-code --yes
+```
+
+Customization lives in `project/` — add your rules, skills, agents, and memory there.
 
 ```
 .gaai/
-├── core/          ← Framework (auto-synced to OSS via post-commit hook)
-│   └── README.md  ← This file
-└── project/       ← Project-specific data (memory, backlog, artefacts, custom skills)
+├── core/      ← Framework engine (managed by installer — do not edit)
+└── project/   ← Your customizations: memory, backlog, skills, rules
 ```
-
-- `core/` changes are **automatically contributed to OSS** on every commit (via post-commit hook → PR → auto-merge)
-- `project/` is **local only** — never synced to OSS
-
----
-
-## Framework Sync (Automatic)
-
-When you commit changes to `.gaai/core/`, a post-commit hook automatically:
-1. Detects `.gaai/core/` was modified
-2. Clones the OSS repo (shallow)
-3. Replaces `core/` with your local version
-4. Creates a PR on `Fr-e-d/GAAI-framework`
-5. Schedules auto-merge
-
-**You don't need to do anything.** The sync is transparent and non-blocking.
-
-Setup: `git config core.hooksPath .githooks` (done by `install-hooks.sh`).
-Logs: `.github/.sync-log`.
 
 ---
 

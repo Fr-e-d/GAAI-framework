@@ -15,6 +15,35 @@ You have:
 
 ---
 
+## Verify Your Install (2 minutes)
+
+After running the installer, confirm everything is in place before you start:
+
+```bash
+bash .gaai/core/scripts/health-check.sh
+```
+
+You should see:
+
+```
+GAAI Health Check
+================================
+...
+Results: N passed, 0 failed, 0 warnings
+
+✅ Health check PASSED
+```
+
+If you see `✅ Health check PASSED`, you're ready — proceed to Step 1.
+
+If you see `❌ Health check FAILED`, re-run the installer and try again:
+
+```bash
+bash .gaai/core/scripts/install.sh
+```
+
+---
+
 ## Step 1 — Initialize (5 minutes)
 
 ### Existing codebase
@@ -87,7 +116,7 @@ The Discovery Agent runs a validation loop automatically:
 1. Generates Epics and Stories
 2. Runs risk analysis
 3. Checks consistency
-4. Validates artefacts against governance rules
+4. Checks that Stories meet quality criteria
 5. If something is wrong, it refines and repeats
 6. When everything passes: Stories move to `status: refined` in the backlog
 
@@ -124,12 +153,12 @@ QA Review
        ↓
 PASS → mark done → move to next Story
 FAIL → remediate → re-run QA (up to 3 attempts)
-ESCALATE → stop and ask you
+Agent pauses → stops and asks you
 ```
 
 You wait. The agent reports back when:
 - A Story is **done** (QA passed)
-- Something needs your decision (escalation)
+- Something needs your decision
 
 ### The only time you intervene
 

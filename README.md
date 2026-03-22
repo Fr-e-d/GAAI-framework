@@ -53,6 +53,7 @@ AI coding tools are fast — but without governance, speed creates drift: agents
 | AGENTS.md / cursor rules | Solves one session. GAAI adds cross-session memory, scope authorization, and structured delivery. |
 | BMAD-METHOD | Simulates a multi-agent Agile team. GAAI is lighter on Discovery, more rigid on Delivery governance. |
 | LangGraph / AutoGen / CrewAI | Code-first orchestration for building AI systems. GAAI governs the use of AI coding tools. Different abstraction level. |
+| Spec Kit (GitHub) | Spec-driven pipeline (spec → plan → tasks → implement). GAAI adds governance enforcement, multi-agent delivery with QA gates, structured cross-session memory, and automated daemon delivery. |
 
 ---
 
