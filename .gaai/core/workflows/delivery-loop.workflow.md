@@ -177,6 +177,35 @@ git -C ../{id}-workspace add .gaai/project/contexts/artefacts/
 git -C ../{id}-workspace commit -m "docs({id}): delivery artefacts — plan, impl-report, qa-report, memory-delta"
 ```
 
+### 7c. Diff-Scope Sanity Check (MANDATORY)
+
+**Before pushing, verify the diff is consistent with the Story scope.** This catches corrupted trees, accidental `git add .` on wrong directories, or GIT_DIR contamination from hooks.
+
+```bash
+# Count files changed vs staging baseline
+DIFF_STAT=$(git -C ../{id}-workspace diff --stat staging..HEAD)
+CHANGED_COUNT=$(git -C ../{id}-workspace diff --name-only staging..HEAD | wc -l)
+DELETED_COUNT=$(git -C ../{id}-workspace diff --diff-filter=D --name-only staging..HEAD | wc -l)
+
+echo "Diff-scope check: $CHANGED_COUNT files changed, $DELETED_COUNT deleted"
+
+# ESCALATE if diff is anomalous:
+#   - More than 30 files changed for a single story
+#   - Any file deleted that is NOT a .gaai/ artefact or backlog file
+#   - Deletions exceed 10x the insertions (tree replacement signal)
+NON_GAAI_DELETIONS=$(git -C ../{id}-workspace diff --diff-filter=D --name-only staging..HEAD \
+  | grep -vcE '^\.gaai/' || true)
+
+if [ "$CHANGED_COUNT" -gt 30 ] || [ "$NON_GAAI_DELETIONS" -gt 0 ]; then
+  echo "ESCALATE: diff anomaly detected — $CHANGED_COUNT files changed, $NON_GAAI_DELETIONS non-.gaai deletions"
+  echo "Expected: small diff matching Story ACs. Actual diff suggests tree corruption."
+  echo "$DIFF_STAT"
+  exit 1  # Do NOT push. ESCALATE to human.
+fi
+```
+
+If this check fails, **STOP immediately**. Do NOT push, do NOT create PR, do NOT mark done. Report the anomaly to the human with the full `git diff --stat` output.
+
 ### 8. Create PR & Complete Story
 
 **8a. Push story branch and create PR to staging:**
@@ -211,7 +240,7 @@ EOF
 )"
 ```
 
-> The AI never merges to staging. It creates a PR for human review. The human merges when satisfied.
+> **FORBIDDEN — The AI MUST NEVER merge its own PRs.** Do NOT run `gh pr merge`, `gh pr review --approve`, or any merge command. The AI creates the PR. The human reviews and merges. This is a non-negotiable safety boundary — violation caused the E64S03 incident (2474 files destroyed). If the daemon or any automation merges the PR, it bypasses the only human review gate on the delivery pipeline.
 
 **8b. Delivery artefacts:** Delivery artefacts are committed to the story branch before PR creation (step 7b) and merge to staging via the PR. No separate staging push needed.
 

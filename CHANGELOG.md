@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.12.2] - 2026-03-23
+
+### Changed
+- fix(security): prevent E64S03-class incidents — 4 hardening measures
+
+
 ## [2.12.1] - 2026-03-23
 
 ### Changed
