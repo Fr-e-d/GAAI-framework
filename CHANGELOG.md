@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.7] - 2026-03-22
+
+### Changed
+- fix(governance): sync templates + add DoR (Definition of Ready) per Epic
+
+
 ## [2.8.6] - 2026-03-22
 
 ### Changed
