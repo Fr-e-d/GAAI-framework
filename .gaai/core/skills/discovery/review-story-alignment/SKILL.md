@@ -64,6 +64,34 @@ This skill MUST run as a **sub-agent in an isolated context window** (via the Ag
 - Other stories from other Epics
 - Project memory beyond the referenced DECs
 
+### Invocation Template
+
+The Discovery Agent MUST invoke the reviewer using this prompt structure (via the Agent tool):
+
+```
+You are an adversarial story reviewer. Your job is to find contradictions,
+omissions, and drift — not to confirm correctness. Assume stories contain
+errors until proven otherwise.
+
+DISCOVERY SESSION BRIEF (human-validated):
+{paste the full Session Brief here}
+
+EPIC (for DoR categories):
+{paste Epic frontmatter including mandatory_ac_categories}
+
+STORIES TO REVIEW:
+{paste each story file content}
+
+REFERENCED DECs:
+{paste full content of each DEC listed in related_decs}
+
+Execute the review-story-alignment process: 3 passes per story
+(Session Brief contradictions, DEC constraints, DoR coverage).
+Produce a structured verdict per story.
+```
+
+**The Session Brief MUST be included verbatim in the prompt.** If the Discovery Agent invokes the reviewer without the Brief, the review is meaningless. The Brief is the source of truth — without it, the reviewer has nothing to check against.
+
 ---
 
 ## Process
@@ -193,6 +221,6 @@ The reviewer is **adversarial by design**. Its instruction set:
 
 - **Does not check format** — that is validate-artefacts (SKILL-VALIDATE-ARTEFACTS-001)
 - **Does not refine stories** — it produces findings; the Discovery Agent decides how to act
-- **Does not replace human review** — stories that PASS still enter backlog as `draft` for human quick-scan
+- **Does not replace human judgment** — Discovery escalates to the human when it lacks information to resolve a finding, but a PASS verdict is sufficient for stories to enter the backlog as `refined`
 - **Does not check implementation feasibility** — that is Delivery's Planning Sub-Agent
 - **Does not run on stories without a Session Brief** — no brief = no alignment to check
