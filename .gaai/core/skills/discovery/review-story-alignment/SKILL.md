@@ -74,7 +74,8 @@ omissions, and drift — not to confirm correctness. Assume stories contain
 errors until proven otherwise.
 
 DISCOVERY SESSION BRIEF (human-validated):
-{paste the full Session Brief here}
+══════════════════════════════════════════
+{paste the full structured Brief with D-N, O-N, H-N, T-N, S-N, C-N, Q-N items}
 
 EPIC (for DoR categories):
 {paste Epic frontmatter including mandatory_ac_categories}
@@ -87,10 +88,14 @@ REFERENCED DECs:
 
 Execute the review-story-alignment process: 3 passes per story
 (Session Brief contradictions, DEC constraints, DoR coverage).
+
+For each finding, reference the Brief item by ID (e.g., "contradicts D-1")
+and the story element by AC number (e.g., "AC3 in E65S01").
+
 Produce a structured verdict per story.
 ```
 
-**The Session Brief MUST be included verbatim in the prompt.** If the Discovery Agent invokes the reviewer without the Brief, the review is meaningless. The Brief is the source of truth — without it, the reviewer has nothing to check against.
+**The Session Brief MUST be included verbatim in the prompt — with all item IDs (D-N, O-N, etc.).** If the Discovery Agent invokes the reviewer without the Brief, the review is meaningless. The Brief is the source of truth — without it, the reviewer has nothing to check against.
 
 ---
 
@@ -167,11 +172,12 @@ For each story, produce a structured verdict:
 
 ### Findings
 
-| # | Type | Severity | Brief Item / DEC / Category | Story Element | Finding |
-|---|------|----------|----------------------------|---------------|---------|
-| 1 | CONTRADICTION | CRITICAL | Brief §Decisions #1: "Homepage = expert-first" | AC1: "prospect-facing homepage" | Story contradicts Session Brief decision |
-| 2 | DEC_MISSING | HIGH | DEC-199 (i18n: EN primary) | related_decs | DEC-199 should be referenced — story has URL routing implications |
-| 3 | DOR_MISSING | HIGH | mandatory_ac_categories: [i18n] | No AC | No AC addresses i18n/localization |
+| # | Type | Severity | Brief Item | Story Element | Finding |
+|---|------|----------|-----------|---------------|---------|
+| 1 | CONTRADICTION | CRITICAL | **D-1** (Homepage = expert-first) | AC1 | Story says "prospect-facing" — contradicts D-1 |
+| 2 | DEC_MISSING | HIGH | **C-1** (DEC-199: EN primary) | related_decs | DEC-199 should be referenced — story has URL routing implications |
+| 3 | DOR_MISSING | HIGH | DoR: `i18n` | No AC | No AC addresses i18n/localization |
+| 4 | DRIFT | HIGH | **Q-2** (FR copy native) | AC5 | AC says "translate" — Q-2 requires native writing, not translation |
 
 ### Refinement Guidance
 

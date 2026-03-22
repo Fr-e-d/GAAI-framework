@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.10.0] - 2026-03-22
+
+### Changed
+- feat(governance): structured context passing — Session Brief with typed item IDs
+
+
 ## [2.9.2] - 2026-03-22
 
 ### Changed
