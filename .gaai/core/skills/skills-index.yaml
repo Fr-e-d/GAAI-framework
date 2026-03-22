@@ -3,7 +3,7 @@
 # Regenerate: invoke build-skills-index skill
 
 generated_at: 2026-03-22
-total: 47
+total: 48
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -51,6 +51,15 @@ discovery:
     tags: []
     updated_at: 2026-01-28
     path: core/skills/discovery/refine-scope/SKILL.md
+  - id: SKILL-RSA-001
+    name: review-story-alignment
+    source: core
+    description: "Adversarial review of generated stories against the Discovery Session Brief, referenced DECs, and Epic DoR. Detects contradictions, omissions, and intent drift BEFORE stories reach Delivery. Produces a structured verdict (PASS/FAIL) with specific findings per story. Triggers after generate-stories, before backlog registration as refined."
+    category: discovery
+    track: discovery
+    tags: []
+    updated_at: 2026-03-22
+    path: core/skills/discovery/review-story-alignment/SKILL.md
   - id: SKILL-VALIDATE-ARTEFACTS-001
     name: validate-artefacts
     source: core

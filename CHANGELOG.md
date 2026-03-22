@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.9.0] - 2026-03-22
+
+### Changed
+- feat(governance): SKILL-RSA-001 review-story-alignment — adversarial story review gate
+
+
 ## [2.8.11] - 2026-03-22
 
 ### Changed
