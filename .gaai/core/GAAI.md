@@ -166,7 +166,7 @@ The governance rules are defined in `core/contexts/rules/base.rules.md` (univers
 
 GAAI never loads everything at once. Context is assembled on demand, in layers:
 
-1. **Session startup** — only `base.rules.md` is auto-loaded (via tool adapter `@import`). Lightweight, universal rules.
+1. **Session startup** — only `base.rules.md` is auto-loaded (via tool adapter `@import`). Universal governance: core rules, backlog state lifecycle, archiving rules, memory discipline, forbidden patterns, default deny.
 2. **Agent activation** — the active agent definition is loaded when a flow starts (`/gaai-discover`, `/gaai-deliver`). Only one agent at a time.
 3. **Sub-agent spawn** — each sub-agent receives a minimal, targeted context bundle. No full rule set, no full memory — only what the task requires.
 4. **Memory retrieval** — 3-level progressive disclosure: index scan → targeted file load → cross-domain (rare). See `memory-retrieve` skill.

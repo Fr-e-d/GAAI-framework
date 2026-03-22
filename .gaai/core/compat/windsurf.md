@@ -24,9 +24,9 @@ Activate based on context:
 
 ## Rules
 
-**Read `.gaai/core/contexts/rules/base.rules.md` at the start of every session.** These are the universal governance rules (backlog-first, skill-first, memory explicit, recommendation validation, conflict protocol).
+**Read `.gaai/core/contexts/rules/base.rules.md` at the start of every session.** These are the universal governance rules (backlog-first, skill-first, memory discipline, backlog state lifecycle, archiving rules, forbidden patterns, default deny, conflict protocol).
 
-For flow-specific rules (agent responsibilities, context isolation, backlog states, branch rules): `.gaai/core/contexts/rules/orchestration.rules.md`
+For flow-specific rules (agent responsibilities, context isolation, branch rules, cron, capability readiness): `.gaai/core/contexts/rules/orchestration.rules.md`
 
 ## Key Paths
 
