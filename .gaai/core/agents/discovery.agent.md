@@ -157,50 +157,69 @@ The brief captures **7 categories** of session intelligence — not just "decisi
 
    **Why the Brief and not the stories:** The Brief is 20-30 lines condensing the entire session. Stories are 100+ lines each × N stories. Reviewing the Brief catches errors at the root. Reviewing stories catches errors at the leaves — too late and too costly.
 
-3. **Include the validated brief as a `DISCOVERY SESSION BRIEF` block** in the sub-agent prompt:
+3. **Include the validated brief as a `DISCOVERY SESSION BRIEF` block** in the sub-agent prompt.
+
+   **Format: Structured items with unique IDs.** Each item has a category prefix + sequence number for traceability. The reviewer can reference "D-3" instead of "the third decision."
+
+   | Prefix | Category |
+   |--------|----------|
+   | `D-N` | Decision |
+   | `O-N` | Observation |
+   | `H-N` | Hypothesis |
+   | `T-N` | Trade-off & Rationale |
+   | `S-N` | Scope Boundary |
+   | `C-N` | Constraint |
+   | `Q-N` | Qualitative Preference |
+
+   **Template:**
 
    ```
-   DISCOVERY SESSION BRIEF
-   (All items below emerged from the human ↔ Discovery conversation.
-    Do not change, reinterpret, narrow, expand, or omit ANY item.
-    If you identify a conflict between an item and another constraint,
-    STOP and return the conflict — never resolve it silently.)
+   DISCOVERY SESSION BRIEF (human-validated)
+   ══════════════════════════════════════════
+   Every item below is a constraint. Do not change, reinterpret, narrow,
+   expand, or omit ANY item. If you identify a conflict between an item
+   and another constraint, STOP and return the conflict — never resolve
+   it silently.
 
-   ## Decisions
-   1. Homepage (/) = expert-first landing page (Contra model)
-   2. /businesses = separate prospect/demand landing page
-   3. Two expert types: "I Build" + "I Train" (V9 Formation)
+   DECISIONS
+   D-1: Homepage (/) = expert-first landing page (Contra model)
+   D-2: /businesses = separate prospect/demand landing page
+   D-3: Two expert types on LP: "I Build" + "I Train" (V9 Formation)
 
-   ## Observations
-   - 80/20 refers to GTM effort allocation, not supply/demand ratio
-   - Post-BPI diagnostic prospect has ZERO content competition in FR
+   OBSERVATIONS
+   O-1: 80/20 refers to GTM effort allocation, not supply/demand ratio
+   O-2: Post-BPI diagnostic prospect has ZERO content competition in FR
 
-   ## Hypotheses (not yet validated)
-   - V9 Formation is a test — do not invest heavily until signal confirmed
-   - Referral mechanic may drive 30-50% additional signups (Robinhood pattern)
+   HYPOTHESES (not yet validated — treat as context, not as confirmed facts)
+   H-1: V9 Formation is a test — do not invest heavily until signal confirmed
+   H-2: Referral mechanic may drive 30-50% additional signups (Robinhood pattern)
 
-   ## Trade-offs & Rationale
-   - Commission model rejected: experts bypass platform, legal complexity
-   - Pay-per-lead chosen despite trust risk: legally simpler, transparent
-   - Pricing visible on LP: DEC-155 transparency doctrine > conversion optimization
+   TRADE-OFFS & RATIONALE
+   T-1: Commission model rejected → experts bypass platform + legal complexity
+   T-2: Pay-per-lead chosen despite trust risk → legally simpler, transparent
+   T-3: Pricing visible on LP → DEC-155 transparency doctrine > conversion optimization
 
-   ## Scope Boundaries
-   - Article production order: Osez l'IA > Cout consultant > Pillar > Formation > n8n
-   - EN first, FR fast-follow (not simultaneous)
-   - Blog on callibrate.io (not just Substack) for SEO domain authority
+   SCOPE BOUNDARIES
+   S-1: Article production order: Osez l'IA > Cout consultant > Pillar > Formation > n8n
+   S-2: EN first, FR fast-follow (not simultaneous)
+   S-3: Blog on callibrate.io (not just Substack) for SEO domain authority
 
-   ## Constraints
-   - DEC-199: EN primary, FR secondary
-   - DEC-155: journalist test on every public-facing element
-   - LinkedIn blocked (founder employment constraint)
-   - Gemini API: use Pro model for deep search, Flash for utility (DEC-206)
+   CONSTRAINTS
+   C-1: DEC-199 — EN primary, FR secondary
+   C-2: DEC-155 — journalist test on every public-facing element
+   C-3: LinkedIn blocked (founder employment constraint)
+   C-4: DEC-206 — Gemini Pro for deep search, Flash for utility only
 
-   ## Qualitative Preferences
-   - Painkiller positioning: quantify cost of inaction, not features
-   - FR copy must be native — "Le faire construire" = unacceptable translation
-   - Social proof pre-launch: market data stats, not fabricated testimonials
-   - "Faire avec > Faire à la place" doctrine for Formation content
+   QUALITATIVE PREFERENCES
+   Q-1: Painkiller positioning — quantify cost of inaction, not features
+   Q-2: FR copy must be native — "Le faire construire" = unacceptable translation
+   Q-3: Social proof pre-launch — market data stats, not fabricated testimonials
+   Q-4: "Faire avec > Faire à la place" doctrine for Formation content
    ```
+
+   **Completeness rule:** Every category MUST have at least one item, or explicitly state `(none this session)`. An empty category without this marker indicates the Brief was compiled incompletely — the human should flag it during validation.
+
+   **Traceability:** When the reviewer finds a conflict, it references the item ID: "Story E65S01 AC1 contradicts **D-1** (Homepage = expert-first)." When Discovery refines a story, it references the item: "Refined AC1 to align with **D-1**."
 
 4. **The sub-agent MUST treat every item as a constraint.** It cannot:
    - Change a decision ("actually, prospect-first is better")
