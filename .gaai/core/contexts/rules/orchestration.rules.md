@@ -9,7 +9,7 @@ tags:
   - backlog
   - governance
 created_at: 2026-02-09
-updated_at: 2026-02-26
+updated_at: 2026-03-22
 ---
 
 # 🧭 GAAI Orchestration Rules
@@ -87,38 +87,7 @@ Sub-agents spawned by Delivery (Planning, Implementation, QA, Specialists) each 
 
 ## 🗂️ Backlog Orchestration
 
-### Backlog States
-
-Backlog items MUST follow this lifecycle:
-
-```
-draft → refined → in_progress → done | failed
-```
-
-Auxiliary states: `blocked`, `cancelled`, `superseded` — see `backlog.rules.md` §Backlog Lifecycle for definitions and transition rules.
-
-- `draft` — Story created but not yet validated or acceptance-criteria complete
-- `refined` — Story is validated, acceptance criteria are present and unambiguous, ready for Delivery to consume
-- `in_progress` — Delivery is actively executing the Story
-- `done` — Story passed QA; moved to `done/` archive
-- `failed` — Story failed and cannot be retried without human intervention
-
-### Rules
-
-- Only Discovery may move items from `draft` to `refined`
-- Delivery may only consume items in `refined`
-- Delivery must update status to `in_progress` when execution begins, then `done` on PASS
-- Failed executions must be marked `failed` with artefact notes
-
-### Archiving Rules
-
-A `done` item may only be archived (moved from `active.backlog.yaml` to `done/`) if **no non-done item depends on it** — directly or transitively. Before archiving:
-
-1. Collect all `dependencies` from every item whose status is NOT `done`
-2. Resolve transitively: if a dep itself has deps, include those too
-3. Any `done` item found in this transitive set **must stay in the active backlog**
-4. When a `done` item is kept as a dependency anchor, **clear its own `dependencies` field** to `[]` — its deps are historical (execution order), not operational. Only its presence and `done` status matter.
-5. After archiving, verify: every `dependencies` entry across the entire active backlog must resolve to an item present in the active backlog. Zero broken refs allowed.
+→ Backlog state lifecycle, transition rules, and archiving rules are defined in `base.rules.md` (loaded at session startup, applies universally).
 
 ## 🌿 Branch Rules
 
@@ -212,22 +181,9 @@ Cron MUST NOT:
 
 ## 🧠 Memory Orchestration Rules
 
-### Memory Retrieval
+→ Memory retrieval discipline and ingestion authority are defined in `base.rules.md` Core Governance Rule #3 (loaded at session startup, applies universally).
 
-- Memory is NEVER auto-loaded
-- Agents MUST explicitly call `memory-retrieve.skill`
-- Retrieval MUST start from `contexts/memory/index.md`
-- Retrieval MUST be selective (by category / tags)
-
-### Memory Ingestion
-
-- Only Discovery may trigger `memory-ingest.skill`
-- Only validated knowledge may be ingested
-- Raw chat transcripts are forbidden
-
-**Governed exception — `decision-extraction`:** Delivery may invoke `decision-extraction` after QA PASS to scan for durable architectural or governance decisions. This is the sole Delivery-permitted memory write, governed by the skill's deduplication gate and consistency checks. All other memory ingestion (project knowledge, patterns, domain memory) remains Discovery-only.
-
-### Memory Maintenance
+### Memory Maintenance (flow-specific)
 
 - `memory-refresh.skill` is maintenance-only
 - `memory-compact.skill` is compression-only
@@ -246,16 +202,9 @@ Cron MUST NOT:
 
 ## 🚫 Forbidden Patterns
 
-The following are explicitly forbidden:
-- agents auto-loading full memory
-- skills accessing memory implicitly
-- Delivery ingesting memory (exception: `decision-extraction` post-QA-PASS — see §Memory Ingestion)
-- Cron creating knowledge
-- bypassing backlog states
-- direct human → Delivery interaction
+→ Universal forbidden patterns and default deny are defined in `base.rules.md` (loaded at session startup).
 
-## 🧠 Final Rule
-
-**If a behavior is not explicitly allowed here, it is forbidden.**
-
-This document governs **all agent orchestration decisions** in the GAAI system.
+**Flow-specific additions** (on top of base forbidden patterns):
+- Delivery ingesting memory (exception: `decision-extraction` post-QA-PASS)
+- Cron creating knowledge or modifying decisions
+- Direct human → Delivery interaction (Delivery is never human-facing)

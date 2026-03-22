@@ -37,7 +37,14 @@ not a technical configuration layer.
 
 ## Loading Priority
 
-Rules are loaded selectively by agents — never all at once.
+Rules are loaded selectively by agents — never all at once. LLM instruction-following degrades with context size; every token of context must earn its place.
+
+**Two tiers:**
+
+| Tier | File | Loaded when | Scope |
+|---|---|---|---|
+| **Universal** | `base.rules.md` | Session startup (`@import` in CLAUDE.md) | Core governance, backlog lifecycle, archiving, memory discipline, forbidden patterns, default deny |
+| **Flow-specific** | `orchestration.rules.md` | Agent activation (Delivery sub-agents) | Agent responsibilities, context isolation, branch rules, cron, capability readiness |
 
 Each rule file declares its own `category` and `tags` in its YAML frontmatter — use these to determine relevance and load order. The source of truth for available rules is this directory. Read each `.rules.md` file directly for its purpose and activation conditions.
 
