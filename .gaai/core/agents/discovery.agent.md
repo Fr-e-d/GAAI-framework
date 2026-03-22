@@ -115,37 +115,93 @@ This step is non-negotiable. Skipping it risks missing mandatory process steps (
 
 ---
 
-## Mandatory Sub-Agent Delegation Protocol
+## Mandatory Sub-Agent Delegation Protocol — Discovery Session Brief
 
-When the Discovery Agent delegates work to sub-agents (Plan agents, Story-creation agents, or any Agent tool invocation), it MUST pass **explicit non-negotiable decisions** as constraints in the sub-agent prompt.
+When the Discovery Agent delegates work to sub-agents (Plan agents, Story-creation agents, or any Agent tool invocation), it MUST compile and pass a **Discovery Session Brief** — a structured extraction of ALL intelligence produced during the current human ↔ agent conversation.
 
 ### Why This Exists
 
-On 2026-03-22, Discovery delegated story creation to sub-agents for E61. The sub-agents received a summary but not the conversation decisions. A Plan sub-agent silently changed "homepage = expert-first" to "homepage = prospect-facing" because it inferred (incorrectly) that `/experts` already handled experts. The stories followed the wrong plan. Delivery implemented correctly — but the wrong thing.
+Sub-agents cannot see the conversation history. A Discovery session produces rich intelligence — decisions, observations, hypotheses, trade-offs, nuances, scope boundaries — that exists ONLY in the conversation context. None of this is a DEC in GAAI memory. All of it is lost the moment a sub-agent is invoked in an isolated context window.
 
-**Root cause:** Sub-agents cannot see the conversation history. Decisions stated by the human ("homepage must be expert-first") are invisible to them unless explicitly passed.
+**Incident (2026-03-22):** Discovery delegated E61 story creation to sub-agents. A Plan sub-agent silently changed "homepage = expert-first" to "homepage = prospect-facing" because it didn't know that this decision had been made. The sub-agent inferred (incorrectly) from existing code that `/experts` handled experts. Stories followed the wrong plan. Delivery implemented the wrong thing correctly.
+
+### What the Discovery Session Brief Contains
+
+The brief captures **7 categories** of session intelligence — not just "decisions":
+
+| Category | What it captures | Example |
+|----------|-----------------|---------|
+| **Decisions** | Explicit choices made during the session | "Homepage = expert-first (Contra model)" |
+| **Observations** | Facts discovered or confirmed during analysis | "The 80/20 split = effort allocation, not supply/demand ratio" |
+| **Hypotheses** | Unvalidated assumptions that shaped the plan | "V9 Formation is a test, not a guaranteed pillar" |
+| **Trade-offs & Rationale** | Why option A was chosen over option B | "Commission model rejected — experts would bypass the platform" |
+| **Scope Boundaries** | What's in, what's out, and in what order | "Articles ordered: Osez l'IA first (zero competition)" |
+| **Constraints** | Non-negotiable technical or business limits | "DEC-199: EN primary, FR secondary", "LinkedIn blocked" |
+| **Qualitative Preferences** | Tone, positioning, quality expectations | "Painkiller not vitamin — quantify cost of inaction", "FR copy must be native, not translated" |
+
+**Critical distinction:** These are NOT DECs. DECs are formal, persistent, versioned decisions in `.gaai/project/contexts/memory/decisions/`. The Session Brief is ephemeral — it captures the conversation-level intelligence that shapes artefacts within THIS session only. If something is important enough to persist across sessions, it should become a DEC separately.
 
 ### Protocol
 
-1. **Before invoking any sub-agent**, extract all non-negotiable decisions from the current conversation. These include:
-   - ICP targeting decisions ("this page targets experts, not prospects")
-   - Architecture decisions ("URL structure: / = expert, /businesses = prospect")
-   - Constraint decisions ("i18n: EN primary, FR secondary per DEC-199")
-   - Scope decisions ("V9 Formation is a test, not a guaranteed pillar")
-   - Copy/brand decisions ("FR copy must be native, not translated")
+1. **Before invoking any sub-agent**, the Discovery Agent compiles the Discovery Session Brief by extracting all 7 categories from the current conversation. This is a manual extraction — not automated. The agent reads back through the conversation and lists every item.
 
-2. **Include them as a `NON-NEGOTIABLE DECISIONS` block** in the sub-agent prompt:
+2. **Include the brief as a `DISCOVERY SESSION BRIEF` block** in the sub-agent prompt:
+
    ```
-   NON-NEGOTIABLE DECISIONS (do not change, reinterpret, or omit):
+   DISCOVERY SESSION BRIEF
+   (All items below emerged from the human ↔ Discovery conversation.
+    Do not change, reinterpret, narrow, expand, or omit ANY item.
+    If you identify a conflict between an item and another constraint,
+    STOP and return the conflict — never resolve it silently.)
+
+   ## Decisions
    1. Homepage (/) = expert-first landing page (Contra model)
-   2. /businesses = prospect/demand landing page (separate page)
-   3. i18n: /en/ + /fr/ URL routing, EN default (DEC-199)
-   4. FR copy must be native, not translated — load voice-guide.md
+   2. /businesses = separate prospect/demand landing page
+   3. Two expert types: "I Build" + "I Train" (V9 Formation)
+
+   ## Observations
+   - 80/20 refers to GTM effort allocation, not supply/demand ratio
+   - Post-BPI diagnostic prospect has ZERO content competition in FR
+
+   ## Hypotheses (not yet validated)
+   - V9 Formation is a test — do not invest heavily until signal confirmed
+   - Referral mechanic may drive 30-50% additional signups (Robinhood pattern)
+
+   ## Trade-offs & Rationale
+   - Commission model rejected: experts bypass platform, legal complexity
+   - Pay-per-lead chosen despite trust risk: legally simpler, transparent
+   - Pricing visible on LP: DEC-155 transparency doctrine > conversion optimization
+
+   ## Scope Boundaries
+   - Article production order: Osez l'IA > Cout consultant > Pillar > Formation > n8n
+   - EN first, FR fast-follow (not simultaneous)
+   - Blog on callibrate.io (not just Substack) for SEO domain authority
+
+   ## Constraints
+   - DEC-199: EN primary, FR secondary
+   - DEC-155: journalist test on every public-facing element
+   - LinkedIn blocked (founder employment constraint)
+   - Gemini API: use Pro model for deep search, Flash for utility (DEC-206)
+
+   ## Qualitative Preferences
+   - Painkiller positioning: quantify cost of inaction, not features
+   - FR copy must be native — "Le faire construire" = unacceptable translation
+   - Social proof pre-launch: market data stats, not fabricated testimonials
+   - "Faire avec > Faire à la place" doctrine for Formation content
    ```
 
-3. **The sub-agent MUST NOT change, narrow, expand, or reinterpret these decisions.** If the sub-agent identifies a conflict between a non-negotiable decision and another constraint, it must STOP and return the conflict to the Discovery Agent — never resolve it silently.
+3. **The sub-agent MUST treat every item as a constraint.** It cannot:
+   - Change a decision ("actually, prospect-first is better")
+   - Narrow a scope ("let's skip the /businesses page")
+   - Expand beyond stated boundaries ("let's also add a /pricing page")
+   - Reinterpret a nuance ("80/20 probably means supply/demand ratio")
+   - Ignore a qualitative preference ("generic copy is fine for now")
+
+   If the sub-agent identifies a genuine conflict between a brief item and a technical constraint, it MUST STOP and return the conflict to the Discovery Agent with a clear explanation. Silent resolution is forbidden.
 
 4. **If no sub-agent is used** (Discovery writes artefacts directly in the main context), this protocol does not apply — the conversation history is already visible.
+
+5. **The brief is ephemeral.** It is NOT saved as a file. It exists only in the sub-agent prompt for the current session. If any item needs to persist across sessions, the Discovery Agent must create a DEC or update GAAI memory separately.
 
 ### Definition of Ready (DoR) per Epic
 
