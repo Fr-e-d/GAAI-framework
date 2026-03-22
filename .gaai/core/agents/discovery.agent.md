@@ -274,19 +274,27 @@ review-story-alignment (isolated sub-agent)
               │     → Refine the story autonomously
               │     → Re-invoke review-story-alignment on the fixed story
               │
-              └── "I need clarification from the human"
-                    → Escalate with a SPECIFIC question:
-                      "Story E65S01 says [X] but the Session Brief says [Y].
-                       Which is correct? Or should the AC be [Z]?"
+              └── "I genuinely lack information to resolve this"
+                    → Escalate with a SPECIFIC question
                     → Wait for human answer
                     → Refine → re-review
 ```
 
-**Escalation format:** When escalating to the human, Discovery MUST:
+**Escalation is the last resort, not the first reflex.** Before escalating any finding to the human, Discovery MUST attempt to resolve it using:
+1. The Session Brief (all 7 categories)
+2. The referenced DECs (read the full decision, not just the title)
+3. Logical deduction (if Brief says "X replaces Y" and story uses Y → the fix is obvious)
+
+If the answer is **deductible** from existing information, do NOT escalate — resolve it. Escalate ONLY when the information is **genuinely absent** from the Brief and DECs. "I'm not sure" is not a valid reason to escalate if the Brief contains the answer.
+
+**Rationale:** On 2026-03-23, the reviewer raised 3 questions. Discovery escalated all 3 to the human. All 3 were answerable from the Brief + DECs: (1) scope boundary S-1 clearly excluded new features from E65, (2) brand values + B2B French norms → vouvoiement, (3) DEC-199 is newer than DEC-162 Part 5 → prevails. The human correctly pointed out that Discovery had the information to resolve them.
+
+**Escalation format** (when genuinely needed): Discovery MUST:
 1. Quote the specific finding (not "there's a problem")
 2. Quote the Session Brief item it conflicts with
-3. Propose a resolution if possible ("I suggest changing AC1 to...")
-4. Ask a binary or narrow question ("Should the homepage target experts or prospects?")
+3. Explain why the Brief + DECs are insufficient to resolve ("Brief is silent on X, and no DEC covers it")
+4. Propose a resolution if possible ("I suggest changing AC1 to...")
+5. Ask a binary or narrow question ("Should the homepage target experts or prospects?")
 
 **Loop limit:** Maximum 2 review cycles per batch. If stories still FAIL after 2 rounds of refinement, escalate ALL remaining findings to the human regardless of whether Discovery thinks it can self-fix.
 
