@@ -43,6 +43,13 @@ Welcome. This is the `.gaai/` folder — the GAAI framework living inside your p
 
 ## How to Navigate
 
+**New to GAAI? Start here:**
+→ **[Quick Start guide](docs/guides/quick-start.md)** — first working Story in 30 minutes. Read this first.
+
+---
+
+**Next steps — choose your path after Quick Start:**
+
 **If you are adding GAAI to an existing project:**
 → Start with `core/agents/bootstrap.agent.md`. The Bootstrap Agent is your entry point.
 → Its job: scan the codebase, extract architecture decisions, normalize rules, build memory.

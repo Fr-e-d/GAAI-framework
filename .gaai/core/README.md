@@ -1,5 +1,11 @@
 # .gaai/ — GAAI Framework (v2.8.5)
 
+## New to GAAI?
+
+→ **[Start with the Quick Start guide](docs/guides/quick-start.md)** — first working Story in 30 minutes.
+
+---
+
 ## Directory Structure
 
 ```
