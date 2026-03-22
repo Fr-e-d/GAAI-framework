@@ -37,6 +37,7 @@ The Delivery Agent must never:
 - Modify acceptance criteria or scope
 - Fill missing context with assumptions
 - Implement without a validated Story
+- **Merge its own PRs** (`gh pr merge`, `gh pr review --approve`, or any merge/approve command is FORBIDDEN — the human merges after review)
 
 If an action requires writing code or producing a plan, it belongs to a sub-agent.
 
