@@ -56,6 +56,14 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 5. Ensure every story is testable
 6. Avoid technical solutions in story body
 7. For each story, answer: "What should the user be able to do or experience?"
+
+   **CRITICAL — Definition of Ready: Mandatory AC Categories (MUST execute before finalizing any story):**
+   - **a)** Read the parent Epic's `mandatory_ac_categories` field (e.g., `[i18n, copy-quality, url-routing, icp-targeting]`).
+   - **b)** For each category listed, verify that the story has **at least one AC** that explicitly addresses it. An AC that merely mentions the category name is insufficient — it must specify the concrete requirement (e.g., "i18n: EN primary, FR secondary per DEC-199" not just "supports i18n").
+   - **c)** If a story legitimately does not need an AC for a declared category (e.g., a backend-only story does not need `copy-quality`), add an explicit note in the story's Out of Scope: "copy-quality: not applicable — backend only."
+   - **d)** If the Epic's `mandatory_ac_categories` field is empty `[]`, skip this check.
+   - **Rationale:** On 2026-03-22, E61 stories were delivered without ACs for i18n (DEC-199 EN/FR routing) or copy quality (voice-guide.md). The omission was undetected because no mechanism enforced AC coverage by category. The DoR catches omissions — categories that should be addressed but were silently skipped.
+
 8. Output using canonical Story template
 9. **MANDATORY — Register in backlog.** After writing all story files, add each story to `contexts/backlog/active.backlog.yaml` with:
    - `id`, `epic`, `title` (from story frontmatter)
