@@ -50,20 +50,19 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
    - **c)** If the file exists and its content matches the current Epic (same epic ID, same intent), treat it as an update — read the existing content first and preserve any human edits.
    - **Rationale:** On 2026-03-17, two concurrent sessions assigned E52 to different epics. The second session overwrote E52S01–S04 story files without checking, destroying the admin Worker stories. This guard prevents recurrence.
 
+   **CRITICAL — Definition of Ready (DoR) Enforcement (MUST execute after writing each story):**
+   - **a)** Read the parent Epic's `mandatory_ac_categories` frontmatter field.
+   - **b)** For each declared category (e.g., `i18n`, `copy-quality`, `url-routing`, `icp-targeting`), verify that the story has **at least one AC** that explicitly addresses it.
+   - **c)** If a story is missing an AC for a mandatory category: add one. If the requirement is unclear, add a placeholder AC with `[REQUIRES CLARIFICATION]` and flag it to the human.
+   - **d)** If the Epic has `mandatory_ac_categories: []` (empty), skip this step.
+   - **Rationale:** On 2026-03-22, E61 stories omitted i18n ACs (despite DEC-199 mandating EN primary/FR secondary) and copy-quality ACs (despite voice-guide.md requirements). The Epic did not declare mandatory AC categories, so the omission went undetected. This step ensures domain-critical requirements cannot be silently skipped.
+
 2. Write from the user's perspective
 3. Focus on behavior, not UI or technology
 4. Keep stories small and independent
 5. Ensure every story is testable
 6. Avoid technical solutions in story body
 7. For each story, answer: "What should the user be able to do or experience?"
-
-   **CRITICAL — Definition of Ready: Mandatory AC Categories (MUST execute before finalizing any story):**
-   - **a)** Read the parent Epic's `mandatory_ac_categories` field (e.g., `[i18n, copy-quality, url-routing, icp-targeting]`).
-   - **b)** For each category listed, verify that the story has **at least one AC** that explicitly addresses it. An AC that merely mentions the category name is insufficient — it must specify the concrete requirement (e.g., "i18n: EN primary, FR secondary per DEC-199" not just "supports i18n").
-   - **c)** If a story legitimately does not need an AC for a declared category (e.g., a backend-only story does not need `copy-quality`), add an explicit note in the story's Out of Scope: "copy-quality: not applicable — backend only."
-   - **d)** If the Epic's `mandatory_ac_categories` field is empty `[]`, skip this check.
-   - **Rationale:** On 2026-03-22, E61 stories were delivered without ACs for i18n (DEC-199 EN/FR routing) or copy quality (voice-guide.md). The omission was undetected because no mechanism enforced AC coverage by category. The DoR catches omissions — categories that should be addressed but were silently skipped.
-
 8. Output using canonical Story template
 9. **MANDATORY — Register in backlog.** After writing all story files, add each story to `contexts/backlog/active.backlog.yaml` with:
    - `id`, `epic`, `title` (from story frontmatter)

@@ -115,6 +115,55 @@ This step is non-negotiable. Skipping it risks missing mandatory process steps (
 
 ---
 
+## Mandatory Sub-Agent Delegation Protocol
+
+When the Discovery Agent delegates work to sub-agents (Plan agents, Story-creation agents, or any Agent tool invocation), it MUST pass **explicit non-negotiable decisions** as constraints in the sub-agent prompt.
+
+### Why This Exists
+
+On 2026-03-22, Discovery delegated story creation to sub-agents for E61. The sub-agents received a summary but not the conversation decisions. A Plan sub-agent silently changed "homepage = expert-first" to "homepage = prospect-facing" because it inferred (incorrectly) that `/experts` already handled experts. The stories followed the wrong plan. Delivery implemented correctly — but the wrong thing.
+
+**Root cause:** Sub-agents cannot see the conversation history. Decisions stated by the human ("homepage must be expert-first") are invisible to them unless explicitly passed.
+
+### Protocol
+
+1. **Before invoking any sub-agent**, extract all non-negotiable decisions from the current conversation. These include:
+   - ICP targeting decisions ("this page targets experts, not prospects")
+   - Architecture decisions ("URL structure: / = expert, /businesses = prospect")
+   - Constraint decisions ("i18n: EN primary, FR secondary per DEC-199")
+   - Scope decisions ("V9 Formation is a test, not a guaranteed pillar")
+   - Copy/brand decisions ("FR copy must be native, not translated")
+
+2. **Include them as a `NON-NEGOTIABLE DECISIONS` block** in the sub-agent prompt:
+   ```
+   NON-NEGOTIABLE DECISIONS (do not change, reinterpret, or omit):
+   1. Homepage (/) = expert-first landing page (Contra model)
+   2. /businesses = prospect/demand landing page (separate page)
+   3. i18n: /en/ + /fr/ URL routing, EN default (DEC-199)
+   4. FR copy must be native, not translated — load voice-guide.md
+   ```
+
+3. **The sub-agent MUST NOT change, narrow, expand, or reinterpret these decisions.** If the sub-agent identifies a conflict between a non-negotiable decision and another constraint, it must STOP and return the conflict to the Discovery Agent — never resolve it silently.
+
+4. **If no sub-agent is used** (Discovery writes artefacts directly in the main context), this protocol does not apply — the conversation history is already visible.
+
+### Definition of Ready (DoR) per Epic
+
+Each Epic MUST declare `mandatory_ac_categories` in its frontmatter — a list of AC categories that every Story in the Epic must cover. The `generate-stories` skill verifies that each Story has at least one AC per declared category.
+
+Standard categories (select those applicable to the Epic's domain):
+- `i18n` — localization scope (which languages, which routes, default language)
+- `copy-quality` — tone, voice guide reference, kill list compliance
+- `url-routing` — URL structure, redirects, language prefixes
+- `icp-targeting` — which ICP the feature/page targets and why
+- `error-handling` — edge cases, fallbacks, degraded states
+- `compliance` — GDPR, privacy, data handling
+- `analytics` — PostHog events, tracking requirements
+
+If a Story is missing an AC for a declared mandatory category, it is **not ready for delivery** and must be refined.
+
+---
+
 ## 🔁 Governed Auto-Refinement Loop (Core Behavior)
 
 Discovery is not linear. The Discovery Agent iterates until artefacts are:

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.8] - 2026-03-22
+
+### Changed
+- fix(governance): prevent Discovery decision drift — 3 systemic fixes
+
+
 ## [2.8.7] - 2026-03-22
 
 ### Changed
