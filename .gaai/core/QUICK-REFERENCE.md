@@ -31,9 +31,11 @@
 | `.gaai/project/contexts/memory/decisions/_log.md` | Decisions that persist across sessions |
 | `.gaai/core/GAAI.md` | Full framework orientation |
 
-## Core Rule
+## Core Rules
 
 Nothing gets built that isn't in the backlog. Discovery decides *what*. Delivery decides *how*. You decide *when*.
+
+**Discovery Session Brief** — When Discovery delegates to sub-agents, it passes a structured brief capturing all session intelligence (decisions, observations, hypotheses, trade-offs, scope boundaries, constraints, qualitative preferences). Sub-agents cannot change or reinterpret these items. See [`agents/discovery.agent.md`](agents/discovery.agent.md) §Mandatory Sub-Agent Delegation Protocol.
 
 ---
 
