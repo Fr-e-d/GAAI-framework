@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.9] - 2026-03-22
+
+### Changed
+- fix(governance): Discovery Session Brief — capture ALL session intelligence, not just decisions
+
+
 ## [2.8.8] - 2026-03-22
 
 ### Changed
