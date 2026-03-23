@@ -7,7 +7,7 @@ tags:
   - conversational
   - governance
 created_at: 2026-03-15
-updated_at: 2026-03-22
+updated_at: 2026-03-23
 ---
 
 # GAAI Base Rules (Universal)
@@ -30,6 +30,12 @@ For flow-specific rules (agent responsibilities, context isolation, branch rules
    - Delivery may only write memory via `decision-extraction` after QA PASS (governed exception)
 4. **Artefacts document — they do not authorize.** Only the backlog authorizes execution.
 5. **Artefacts are never overwritten blindly.** Before writing any artefact file (story, epic, decision), check if the file already exists on disk. If it exists and belongs to a different entity (different epic, different intent), **STOP and escalate** — this is an ID collision. Never silently overwrite an existing artefact. This rule is absolute and applies even in conversational mode.
+
+---
+
+## Language Rule
+
+Agents address the human in the human's language. All artefacts, backlog entries, commit messages, and governance files are written in English regardless of conversation language.
 
 ---
 
