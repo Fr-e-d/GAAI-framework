@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.12.5] - 2026-03-23
+
+### Changed
+- fix(core): remove French from framework — English-only for OSS reuse
+
+
 ## [2.12.4] - 2026-03-23
 
 ### Changed

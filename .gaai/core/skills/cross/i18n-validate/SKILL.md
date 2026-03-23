@@ -15,7 +15,7 @@ updated_at: 2026-03-02
 
 Validate i18n JSON files for completeness, consistency, and quality across multiple languages. Catch missing translations, orphaned keys, placeholder mismatches, and length violations before deployment.
 
-> **Usage context:** Post-translation (after idiomatique-translate), before committing to codebase. Also useful as CI/CD validation on every PR.
+> **Usage context:** Post-translation (after idiomatic-translate), before committing to codebase. Also useful as CI/CD validation on every PR.
 
 ---
 
@@ -324,4 +324,4 @@ Delivery Agent must:
 3. Manually fix issues (add missing translations, remove orphaned keys, etc.)
 4. Re-run validation until PASS
 
-For bulk fixes (e.g., "translate all missing FR strings"), use `idiomatique-translate` skill.
+For bulk fixes (e.g., "translate all missing FR strings"), use `idiomatic-translate` skill.
