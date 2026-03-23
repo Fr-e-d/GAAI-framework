@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.12.0] - 2026-03-23
 
 ### Changed
+- fix(governance): DEC-208 D2 amended — self-merge on staging PERMITTED
 - feat(governance): Mission Brief — tailored context per sub-agent invocation
 - fix(security): prevent E64S03-class incidents — 4 hardening measures
 - fix(core): remove French from framework — English-only for OSS reuse

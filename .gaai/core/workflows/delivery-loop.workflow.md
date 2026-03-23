@@ -214,7 +214,7 @@ If this check fails, **STOP immediately**. Do NOT push, do NOT create PR, do NOT
 # Push story branch to origin
 git -C ../{id}-workspace push origin story/{id}
 
-# Create PR targeting staging (human will review and merge)
+# Create PR targeting staging
 gh pr create --base staging --head story/{id} \
   --title "feat({id}): {Story title}" \
   --body "$(cat <<'EOF'
@@ -238,9 +238,14 @@ gh pr create --base staging --head story/{id} \
 🤖 Generated with [GAAI Delivery Agent](https://github.com/Fr-e-d/GAAI-framework)
 EOF
 )"
+
+# Merge PR to staging (after diff-sanity check D3 passes)
+gh pr merge --squash --delete-branch
 ```
 
-> **FORBIDDEN — The AI MUST NEVER merge its own PRs.** Do NOT run `gh pr merge`, `gh pr review --approve`, or any merge command. The AI creates the PR. The human reviews and merges. This is a non-negotiable safety boundary — violation caused the E64S03 incident (2474 files destroyed). If the daemon or any automation merges the PR, it bypasses the only human review gate on the delivery pipeline.
+> **Staging self-merge: PERMITTED** after diff-sanity check (DEC-208 D3: max 30 changed files, zero non-.gaai deletions). If the check fails → ESCALATE, do NOT merge.
+>
+> **Production/main merge: FORBIDDEN.** The AI MUST NEVER run `gh pr merge` targeting `main` or `production`. The human reviews and merges to production. This is a non-negotiable safety boundary (DEC-208 D2, amended).
 
 **8b. Delivery artefacts:** Delivery artefacts are committed to the story branch before PR creation (step 7b) and merge to staging via the PR. No separate staging push needed.
 
