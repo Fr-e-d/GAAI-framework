@@ -152,6 +152,8 @@ GAAI works manually with `/gaai-deliver`. But if your project uses git with a `s
 - Monitors health, retries failures, archives completed work
 - Auto-opens a monitoring dashboard (tmux split: daemon config + active deliveries)
 
+<img src="assets/daemon-monitor.png" alt="Delivery Daemon monitoring 3 concurrent story deliveries" width="700">
+
 **Setup (one-time):**
 
 ```bash
