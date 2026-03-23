@@ -116,7 +116,7 @@ specialists:
       - contexts/memory/patterns/conventions.md
 
   - id: content-production
-    description: Content creation, SEO, social media adaptation, keyword research, trend intelligence, repurposing — the full content blueprint pipeline
+    description: Content creation, SEO, social media adaptation, keyword research, trend intelligence, repurposing, AND user-facing copy quality on any page — the full content blueprint pipeline
     triggers:
       - blog post
       - content
@@ -134,6 +134,19 @@ specialists:
       - copywriting
       - article
       - newsletter
+      # User-facing copy triggers (added 2026-03-23 — E61 incident: landing page
+      # copy was produced by UI specialist without voice-guide.md, resulting in
+      # franglais and literal translations)
+      - landing page
+      - homepage
+      - page copy
+      - headline
+      - CTA
+      - user-facing text
+      - email template
+      - notification
+      - waitlist
+      - onboarding
     skills:
       - google-trends      # CNT-012 — trend intelligence via Playwright
       - social-adapt       # CNT-007 — transform content for X/LinkedIn/Reddit
