@@ -344,7 +344,7 @@ Canonical format (Markdown with YAML table):
 ## Integration with Translation Workflow
 
 1. **Extract strings** → `i18n-extract` skill
-2. **Batch translate** → `idiomatique-translate` skill (check glossary reference)
+2. **Batch translate** → `idiomatic-translate` skill (check glossary reference)
 3. **Validate translations** → `i18n-validate` skill
 4. **Sync glossary** → `i18n-glossary-sync` skill (this one)
 5. **Commit** → All glossary updates included in PR

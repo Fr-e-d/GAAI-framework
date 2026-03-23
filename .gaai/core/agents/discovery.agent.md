@@ -133,11 +133,11 @@ The brief captures **7 categories** of session intelligence — not just "decisi
 |----------|-----------------|---------|
 | **Decisions** | Explicit choices made during the session | "Homepage = expert-first (Contra model)" |
 | **Observations** | Facts discovered or confirmed during analysis | "The 80/20 split = effort allocation, not supply/demand ratio" |
-| **Hypotheses** | Unvalidated assumptions that shaped the plan | "V9 Formation is a test, not a guaranteed pillar" |
+| **Hypotheses** | Unvalidated assumptions that shaped the plan | "V9 Coaching tier is a test, not a guaranteed pillar" |
 | **Trade-offs & Rationale** | Why option A was chosen over option B | "Commission model rejected — experts would bypass the platform" |
-| **Scope Boundaries** | What's in, what's out, and in what order | "Articles ordered: Osez l'IA first (zero competition)" |
+| **Scope Boundaries** | What's in, what's out, and in what order | "Articles ordered: 'Dare to Automate' first (zero competition)" |
 | **Constraints** | Non-negotiable technical or business limits | "DEC-199: EN primary, FR secondary", "LinkedIn blocked" |
-| **Qualitative Preferences** | Tone, positioning, quality expectations | "Painkiller not vitamin — quantify cost of inaction", "FR copy must be native, not translated" |
+| **Qualitative Preferences** | Tone, positioning, quality expectations | "Painkiller not vitamin — quantify cost of inaction", "Localized copy must be native, not translated" |
 
 **Critical distinction:** These are NOT DECs. DECs are formal, persistent, versioned decisions in `.gaai/project/contexts/memory/decisions/`. The Session Brief is ephemeral — it captures the conversation-level intelligence that shapes artefacts within THIS session only. If something is important enough to persist across sessions, it should become a DEC separately.
 
@@ -222,14 +222,14 @@ The brief captures **7 categories** of session intelligence — not just "decisi
    DECISIONS
    D-1: Homepage (/) = expert-first landing page (Contra model)
    D-2: /businesses = separate prospect/demand landing page
-   D-3: Two expert types on LP: "I Build" + "I Train" (V9 Formation)
+   D-3: Two expert types on LP: "I Build" + "I Train" (V9 Coaching tier)
 
    OBSERVATIONS
    O-1: 80/20 refers to GTM effort allocation, not supply/demand ratio
-   O-2: Post-BPI diagnostic prospect has ZERO content competition in FR
+   O-2: Post-audit diagnostic prospect niche has ZERO content competition
 
    HYPOTHESES (not yet validated — treat as context, not as confirmed facts)
-   H-1: V9 Formation is a test — do not invest heavily until signal confirmed
+   H-1: V9 Coaching tier is a test — do not invest heavily until signal confirmed
    H-2: Referral mechanic may drive 30-50% additional signups (Robinhood pattern)
 
    TRADE-OFFS & RATIONALE
@@ -238,7 +238,7 @@ The brief captures **7 categories** of session intelligence — not just "decisi
    T-3: Pricing visible on LP → DEC-155 transparency doctrine > conversion optimization
 
    SCOPE BOUNDARIES
-   S-1: Article production order: Osez l'IA > Cout consultant > Pillar > Formation > n8n
+   S-1: Article production order: "Dare to Automate" > Cost of Consultants > Pillar > Coaching > n8n
    S-2: EN first, FR fast-follow (not simultaneous)
    S-3: Blog on callibrate.io (not just Substack) for SEO domain authority
 
@@ -250,9 +250,9 @@ The brief captures **7 categories** of session intelligence — not just "decisi
 
    QUALITATIVE PREFERENCES
    Q-1: Painkiller positioning — quantify cost of inaction, not features
-   Q-2: FR copy must be native — "Le faire construire" = unacceptable translation
+   Q-2: Localized copy must sound native — clumsy literal translations are unacceptable
    Q-3: Social proof pre-launch — market data stats, not fabricated testimonials
-   Q-4: "Faire avec > Faire à la place" doctrine for Formation content
+   Q-4: "Enable, don't replace" doctrine for Coaching content
    ```
 
    **Completeness rule:** Every category MUST have at least one item, or explicitly state `(none this session)`. An empty category without this marker indicates the Brief was compiled incompletely — the human should flag it during validation.

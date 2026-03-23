@@ -127,7 +127,7 @@ For each Session Brief item, ask:
 Examples:
 - Brief: "Homepage = expert-first" → Story: "prospect-facing homepage" → **CONTRADICTION**
 - Brief: "EN primary, FR secondary" → Story has zero i18n ACs → **OMISSION** (not contradiction, caught in Pass C)
-- Brief: "V9 Formation = test" → Story treats Formation as guaranteed pillar → **DRIFT**
+- Brief: "V2 Coaching tier = experiment" → Story treats Coaching as guaranteed pillar → **DRIFT**
 
 Classification:
 - `CONTRADICTION` — story says the opposite of the brief (severity: CRITICAL)
