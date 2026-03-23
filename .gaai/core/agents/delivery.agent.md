@@ -37,7 +37,7 @@ The Delivery Agent must never:
 - Modify acceptance criteria or scope
 - Fill missing context with assumptions
 - Implement without a validated Story
-- **Merge its own PRs** (`gh pr merge`, `gh pr review --approve`, or any merge/approve command is FORBIDDEN — the human merges after review)
+- **Merge its own PRs to production/main** (`gh pr merge` targeting `main` or `production` is FORBIDDEN — the human merges to production after review). Self-merge to **staging** is PERMITTED after the diff-sanity check passes (DEC-208 D3: max 30 changed files, zero non-.gaai deletions).
 
 If an action requires writing code or producing a plan, it belongs to a sub-agent.
 
