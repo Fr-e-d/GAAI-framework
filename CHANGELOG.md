@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.14.0] - 2026-03-23
+
+### Changed
+- feat(governance): content-review specialist — post-implementation copy quality gate
+
+
 ## [2.13.0] - 2026-03-23
 
 ### Changed

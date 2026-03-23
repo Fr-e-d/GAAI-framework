@@ -115,6 +115,37 @@ specialists:
     context_bundle:
       - contexts/memory/patterns/conventions.md
 
+  - id: content-review
+    description: Post-implementation copy quality review. Verifies user-facing text against voice-guide.md kill list, vouvoiement, franglais, literal translations, journalist test (DEC-155), and ICP alignment. Runs AFTER ui-component and content-production specialists — never self-reviews its own output.
+    triggers:
+      - landing page
+      - homepage
+      - page copy
+      - headline
+      - CTA
+      - user-facing text
+      - email template
+      - notification
+      - waitlist
+      - onboarding
+      - article
+      - blog post
+    skills:
+      - content-edit    # CNT-004 — 3-pass editorial review (structural, line-level, authenticity)
+    context_bundle:
+      - contexts/memory/project/brand-identity.md
+      - contexts/memory/domains/content-production/voice-guide.md
+      - contexts/memory/domains/content-production/demand-icp-empathy-maps.md
+    execution_order: after-implementation  # runs AFTER ui-component/content-production, BEFORE QA
+    review_checklist:
+      - "Kill list FR (voice-guide.md §V): zero violations in user-facing strings"
+      - "Kill list EN (voice-guide.md §V-A): zero violations"
+      - "Franglais detection: matcher, matchés, pitchent, pipeline, scaler, targeter, booster → FAIL"
+      - "Vouvoiement: no tu/ton/ta/tes in FR copy (expert AND prospect facing)"
+      - "Literal translation: detect EN→FR patterns (Get it built ≠ Le faire construire)"
+      - "Journalist test (DEC-155): every claim traceable to data source"
+      - "ICP alignment: copy speaks to the correct ICP per story context"
+
   - id: content-production
     description: Content creation, SEO, social media adaptation, keyword research, trend intelligence, repurposing, AND user-facing copy quality on any page — the full content blueprint pipeline
     triggers:
