@@ -218,10 +218,11 @@ Escalation target:
 
 ## Delivery Metadata Fields (Non-Negotiable)
 
-Every delivery session must update the following fields on the Story's backlog entry. All 6 fields are **mandatory** for any story marked `done`.
+Every delivery session must update the following fields on the Story's backlog entry. All 7 fields are **mandatory** for any story marked `done`.
 
 | Field | When to set | Format | How |
 |-------|-------------|--------|-----|
+| `tier` | After `evaluate-story` (before spawning any sub-agent) | Integer — `1`, `2`, or `3` | `.gaai/core/scripts/backlog-scheduler.sh --set-field {id} tier {1\|2\|3}` |
 | `started_at` | When marking `in_progress` (first session only) | ISO 8601 datetime with timezone (e.g. `"2026-02-28T22:00:00Z"`) | `.gaai/core/scripts/backlog-scheduler.sh --set-field {id} started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"` |
 | `completed_at` | When marking `done` (QA PASS) | ISO 8601 datetime with timezone | `.gaai/core/scripts/backlog-scheduler.sh --set-field {id} completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"` |
 | `pr_url` | After `gh pr create` | Full GitHub PR URL (e.g. `"https://github.com/your-org/your-repo/pull/71"`) | `.gaai/core/scripts/backlog-scheduler.sh --set-field {id} pr_url "$(gh pr view --json url -q .url)"` |
@@ -240,19 +241,20 @@ These fields enable tracking total AI delivery time and API-equivalent cost vs M
 **Before the final `flock: mark done` step**, the Delivery Agent MUST verify that all delivery metadata fields are present on the story entry. This is the "BACKLOG VALIDATION CHECKPOINT" referenced in the Orchestration Flow.
 
 Required fields checklist (all must be non-empty):
-1. `started_at` — should already be set from the `in_progress` step
-2. `completed_at` — set now (QA PASS timestamp)
-3. `pr_url` — set after PR creation/merge
-4. `pr_number` — set after PR creation/merge
-5. `pr_status` — set after PR merge (usually `merged`)
-6. `cost_usd` — set if available; if not, the post-delivery-hook will capture it at session end
+1. `tier` — should already be set after evaluate-story (before sub-agents were spawned)
+2. `started_at` — should already be set from the `in_progress` step
+3. `completed_at` — set now (QA PASS timestamp)
+4. `pr_url` — set after PR creation/merge
+5. `pr_number` — set after PR creation/merge
+6. `pr_status` — set after PR merge (usually `merged`)
+7. `cost_usd` — set if available; if not, the post-delivery-hook will capture it at session end
 
 Additionally verify these Discovery-provided fields are present (warn if missing, do not block):
 - `human_md_estimate`
 - `human_cost_usd`
 - `artefact`
 
-If any of the 5 mandatory fields (1-5) are missing, set them before committing. `cost_usd` (field 6) is the only field that may be deferred to the post-delivery hook.
+If any of the 6 mandatory fields (1-6) are missing, set them before committing. `cost_usd` (field 7) is the only field that may be deferred to the post-delivery hook.
 
 ---
 
