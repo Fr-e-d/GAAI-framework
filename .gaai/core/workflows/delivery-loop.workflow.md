@@ -108,6 +108,17 @@ Read `.gaai/project/contexts/backlog/active.backlog.yaml`. Select the highest-pr
 
 Invoke `evaluate-story` → returns tier (1/2/3), specialists_triggered, risk_analysis_required.
 
+### 2b. Persist Tier Assignment
+
+After evaluate-story completes and **before spawning any sub-agent**, persist the tier on the backlog entry:
+
+```bash
+.gaai/core/scripts/backlog-scheduler.sh --set-field {id} tier {1|2|3} \
+  .gaai/project/contexts/backlog/active.backlog.yaml
+```
+
+The `tier` value is the integer (1, 2, or 3) returned by evaluate-story. This enables delivery telemetry segmentation (cost, duration, retry rate by tier) and future threshold calibration.
+
 ### 3. Compose Team
 
 Invoke `compose-team` → assembles context bundles for each sub-agent in the selected tier.
