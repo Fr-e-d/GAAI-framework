@@ -97,7 +97,7 @@ All AI-driven execution targets the **`staging`** branch. The `production` branc
 
 - AI agents MUST NOT push to, merge to, or interact with `production`
 - Delivery creates story branches from staging: `git branch story/{id} staging` (no checkout — main stays on staging)
-- All implementation happens in worktrees: `git worktree add ../{id}-workspace story/{id}`
+- All implementation happens in worktrees: `git worktree add "$WORKTREE_PATH" story/{id}` (absolute path resolved once at Step 0 — see `delivery-loop.workflow.md`)
 - Sub-agents work exclusively inside their worktree — never in the main repo directory
 - Squash merges back to staging are serialized via `flock`
 - Promotion staging → production is a human action via GitHub PR

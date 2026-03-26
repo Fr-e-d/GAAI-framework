@@ -73,6 +73,18 @@ done || { echo "ESCALATE: staging push failed after 3 attempts"; exit 1; }
 For every Story, before any implementation begins:
 
 ```bash
+# Step 0 — Prerequisites
+# Verify remote exists (GAAI requires a configured remote for PR-based delivery)
+git remote get-url origin 2>/dev/null || {
+  echo "FATAL: no 'origin' remote configured. GAAI requires a remote repository for PR-based delivery."
+  echo "Run: git remote add origin <url>"
+  exit 1
+}
+
+# Resolve worktree path ONCE as absolute — all subsequent operations use $WORKTREE_PATH
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+WORKTREE_PATH="${GAAI_WORKTREE_BASE:-${REPO_ROOT}/..}/${id}-workspace"
+
 # Step 0a: Sync with latest staging (under flock if concurrent)
 flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
   git pull origin staging
@@ -93,12 +105,18 @@ flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
 
 # Step 0c: Create branch WITHOUT switching (main stays on staging)
 git branch story/{id} staging
-git worktree add ../{id}-workspace story/{id}
+git worktree add "$WORKTREE_PATH" story/{id}
+
+# Step 0d: Validate worktree exists (mandatory gate — do NOT skip)
+if [ ! -e "$WORKTREE_PATH/.git" ]; then
+  echo "FATAL: worktree not found at $WORKTREE_PATH — cannot proceed with delivery"
+  exit 1
+fi
 ```
 
-All sub-agents operate exclusively inside `../{id}-workspace/`. The main working directory stays on `staging` and is never switched. If two Stories run in parallel, each has its own worktree — zero filesystem conflicts.
+All sub-agents operate exclusively inside `$WORKTREE_PATH`. The main working directory stays on `staging` and is never switched. If two Stories run in parallel, each has its own worktree — zero filesystem conflicts. Worktree isolation is **unconditional** regardless of story tier.
 
-> Solo founder shortcut: for Tier 1 (MicroDelivery, low-risk, no schema changes), worktree is optional — branch only is acceptable.
+Override the default worktree location by setting `GAAI_WORKTREE_BASE` (e.g., `export GAAI_WORKTREE_BASE=/tmp/gaai-worktrees` for cloud-synced repos).
 
 ### 1. Select Next Story
 
@@ -158,8 +176,8 @@ Invoke `coordinate-handoffs` → validate artefact → PROCEED or RE-SPAWN or ES
 
 **After PROCEED — atomic commit:**
 ```bash
-git -C ../{id}-workspace add .
-git -C ../{id}-workspace commit -m "feat({id}): {Story title summary}
+git -C "$WORKTREE_PATH" add .
+git -C "$WORKTREE_PATH" commit -m "feat({id}): {Story title summary}
 
 Implements: {AC list e.g. AC1–AC9}
 Story: contexts/artefacts/stories/{id}.story.md
@@ -184,8 +202,8 @@ After QA PASS, commit all delivery artefacts (execution-plan, impl-report, qa-re
 
 ```bash
 # Step 7b: Commit delivery artefacts to story branch (in worktree)
-git -C ../{id}-workspace add .gaai/project/contexts/artefacts/
-git -C ../{id}-workspace commit -m "docs({id}): delivery artefacts — plan, impl-report, qa-report, memory-delta"
+git -C "$WORKTREE_PATH" add .gaai/project/contexts/artefacts/
+git -C "$WORKTREE_PATH" commit -m "docs({id}): delivery artefacts — plan, impl-report, qa-report, memory-delta"
 ```
 
 ### 7c. Diff-Scope Sanity Check (MANDATORY)
@@ -194,9 +212,9 @@ git -C ../{id}-workspace commit -m "docs({id}): delivery artefacts — plan, imp
 
 ```bash
 # Count files changed vs staging baseline
-DIFF_STAT=$(git -C ../{id}-workspace diff --stat staging..HEAD)
-CHANGED_COUNT=$(git -C ../{id}-workspace diff --name-only staging..HEAD | wc -l)
-DELETED_COUNT=$(git -C ../{id}-workspace diff --diff-filter=D --name-only staging..HEAD | wc -l)
+DIFF_STAT=$(git -C "$WORKTREE_PATH" diff --stat staging..HEAD)
+CHANGED_COUNT=$(git -C "$WORKTREE_PATH" diff --name-only staging..HEAD | wc -l)
+DELETED_COUNT=$(git -C "$WORKTREE_PATH" diff --diff-filter=D --name-only staging..HEAD | wc -l)
 
 echo "Diff-scope check: $CHANGED_COUNT files changed, $DELETED_COUNT deleted"
 
@@ -204,7 +222,7 @@ echo "Diff-scope check: $CHANGED_COUNT files changed, $DELETED_COUNT deleted"
 #   - More than 30 files changed for a single story
 #   - Any file deleted that is NOT a .gaai/ artefact or backlog file
 #   - Deletions exceed 10x the insertions (tree replacement signal)
-NON_GAAI_DELETIONS=$(git -C ../{id}-workspace diff --diff-filter=D --name-only staging..HEAD \
+NON_GAAI_DELETIONS=$(git -C "$WORKTREE_PATH" diff --diff-filter=D --name-only staging..HEAD \
   | grep -vcE '^\.gaai/' || true)
 
 if [ "$CHANGED_COUNT" -gt 30 ] || [ "$NON_GAAI_DELETIONS" -gt 0 ]; then
@@ -223,7 +241,7 @@ If this check fails, **STOP immediately**. Do NOT push, do NOT create PR, do NOT
 
 ```bash
 # Push story branch to origin
-git -C ../{id}-workspace push origin story/{id}
+git -C "$WORKTREE_PATH" push origin story/{id}
 
 # Create PR targeting staging
 gh pr create --base staging --head story/{id} \
@@ -264,7 +282,7 @@ gh pr merge --squash --delete-branch
 
 ```bash
 # Remove worktree (but keep story branch — needed for the PR)
-git worktree remove ../{id}-workspace
+git worktree remove "$WORKTREE_PATH"
 
 # Update backlog (push with retry-rebase pattern)
 flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '

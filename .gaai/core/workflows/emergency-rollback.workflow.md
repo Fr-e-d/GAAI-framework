@@ -60,7 +60,7 @@ If the affected story was running in an isolated worktree:
 git worktree list
 
 # Remove worktrees for affected stories
-git worktree remove ../{id}-workspace
+git worktree remove "$WORKTREE_PATH"    # absolute path resolved at delivery start
 
 # Delete story branches if no longer needed
 git branch -d story/{id}
