@@ -9,10 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.15.0] - 2026-03-26
 
-### Changed
-- chore: bump framework version to 2.15.0
-
-
+### Fixed
+- **Absolute worktree paths** — resolve once via `git rev-parse --show-toplevel`, use `$WORKTREE_PATH` everywhere (#128)
+- **Mandatory worktree validation gate** — delivery fails explicitly if worktree missing after creation (#127)
+- **Remove Tier 1 solo-founder shortcut** — worktree isolation is now unconditional regardless of tier (#125)
+- **Fail-fast remote guard** — Step 0 checks for `origin` remote before any git operation (#126)
+- **`GAAI_WORKTREE_BASE` env var** — configurable worktree location for cloud-synced repos (Dropbox/OneDrive)
+- **Validation gate fix** — use `-e` (file exists) not `-d` (directory) for worktree `.git` check
 ## [2.14.0] - 2026-03-23
 
 ### Changed
