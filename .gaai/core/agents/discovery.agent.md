@@ -240,7 +240,7 @@ The brief captures **7 categories** of session intelligence — not just "decisi
    SCOPE BOUNDARIES
    S-1: Article production order: "Dare to Automate" > Cost of Consultants > Pillar > Coaching > n8n
    S-2: EN first, FR fast-follow (not simultaneous)
-   S-3: Blog on callibrate.io (not just Substack) for SEO domain authority
+   S-3: Blog on own domain (not just Substack) for SEO domain authority
 
    CONSTRAINTS
    C-1: DEC-199 — EN primary, FR secondary
@@ -304,7 +304,7 @@ Brief Self-Assessment:
 
 If ANY check fails, the Discovery Agent fixes the Brief BEFORE presenting it. The human should never see a Brief that fails its own self-assessment.
 
-**Rationale (2026-03-28):** Brief v1 for the gaai-cloud self-correction audit passed format (7 categories, IDs, constraints) but failed on substance: no root principle, client-side skills not verified, soft gate gap dismissed, severity underrated, hypothesis unverified, amendments vague. The human caught all 6 issues. This checklist encodes those 6 failure modes so they are caught before the human sees the Brief.
+**Rationale (2026-03-28):** Brief v1 for a client↔server self-correction audit passed format (7 categories, IDs, constraints) but failed on substance: no root principle, client-side paths not verified, a large gap dismissed, severity underrated, hypothesis unverified, amendments vague. The human caught all 6 issues. This checklist encodes those 6 failure modes so they are caught before the human sees the Brief.
 
 ---
 
