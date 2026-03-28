@@ -8,7 +8,7 @@ export GAAI_SKILLS_INDEX_RUNNING=1
 if git diff-tree --no-commit-id --name-only -r HEAD | grep -q 'SKILL.md'; then
     echo "📝 Detected SKILL.md changes, checking skills indices..."
 
-    if node .gaai/core/scripts/check-and-update-skills-index.js; then
+    if node .gaai/core/scripts/check-and-update-skills-index.cjs; then
         NEED_AMEND=false
         for idx in .gaai/core/skills/skills-index.yaml .gaai/project/skills/skills-index.yaml; do
             if [ -f "$idx" ] && ! git diff --quiet "$idx" 2>/dev/null; then

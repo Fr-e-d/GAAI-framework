@@ -10,23 +10,26 @@ if git diff-tree --no-commit-id --name-only -r HEAD | grep -q 'contexts/memory/.
 
     [ -f "$INDEX_FILE" ] || { echo "⚠️  No index.md found — skipping drift check"; exit 0; }
 
-    # Find .md files on disk (exclude index.md itself, README files, and archive/)
+    # Find .md files on disk (exclude index.md, READMEs, archives, templates, examples)
     UNREGISTERED=0
     while IFS= read -r file; do
         rel="${file#"$MEMORY_DIR"/}"
-        # Skip index itself, READMEs, and archive
+        # Skip index itself, READMEs, archive, sessions, templates, and example files
         case "$rel" in
             index.md|README*|archive/*|sessions/*) continue ;;
+            *_template*|*.example.md) continue ;;
         esac
-        # Check if the file is referenced in index.md
-        basename_no_ext="${rel%.md}"
-        if ! grep -qF "$rel" "$INDEX_FILE" 2>/dev/null; then
-            # Also check by filename only (index sometimes uses short references)
-            filename="$(basename "$rel")"
-            if ! grep -qF "$filename" "$INDEX_FILE" 2>/dev/null; then
-                echo "  ⚠️  Not in index: $rel"
-                ((UNREGISTERED++))
-            fi
+        # Check if the file is referenced in index.md by:
+        #   1. Full relative path (e.g., decisions/DEC-1.md)
+        #   2. Filename only (e.g., DEC-1.md)
+        #   3. Filename without extension (e.g., DEC-1) — Decision Registry uses this format
+        filename="$(basename "$rel")"
+        filename_no_ext="${filename%.md}"
+        if ! grep -qF "$rel" "$INDEX_FILE" 2>/dev/null &&
+           ! grep -qF "$filename" "$INDEX_FILE" 2>/dev/null &&
+           ! grep -qF "$filename_no_ext" "$INDEX_FILE" 2>/dev/null; then
+            echo "  ⚠️  Not in index: $rel"
+            ((UNREGISTERED++))
         fi
     done < <(find "$MEMORY_DIR" -name "*.md" -type f 2>/dev/null | sort)
 

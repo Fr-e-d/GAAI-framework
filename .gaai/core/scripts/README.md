@@ -4,11 +4,11 @@ Utility scripts for maintaining GAAI framework infrastructure.
 
 ## Scripts
 
-### check-and-update-skills-index.js
+### check-and-update-skills-index.cjs
 
 **Purpose:** Detect when SKILL.md files have been modified and automatically regenerate the skills indices (core + project).
 
-**Location:** `.gaai/core/scripts/check-and-update-skills-index.js`
+**Location:** `.gaai/core/scripts/check-and-update-skills-index.cjs`
 
 **How It Works:**
 
@@ -26,7 +26,7 @@ Utility scripts for maintaining GAAI framework infrastructure.
 
 ```bash
 # Manual check and regenerate if needed
-node .gaai/core/scripts/check-and-update-skills-index.js
+node .gaai/core/scripts/check-and-update-skills-index.cjs
 
 # Exit codes:
 #   0 = Index is current, no changes
@@ -49,7 +49,7 @@ This script is automatically invoked by the Git post-commit hook (`.git/hooks/po
 
 1. Checks if any SKILL.md files were modified in the commit
 2. If yes:
-   - Runs `check-and-update-skills-index.js`
+   - Runs `check-and-update-skills-index.cjs`
    - If index was regenerated:
      - Adds updated index to staging
      - Amends the previous commit (transparent operation)
@@ -102,7 +102,7 @@ This script is automatically invoked by the Git post-commit hook (`.git/hooks/po
 If the hook doesn't trigger or you need to manually regenerate:
 
 ```bash
-node .gaai/core/scripts/check-and-update-skills-index.js
+node .gaai/core/scripts/check-and-update-skills-index.cjs
 ```
 
 Then:
@@ -148,7 +148,7 @@ A: If working with a fresh clone or git worktree:
 chmod +x .git/hooks/post-commit
 
 # Force regeneration
-node .gaai/core/scripts/check-and-update-skills-index.js
+node .gaai/core/scripts/check-and-update-skills-index.cjs
 ```
 
 **Q: What if Node.js isn't available?**
