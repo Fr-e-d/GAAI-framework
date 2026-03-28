@@ -48,14 +48,14 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
    - **a)** Scan `contexts/backlog/active.backlog.yaml` for any existing entries with the same Epic ID prefix. If entries exist, determine the **next available story number** (e.g., if E52S01–E52S05 exist, start at E52S06).
    - **b)** For each story file to be created, **check if the file already exists** on disk at `contexts/artefacts/stories/{id}.story.md`. If the file exists and its `id` frontmatter matches a **different** epic or title, **STOP immediately** — this means an ID collision between two epics. Surface the conflict to the human and do not proceed.
    - **c)** If the file exists and its content matches the current Epic (same epic ID, same intent), treat it as an update — read the existing content first and preserve any human edits.
-   - **Rationale:** On 2026-03-17, two concurrent sessions assigned E52 to different epics. The second session overwrote E52S01–S04 story files without checking, destroying the admin Worker stories. This guard prevents recurrence.
+   - **Rationale:** In a past incident, two concurrent sessions assigned the same Epic ID to different epics. The second session overwrote story files without checking, destroying existing stories. This guard prevents recurrence.
 
    **CRITICAL — Definition of Ready (DoR) Enforcement (MUST execute after writing each story):**
    - **a)** Read the parent Epic's `mandatory_ac_categories` frontmatter field.
    - **b)** For each declared category (e.g., `i18n`, `copy-quality`, `url-routing`, `icp-targeting`), verify that the story has **at least one AC** that explicitly addresses it.
    - **c)** If a story is missing an AC for a mandatory category: add one. If the requirement is unclear, add a placeholder AC with `[REQUIRES CLARIFICATION]` and flag it to the human.
    - **d)** If the Epic has `mandatory_ac_categories: []` (empty), skip this step.
-   - **Rationale:** On 2026-03-22, E61 stories omitted i18n ACs (despite DEC-199 mandating EN primary/FR secondary) and copy-quality ACs (despite voice-guide.md requirements). The Epic did not declare mandatory AC categories, so the omission went undetected. This step ensures domain-critical requirements cannot be silently skipped.
+   - **Rationale:** In a past incident, stories omitted mandatory AC categories (e.g., i18n, copy-quality) despite existing DECs requiring them. The Epic did not declare mandatory AC categories, so the omission went undetected. This step ensures domain-critical requirements cannot be silently skipped.
 
 2. Write from the user's perspective
 3. Focus on behavior, not UI or technology
@@ -78,7 +78,7 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 
    **A story registered in the backlog as `refined` without both gates passing via sub-agents is a governance violation.** If this step is skipped, the commit message will lack gate evidence, which is detectable in review.
 
-   **Rationale (2026-03-28):** (1) Discovery produced 14 stories for Phase 3 and registered them as `refined` without running either gate — the gates were not in the skill's step list. (2) Later, Discovery created E10S10 and self-validated both gates inline, using the "no Session Brief" skip condition to bypass the alignment gate entirely. In both cases, the main agent marked its own homework — no independent review occurred. This step closes both gaps by mandating sub-agent execution with no skip conditions.
+   **Rationale:** (1) In a past incident, Discovery produced 14 stories and registered them as `refined` without running either gate — the gates were not in the skill's step list. (2) Later, Discovery self-validated both gates inline, using the "no Session Brief" skip condition to bypass the alignment gate entirely. In both cases, the main agent marked its own homework — no independent review occurred. This step closes both gaps by mandating sub-agent execution with no skip conditions.
 
 10. **MANDATORY — Register in backlog.** After writing all story files, add each story to `contexts/backlog/active.backlog.yaml` with:
    - `id`, `epic`, `title` (from story frontmatter)
@@ -95,7 +95,7 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
     - Commit message format: `chore(discovery): generate stories {id_range} for Epic {epic_id}`
       - Example: `chore(discovery): generate stories E06S46–E06S50 for Epic E06`
     - Push to `staging` branch **immediately after commit — never wait for human to request the push**
-    - **Rationale:** On 2026-03-22, Discovery committed E59S03 but did not push. The human had to explicitly request the push. The commit and push are a single atomic operation — separating them defeats the purpose of this step.
+    - **Rationale:** In a past incident, Discovery committed a story but did not push. The human had to explicitly request the push. The commit and push are a single atomic operation — separating them defeats the purpose of this step.
 
 ---
 

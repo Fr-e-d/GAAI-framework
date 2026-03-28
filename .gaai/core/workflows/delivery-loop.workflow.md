@@ -284,9 +284,9 @@ gh pr merge --squash --delete-branch
 
 > **CI advisory mode:** When no branch protection exists on the target branch, CI failures caused by infrastructure issues (billing, quotas) do not block merge. The `ci-watch-and-fix` skill checks branch protection status before deciding whether to block or proceed. See `ci-watch-and-fix/SKILL.md` Step 0.
 >
-> **Staging self-merge: PERMITTED** after diff-sanity check (DEC-208 D3: max 30 changed files, zero non-.gaai deletions). If the check fails → ESCALATE, do NOT merge.
+> **Staging self-merge: PERMITTED** after diff-sanity check (max 30 changed files, zero non-.gaai deletions — see §7c above). If the check fails → ESCALATE, do NOT merge.
 >
-> **Production/main merge: FORBIDDEN.** The AI MUST NEVER run `gh pr merge` targeting `main` or `production`. The human reviews and merges to production. This is a non-negotiable safety boundary (DEC-208 D2, amended).
+> **Production/main merge: FORBIDDEN.** The AI MUST NEVER run `gh pr merge` targeting `main` or `production`. The human reviews and merges to production. This is a non-negotiable safety boundary.
 
 **8b. Delivery artefacts:** Delivery artefacts are committed to the story branch before PR creation (step 7b) and merge to staging via the PR. No separate staging push needed.
 

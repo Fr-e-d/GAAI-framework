@@ -116,7 +116,7 @@ specialists:
       - contexts/memory/patterns/conventions.md
 
   - id: content-review
-    description: Post-implementation copy quality review. Verifies user-facing text against voice-guide.md kill list, vouvoiement, franglais, literal translations, journalist test (DEC-155), and ICP alignment. Runs AFTER ui-component and content-production specialists — never self-reviews its own output.
+    description: Post-implementation copy quality review. Verifies user-facing text against voice-guide.md kill list, tone consistency, literal translations, readability audit, and ICP alignment. Runs AFTER ui-component and content-production specialists — never self-reviews its own output.
     triggers:
       - landing page
       - homepage
@@ -140,10 +140,10 @@ specialists:
     review_checklist:
       - "Kill list FR (voice-guide.md §V): zero violations in user-facing strings"
       - "Kill list EN (voice-guide.md §V-A): zero violations"
-      - "Franglais detection: matcher, matchés, pitchent, pipeline, scaler, targeter, booster → FAIL"
-      - "Vouvoiement: no tu/ton/ta/tes in FR copy (expert AND prospect facing)"
-      - "Literal translation: detect EN→FR patterns (Get it built ≠ Le faire construire)"
-      - "Journalist test (DEC-155): every claim traceable to data source"
+      - "Code-switching detection: mixed-language terms in supposedly single-language copy → FAIL"
+      - "Register consistency: formal/informal tone matches voice-guide.md for the target audience"
+      - "Literal translation: detect mechanical L1→L2 patterns that sound unnatural"
+      - "Claim traceability: every claim traceable to a data source or documented decision"
       - "ICP alignment: copy speaks to the correct ICP per story context"
 
   - id: content-production
@@ -165,9 +165,9 @@ specialists:
       - copywriting
       - article
       - newsletter
-      # User-facing copy triggers (added 2026-03-23 — E61 incident: landing page
-      # copy was produced by UI specialist without voice-guide.md, resulting in
-      # franglais and literal translations)
+      # User-facing copy triggers (added after incident: landing page copy was
+      # produced by UI specialist without voice-guide.md, resulting in poor
+      # quality copy that did not match brand tone)
       - landing page
       - homepage
       - page copy

@@ -111,7 +111,7 @@ Before producing any artefact (Epic, Story, PRD), the Discovery Agent MUST:
 
 This step is non-negotiable. Skipping it risks missing mandatory process steps (commit, `related_decs`, collision guards) that are invisible in the artefact format itself.
 
-**Rationale:** On 2026-03-21, Discovery produced E59 stories without reading `generate-stories/SKILL.md`. The artefact format was correct but 3 process steps were missed: commit & push to staging (step 10), `related_decs` frontmatter (step 1d/1e), and the correct commit message format. The agent's familiarity with the format masked the missing procedural steps.
+**Rationale:** In a past session, Discovery produced stories without reading `generate-stories/SKILL.md`. The artefact format was correct but 3 process steps were missed: commit & push to staging (step 10), `related_decs` frontmatter (step 1d/1e), and the correct commit message format. The agent's familiarity with the format masked the missing procedural steps.
 
 ---
 
@@ -123,7 +123,7 @@ When the Discovery Agent delegates work to sub-agents (Plan agents, Story-creati
 
 Sub-agents cannot see the conversation history. A Discovery session produces rich intelligence — decisions, observations, hypotheses, trade-offs, nuances, scope boundaries — that exists ONLY in the conversation context. None of this is a DEC in GAAI memory. All of it is lost the moment a sub-agent is invoked in an isolated context window.
 
-**Incident (2026-03-22):** Discovery delegated E61 story creation to sub-agents. A Plan sub-agent silently changed "homepage = expert-first" to "homepage = prospect-facing" because it didn't know that this decision had been made. The sub-agent inferred (incorrectly) from existing code that `/experts` handled experts. Stories followed the wrong plan. Delivery implemented the wrong thing correctly.
+**Incident:** Discovery delegated story creation to sub-agents. A Plan sub-agent silently changed a key product decision (e.g., target audience for a landing page) because it didn't know that decision had been made during the conversation. The sub-agent inferred (incorrectly) from existing code. Stories followed the wrong plan. Delivery implemented the wrong thing correctly.
 
 ### What the Discovery Session Brief Contains
 
@@ -131,13 +131,13 @@ The brief captures **7 categories** of session intelligence — not just "decisi
 
 | Category | What it captures | Example |
 |----------|-----------------|---------|
-| **Decisions** | Explicit choices made during the session | "Homepage = expert-first (Contra model)" |
-| **Observations** | Facts discovered or confirmed during analysis | "The 80/20 split = effort allocation, not supply/demand ratio" |
-| **Hypotheses** | Unvalidated assumptions that shaped the plan | "V9 Coaching tier is a test, not a guaranteed pillar" |
-| **Trade-offs & Rationale** | Why option A was chosen over option B | "Commission model rejected — experts would bypass the platform" |
-| **Scope Boundaries** | What's in, what's out, and in what order | "Articles ordered: 'Dare to Automate' first (zero competition)" |
-| **Constraints** | Non-negotiable technical or business limits | "DEC-199: EN primary, FR secondary", "LinkedIn blocked" |
-| **Qualitative Preferences** | Tone, positioning, quality expectations | "Painkiller not vitamin — quantify cost of inaction", "Localized copy must be native, not translated" |
+| **Decisions** | Explicit choices made during the session | "Dashboard = admin-first (not end-user-facing)" |
+| **Observations** | Facts discovered or confirmed during analysis | "The 80/20 rule here means effort allocation, not user ratio" |
+| **Hypotheses** | Unvalidated assumptions that shaped the plan | "Premium tier is a test — do not invest heavily until signal" |
+| **Trade-offs & Rationale** | Why option A was chosen over option B | "Per-seat pricing rejected — usage-based is simpler for solo users" |
+| **Scope Boundaries** | What's in, what's out, and in what order | "API docs first (zero competition), tutorials second" |
+| **Constraints** | Non-negotiable technical or business limits | "DEC-5: EN only", "No social media promotion pre-launch" |
+| **Qualitative Preferences** | Tone, positioning, quality expectations | "Painkiller not vitamin — quantify cost of inaction", "Error messages must be actionable, not generic" |
 
 **Critical distinction:** These are NOT DECs. DECs are formal, persistent, versioned decisions in `.gaai/project/contexts/memory/decisions/`. The Session Brief is ephemeral — it captures the conversation-level intelligence that shapes artefacts within THIS session only. If something is important enough to persist across sessions, it should become a DEC separately.
 
@@ -220,50 +220,49 @@ The brief captures **7 categories** of session intelligence — not just "decisi
    it silently.
 
    DECISIONS
-   D-1: Homepage (/) = expert-first landing page (Contra model)
-   D-2: /businesses = separate prospect/demand landing page
-   D-3: Two expert types on LP: "I Build" + "I Train" (V9 Coaching tier)
+   D-1: Dashboard (/) = admin-first (not end-user-facing)
+   D-2: /pricing = separate public pricing page
+   D-3: Two user tiers on launch: "Free" + "Pro" (annual billing only)
 
    OBSERVATIONS
-   O-1: 80/20 refers to GTM effort allocation, not supply/demand ratio
-   O-2: Post-audit diagnostic prospect niche has ZERO content competition
+   O-1: 80/20 rule here means effort allocation, not user ratio
+   O-2: Developer docs niche has low content competition
 
    HYPOTHESES (not yet validated — treat as context, not as confirmed facts)
-   H-1: V9 Coaching tier is a test — do not invest heavily until signal confirmed
-   H-2: Referral mechanic may drive 30-50% additional signups (Robinhood pattern)
+   H-1: Pro tier is a test — do not invest heavily until signal confirmed
+   H-2: Referral mechanic may drive 30-50% additional signups
 
    TRADE-OFFS & RATIONALE
-   T-1: Commission model rejected → experts bypass platform + legal complexity
-   T-2: Pay-per-lead chosen despite trust risk → legally simpler, transparent
-   T-3: Pricing visible on LP → DEC-155 transparency doctrine > conversion optimization
+   T-1: Per-seat pricing rejected → solo users would pay too much
+   T-2: Usage-based chosen despite metering complexity → fairer, transparent
+   T-3: Pricing visible on site → transparency > conversion optimization
 
    SCOPE BOUNDARIES
-   S-1: Article production order: "Dare to Automate" > Cost of Consultants > Pillar > Coaching > n8n
-   S-2: EN first, FR fast-follow (not simultaneous)
-   S-3: Blog on own domain (not just Substack) for SEO domain authority
+   S-1: Content priority: API docs first, tutorials second, blog third
+   S-2: EN only for V1
+   S-3: Blog on own domain (not just Medium/Substack) for SEO authority
 
    CONSTRAINTS
-   C-1: DEC-199 — EN primary, FR secondary
-   C-2: DEC-155 — journalist test on every public-facing element
-   C-3: LinkedIn blocked (founder employment constraint)
-   C-4: DEC-206 — Gemini deep search via gemini-search.sh only (never manual curl), Flash for utility only
+   C-1: DEC-5 — EN only
+   C-2: DEC-8 — every public-facing page must pass readability audit
+   C-3: No paid advertising pre-launch (budget constraint)
 
    QUALITATIVE PREFERENCES
    Q-1: Painkiller positioning — quantify cost of inaction, not features
-   Q-2: Localized copy must sound native — clumsy literal translations are unacceptable
-   Q-3: Social proof pre-launch — market data stats, not fabricated testimonials
-   Q-4: "Enable, don't replace" doctrine for Coaching content
+   Q-2: Error messages must be actionable, not generic
+   Q-3: Social proof pre-launch — usage stats, not fabricated testimonials
+   Q-4: "Enable, don't replace" doctrine for automation content
    ```
 
    **Completeness rule:** Every category MUST have at least one item, or explicitly state `(none this session)`. An empty category without this marker indicates the Brief was compiled incompletely — the human should flag it during validation.
 
-   **Traceability:** When the reviewer finds a conflict, it references the item ID: "Story E65S01 AC1 contradicts **D-1** (Homepage = expert-first)." When Discovery refines a story, it references the item: "Refined AC1 to align with **D-1**."
+   **Traceability:** When the reviewer finds a conflict, it references the item ID: "Story AC1 contradicts **D-1** (Dashboard = admin-first)." When Discovery refines a story, it references the item: "Refined AC1 to align with **D-1**."
 
 4. **The sub-agent MUST treat every item as a constraint.** It cannot:
-   - Change a decision ("actually, prospect-first is better")
-   - Narrow a scope ("let's skip the /businesses page")
-   - Expand beyond stated boundaries ("let's also add a /pricing page")
-   - Reinterpret a nuance ("80/20 probably means supply/demand ratio")
+   - Change a decision ("actually, end-user-first is better")
+   - Narrow a scope ("let's skip the /pricing page")
+   - Expand beyond stated boundaries ("let's also add a /blog page")
+   - Reinterpret a nuance ("80/20 probably means user ratio")
    - Ignore a qualitative preference ("generic copy is fine for now")
 
    If the sub-agent identifies a genuine conflict between a brief item and a technical constraint, it MUST STOP and return the conflict to the Discovery Agent with a clear explanation. Silent resolution is forbidden.
@@ -361,7 +360,7 @@ review-story-alignment (isolated sub-agent)
 
 If the answer is **deductible** from existing information, do NOT escalate — resolve it. Escalate ONLY when the information is **genuinely absent** from the Brief and DECs. "I'm not sure" is not a valid reason to escalate if the Brief contains the answer.
 
-**Rationale:** On 2026-03-23, the reviewer raised 3 questions. Discovery escalated all 3 to the human. All 3 were answerable from the Brief + DECs: (1) scope boundary S-1 clearly excluded new features from E65, (2) brand values + B2B French norms → vouvoiement, (3) DEC-199 is newer than DEC-162 Part 5 → prevails. The human correctly pointed out that Discovery had the information to resolve them.
+**Rationale:** In a past session, the reviewer raised 3 questions. Discovery escalated all 3 to the human. All 3 were answerable from the Brief + DECs: (1) a scope boundary clearly excluded new features, (2) existing constraints implied the answer, (3) a newer DEC superseded an older one. The human correctly pointed out that Discovery had the information to resolve them.
 
 **Escalation format** (when genuinely needed): Discovery MUST:
 1. Quote the specific finding (not "there's a problem")
