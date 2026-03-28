@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.14.0] - 2026-03-23
 
 ### Changed
+- fix(delivery): CI advisory mode — don't block merge when no branch protection
 - fix(sync): defer marker+tag until after successful PR merge
 - feat(governance): content-review specialist — post-implementation copy quality gate
 
