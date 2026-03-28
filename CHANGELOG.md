@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.15.0] - 2026-03-26
 
 ### Fixed
+- fix(core): remove all project-specific references from .gaai/core/
 - fix(discovery): add Brief Self-Assessment checklist to discovery.agent.md
 - **Absolute worktree paths** — resolve once via `git rev-parse --show-toplevel`, use `$WORKTREE_PATH` everywhere (#128)
 - **Mandatory worktree validation gate** — delivery fails explicitly if worktree missing after creation (#127)
