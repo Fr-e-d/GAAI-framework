@@ -268,10 +268,22 @@ gh pr create --base staging --head story/{id} \
 EOF
 )"
 
-# Merge PR to staging (after diff-sanity check D3 passes)
+# CI Watch — invoke ci-watch-and-fix skill
+# Returns: CI PASS | CI PASS (advisory) | CI FAIL
+# CI PASS (advisory) = CI failed but no branch protection → merge anyway
+# CI FAIL = branch protection active AND CI cannot pass → ESCALATE
+ci_result = invoke ci-watch-and-fix(pr_number, story_id, story_branch, repo, worktree_path, log_dir)
+
+if ci_result == CI FAIL:
+    # Branch protection prevents merge — escalate to human
+    exit 1  # on_exit trap marks story failed
+
+# CI PASS or CI PASS (advisory) — proceed to merge
 gh pr merge --squash --delete-branch
 ```
 
+> **CI advisory mode:** When no branch protection exists on the target branch, CI failures caused by infrastructure issues (billing, quotas) do not block merge. The `ci-watch-and-fix` skill checks branch protection status before deciding whether to block or proceed. See `ci-watch-and-fix/SKILL.md` Step 0.
+>
 > **Staging self-merge: PERMITTED** after diff-sanity check (DEC-208 D3: max 30 changed files, zero non-.gaai deletions). If the check fails → ESCALATE, do NOT merge.
 >
 > **Production/main merge: FORBIDDEN.** The AI MUST NEVER run `gh pr merge` targeting `main` or `production`. The human reviews and merges to production. This is a non-negotiable safety boundary (DEC-208 D2, amended).
