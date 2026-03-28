@@ -124,7 +124,7 @@ Return to the invoking agent:
 
 ## Automation
 
-The `check-and-update-skills-index.js` script performs the same work automatically via the post-commit Git hook. This skill exists for manual invocation when the hook doesn't trigger (fresh clone, worktree, CI).
+The `check-and-update-skills-index.cjs` script performs the same work automatically via the post-commit Git hook. This skill exists for manual invocation when the hook doesn't trigger (fresh clone, worktree, CI).
 
 ---
 

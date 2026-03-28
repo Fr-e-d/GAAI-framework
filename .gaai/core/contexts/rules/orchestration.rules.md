@@ -89,6 +89,19 @@ Sub-agents spawned by Delivery (Planning, Implementation, QA, Specialists) each 
 
 → Backlog state lifecycle, transition rules, and archiving rules are defined in `base.rules.md` (loaded at session startup, applies universally).
 
+### Refined Status Gate (Mandatory)
+
+A story may only be registered in the backlog as `status: refined` if BOTH of the following gates have passed in the current session:
+
+1. **Format gate** — `validate-artefacts` (SKILL-VALIDATE-ARTEFACTS-001) returned PASS for the story
+2. **Alignment gate** — `review-story-alignment` (SKILL-RSA-001) returned PASS for the story (when a Discovery Session Brief exists)
+
+If either gate has not been executed, the story MUST be registered as `status: draft` — not `refined`. Only after both gates pass may the Discovery Agent update the status to `refined`.
+
+**Evidence:** The commit message for stories registered as `refined` should include the gate verdicts (e.g., "validate-artefacts: PASS, review-story-alignment: PASS"). Absence of this evidence in a commit that sets `status: refined` is a detectable governance violation.
+
+**Rationale (2026-03-28):** 14 Phase 3 stories were registered as `refined` without either gate executing. Root cause: gates were defined in `discovery.agent.md` but not enforced in the skill process or transition rules. This rule closes the enforcement gap at the rule level.
+
 ## 🌿 Branch Rules
 
 All AI-driven execution targets the **`staging`** branch. The `production` branch is human-only.

@@ -80,13 +80,13 @@ _launch_monitor() {
 
   case "$(uname -s)" in
     Darwin)
-      # Open a new Terminal.app window with the monitoring dashboard
-      osascript -e "
-        tell application \"Terminal\"
-          do script \"cd '$PROJECT_ROOT' && bash '$daemon_start_path' --status\"
-        end tell
-      " 2>/dev/null && echo "  Monitor: opened in new Terminal.app window" \
-                    || echo "  Monitor: bash $daemon_start_path --status"
+      # Uses `open -a Terminal` (LaunchServices) instead of osascript Apple
+      # Events, which requires explicit Automation permission that headless
+      # contexts (like Claude Code) typically lack.
+      local monitor_cmd="$SCRIPT_DIR/open-monitor.command"
+      open -a Terminal "$monitor_cmd" 2>/dev/null \
+        && echo "  Monitor: opened in new Terminal.app window" \
+        || echo "  Monitor: bash $daemon_start_path --status"
       ;;
     *)
       # On Linux: create the monitor tmux session detached (user can attach)

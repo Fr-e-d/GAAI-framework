@@ -272,6 +272,42 @@ The brief captures **7 categories** of session intelligence — not just "decisi
 
 6. **The brief is ephemeral.** It is NOT saved as a file. It exists only in the sub-agent prompt for the current session. If any item needs to persist across sessions, the Discovery Agent must create a DEC or update GAAI memory separately.
 
+### Brief Self-Assessment (Mandatory before presenting to human)
+
+After compiling the Discovery Session Brief and BEFORE presenting it for human validation, the Discovery Agent MUST run a 6-point self-assessment on the Brief itself. This is NOT the same as the Critical Self-Assessment Protocol (which evaluates proposals/recommendations). This evaluates the **Brief's completeness and intellectual honesty** — because the Brief is the root of the quality chain. If the Brief is weak, everything downstream is weak, even if format and alignment gates pass.
+
+**Checklist:**
+
+1. **Root principle identified?** — Does the Brief contain at least one Decision (D-) that states a **design principle** (not just a scope or naming decision)? A principle is a constraint that applies to ALL gaps/stories, not just one. If the audit surfaces 10+ issues and no unifying principle, the Brief is a symptom list, not an analysis. Stop and derive the principle.
+
+2. **Both sides of the boundary verified?** — If the analysis involves a client↔server (or any two-party) boundary, does the Brief cover BOTH sides? (a) What one side sends/returns, (b) What the other side does with it. A Brief that only audits one side will miss mismatches. Add O- items for the uncovered side.
+
+3. **Hypotheses verified or honestly flagged?** — Every H- item must be either **VERIFIED** (evidence cited, check performed in this session) or explicitly flagged as **UNVERIFIED with reason** ("cannot verify without access to X"). "Needs verification" without attempting verification when verification IS possible is lazy. If you can verify it now, do it before presenting.
+
+4. **Known limitations honestly treated?** — Any gap classified as "out of scope" or "deferred" that involves **≥10% of the system surface** must include a remediation path (even if Phase 4+) and a tracking mechanism (DEC or constraint C-). Dismissing large gaps without a plan is evasion, not scoping.
+
+5. **Severity justified against root principle?** — Every gap severity must be tested against D-0 (or the root principle). The test: "can the client complete its operation despite this gap?" If NO → HIGH minimum. A broken workflow (client literally cannot succeed) is never MEDIUM. Review all MEDIUM ratings and re-justify.
+
+6. **Actions concrete?** — Every item in "Amendments" or "Changes to existing backlog" must specify the **exact change**: which file, which field, what content. "Bundle into E10S09" is vague. "Add AC17 to E10S09.story.md requiring default deny fires regardless of rules table state" is concrete. If you can't specify the exact change, the item is not ready.
+
+**Output:** The Discovery Agent includes a `Brief Self-Assessment` section at the end of the Brief (before presenting to human), showing each check's result:
+
+```
+Brief Self-Assessment:
+1. Root principle: ✓ D-0 (actionable response contract)
+2. Boundary coverage: ✓ Server (DO responses) + Client (skill consumption)
+3. Hypotheses: ✓ H-1 unverified (cannot test without implementation), H-2 verified (read E03S07)
+4. Known limitations: ✓ C-6 (soft gates 22%) tracked as DEC-28 with Phase 4 remediation
+5. Severity: ✓ All MEDIUM ratings re-checked — GAP-15 upgraded to HIGH
+6. Actions: ✓ All amendments specify file + field + content
+```
+
+If ANY check fails, the Discovery Agent fixes the Brief BEFORE presenting it. The human should never see a Brief that fails its own self-assessment.
+
+**Rationale (2026-03-28):** Brief v1 for the gaai-cloud self-correction audit passed format (7 categories, IDs, constraints) but failed on substance: no root principle, client-side skills not verified, soft gate gap dismissed, severity underrated, hypothesis unverified, amendments vague. The human caught all 6 issues. This checklist encodes those 6 failure modes so they are caught before the human sees the Brief.
+
+---
+
 ### Definition of Ready (DoR) per Epic
 
 Each Epic MUST declare `mandatory_ac_categories` in its frontmatter — a list of AC categories that every Story in the Epic must cover. The `generate-stories` skill verifies that each Story has at least one AC per declared category.
@@ -336,7 +372,9 @@ If the answer is **deductible** from existing information, do NOT escalate — r
 
 **Loop limit:** Maximum 2 review cycles per batch. If stories still FAIL after 2 rounds of refinement, escalate ALL remaining findings to the human regardless of whether Discovery thinks it can self-fix.
 
-**Skip condition:** If no Discovery Session Brief exists (e.g., stories created from a bug report or a DEC amendment without conversation), skip this gate entirely. The gate only applies when a Session Brief was compiled.
+**No skip condition.** The alignment gate runs for EVERY story, regardless of whether a Session Brief was compiled. When no Brief exists, the gate runs in **reduced-scope mode** (Pass B: DEC constraints + Pass C: DoR coverage — Pass A: Session Brief contradictions is skipped with explicit "SKIPPED — no Session Brief" in the verdict). This ensures DEC cross-reference and DoR enforcement are never bypassed, even for single-story amendments, bug-triage stories, or stories created outside a full Discovery session.
+
+   **Rationale (2026-03-28):** Discovery created E10S10 (single story amendment) and self-validated both gates inline, citing "no Session Brief" to skip the alignment gate entirely. The DEC constraint check (Pass B) and DoR check (Pass C) would have run and caught issues independently of the Brief — but they were skipped along with Pass A. The skip condition was an escape hatch that defeated the gate's purpose.
 
 ---
 
