@@ -131,6 +131,8 @@ parse_log() {
 
 while true; do
   clear
+  # In tmux: clear scrollback left by `clear` so prior refresh doesn't ghost below
+  [[ -n "${TMUX:-}" ]] && tmux clear-history 2>/dev/null || true
   echo "═══ Active Deliveries (refreshes every 5s) ═══"
   echo ""
 
