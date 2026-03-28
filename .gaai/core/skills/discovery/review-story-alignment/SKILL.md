@@ -98,7 +98,7 @@ Execute the review-story-alignment process: 3 passes per story
 (Session Brief contradictions, DEC constraints, DoR coverage).
 
 For each finding, reference the Brief item by ID (e.g., "contradicts D-1")
-and the story element by AC number (e.g., "AC3 in E65S01").
+and the story element by AC number (e.g., "AC3 in {story_id}").
 
 Produce a structured verdict per story.
 ```
@@ -135,9 +135,9 @@ For each Session Brief item, ask:
 **Contradiction = any statement in the story that implies the OPPOSITE of a Session Brief item.**
 
 Examples:
-- Brief: "Homepage = expert-first" → Story: "prospect-facing homepage" → **CONTRADICTION**
-- Brief: "EN primary, FR secondary" → Story has zero i18n ACs → **OMISSION** (not contradiction, caught in Pass C)
-- Brief: "V2 Coaching tier = experiment" → Story treats Coaching as guaranteed pillar → **DRIFT**
+- Brief: "Dashboard = admin-first" → Story: "end-user-facing dashboard" → **CONTRADICTION**
+- Brief: "EN only for V1" → Story has zero i18n ACs → **OMISSION** (not contradiction, caught in Pass C)
+- Brief: "Pro tier = experiment" → Story treats Pro as guaranteed pillar → **DRIFT**
 
 Classification:
 - `CONTRADICTION` — story says the opposite of the brief (severity: CRITICAL)
@@ -184,10 +184,10 @@ For each story, produce a structured verdict:
 
 | # | Type | Severity | Brief Item | Story Element | Finding |
 |---|------|----------|-----------|---------------|---------|
-| 1 | CONTRADICTION | CRITICAL | **D-1** (Homepage = expert-first) | AC1 | Story says "prospect-facing" — contradicts D-1 |
-| 2 | DEC_MISSING | HIGH | **C-1** (DEC-199: EN primary) | related_decs | DEC-199 should be referenced — story has URL routing implications |
-| 3 | DOR_MISSING | HIGH | DoR: `i18n` | No AC | No AC addresses i18n/localization |
-| 4 | DRIFT | HIGH | **Q-2** (FR copy native) | AC5 | AC says "translate" — Q-2 requires native writing, not translation |
+| 1 | CONTRADICTION | CRITICAL | **D-1** (Dashboard = admin-first) | AC1 | Story says "end-user-facing" — contradicts D-1 |
+| 2 | DEC_MISSING | HIGH | **C-1** (DEC-5: EN only) | related_decs | DEC-5 should be referenced — story has URL routing implications |
+| 3 | DOR_MISSING | HIGH | DoR: `error-handling` | No AC | No AC addresses error handling |
+| 4 | DRIFT | HIGH | **Q-2** (actionable errors) | AC5 | AC says "return error code" — Q-2 requires actionable guidance, not just codes |
 
 ### Refinement Guidance
 

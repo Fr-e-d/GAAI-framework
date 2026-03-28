@@ -110,7 +110,7 @@ validated_in:
   - domain: content-production
     date: 2026-03-08
     result: success
-    decision_ref: DEC-184
+    decision_ref: DEC-{N}
 ```
 
 History of domains where the pattern has been applied, with outcomes. Append-only — entries are never removed.
@@ -169,7 +169,7 @@ validated_in:
   - domain: content-production
     date: 2026-03-08
     result: success
-    decision_ref: DEC-184
+    decision_ref: DEC-{N}
 tags:
   - visual-production
   - infographic

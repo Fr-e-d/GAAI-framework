@@ -40,7 +40,7 @@ Works with or without a PRD.
    - **b)** Also scan `contexts/artefacts/epics/` for existing `.epic.md` files to catch any that may not yet be in the backlog.
    - **c)** For each Epic file to be created, **check if the file already exists** at `contexts/artefacts/epics/{id}.epic.md`. If it exists with different content, **STOP immediately** — surface the conflict to the human.
    - **d)** The new Epic ID = `max(existing IDs) + 1`. Never reuse an Epic ID, even if the previous Epic was deleted or superseded.
-   - **Rationale:** On 2026-03-17, two concurrent sessions both assigned E52 to different epics. The second overwrote the first's stories. This guard prevents recurrence.
+   - **Rationale:** In a past incident, two concurrent sessions both assigned the same Epic ID to different epics. The second overwrote the first's stories. This guard prevents recurrence.
 
 2. Think in **user outcomes**, not features
 3. Keep Epics high-level and value-focused
