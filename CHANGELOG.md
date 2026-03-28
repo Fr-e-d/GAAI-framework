@@ -16,10 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fail-fast remote guard** — Step 0 checks for `origin` remote before any git operation (#126)
 - **`GAAI_WORKTREE_BASE` env var** — configurable worktree location for cloud-synced repos (Dropbox/OneDrive)
 - **Validation gate fix** — use `-e` (file exists) not `-d` (directory) for worktree `.git` check
+- fix(delivery): CI advisory mode — don't block merge when no branch protection
+
 ## [2.14.0] - 2026-03-23
 
 ### Changed
-- fix(delivery): CI advisory mode — don't block merge when no branch protection
 - fix(sync): defer marker+tag until after successful PR merge
 - feat(governance): content-review specialist — post-implementation copy quality gate
 
