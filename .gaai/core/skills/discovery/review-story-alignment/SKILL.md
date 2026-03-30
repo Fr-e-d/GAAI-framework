@@ -56,7 +56,9 @@ Reduced-scope mode ensures that DEC cross-referencing and DoR enforcement are ne
 
 ## Architecture — Isolated Reviewer
 
-This skill MUST run as a **sub-agent in an isolated context window** (via the Agent tool). The reviewer must NOT be the same agent instance that wrote the stories.
+This skill is executed by the **Review Sub-Agent** (SUB-AGENT-REVIEW-001) during Tier 2 review. The Review Sub-Agent already runs in an isolated context window with an adversarial prompt — this skill defines the 3-pass process it follows for story alignment specifically.
+
+**If invoked standalone** (outside the Review Sub-Agent context), this skill MUST still run as a sub-agent in an isolated context window (via the Agent tool). The reviewer must NOT be the same agent instance that wrote the stories.
 
 **Why isolation matters:** The author of the stories has confirmation bias — it wrote the stories believing they were correct. A separate agent with fresh context is more likely to detect contradictions.
 

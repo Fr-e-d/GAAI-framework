@@ -126,6 +126,7 @@ Load the full `.md` body only for agents confirmed relevant in Phase 1.
 |---------|-----------|----------------------|------------|-----------|
 | Product value | ✅ | ❌ | ❌ | ❌ |
 | Scope decisions | ✅ | ❌ | ❌ | ❌ |
+| Independent evaluation | ❌ | ❌ | ✅ (Review) | ❌ |
 | Team composition | ❌ | ✅ | ❌ | ❌ |
 | Implementation | ❌ | ❌ | ✅ (Impl/Micro) | ❌ |
 | Testing / QA | ❌ | ❌ | ✅ (QA/Micro) | ❌ |
@@ -142,6 +143,8 @@ Load the full `.md` body only for agents confirmed relevant in Phase 1.
 Idea
   ↓
 Discovery Agent → clarity & decisions
+  ↓
+Review Sub-Agent → independent evaluation (Principle #5)
   ↓
 Artefacts (PRD → Epics → Stories)
   ↓

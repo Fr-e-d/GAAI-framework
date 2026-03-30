@@ -29,7 +29,20 @@ For flow-specific rules (agent responsibilities, context isolation, branch rules
    - Only the Discovery Agent (or Bootstrap Agent during initialization) may trigger `memory-ingest`
    - Delivery may only write memory via `decision-extraction` after QA PASS (governed exception)
 4. **Artefacts document — they do not authorize.** Only the backlog authorizes execution.
-5. **Artefacts are never overwritten blindly.** Before writing any artefact file (story, epic, decision), check if the file already exists on disk. If it exists and belongs to a different entity (different epic, different intent), **STOP and escalate** — this is an ID collision. Never silently overwrite an existing artefact. This rule is absolute and applies even in conversational mode.
+5. **Independent evaluation.** An agent must never be the sole evaluator of its own consequential outputs. Every consequential output — recommendations, proposals, Session Briefs, stories, epics — must be independently evaluated by a separate agent instance before reaching the human or the backlog. Self-assessment (Critical Self-Assessment, Brief Self-Assessment) is retained as draft preparation but is never the authoritative quality gate.
+   - **Minimum:** Spawn a sub-agent in an isolated context window with an adversarial prompt. The reviewer must NOT receive the conversation history (prevents confirmation bias) or the generator's self-assessment (prevents anchoring).
+   - **Better:** Use model diversity — route evaluation to a different model than the generator. Self-preference bias is perplexity-driven (in the model weights, not the context), so same-model isolation reduces but does not eliminate bias.
+   - **Proportionality:** Mechanical checks (format validation, collision guards) do not require independent evaluation. The trigger is the presence of **consequential choices** — decisions between alternatives (D-), trade-offs (T-), scope changes, or recommendations that constrain future decisions.
+   - **Implementation:** The Review Sub-Agent (SUB-AGENT-REVIEW-001) enforces this principle. See `agents/sub-agents/review.sub-agent.md` for the tiered architecture (Tier 1: governance sanity, Tier 2: adversarial substance review) and `orchestration.rules.md` § Independent Review Gate for the mandatory gates.
+
+   **Why this is a core principle (research foundation):**
+   - Self-preference bias is quantified and perplexity-driven — LLMs systematically prefer outputs familiar to their own distribution, regardless of quality (Wataoka et al., arXiv:2410.21819, 2024)
+   - Generator/evaluator separation is foundational to Constitutional AI (Anthropic, 2022), LLM-as-Judge (Zheng et al., NeurIPS 2023), and Chain-of-Verification (Meta, ACL 2024)
+   - 12 distinct evaluation biases are documented, many amplified when judge = generator (CALM framework, Li et al., NeurIPS 2024)
+   - Multi-agent debate with heterogeneous agents consistently outperforms self-evaluation (Du et al., ICML 2024; DMAD, ICLR 2025)
+   - Cascaded evaluation (light first, adversarial when needed) reduces cost by 40% without quality loss (Trust or Escalate, ICLR 2025 Oral)
+
+6. **Artefacts are never overwritten blindly.** Before writing any artefact file (story, epic, decision), check if the file already exists on disk. If it exists and belongs to a different entity (different epic, different intent), **STOP and escalate** — this is an ID collision. Never silently overwrite an existing artefact. This rule is absolute and applies even in conversational mode.
 
 ---
 

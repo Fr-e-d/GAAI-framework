@@ -89,18 +89,71 @@ Sub-agents spawned by Delivery (Planning, Implementation, QA, Specialists) each 
 
 → Backlog state lifecycle, transition rules, and archiving rules are defined in `base.rules.md` (loaded at session startup, applies universally).
 
-### Refined Status Gate (Mandatory)
+### Independent Review Gate (Mandatory)
 
-A story may only be registered in the backlog as `status: refined` if BOTH of the following gates have passed in the current session:
+**Principle:** Discovery must never be the sole evaluator of its own outputs. Every Discovery output must be independently reviewed by the Review Sub-Agent (SUB-AGENT-REVIEW-001) before reaching the human (for proposals/recommendations) or the backlog (for stories/epics).
+
+**Why:** Generator/evaluator separation is a foundational LLM quality pattern. The generating agent has confirmation bias — it wrote the output believing it was correct. An independent agent with fresh context and an adversarial prompt is more likely to detect contradictions, drift, weak reasoning, and governance violations. Self-assessment is preparation, not verification.
+
+#### Tier Selection
+
+The Review Sub-Agent operates in two tiers. Discovery selects the tier based on the output's content:
+
+| Tier | Trigger | Checks |
+|---|---|---|
+| **Tier 1 — Sanity** | Every output without exception | DEC constraints, DoR coverage, skill attestation, scope creep |
+| **Tier 2 — Adversarial** | Output contains D- (decisions), T- (trade-offs), scope changes, approach evaluations, or batch story generation (2+) | All Tier 1 checks + Brief quality + substance challenge + story alignment |
+
+**Trigger rule:** If Discovery made a choice between alternatives, Tier 2 applies. The presence of consequential decisions — not complexity score — is the trigger.
+
+#### Refined Status Gate
+
+A story may only be registered in the backlog as `status: refined` if ALL of the following gates have passed in the current session:
 
 1. **Format gate** — `validate-artefacts` (SKILL-VALIDATE-ARTEFACTS-001) returned PASS for the story
-2. **Alignment gate** — `review-story-alignment` (SKILL-RSA-001) returned PASS for the story (when a Discovery Session Brief exists)
+2. **Independent Review gate** — Review Sub-Agent (SUB-AGENT-REVIEW-001) returned PASS at the applicable tier
 
 If either gate has not been executed, the story MUST be registered as `status: draft` — not `refined`. Only after both gates pass may the Discovery Agent update the status to `refined`.
 
-**Evidence:** The commit message for stories registered as `refined` should include the gate verdicts (e.g., "validate-artefacts: PASS, review-story-alignment: PASS"). Absence of this evidence in a commit that sets `status: refined` is a detectable governance violation.
+**Evidence:** The commit message for stories registered as `refined` must include the gate verdicts (e.g., "validate-artefacts: PASS, review[tier-2]: PASS"). Absence of this evidence in a commit that sets `status: refined` is a detectable governance violation.
 
-**Rationale (2026-03-28):** 14 Phase 3 stories were registered as `refined` without either gate executing. Root cause: gates were defined in `discovery.agent.md` but not enforced in the skill process or transition rules. This rule closes the enforcement gap at the rule level.
+#### Proposal & Recommendation Gate (Pre-Artefact AND Artefact Phases)
+
+Discovery recommendations must pass the Review Sub-Agent at the applicable tier BEFORE being presented to the human. **This applies at every phase of Discovery — including conversational recommendations made before any artefact exists.**
+
+**Why pre-artefact recommendations matter most:** The most impactful decisions happen early — "use Stripe", "target solo devs", "architecture = event-driven". These shape everything downstream. If a pre-artefact recommendation is biased, all artefacts built on it inherit the bias — and no artefact-level gate can catch a flawed premise. The earlier the review, the higher the leverage.
+
+**Scope — what triggers this gate:**
+- Any recommendation that implies a **choice between viable alternatives** (architecture, library, pattern, target audience, pricing model, service provider)
+- Any recommendation that **constrains future decisions** (technology lock-in, scope boundary, priority ordering)
+- Any output containing **D-** (decisions) or **T-** (trade-offs) — whether in a Session Brief, an artefact, or a conversational recommendation
+
+**What does NOT trigger this gate:**
+- Factual answers to diagnostic questions ("what does this function do?")
+- Status reports with no recommendation
+- Obvious choices with no viable alternative (governed by `base.rules.md` § Recommendation Validation proportionality clause)
+
+**Pre-artefact context bundle:** When no Session Brief or artefact exists yet, the Review Sub-Agent receives:
+- The recommendation itself (Discovery's proposed direction)
+- Referenced DECs (if any)
+- Relevant memory entries (if Discovery loaded any via `memory-retrieve`)
+- The human's stated intent or question (paraphrased by Discovery — NOT the raw conversation)
+
+Discovery's Critical Self-Assessment remains as a preparatory step (it helps Discovery catch obvious issues before invoking the reviewer), but the Review Sub-Agent verdict is the authoritative evaluation.
+
+- Review Sub-Agent PASS → Discovery may present to human
+- Review Sub-Agent FAIL → Discovery must refine, then re-submit to reviewer
+- Review Sub-Agent ESCALATE → Discovery surfaces the escalation to the human alongside the proposal
+
+#### Session Brief Gate
+
+The Discovery Session Brief must pass Review Sub-Agent Tier 2 BEFORE being presented to the human for validation. Discovery's Brief Self-Assessment remains as draft preparation, but the independent review is the quality gate.
+
+**Why the Brief matters most:** The Brief is the root of the quality chain. If the Brief is weak, stories will be weak — even if they pass format and alignment checks. An independent reviewer catching Brief issues BEFORE human validation saves the human from reviewing a flawed Brief and prevents downstream waste.
+
+**Rationale (2026-03-30):** Prior to this rule, Discovery self-evaluated all outputs except story alignment. The Critical Self-Assessment Protocol and Brief Self-Assessment were executed by the same agent instance that produced the output — the textbook confirmation bias anti-pattern. `review-story-alignment` proved the isolated reviewer model works (it has caught real issues). This rule extends that model to all Discovery outputs.
+
+**Supersedes (2026-03-28):** The previous Refined Status Gate rule required `review-story-alignment` (SKILL-RSA-001) as a standalone gate. That skill's 3-pass process is now executed by the Review Sub-Agent during Tier 2 review. The enforcement is stronger (all outputs reviewed, not just stories) and the architecture is cleaner (one reviewer, tiered depth).
 
 ## 🌿 Branch Rules
 
