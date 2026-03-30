@@ -145,9 +145,13 @@ Discovery's Critical Self-Assessment remains as a preparatory step (it helps Dis
 - Review Sub-Agent FAIL → Discovery must refine, then re-submit to reviewer
 - Review Sub-Agent ESCALATE → Discovery surfaces the escalation to the human alongside the proposal
 
+**Refinement loop limit (applies to all Discovery review gates):** Maximum **2 review cycles** per output. If the output still FAILs after 2 rounds of refinement, ALL remaining findings are escalated to the human — regardless of whether Discovery believes it can self-fix. This limit is absolute and applies to proposals, recommendations, Session Briefs, and stories equally. See `review.sub-agent.md` § Refinement Loop for the detailed flow.
+
+**Rationale:** Infinite refinement loops waste tokens and indicate a deeper problem (ambiguous constraints, conflicting DECs, or genuine knowledge gap). Two rounds is enough for honest errors; anything beyond signals a structural issue that requires human judgment. Aligned with Constitutional AI research: quality peaks at 2-3 critique-revision rounds then yields diminishing returns (Anthropic, 2022).
+
 #### Session Brief Gate
 
-The Discovery Session Brief must pass Review Sub-Agent Tier 2 BEFORE being presented to the human for validation. Discovery's Brief Self-Assessment remains as draft preparation, but the independent review is the quality gate.
+The Discovery Session Brief must pass Review Sub-Agent Tier 2 BEFORE being presented to the human for validation. Discovery's Brief Self-Assessment remains as draft preparation, but the independent review is the quality gate. Same 2-cycle refinement limit applies.
 
 **Why the Brief matters most:** The Brief is the root of the quality chain. If the Brief is weak, stories will be weak — even if they pass format and alignment checks. An independent reviewer catching Brief issues BEFORE human validation saves the human from reviewing a flawed Brief and prevents downstream waste.
 

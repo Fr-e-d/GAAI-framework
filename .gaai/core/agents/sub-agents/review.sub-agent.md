@@ -87,7 +87,8 @@ Not every Discovery output warrants the same evaluation depth. The Review Sub-Ag
    - Are rejected alternatives fairly represented? (steel-man, not straw-man)
    - Are trade-offs complete? (what is gained AND what is lost)
    - Is there a viable alternative NOT considered?
-   - Does the reasoning contain circular logic? (recommending X because X is recommended)
+   - Does the reasoning contain circular logic? (recommending X because X is recommended) — **caveat: this check catches gross cases only.** LLMs reliably detect factual hallucinations but NOT reasoning hallucinations (Chain-of-Verification, Meta, ACL 2024). Do not treat a PASS on this check as proof of sound reasoning.
+   - **Verbosity bias guard** — Do not penalize brevity. Do not reward length. A 3-line AC that is clear and testable is better than a 10-line AC that is verbose. RLHF-trained models systematically prefer longer outputs regardless of quality (CALM framework, NeurIPS 2024) — actively counter this tendency.
 
 7. **Story alignment** (for stories — delegates to `review-story-alignment` process):
    - Session Brief contradiction check (Pass A)
@@ -200,6 +201,8 @@ Produce a structured verdict.
 
 ### Tier 2 Invocation Template
 
+**Positional bias mitigation (batch reviews):** When reviewing multiple stories, Discovery MUST either (a) invoke a separate Review Sub-Agent per story, or (b) randomize the order of stories in the prompt before each invocation. Positional bias causes >10% accuracy shifts based on presentation order ("Judging the Judges", ACL/IJCNLP 2025, 150K instances). Option (a) is preferred — it eliminates positional bias entirely and allows parallel invocation.
+
 ```
 You are an adversarial reviewer. Your job is to find contradictions,
 omissions, drift, and weak reasoning — not to confirm correctness.
@@ -210,12 +213,15 @@ don't look for confirmation. When in doubt, it's a FAIL, not a PASS.
 A false positive costs 5 minutes to dismiss. A false negative costs
 hours of wrong implementation.
 
+Do not penalize brevity or reward length. A concise, testable output
+is better than a verbose one.
+
 DISCOVERY SESSION BRIEF (human-validated):
 ══════════════════════════════════════════
 {paste the full structured Brief with D-N, O-N, H-N, T-N, S-N, C-N, Q-N items}
 
 OUTPUT TO REVIEW:
-{paste all outputs — story files, recommendations, approach evaluations}
+{paste output — one story per invocation preferred, or randomized order if batched}
 
 PARENT EPIC (if stories):
 {paste Epic frontmatter including mandatory_ac_categories}
@@ -226,13 +232,14 @@ REFERENCED DECs:
 Execute Tier 2 review:
 - Tier 1 checks (DEC constraints, DoR, attestation, scope creep)
 - Brief quality (6 checks)
-- Substance challenge (5 checks)
+- Substance challenge (6 checks including verbosity bias guard)
 - Story alignment (3 passes per story, if applicable)
 
 For each finding, reference the Brief item by ID (e.g., "contradicts D-1")
 and the output element by specific location (e.g., "AC3 in {story_id}").
 
-Produce a structured verdict with refinement guidance for each FAIL.
+Produce findings first, then verdict. Findings drive the verdict —
+not the reverse.
 ```
 
 ### Pre-Artefact Invocation Template (Tier 2 — conversational recommendations)
@@ -346,6 +353,43 @@ For each finding, Discovery evaluates:
 
 ---
 
+## Rubric Versioning
+
+Every verdict output MUST include a `rubric_version` field — the `updated_at` value from this file's frontmatter. This allows tracing which version of the checks was used for each verdict.
+
+```
+rubric_version: 2026-03-30
+```
+
+**Why:** Rubric interpretation drift is a documented problem — LLMs treat rubrics as "flexible natural language advice rather than executable specifications" (RULERS, arXiv, Jan 2026). Versioning the rubric in each verdict enables detection of drift: if the same rubric version produces inconsistent verdicts on similar inputs, the rubric has an interpretation stability problem.
+
+When this file is modified (checks added, removed, or reworded), `updated_at` in frontmatter MUST be bumped. Verdicts produced under different rubric versions are not directly comparable.
+
+---
+
+## Meta-Evaluation (Reviewer Health)
+
+The Review Sub-Agent itself must be evaluated — deploying a judge without meta-evaluation is "flying blind" (Trust or Escalate, ICLR 2025).
+
+### OSS — Lightweight Health Signals
+
+In the OSS version, formal meta-evaluation tooling does not exist. Discovery SHOULD monitor these health signals manually:
+
+1. **Rubber-stamping detection** — If the reviewer returns PASS on every invocation across multiple sessions, it is likely not adversarial enough. A healthy reviewer catches something in ~30-50% of reviews (calibrated from Constitutional AI revision rates).
+2. **Over-strictness detection** — If the reviewer returns FAIL on every invocation, the rubric or prompt is too strict and creates alert fatigue. Discovery stops reading findings.
+3. **Finding quality** — FAIL findings should cite specific Brief items, DEC IDs, or AC numbers. Generic findings ("could be improved") indicate the reviewer is not engaging with the rubric.
+
+### Cloud — Systematic Telemetry
+
+In GAAI Cloud, the DO tracks per-workspace:
+- **Verdict distribution** — PASS/FAIL/ESCALATE ratio over time
+- **Catch rate** — percentage of reviews with at least one CRITICAL or HIGH finding
+- **False positive rate** — findings dismissed by Discovery (refined without changing the flagged element) as a proxy for false positives
+- **Convergence cycles** — how many refinement rounds before PASS (target: 1-2, alarm: consistently 0 or >2)
+- **Confidence distribution** — percentage of verdicts at HIGH vs LOW confidence (cascade architecture)
+
+---
+
 ## Constraints
 
 - MUST run in an isolated context window (Agent tool) — never in Discovery's own context
@@ -354,15 +398,18 @@ For each finding, Discovery evaluates:
 - MUST NOT soften a FAIL to PASS — "close enough" is FAIL
 - MUST terminate after producing the verdict (even on PASS)
 - MUST be invoked by Discovery — never self-invoked, never invoked by Delivery or cron
+- MUST include `rubric_version` in every verdict output
 - Discovery MUST NOT proceed to backlog registration or human presentation if verdict is FAIL with CRITICAL or HIGH findings
 
 ---
 
-## Model Diversity (Optional, Recommended)
+## Model Diversity (Strongly Recommended)
 
-**Default behavior (OSS):** The Review Sub-Agent uses the same model as Discovery — the model available in the user's AI coding agent session. Context isolation and adversarial prompting provide measurable improvement over self-evaluation, but same-model review still carries systematic bias (see Known Limitations below).
+**Default behavior (OSS):** The Review Sub-Agent uses the same model as Discovery — the model available in the user's AI coding agent session. Context isolation and adversarial prompting provide measurable improvement over self-evaluation, but same-model review **still carries systematic bias** that cannot be eliminated by isolation alone (see Known Limitations).
 
-**Why model diversity is better:** Two different models have different failure modes, blind spots, and reasoning biases. A Claude evaluating a Claude output shares the same systematic biases (training data, RLHF preferences, reasoning patterns). A different model used as evaluator compensates for these shared blind spots — this is the strongest defense against confirmation bias beyond context isolation.
+**Why same-model isolation is insufficient:** Self-preference bias is **perplexity-driven** — it operates at the model weight level, not the context level. A Claude evaluating Claude output systematically prefers outputs with lower perplexity (more familiar to its own distribution), regardless of actual quality. Context isolation removes conversation history but does not change the model's distribution preferences (Wataoka et al., arXiv:2410.21819, 2024). Same-model isolation is better than self-evaluation, but it has a **proven quality ceiling**.
+
+**Why model diversity overcomes this:** A different model has a different training distribution, different perplexity surface, and different reasoning biases. What is "familiar" to Claude is not "familiar" to Gemini. Cross-model evaluation compensates for systematic blind spots that no amount of prompt engineering can fix within a single model.
 
 **How to enable model diversity:** Within a local AI coding agent session (e.g., Claude Code), only one model is available at a time. Model diversity requires calling a **remote reviewer** — either via MCP tool call to a review service, or via direct API call to a different model provider. This is an architectural choice, not a default.
 
@@ -370,22 +417,80 @@ For each finding, Discovery evaluates:
 
 | Path | How | When |
 |---|---|---|
-| **Same model, isolated context** (default) | Agent tool with isolated context window | Always available — no setup needed |
-| **Remote reviewer via MCP** | MCP tool call to a review service that routes to a different model | When GAAI Cloud is connected — the DO can proxy the review to a configurable model |
-| **Remote reviewer via API** | Direct API call to a different model provider (e.g., Gemini, GPT) | Self-hosted setups — user configures the endpoint |
+| **Same model, isolated context** (default) | Agent tool with isolated context window | Always available — no setup needed. Proven ceiling but still major improvement. |
+| **Remote reviewer via MCP** | MCP tool call to GAAI Cloud, which routes to a different model | When GAAI Cloud is connected — cascade architecture with confidence estimation |
+| **Remote reviewer via API** | Direct API call to a different model provider | Self-hosted setups — user configures the endpoint |
 
-**Recommendation:** Use model diversity when available (GAAI Cloud or self-hosted API). The marginal cost of a review call (~2-3K tokens) is small compared to the cost of implementing the wrong thing. But same-model isolated review is already a major improvement over self-evaluation — do not skip the review gate because model diversity is unavailable.
+**Recommendation:** Use model diversity when available. The marginal cost of a review call (~2-3K tokens) is small compared to the cost of implementing the wrong thing. Same-model isolated review has a proven quality ceiling — do not treat it as equivalent to cross-model review. But do not skip the review gate because model diversity is unavailable — partial improvement is better than no improvement.
 
 ---
 
 ## Cloud Extension Points
 
-In GAAI Cloud (`gaai.cloud`), the Review Sub-Agent gains additional capabilities:
+In GAAI Cloud (`gaai.cloud`), the Review Sub-Agent gains capabilities that address the proven limitations of same-model evaluation.
+
+### Architecture — Cascade, Not Aggregation
+
+GAAI Cloud uses a **cascade architecture** — not multi-model aggregation. Research shows that multi-agent debate fails to consistently outperform single-agent strategies and degrades after 2-4 rounds due to context overload (ICLR 2025). Aggregation (majority vote, union, weighted) has unsolved failure modes.
+
+The cascade approach:
+
+```
+Client (Claude Code) → MCP tool call → GAAI Cloud DO
+  ↓
+DO routes to Evaluator Model (different from generator)
+  ↓
+Evaluator produces verdict + confidence signal
+  ↓
+┌── Confidence HIGH → verdict returned to client
+│
+└── Confidence LOW → escalate to second model or flag for human
+                      → escalated verdict returned
+```
+
+**Why cascade, not aggregation:**
+- 1 API call in ~70-80% of cases (not 3) — cost-efficient
+- No aggregation problem (how to reconcile conflicting verdicts)
+- Client knows when the verdict is reliable vs uncertain
+- Aligned with "Trust or Escalate" (ICLR 2025, Oral) — reduces evaluation cost by 40% without quality loss
+
+### Confidence Estimation
+
+**Critical caveat: LLMs do not have reliable meta-cognition.** When a model says "I am 95% sure", that is generated text — not a calibrated probability. Research shows verbalized confidence averages 97-99% on tasks where actual accuracy is 50-70% (Xiong et al., ICLR 2024). Asking a model "are you confident?" is not a viable confidence estimation strategy.
+
+**How GAAI Cloud estimates confidence instead — Self-Consistency method:**
+
+The evaluator model is queried **3-5 times** with prompt variations (different in-context examples or randomized element order). Confidence is measured as the **agreement ratio between runs** — not as the model's self-reported certainty.
+
+```
+For each output to review:
+  1. Construct 3-5 prompt variants
+     → Same output to review, same rubric
+     → Different in-context examples OR different element order
+  2. Query the evaluator model 3-5 times (parallel API calls)
+  3. Confidence = fraction of runs that agree on the verdict
+     → 5/5 PASS → HIGH confidence → return verdict
+     → 4/5 PASS → HIGH confidence → return majority verdict
+     → 3/5 split → LOW confidence → escalate
+```
+
+This is a simplified version of the **Simulated Annotators** method (Trust or Escalate, ICLR 2025 Oral). The full method uses token-level log-probabilities for probability-weighted voting; the simplified version uses text-only agreement, making it practical in **black-box API settings** where logprobs are not available.
+
+**Why this works:** Disagreement between prompt variants reveals cases where the verdict is sensitive to framing — exactly the cases where the evaluator is unreliable. Research confirms: instances where simulated annotators disagree are also more subjective for humans (p < 1e-8), suggesting the signal is meaningful.
+
+**Known limitation — confidently wrong:** If the model produces the same incorrect verdict 5/5 times, self-consistency reports HIGH confidence on a wrong answer. This is an unsolved failure mode. Model diversity (different model as evaluator) partially mitigates it — a different model has a different error distribution and may disagree where the first is uniformly wrong. But no method fully solves this.
+
+**Cost:** 3-5x per Tier 2 review. Applied only to Tier 2 (consequential choices) — Tier 1 (sanity checks) runs once, no confidence estimation needed.
+
+**Escalation is the exception, not the norm.** Research shows ~70-80% of evaluations have HIGH agreement on first pass. Escalation targets the genuinely ambiguous ~20-30% — saving the cost of a second model for the majority of cases.
+
+### Capability Comparison
 
 | Capability | OSS (`.gaai/core`) | Cloud (`gaai.cloud`) |
 |---|---|---|
 | Context isolation | Same model, isolated context window | Same model, isolated context window |
-| Model diversity | Optional — user configures remote endpoint if desired | Built-in — DO routes review to a configurable model (default: different provider than generator) |
+| Model diversity | Not available (same model, proven ceiling) | Built-in — DO routes review to a configurable model (different provider than generator) |
+| Confidence estimation | Not available | Simulated Annotators — confidence signal per verdict, cascade escalation on low confidence |
 | Evaluation telemetry | Not available | Findings tracked: catch rate, false positive rate, convergence cycles, common failure patterns |
 | Cost management | User pays per invocation | Configurable per workspace: always Tier 2, auto-tier (default), Tier 1 only (cost-saving mode) |
 | Historical calibration | Not available | Reviewer stance tuned based on workspace's false positive / false negative history |
@@ -396,13 +501,13 @@ In GAAI Cloud (`gaai.cloud`), the Review Sub-Agent gains additional capabilities
 
 This design was confronted against current LLM evaluation research (2023-2026). The following limitations are acknowledged and documented for transparency.
 
-| Limitation | Severity | Research Source | Mitigation |
+| Limitation | Severity | Research Source | Status |
 |---|---|---|---|
-| **Same-model self-preference bias** — perplexity-driven, not context-driven. Context isolation reduces but does not eliminate. | CRITICAL | Wataoka et al., arXiv:2410.21819, 2024 | Model diversity (strongly recommended). Without it, the reviewer shares the generator's systematic biases. |
-| **Positional bias in batch review** — order of presentation affects evaluation. >10% accuracy shift documented. | HIGH | "Judging the Judges", ACL/IJCNLP 2025 (150K instances) | For batch reviews (multiple stories), review each story separately then aggregate. Randomize order if reviewing in batch. |
-| **No meta-evaluation mechanism** — no way to measure if the reviewer itself is good. | HIGH | "Trust or Escalate", ICLR 2025; Judge's Verdict Benchmark, 2025 | Cloud: evaluation telemetry (catch rate, FP rate). OSS: future work — calibration set with known PASS/FAIL cases. |
-| **Circular reasoning detection is weak** — LLMs detect factual hallucinations but not reasoning hallucinations reliably. | MEDIUM | Chain-of-Verification, Meta, ACL 2024 | Check 6e (circular reasoning) catches gross cases but will miss sophisticated reasoning errors. Do not treat it as reliable. |
-| **Rubric interpretation drift** — same rubric may be interpreted differently across runs. | MEDIUM | RULERS, arXiv, Jan 2026 | Rubrics are versioned via git. Future: lock rubric version in verdict output for traceability. |
-| **Verbosity bias** — RLHF-trained models prefer longer, more formal outputs regardless of quality. | LOW | CALM framework, Li et al., NeurIPS 2024 | Low impact for structured governance checks. Higher impact for substance challenge (qualitative judgment). |
+| **Same-model self-preference bias** — perplexity-driven, not context-driven. Context isolation reduces but does not eliminate. | CRITICAL | Wataoka et al., arXiv:2410.21819, 2024 | **Documented.** Model Diversity section upgraded to "Strongly Recommended" with proven ceiling acknowledged. Cloud cascade architecture addresses this via cross-model evaluation. OSS: inherent ceiling — mitigated but not solved. |
+| **Positional bias in batch review** — order of presentation affects evaluation. >10% accuracy shift documented. | HIGH | "Judging the Judges", ACL/IJCNLP 2025 (150K instances) | **Mitigated.** Tier 2 invocation protocol requires separate invocation per story (preferred) or randomized order. Documented in template. |
+| **No meta-evaluation mechanism** — no way to measure if the reviewer itself is good. | HIGH | "Trust or Escalate", ICLR 2025; Judge's Verdict Benchmark, 2025 | **Partially addressed.** OSS: 3 lightweight health signals defined (rubber-stamping, over-strictness, finding quality). Cloud: systematic telemetry (verdict distribution, catch rate, FP proxy, convergence, confidence). See § Meta-Evaluation. |
+| **Circular reasoning detection is weak** — LLMs detect factual hallucinations but not reasoning hallucinations reliably. | MEDIUM | Chain-of-Verification, Meta, ACL 2024 | **Documented.** Caveat added inline to check 6e: catches gross cases only. Explicitly marked as unreliable for sophisticated reasoning errors. |
+| **Rubric interpretation drift** — same rubric may be interpreted differently across runs. | MEDIUM | RULERS, arXiv, Jan 2026 | **Mitigated.** `rubric_version` mandatory in every verdict output. See § Rubric Versioning. Drift is detectable (same version, inconsistent verdicts on similar inputs). |
+| **Verbosity bias** — RLHF-trained models prefer longer, more formal outputs regardless of quality. | LOW | CALM framework, Li et al., NeurIPS 2024 | **Mitigated.** Verbosity bias guard added to substance challenge (check 6f). Explicit instruction in Tier 2 template: "Do not penalize brevity or reward length." |
 
 **Design philosophy:** These limitations are openly documented rather than hidden. The Review Sub-Agent is a significant improvement over self-evaluation (which has ALL of these limitations plus confirmation bias plus anchoring on own reasoning). It is not perfect — no LLM evaluation system is (best judges achieve <0.7 Accboth vs humans, per Survey arXiv:2411.15594). The goal is to catch the majority of consequential errors before they compound downstream.
