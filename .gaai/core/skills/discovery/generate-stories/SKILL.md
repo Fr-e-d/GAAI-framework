@@ -66,19 +66,19 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 8. Output using canonical Story template
 9. **MANDATORY — Validation gates via isolated sub-agents (MUST pass before backlog registration).**
 
-   Before registering ANY story in the backlog, the Discovery Agent MUST execute both gates in sequence. **Both gates MUST be invoked as isolated sub-agents** (via the Agent tool) — never executed inline by the main Discovery agent, even if the main agent is the one that created the story. The author of a story cannot objectively validate its own work.
+   Before registering ANY story in the backlog, the Discovery Agent MUST execute both gates in sequence. **Both gates MUST be invoked as isolated sub-agents** (via the Agent tool) — never executed inline by the main Discovery agent, even if the main agent is the one that created the story. The author of a story cannot objectively validate its own work (Core Principle #5 — Independent Evaluation).
 
    a) **Format gate** — invoke `validate-artefacts` (SKILL-VALIDATE-ARTEFACTS-001) as an **isolated sub-agent**. Provide the generated stories and their parent Epic. If verdict is BLOCKED, fix the flagged issues in the main agent and re-invoke the sub-agent until PASS.
 
-   b) **Alignment gate** — invoke `review-story-alignment` (SKILL-RSA-001) as an **isolated sub-agent**. Provide the stories + Epic + referenced DECs + Discovery Session Brief (if one was compiled). If no Session Brief exists, the gate still runs in **reduced-scope mode** (DEC constraints + DoR checks only — Pass A is skipped). If any story FAILs, the Discovery Agent resolves findings (from Brief + DECs) or escalates to the human, then re-invokes the sub-agent until ALL PASS.
+   b) **Independent Review gate** — invoke the **Review Sub-Agent** (SUB-AGENT-REVIEW-001) at the applicable tier. The Review Sub-Agent executes the `review-story-alignment` (SKILL-RSA-001) 3-pass process during Tier 2 review. Provide the stories + Epic + referenced DECs + Discovery Session Brief (if one was compiled). If no Session Brief exists, the reviewer runs in Tier 1 (DEC constraints + DoR + attestation + scope creep). If any story FAILs, the Discovery Agent resolves findings (from Brief + DECs) or escalates to the human, then re-invokes the reviewer. **Maximum 2 review cycles** — after that, all remaining findings escalate to the human.
 
-   **These gates are sequential: format must PASS before alignment runs.**
+   **These gates are sequential: format must PASS before the independent review runs.**
 
-   **No exceptions.** Both gates run for every story creation or modification — regardless of batch size (1 story or 20), origin (full Epic session, bug triage, single amendment), or whether a Session Brief was compiled. The reduced-scope mode ensures the alignment gate is always valuable even without a Brief.
+   **No exceptions.** Both gates run for every story creation or modification — regardless of batch size (1 story or 20), origin (full Epic session, bug triage, single amendment), or whether a Session Brief was compiled. For batch reviews (2+ stories), invoke a separate Review Sub-Agent per story to eliminate positional bias (see `review.sub-agent.md` § Positional bias mitigation).
 
-   **A story registered in the backlog as `refined` without both gates passing via sub-agents is a governance violation.** If this step is skipped, the commit message will lack gate evidence, which is detectable in review.
+   **A story registered in the backlog as `refined` without both gates passing via sub-agents is a governance violation.** If this step is skipped, the commit message will lack gate evidence (e.g., "validate-artefacts: PASS, review[tier-2]: PASS"), which is detectable in review.
 
-   **Rationale:** (1) In a past incident, Discovery produced 14 stories and registered them as `refined` without running either gate — the gates were not in the skill's step list. (2) Later, Discovery self-validated both gates inline, using the "no Session Brief" skip condition to bypass the alignment gate entirely. In both cases, the main agent marked its own homework — no independent review occurred. This step closes both gaps by mandating sub-agent execution with no skip conditions.
+   **Rationale:** (1) In a past incident, Discovery produced 14 stories and registered them as `refined` without running either gate — the gates were not in the skill's step list. (2) Later, Discovery self-validated both gates inline, using the "no Session Brief" skip condition to bypass the alignment gate entirely. In both cases, the main agent marked its own homework — no independent review occurred. This step closes both gaps by mandating sub-agent execution with no skip conditions. (3) Updated 2026-03-30: the alignment gate is now executed by the Review Sub-Agent (SUB-AGENT-REVIEW-001), enforcing Core Principle #5 (Independent Evaluation).
 
 10. **MANDATORY — Register in backlog.** After writing all story files, add each story to `contexts/backlog/active.backlog.yaml` with:
    - `id`, `epic`, `title` (from story frontmatter)
