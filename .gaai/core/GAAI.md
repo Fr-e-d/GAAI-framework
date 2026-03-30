@@ -167,7 +167,8 @@ The governance rules are defined in `core/contexts/rules/base.rules.md` (univers
 2. **Skill-first.** Agents reason. Skills execute.
 3. **Memory is explicit.** Load only what is needed. Never auto-load all memory.
 4. **Artefacts document — they do not authorize.** Only the backlog authorizes execution.
-5. **When in doubt, stop and ask.** Ambiguity is always resolved before execution.
+5. **Independent evaluation.** An agent must never be the sole evaluator of its own consequential outputs. At minimum, spawn an independent sub-agent with isolated context and adversarial stance. Self-assessment is preparation, not verification.
+6. **When in doubt, stop and ask.** Ambiguity is always resolved before execution.
 
 ## Progressive Disclosure (Architectural Principle)
 

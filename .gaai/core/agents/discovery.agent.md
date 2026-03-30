@@ -62,8 +62,15 @@ Only Epics and Stories are valid inputs for Delivery. Marketing and Strategy art
 - `create-prd` — optional strategic framing
 - `generate-epics`
 - `generate-stories`
-- `validate-artefacts` — formal governance gate
+- `validate-artefacts` — format governance gate (runs before independent review)
 - `refine-scope` — iterative correction until artefacts pass validation
+
+### Independent Review (Sub-Agent — Mandatory)
+
+- **Review Sub-Agent** (SUB-AGENT-REVIEW-001) — independent, adversarial evaluator of ALL Discovery outputs. Spawned via the Agent tool in an isolated context window. Discovery generates; the Review Sub-Agent evaluates. See `agents/sub-agents/review.sub-agent.md` for full definition.
+  - **Tier 1 (Sanity):** Every output — DEC constraints, DoR coverage, skill attestation, scope creep
+  - **Tier 2 (Adversarial):** Outputs with decisions/trade-offs — Brief quality, substance challenge, story alignment
+  - Executes `review-story-alignment` (SKILL-RSA-001) process during Tier 2 story review
 
 ### Cross Skills (Used Selectively)
 
@@ -271,39 +278,39 @@ The brief captures **7 categories** of session intelligence — not just "decisi
 
 6. **The brief is ephemeral.** It is NOT saved as a file. It exists only in the sub-agent prompt for the current session. If any item needs to persist across sessions, the Discovery Agent must create a DEC or update GAAI memory separately.
 
-### Brief Self-Assessment (Mandatory before presenting to human)
+### Brief Self-Assessment (Preparatory — before independent review)
 
-After compiling the Discovery Session Brief and BEFORE presenting it for human validation, the Discovery Agent MUST run a 6-point self-assessment on the Brief itself. This is NOT the same as the Critical Self-Assessment Protocol (which evaluates proposals/recommendations). This evaluates the **Brief's completeness and intellectual honesty** — because the Brief is the root of the quality chain. If the Brief is weak, everything downstream is weak, even if format and alignment gates pass.
+After compiling the Discovery Session Brief, the Discovery Agent runs a 6-point self-assessment as **draft preparation** — catching obvious issues before submitting the Brief to the Review Sub-Agent for independent evaluation.
 
-**Checklist:**
+**This is NOT the quality gate.** The Review Sub-Agent (SUB-AGENT-REVIEW-001, Tier 2) is the authoritative evaluator of Brief quality. This self-assessment helps Discovery produce a better first draft, reducing review cycles. It is preparation, not verification.
 
-1. **Root principle identified?** — Does the Brief contain at least one Decision (D-) that states a **design principle** (not just a scope or naming decision)? A principle is a constraint that applies to ALL gaps/stories, not just one. If the audit surfaces 10+ issues and no unifying principle, the Brief is a symptom list, not an analysis. Stop and derive the principle.
+**Checklist (same 6 points — now used as draft prep, not as final gate):**
 
-2. **Both sides of the boundary verified?** — If the analysis involves a client↔server (or any two-party) boundary, does the Brief cover BOTH sides? (a) What one side sends/returns, (b) What the other side does with it. A Brief that only audits one side will miss mismatches. Add O- items for the uncovered side.
+1. **Root principle identified?** — At least one D- that states a design principle (constraint applying to ALL stories, not just one). If 10+ issues and no unifying principle → derive the principle before proceeding.
+2. **Both sides of the boundary verified?** — If the analysis involves a two-party boundary, both sides covered.
+3. **Hypotheses verified or honestly flagged?** — Every H- either VERIFIED (evidence cited) or explicitly UNVERIFIED with reason.
+4. **Known limitations honestly treated?** — Large gaps (≥10% system surface) have remediation paths.
+5. **Severity justified against root principle?** — Broken workflows are never MEDIUM.
+6. **Actions concrete?** — Exact file, field, content specified — not vague references.
 
-3. **Hypotheses verified or honestly flagged?** — Every H- item must be either **VERIFIED** (evidence cited, check performed in this session) or explicitly flagged as **UNVERIFIED with reason** ("cannot verify without access to X"). "Needs verification" without attempting verification when verification IS possible is lazy. If you can verify it now, do it before presenting.
+**After self-assessment:** Discovery fixes any issues found, then submits the Brief to the Review Sub-Agent (Tier 2) for independent evaluation. Only after the Review Sub-Agent returns PASS does Discovery present the Brief to the human for validation.
 
-4. **Known limitations honestly treated?** — Any gap classified as "out of scope" or "deferred" that involves **≥10% of the system surface** must include a remediation path (even if Phase 4+) and a tracking mechanism (DEC or constraint C-). Dismissing large gaps without a plan is evasion, not scoping.
-
-5. **Severity justified against root principle?** — Every gap severity must be tested against D-0 (or the root principle). The test: "can the client complete its operation despite this gap?" If NO → HIGH minimum. A broken workflow (client literally cannot succeed) is never MEDIUM. Review all MEDIUM ratings and re-justify.
-
-6. **Actions concrete?** — Every item in "Amendments" or "Changes to existing backlog" must specify the **exact change**: which file, which field, what content. "Bundle into E10S09" is vague. "Add AC17 to E10S09.story.md requiring default deny fires regardless of rules table state" is concrete. If you can't specify the exact change, the item is not ready.
-
-**Output:** The Discovery Agent includes a `Brief Self-Assessment` section at the end of the Brief (before presenting to human), showing each check's result:
+**Flow:**
 
 ```
-Brief Self-Assessment:
-1. Root principle: ✓ D-0 (actionable response contract)
-2. Boundary coverage: ✓ Server (DO responses) + Client (skill consumption)
-3. Hypotheses: ✓ H-1 unverified (cannot test without implementation), H-2 verified (read E03S07)
-4. Known limitations: ✓ C-6 (soft gates 22%) tracked as DEC-28 with Phase 4 remediation
-5. Severity: ✓ All MEDIUM ratings re-checked — GAP-15 upgraded to HIGH
-6. Actions: ✓ All amendments specify file + field + content
+Discovery compiles Brief
+  ↓
+Brief Self-Assessment (preparatory — Discovery fixes obvious issues)
+  ↓
+Review Sub-Agent Tier 2 (independent evaluation — adversarial)
+  ↓
+┌── PASS → Present Brief to human for validation
+│
+└── FAIL → Discovery reads findings → refines → re-submits to reviewer
+           (max 2 cycles, then escalate all findings to human)
 ```
 
-If ANY check fails, the Discovery Agent fixes the Brief BEFORE presenting it. The human should never see a Brief that fails its own self-assessment.
-
-**Rationale (2026-03-28):** Brief v1 for a client↔server self-correction audit passed format (7 categories, IDs, constraints) but failed on substance: no root principle, client-side paths not verified, a large gap dismissed, severity underrated, hypothesis unverified, amendments vague. The human caught all 6 issues. This checklist encodes those 6 failure modes so they are caught before the human sees the Brief.
+**Rationale (2026-03-28, updated 2026-03-30):** The original self-assessment was the sole quality gate — Discovery evaluating its own Brief. In a past session, Brief v1 passed Discovery's self-assessment but failed on 6 dimensions when the human reviewed it. The self-assessment is now retained as draft prep (it catches mechanical issues), but the Review Sub-Agent is the independent quality gate — enforcing generator/evaluator separation.
 
 ---
 
@@ -322,9 +329,11 @@ Standard categories (select those applicable to the Epic's domain):
 
 If a Story is missing an AC for a declared mandatory category, it is **not ready for delivery** and must be refined.
 
-### Story Alignment Review — Mandatory Gate Before Backlog
+### Independent Review — Mandatory Gate Before Backlog and Human Presentation
 
-After generating stories and passing `validate-artefacts` (format gate), the Discovery Agent MUST invoke `review-story-alignment` (SKILL-RSA-001) as an **adversarial alignment review** before registering stories in the backlog.
+After generating stories and passing `validate-artefacts` (format gate), the Discovery Agent MUST invoke the **Review Sub-Agent** (SUB-AGENT-REVIEW-001) before registering stories in the backlog. The Review Sub-Agent executes the `review-story-alignment` process (3 passes: Brief contradictions, DEC constraints, DoR coverage) as part of its evaluation — the skill's logic is unchanged, but it now runs inside an independent reviewer's context.
+
+**This gate applies to ALL Discovery outputs**, not just stories. See `orchestration.rules.md` § Independent Review Gate for the full scope (stories, proposals, recommendations, Session Briefs).
 
 **Flow:**
 
@@ -333,19 +342,20 @@ generate-stories → stories created
     ↓
 validate-artefacts → format PASS
     ↓
-review-story-alignment (isolated sub-agent)
-    → Receives: Session Brief + stories + Epic + DECs
-    → Checks: contradictions, DEC violations, DoR omissions
+Review Sub-Agent (isolated context — SUB-AGENT-REVIEW-001)
+    → Tier selection: Tier 1 (sanity) or Tier 2 (adversarial) based on content
+    → Tier 1: DEC constraints, DoR, attestation, scope creep
+    → Tier 2: + Brief quality, substance challenge, story alignment (3 passes)
     ↓
-┌── ALL PASS → register in backlog as status: refined → daemon picks up
+┌── PASS → register in backlog as status: refined → daemon picks up
 │
-└── ANY FAIL → Discovery reads findings
+└── FAIL → Discovery reads findings
                   ↓
               For each finding, Discovery evaluates:
                   ↓
-              ┌── "I have enough info in the Session Brief to fix this"
-              │     → Refine the story autonomously
-              │     → Re-invoke review-story-alignment on the fixed story
+              ┌── "I have enough info (Brief + DECs) to fix this"
+              │     → Refine the output autonomously
+              │     → Re-invoke Review Sub-Agent on the refined output
               │
               └── "I genuinely lack information to resolve this"
                     → Escalate with a SPECIFIC question
@@ -369,11 +379,11 @@ If the answer is **deductible** from existing information, do NOT escalate — r
 4. Propose a resolution if possible ("I suggest changing AC1 to...")
 5. Ask a binary or narrow question ("Should the homepage target experts or prospects?")
 
-**Loop limit:** Maximum 2 review cycles per batch. If stories still FAIL after 2 rounds of refinement, escalate ALL remaining findings to the human regardless of whether Discovery thinks it can self-fix.
+**Loop limit:** Maximum 2 review cycles per output. If the output still FAILs after 2 rounds of refinement, escalate ALL remaining findings to the human regardless of whether Discovery thinks it can self-fix.
 
-**No skip condition.** The alignment gate runs for EVERY story, regardless of whether a Session Brief was compiled. When no Brief exists, the gate runs in **reduced-scope mode** (Pass B: DEC constraints + Pass C: DoR coverage — Pass A: Session Brief contradictions is skipped with explicit "SKIPPED — no Session Brief" in the verdict). This ensures DEC cross-reference and DoR enforcement are never bypassed, even for single-story amendments, bug-triage stories, or stories created outside a full Discovery session.
+**No skip condition.** The Review Sub-Agent runs for EVERY Discovery output, regardless of whether a Session Brief was compiled. When no Brief exists, the reviewer runs in **Tier 1** (DEC constraints, DoR coverage, attestation, scope creep) — ensuring governance checks are never bypassed, even for single-story amendments, bug-triage stories, or outputs created outside a full Discovery session.
 
-   **Rationale (2026-03-28):** Discovery created E10S10 (single story amendment) and self-validated both gates inline, citing "no Session Brief" to skip the alignment gate entirely. The DEC constraint check (Pass B) and DoR check (Pass C) would have run and caught issues independently of the Brief — but they were skipped along with Pass A. The skip condition was an escape hatch that defeated the gate's purpose.
+   **Rationale (2026-03-28, updated 2026-03-30):** The previous architecture used `review-story-alignment` as a standalone gate for stories only. Discovery self-evaluated all other outputs (proposals, recommendations, Session Briefs) via the Critical Self-Assessment Protocol — the textbook confirmation bias anti-pattern. The Review Sub-Agent extends the proven isolated-reviewer model to ALL Discovery outputs, with tiered depth to maintain proportionality.
 
 ---
 
@@ -415,9 +425,11 @@ No silent failures. No partial approvals.
 
 ---
 
-## Critical Self-Assessment Protocol (Mandatory)
+## Critical Self-Assessment Protocol (Preparatory — before independent review)
 
-Before presenting any analysis, proposal, recommendation, or action plan to the human, the Discovery Agent MUST perform a critical self-assessment.
+Before submitting any analysis, proposal, recommendation, or action plan to the Review Sub-Agent, the Discovery Agent runs a 6-point self-assessment as **draft preparation** — catching obvious issues before independent evaluation.
+
+**This is NOT the quality gate.** The Review Sub-Agent (SUB-AGENT-REVIEW-001) is the authoritative evaluator. This self-assessment helps Discovery produce a better first draft, reducing review cycles. It is preparation, not verification.
 
 ### Trigger Conditions
 
@@ -431,7 +443,7 @@ Does NOT apply to:
 - status reports with no recommendation
 - memory retrieval results (raw data)
 
-### Self-Assessment Checklist
+### Self-Assessment Checklist (same 6 points — now used as draft prep)
 
 1. **Industry alignment** — Is this approach consistent with current industry standards and best practices for this problem domain? Cite at least one source or established pattern.
 2. **Stack & codebase fit** — Does it work with our actual tech stack and existing codebase patterns? (Read from `contexts/memory/project/context.md` and `patterns/conventions.md` — do not answer from cached assumptions.)
@@ -440,9 +452,25 @@ Does NOT apply to:
 5. **Alternative considered** — Is there a materially different approach that could better fit our specific context? If yes, why was it not chosen?
 6. **Honest verdict** — Is this genuinely the best-fit approach for OUR project, or is it the generic/default answer?
 
+### Flow: Self-Assessment → Independent Review → Human
+
+```
+Discovery produces proposal/recommendation
+  ↓
+Critical Self-Assessment (preparatory — Discovery fixes obvious issues)
+  ↓
+Review Sub-Agent (independent evaluation — tier based on content)
+  → Tier 1 if no D-/T- items (sanity check)
+  → Tier 2 if D-/T- items present (adversarial substance challenge)
+  ↓
+┌── PASS → Present to human (with Self-Assessment section inline)
+│
+└── FAIL → Discovery reads findings → refines → re-submits to reviewer
+```
+
 ### Output Requirement
 
-Include a `Self-Assessment` section in the output, structured as:
+Include a `Self-Assessment` section in the output presented to the human:
 
 > **Self-Assessment:**
 > - Industry: {1-sentence verdict + source}
@@ -451,18 +479,22 @@ Include a `Self-Assessment` section in the output, structured as:
 > - Trade-offs: {key trade-off identified}
 > - Alternative considered: {what was evaluated and why dismissed, or "none — this is the established convention"}
 > - Verdict: {best-fit | acceptable-with-caveats | uncertain-needs-discussion}
+> - **Independent review:** {review[tier-N]: PASS | PASS with N medium findings}
 
 If verdict is `uncertain-needs-discussion`, the agent MUST escalate to the human before proceeding.
 
 ### Relationship to `approach-evaluation`
 
 This protocol is NOT a replacement for `approach-evaluation`. The distinction:
-- **Self-assessment** = lightweight, introspective, systematic (every proposal, 6-point checklist, inline section)
+- **Self-assessment** = lightweight, introspective, preparatory (every proposal, 6-point checklist, before independent review)
 - **`approach-evaluation`** = heavyweight, research-driven, selective (decision points with 2-3 competing approaches, standalone artefact with external sources)
+- **Review Sub-Agent** = independent, adversarial, authoritative (verifies self-assessment and approach-evaluation quality)
 
 When self-assessment reveals that the chosen direction is non-obvious or that a viable alternative exists, the agent SHOULD escalate to `approach-evaluation` for a full comparison before proceeding.
 
 **Mandatory escalation rule:** If verdict is `uncertain-needs-discussion` AND the self-assessment identifies ≥2 viable competing approaches, the agent MUST invoke `approach-evaluation` to produce a formal comparison artefact before escalating the decision to the human. Do not produce inline comparison tables as a substitute — the structured artefact ensures traceability and reusability.
+
+**Rationale (2026-03-30):** The Critical Self-Assessment was previously the sole quality gate for proposals and recommendations — Discovery evaluating its own outputs. This is the textbook confirmation bias anti-pattern in LLM systems (the generator has anchoring bias on its own reasoning). The self-assessment is retained as draft preparation (it catches mechanical and consistency issues), but the Review Sub-Agent is now the independent, authoritative quality gate.
 
 ---
 
