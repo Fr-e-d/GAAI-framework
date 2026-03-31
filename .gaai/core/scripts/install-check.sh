@@ -98,14 +98,24 @@ else
   check ".gaai/ in target — ok (not present, clean install)" "ok"
 fi
 
-# 6. Git hooks
+# 6. Git repository
+echo ""
+echo "[ Git Repository ]"
+if (cd "$TARGET" && git rev-parse --git-dir &>/dev/null); then
+  check "target is a git repository" "ok"
+else
+  check "target is a git repository" "not a git repo — run 'git init' first"
+fi
+
+# 7. Git hooks (informational — installer will configure these)
 echo ""
 echo "[ Git Hooks ]"
 HOOKS_PATH=$(cd "$TARGET" && git config --get core.hooksPath 2>/dev/null || echo "")
 if [[ "$HOOKS_PATH" == ".githooks" ]]; then
   check "core.hooksPath set to .githooks" "ok"
 else
-  check "core.hooksPath" "not set to .githooks (installer will configure this)"
+  echo "  ⚠️  core.hooksPath not set to .githooks (installer will configure this)"
+  PASS=$((PASS + 1))
 fi
 
 if [[ -d "$TARGET/.githooks" ]]; then
@@ -113,11 +123,13 @@ if [[ -d "$TARGET/.githooks" ]]; then
     if [[ -x "$TARGET/.githooks/$dispatcher" ]]; then
       check ".githooks/$dispatcher dispatcher" "ok"
     else
-      check ".githooks/$dispatcher dispatcher" "missing or not executable (installer will create it)"
+      echo "  ⚠️  .githooks/$dispatcher dispatcher — missing or not executable (installer will create it)"
+      PASS=$((PASS + 1))
     fi
   done
 else
-  check ".githooks/ directory" "not present (installer will create it)"
+  echo "  ⚠️  .githooks/ directory — not present (installer will create it)"
+  PASS=$((PASS + 1))
 fi
 
 # Summary
