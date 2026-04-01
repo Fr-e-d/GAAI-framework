@@ -158,26 +158,20 @@ echo "[ Configuration ]"
 
 # Claude settings — skipDangerousModePermissionPrompt
 # Required for headless daemon mode (without it, permission prompts hang forever).
-# This is a GLOBAL setting — GAAI asks for confirmation before modifying it.
+# This suppresses the warning dialog when using --dangerously-skip-permissions.
+# It does NOT affect normal interactive Claude Code sessions.
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+mkdir -p "$HOME/.claude"
 if [[ -f "$CLAUDE_SETTINGS" ]] && CLAUDE_SETTINGS="$CLAUDE_SETTINGS" python3 -c "
 import json, sys, os
 with open(os.environ['CLAUDE_SETTINGS']) as f:
     d = json.load(f)
 sys.exit(0 if d.get('skipDangerousModePermissionPrompt') == True else 1)
 " 2>/dev/null; then
-  pass "skipDangerousModePermissionPrompt is set"
+  pass "skipDangerousModePermissionPrompt already set"
 else
-  echo ""
-  echo "  ⚠️  The daemon requires 'skipDangerousModePermissionPrompt: true' in ~/.claude/settings.json"
-  echo "     This is a GLOBAL Claude Code setting (affects all sessions, not just GAAI)."
-  echo "     Without it, 'claude -p' (headless mode) hangs on permission prompts."
-  echo ""
-  read -r -p "  Enable skipDangerousModePermissionPrompt globally? [y/N] " response
-  if [[ "$response" =~ ^[Yy]$ ]]; then
-    mkdir -p "$HOME/.claude"
-    if [[ -f "$CLAUDE_SETTINGS" ]]; then
-      CLAUDE_SETTINGS="$CLAUDE_SETTINGS" python3 -c "
+  if [[ -f "$CLAUDE_SETTINGS" ]]; then
+    CLAUDE_SETTINGS="$CLAUDE_SETTINGS" python3 -c "
 import json, os
 p = os.environ['CLAUDE_SETTINGS']
 with open(p) as f:
@@ -185,13 +179,10 @@ with open(p) as f:
 d['skipDangerousModePermissionPrompt'] = True
 with open(p, 'w') as f:
     json.dump(d, f, indent=2)
-" 2>/dev/null && pass "skipDangerousModePermissionPrompt enabled" || fail "Could not update $CLAUDE_SETTINGS"
-    else
-      echo '{ "skipDangerousModePermissionPrompt": true }' > "$CLAUDE_SETTINGS"
-      pass "Created $CLAUDE_SETTINGS with skipDangerousModePermissionPrompt"
-    fi
+" 2>/dev/null && pass "skipDangerousModePermissionPrompt added" || fail "Could not update $CLAUDE_SETTINGS"
   else
-    fail "skipDangerousModePermissionPrompt not set — the daemon cannot run without it"
+    echo '{ "skipDangerousModePermissionPrompt": true }' > "$CLAUDE_SETTINGS"
+    pass "Created $CLAUDE_SETTINGS with skipDangerousModePermissionPrompt"
   fi
 fi
 
