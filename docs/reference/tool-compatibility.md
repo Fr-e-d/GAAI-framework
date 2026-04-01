@@ -17,7 +17,9 @@ GAAI works with any AI coding tool that can read files. This document covers set
 | Windsurf | ❌ | Via `AGENTS.md` | Manual | `AGENTS.md` |
 | Any other | ❌ | Manual | Manual | Read `.gaai/README.md` directly |
 
-**Claude Code** has the deepest integration. All other tools provide full GAAI capability via manual activation — the framework works identically, the difference is convenience.
+**Claude Code** has the deepest integration. All other tools provide full GAAI capability for Discovery and governance via manual activation — the difference is convenience.
+
+> **Delivery Daemon:** Regardless of which tool you use for Discovery, the Delivery Daemon requires **Claude Code CLI (`claude` in PATH)** as a runtime dependency. Discovery and governance work with any tool in the matrix above; autonomous delivery requires Claude Code CLI.
 
 ---
 
@@ -151,17 +153,27 @@ For any tool that supports reading project files:
 1. Copy the relevant content from `.gaai/core/compat/claude-code.md` or `.gaai/core/compat/windsurf.md` as a system prompt or instructions file for your tool
 2. Use manual prompts to activate agents
 
-The framework functions correctly regardless of how it's activated — the files are the system. The compat adapters only make activation more convenient.
+The framework's governance files are the system — they work with any AI tool for Discovery and governance. The compat adapters only make activation more convenient. The one exception: the Delivery Daemon requires Claude Code CLI (`claude` in PATH) as a runtime dependency for autonomous delivery.
 
 ---
 
-## The Framework Is Tool-Agnostic
+## Tool Compatibility: 3-Tier Model
 
-GAAI's governance is in the files, not in the tool. Changing AI tools requires only:
+GAAI tool compatibility follows a 3-tier model:
+
+| Tier | Mode | Requirement |
+|---|---|---|
+| 1 | Discovery / governance (interactive) | Any AI coding tool or MCP client |
+| 2 | Delivery interactive (manual) | Any AI coding tool or MCP client |
+| 3 | Delivery autonomous (daemon) | Claude Code CLI (`claude` in PATH) |
+
+**Discovery and governance are tool-agnostic.** GAAI's governance is in the files. Changing AI tools for Discovery or governance requires only:
 1. Deploying the right compat adapter (the installer handles this)
 2. Using the appropriate activation method (slash command vs manual prompt)
 
 All memory, rules, backlog, and artefacts remain unchanged.
+
+**Autonomous delivery requires Claude Code CLI.** The Delivery Daemon runs `claude -p` as a background OS process. This is a runtime dependency — not a tool choice. You can use any AI tool for Discovery and still use autonomous delivery, as long as Claude Code CLI is installed locally. This applies to both GAAI OSS and GAAI Cloud users.
 
 ---
 
