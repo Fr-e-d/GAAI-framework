@@ -83,6 +83,8 @@ Delivery **must NOT**:
 
 Discovery and Delivery must **never coexist in the same context window**. The Delivery Agent always runs as an isolated `claude -p` process launched by the daemon (via tmux or Terminal.app) — a completely separate OS process with its own context containing only its agent definition, the workflow, rules, and the story context bundle. This prevents cross-contamination between human-facing reasoning (Discovery) and pure execution (Delivery).
 
+**Runtime dependency, not a tool restriction:** `claude -p` is the execution runtime for autonomous delivery (Tier 3 of the 3-tier compatibility model). The user's choice of AI coding tool for Discovery — Claude Code, Cursor, Windsurf, or any MCP client — is independent. The daemon requires the Claude Code CLI (`claude` binary in PATH, local) as a hard dependency. Discovery and Delivery interactive (tiers 1–2) work with any tool. This requirement applies to both GAAI OSS and GAAI Cloud.
+
 Sub-agents spawned by Delivery (Planning, Implementation, QA, Specialists) each run in their own isolated context with a targeted context bundle. See `agents/delivery.agent.md` for team composition and bundle definitions.
 
 ## 🗂️ Backlog Orchestration

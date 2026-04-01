@@ -15,6 +15,8 @@
 
 `/gaai-deliver` and `/gaai-daemon` are aliases — both launch the same daemon infrastructure.
 
+Discovery works with any AI coding tool or MCP client (Claude Code, Cursor, Windsurf, and more). The daemon requires the Claude Code CLI (`claude` binary in PATH) as a runtime dependency — not a preference. See `compat/COMPAT.md` for the full 3-tier compatibility model.
+
 That's the day-1 surface area. Everything else (47 skills, 8 rule files, 4 workflows) is loaded on demand — you never interact with it directly.
 
 **Information preservation:** When Discovery delegates work to sub-agents, it compiles a *Discovery Session Brief* — a structured extraction of all conversation intelligence (decisions, observations, trade-offs, constraints). This prevents context loss between agents. See [`agents/discovery.agent.md`](agents/discovery.agent.md).
@@ -51,6 +53,8 @@ Override concurrency: `/gaai-deliver --max-concurrent 3`
 
 The daemon polls for `refined` stories and delivers them in parallel via tmux — each delivery runs in its own tmux session with real-time visibility.
 Full reference: see `GAAI.md` → "Branch Model & Automation".
+
+**Runtime requirement:** The daemon requires the Claude Code CLI (`claude` binary in PATH). This is a hard dependency — not a recommendation. Discovery and manual Delivery work with any AI coding tool; this requirement applies only to autonomous delivery.
 
 > **Tested on:** macOS (Apple Silicon). Linux and WSL (Windows) are expected to work but not yet validated — issues and feedback welcome.
 
