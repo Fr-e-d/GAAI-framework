@@ -6,21 +6,22 @@
 |---|---|
 | `/gaai-bootstrap` | Scan codebase, extract decisions, build memory files |
 | `/gaai-discover` | Start Discovery — clarify intent, create Stories with acceptance criteria |
-| `/gaai-deliver` | Start Delivery — execute the next refined Story from the backlog |
+| `/gaai-deliver` | Start the Delivery Daemon — deliver refined Stories autonomously via tmux |
 | `/gaai-status` | Show current backlog state and memory summary |
-| `/gaai-daemon` | Start/stop/monitor the Delivery Daemon |
+
+> `/gaai-deliver` and `/gaai-daemon` are aliases — both launch the same daemon.
 
 ## Starting a Session
 
 1. Run `/gaai-discover` and describe what you want to build
 2. Discovery creates a Story with acceptance criteria and adds it to the backlog
-3. Run `/gaai-deliver` — the Delivery Agent handles planning, implementation, and QA
+3. Run `/gaai-deliver` — starts the daemon, which delivers Stories autonomously in tmux
 
 ## Adding a Feature
 
 1. `/gaai-discover` — "I want to add [feature description]"
 2. Answer Discovery's clarifying questions until the Story is `refined`
-3. `/gaai-deliver` — Delivery picks up the Story and executes it autonomously
+3. `/gaai-deliver` — daemon picks up the Story and delivers it in an isolated tmux session
 
 ## Key Files
 
@@ -39,13 +40,14 @@ Nothing gets built that isn't in the backlog. Discovery decides *what*. Delivery
 
 ---
 
-## Daemon (Optional — autonomous delivery)
+## Daemon Options
 
-1. Create stories with `/gaai-discover`
-2. `/gaai-daemon` — starts the daemon (default: 3 concurrent slots, auto-opens monitoring)
-3. `/gaai-daemon --stop` — graceful shutdown
-
-Override concurrency: `/gaai-daemon --max-concurrent 5`
+```
+/gaai-deliver                          # start (default: 1 slot) + open monitor
+/gaai-deliver --max-concurrent 3       # 3 parallel deliveries
+/gaai-deliver --status                 # live monitoring dashboard
+/gaai-deliver --stop                   # graceful shutdown
+```
 
 One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`
 

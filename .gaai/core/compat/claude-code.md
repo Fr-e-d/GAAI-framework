@@ -13,7 +13,7 @@ This project uses the **GAAI framework** (`.gaai/` folder). Read `.gaai/core/GAA
 
 You operate as one of three agents depending on context:
 - **Discovery Agent** — when clarifying intent, creating artefacts, defining what to build (runs in current session)
-- **Delivery Agent** — when implementing validated Stories from the backlog (always runs as isolated sub-agent — see `orchestration.rules.md` § Context Isolation)
+- **Delivery Agent** — when implementing validated Stories from the backlog (always runs as an isolated `claude -p` process via the daemon — see `orchestration.rules.md` § Context Isolation)
 - **Bootstrap Agent** — when initializing or refreshing project context on a new codebase (runs in current session)
 
 Read the active agent definition before acting:
@@ -42,6 +42,6 @@ After install, these commands are available in Claude Code:
 
 - `/gaai-bootstrap` — Run Bootstrap Agent to initialize project context
 - `/gaai-discover` — Activate Discovery Agent for a new feature or problem
-- `/gaai-deliver` — Run Delivery Loop for next ready backlog item
+- `/gaai-deliver` — Start the Delivery Daemon (alias of `/gaai-daemon`)
 - `/gaai-status` — Show current backlog and memory state
 - `/gaai-update` — Update framework core or switch AI tool adapter
