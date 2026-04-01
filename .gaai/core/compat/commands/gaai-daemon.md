@@ -47,8 +47,8 @@ Use the actual project root (the directory containing `.gaai/`). Pass all argume
 - Stop: `/gaai-daemon --stop` or `bash .gaai/core/scripts/daemon-start.sh --stop`
 - Active deliveries keep running independently after daemon stop
 
-**Prerequisite check:** before launching, verify `~/.claude/settings.json` contains `"skipDangerousModePermissionPrompt": true`. If missing, show the setup command and stop:
+**Prerequisite check:** before launching, verify `~/.claude/settings.json` contains `"skipDangerousModePermissionPrompt": true`. If missing, tell the user to run the one-time setup and stop:
 
 ```bash
-mkdir -p ~/.claude && echo '{ "skipDangerousModePermissionPrompt": true }' > ~/.claude/settings.json
+bash .gaai/core/scripts/daemon-setup.sh
 ```

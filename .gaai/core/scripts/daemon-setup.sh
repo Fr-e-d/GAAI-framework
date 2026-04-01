@@ -157,36 +157,27 @@ echo ""
 echo "[ Configuration ]"
 
 # Claude settings — skipDangerousModePermissionPrompt
-# Note: this is a GLOBAL setting that affects all Claude Code sessions.
-# Required for headless daemon mode (without it, permission prompts hang).
+# Required for headless daemon mode (without it, permission prompts hang forever).
+# This is a GLOBAL setting — GAAI will NOT modify it automatically.
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
-mkdir -p "$HOME/.claude"
-if [[ -f "$CLAUDE_SETTINGS" ]]; then
-  if python3 -c "
+if [[ -f "$CLAUDE_SETTINGS" ]] && python3 -c "
 import json, sys, os
 with open(os.environ['CLAUDE_SETTINGS']) as f:
     d = json.load(f)
 sys.exit(0 if d.get('skipDangerousModePermissionPrompt') == True else 1)
-" 2>/dev/null; then
-    pass "skipDangerousModePermissionPrompt already set (global)"
-  else
-    if CLAUDE_SETTINGS="$CLAUDE_SETTINGS" python3 -c "
-import json, os
-p = os.environ['CLAUDE_SETTINGS']
-with open(p) as f:
-    d = json.load(f)
-d['skipDangerousModePermissionPrompt'] = True
-with open(p, 'w') as f:
-    json.dump(d, f, indent=2)
-" 2>/dev/null; then
-      pass "skipDangerousModePermissionPrompt added (global — affects all Claude Code sessions)"
-    else
-      fail "Could not update $CLAUDE_SETTINGS — check permissions on $HOME/.claude/"
-    fi
-  fi
+" CLAUDE_SETTINGS="$CLAUDE_SETTINGS" 2>/dev/null; then
+  pass "skipDangerousModePermissionPrompt is set"
 else
-  echo '{ "skipDangerousModePermissionPrompt": true }' > "$CLAUDE_SETTINGS"
-  pass "Created $CLAUDE_SETTINGS with skipDangerousModePermissionPrompt (global)"
+  fail "skipDangerousModePermissionPrompt not set — the daemon cannot run without it"
+  echo ""
+  echo "    This is a GLOBAL Claude Code setting (affects all sessions, not just GAAI)."
+  echo "    The daemon uses 'claude -p' (headless), which hangs on permission prompts."
+  echo ""
+  echo "    To enable, run:"
+  echo ""
+  echo "      mkdir -p ~/.claude && python3 -c \\"
+  echo "        \"import json, pathlib; p=pathlib.Path('$CLAUDE_SETTINGS'); d=json.loads(p.read_text()) if p.exists() else {}; d['skipDangerousModePermissionPrompt']=True; p.write_text(json.dumps(d,indent=2))\" "
+  echo ""
 fi
 
 # git hooksPath (if .githooks/ exists)
