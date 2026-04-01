@@ -36,7 +36,7 @@ Delivery:   "E03S01 complete. No further Stories in backlog."
 Two slash commands. Two **isolated contexts**. Discovery reasons — it never executes. Delivery executes — it never decides scope. They never share a context window — Delivery runs as a separate OS process (`claude -p` via tmux), so system prompts can't contaminate each other. The backlog is the contract between them.
 
 > `/gaai-deliver` and `/gaai-daemon` are aliases — both launch the same daemon infrastructure.
-> Multiple stories? The daemon polls your backlog and delivers them in parallel. [See Automation →](#automation-optional)
+> Multiple stories? The daemon polls your backlog and delivers them in parallel. [See Delivery Daemon →](#delivery-daemon)
 
 > [Full walkthrough in Quick Start](docs/guides/quick-start.md)
 
@@ -142,9 +142,9 @@ git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai && \
 
 ---
 
-## Automation (Optional)
+## Delivery Daemon
 
-`/gaai-deliver` launches the Delivery Daemon, which delivers Stories autonomously. If your project uses git with a `staging` branch:
+`/gaai-deliver` launches the Delivery Daemon, which delivers Stories autonomously. Requires a git repo with a `staging` branch:
 
 - Polls the backlog for `refined` stories
 - Launches parallel Claude Code sessions in tmux (default: 1 slot, configurable)
