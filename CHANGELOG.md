@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.15.0] - 2026-03-26
 
 ### Fixed
+- refactor(core): make /gaai-deliver an alias of /gaai-daemon
 - chore: GAAI core independent evaluation principle + E10S08 daemon artifacts
 - chore: regenerate skills indices after community-engage v5
 - fix(gaai): monitor pane layout — 55% split, mouse scroll, clear scrollback

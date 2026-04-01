@@ -81,7 +81,7 @@ Delivery **must NOT**:
 
 ### Context Isolation (Non-Negotiable)
 
-Discovery and Delivery must **never coexist in the same context window**. The Delivery Agent always runs as an isolated sub-agent with a clean context — only its own agent definition, the workflow, rules, and the story context bundle. This prevents cross-contamination between human-facing reasoning (Discovery) and pure execution (Delivery).
+Discovery and Delivery must **never coexist in the same context window**. The Delivery Agent always runs as an isolated `claude -p` process launched by the daemon (via tmux or Terminal.app) — a completely separate OS process with its own context containing only its agent definition, the workflow, rules, and the story context bundle. This prevents cross-contamination between human-facing reasoning (Discovery) and pure execution (Delivery).
 
 Sub-agents spawned by Delivery (Planning, Implementation, QA, Specialists) each run in their own isolated context with a targeted context bundle. See `agents/delivery.agent.md` for team composition and bundle definitions.
 

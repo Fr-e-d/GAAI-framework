@@ -10,8 +10,10 @@
 |---|---|
 | `/gaai-bootstrap` | Initialize project context on an existing codebase |
 | `/gaai-discover` | Activate Discovery Agent — clarify intent, create Stories |
-| `/gaai-deliver` | Run Delivery Loop — implement next ready Story end-to-end |
+| `/gaai-deliver` | Start the Delivery Daemon — deliver refined Stories autonomously via tmux |
 | `/gaai-status` | Show backlog and memory state |
+
+`/gaai-deliver` and `/gaai-daemon` are aliases — both launch the same daemon infrastructure.
 
 That's the day-1 surface area. Everything else (47 skills, 8 rule files, 4 workflows) is loaded on demand — you never interact with it directly.
 
@@ -37,15 +39,17 @@ Customization lives in `project/` — add your rules, skills, agents, and memory
 
 ---
 
-## Optional: Autonomous Delivery
+## Delivery Daemon
 
-If your project uses git with a `staging` branch, the **Delivery Daemon** can automate everything:
+If your project uses git with a `staging` branch, the **Delivery Daemon** delivers refined Stories autonomously:
 
 1. One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`
-2. `/gaai-daemon` — starts the daemon (3 concurrent slots, auto-opens monitoring)
-3. `/gaai-daemon --stop` — graceful shutdown
+2. `/gaai-deliver` — starts the daemon (default: 1 slot, auto-opens monitoring)
+3. `/gaai-deliver --stop` — graceful shutdown
 
-The daemon polls for `refined` stories and delivers them in parallel — no human in the loop.
+Override concurrency: `/gaai-deliver --max-concurrent 3`
+
+The daemon polls for `refined` stories and delivers them in parallel via tmux — each delivery runs in its own tmux session with real-time visibility.
 Full reference: see `GAAI.md` → "Branch Model & Automation".
 
 > **Tested on:** macOS (Apple Silicon). Linux and WSL (Windows) are expected to work but not yet validated — issues and feedback welcome.
