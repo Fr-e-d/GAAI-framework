@@ -107,6 +107,8 @@ The **Delivery Daemon** automates delivery end-to-end:
 - Monitors session health via heartbeat and `--max-turns` safety limits
 - Auto-opens a monitoring dashboard (tmux split: daemon config + active deliveries)
 
+**Runtime dependency:** The daemon requires the Claude Code CLI (`claude` binary in PATH, local). This applies whether you are using GAAI OSS or GAAI Cloud — the LLM runs in your tool, not on the server. Discovery and Delivery interactive work with any AI coding tool; the Claude CLI requirement is specific to autonomous delivery. See `core/compat/COMPAT.md` for the full 3-tier compatibility model.
+
 Usage: `/gaai-daemon` to start, `/gaai-daemon --stop` to stop. One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`.
 
 Git hooks are managed via dispatchers in `.githooks/` that delegate to scripts in `.gaai/core/hooks/<hook>.d/` (framework) and `.gaai/project/hooks/<hook>.d/` (project-specific). The installer (`install.sh`) sets up all dispatchers automatically.

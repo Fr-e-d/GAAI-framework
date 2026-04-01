@@ -6,6 +6,20 @@ The installer (`core/scripts/install.sh`) deploys the correct adapter to the rig
 
 ---
 
+## Delivery Runtime
+
+GAAI tool compatibility follows a 3-tier model. This applies to both GAAI OSS and GAAI Cloud.
+
+| Tier | Mode | Tool requirement |
+|---|---|---|
+| 1 | Discovery / governance (interactive) | Any AI coding tool or MCP client |
+| 2 | Delivery interactive (manual) | Any AI coding tool or MCP client |
+| 3 | Delivery autonomous (daemon) | Claude Code CLI (`claude` binary) |
+
+Discovery (Tier 1) and Delivery interactive (Tier 2) work with any AI coding tool — Cursor, Windsurf, Codex CLI, Gemini CLI, or any tool with MCP support. The daemon (Tier 3) requires the Claude Code CLI (`claude` binary in PATH, local). This is a hard runtime dependency — not a preference or recommendation. Users without Claude CLI can still use GAAI for Discovery and manual Delivery (tiers 1–2). This requirement applies to both GAAI OSS and GAAI Cloud: even Cloud users need Claude CLI locally for autonomous delivery (the LLM runs client-side, not on the server).
+
+---
+
 ## Compatibility Matrix
 
 ### Deep Integration (slash commands, auto-loaded context, SKILL.md auto-discovery)
