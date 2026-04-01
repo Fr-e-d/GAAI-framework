@@ -23,7 +23,7 @@ Discovery:  "Got it. Checking memory for existing middleware patterns..."
 Discovery:  "Done. E03S01 is ready. Run /gaai-deliver when you're ready."
 
 You:        /gaai-deliver
-            → Spawns an isolated Delivery Agent (clean context — no Discovery bleed)
+            → Launches the Delivery Daemon (isolated claude -p process via tmux)
 Delivery:   → Reads E03S01 from backlog
             → Loads middleware conventions from memory
             → Planning Sub-Agent: produces execution plan
@@ -33,10 +33,10 @@ Delivery:   → Reads E03S01 from backlog
 Delivery:   "E03S01 complete. No further Stories in backlog."
 ```
 
-Two slash commands. Two **isolated contexts**. Discovery reasons — it never executes. Delivery executes — it never decides scope. They never share a context window, so system prompts can't contaminate each other. The backlog is the contract between them.
+Two slash commands. Two **isolated contexts**. Discovery reasons — it never executes. Delivery executes — it never decides scope. They never share a context window — Delivery runs as a separate OS process (`claude -p` via tmux), so system prompts can't contaminate each other. The backlog is the contract between them.
 
-> **Want it fully autonomous?** The Delivery Daemon polls your backlog and auto-delivers
-> stories in parallel — no human in the loop. [See Automation →](#automation-optional)
+> `/gaai-deliver` and `/gaai-daemon` are aliases — both launch the same daemon infrastructure.
+> Multiple stories? The daemon polls your backlog and delivers them in parallel. [See Automation →](#automation-optional)
 
 > [Full walkthrough in Quick Start](docs/guides/quick-start.md)
 
@@ -61,7 +61,7 @@ AI coding tools are fast — but without governance, speed creates drift: agents
 
 **Discovery** — you talk to the Discovery Agent in your current session. Clarify what to build. Output: a Story with acceptance criteria in the backlog. Discovery reasons. It does not execute.
 
-**Delivery** — always runs in an **isolated context**. `/gaai-deliver` spawns a separate agent with a clean context window — no Discovery residue, no conversation history bleed. The Delivery Agent orchestrates specialized sub-agents (Planning, Implementation, QA) per Story. No improvisation. No scope drift. No context contamination.
+**Delivery** — always runs in an **isolated process**. `/gaai-deliver` launches the Delivery Daemon, which runs each Story in its own `claude -p` session via tmux — a completely separate OS process with no Discovery residue and no conversation history bleed. The Delivery Agent orchestrates specialized sub-agents (Planning, Implementation, QA) per Story. Real-time visibility via `tmux attach`. No improvisation. No scope drift. No context contamination.
 
 **The backlog is the contract.** Nothing gets built that isn't in it.
 
@@ -144,10 +144,10 @@ git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai && \
 
 ## Automation (Optional)
 
-GAAI works manually with `/gaai-deliver`. But if your project uses git with a `staging` branch, the **Delivery Daemon** runs deliveries autonomously:
+`/gaai-deliver` launches the Delivery Daemon, which delivers Stories autonomously. If your project uses git with a `staging` branch:
 
 - Polls the backlog for `refined` stories
-- Launches parallel Claude Code sessions (default: 3 concurrent slots)
+- Launches parallel Claude Code sessions in tmux (default: 1 slot, configurable)
 - Coordinates across devices via git push
 - Monitors health, retries failures, archives completed work
 - Auto-opens a monitoring dashboard (tmux split: daemon config + active deliveries)
@@ -163,10 +163,13 @@ bash .gaai/core/scripts/daemon-setup.sh
 **Usage:**
 
 ```
-/gaai-daemon                    # start daemon (3 concurrent slots, auto-opens monitor)
-/gaai-daemon --max-concurrent 5 # override concurrency
-/gaai-daemon --stop             # graceful shutdown
+/gaai-deliver                       # start daemon (1 slot, auto-opens monitor)
+/gaai-deliver --max-concurrent 3    # 3 parallel deliveries
+/gaai-deliver --status              # live monitoring dashboard
+/gaai-deliver --stop                # graceful shutdown
 ```
+
+> `/gaai-deliver` and `/gaai-daemon` are aliases — use whichever you prefer.
 
 > Requires: git repo, `staging` branch, an AI coding tool with `/gaai-*` slash commands (e.g. [Claude Code](https://claude.com/claude-code)), python3, tmux (recommended) or Terminal.app (macOS fallback).
 >
