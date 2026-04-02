@@ -9,7 +9,7 @@ Switch GAAI backend between local OSS mode and GAAI Cloud.
 ## Subcommands
 
 - `/gaai-switch cloud` — Connect to GAAI Cloud: install MCP config, authenticate, migrate local contexts
-- `/gaai-switch oss` — *(coming soon — E18S04)* Revert to local OSS mode
+- `/gaai-switch oss` — Revert to local OSS mode: export cloud data, restore local contexts
 
 ---
 
@@ -285,9 +285,260 @@ If Step 7 reports 0 total items migrated (all calls failed):
 
 ---
 
-## Notes for E18S04
+# /gaai-switch oss
 
-This file is designed to accommodate the `/gaai-switch oss` subcommand in E18S04.  
-The `## Subcommands` section at the top already lists `oss` as coming soon.  
-E18S04 will add a `# /gaai-switch oss` section below the `cloud` section in this file.  
-Do not add that section here.
+Revert this project from GAAI Cloud back to local OSS mode. Exports all cloud data via MCP tools, writes it to local context files, removes the cloud MCP configuration, and sets the backend flag to local.
+
+## What This Does
+
+1. Guards: verifies cloud is active; verifies not already on OSS
+2. Checks or installs `.gaai/core/` (OSS framework core)
+3. Exports all memory entries from cloud to `contexts/memory/`
+4. Exports all backlog items from cloud to `contexts/backlog/active.backlog.yaml`
+5. Exports all artefacts from cloud to `contexts/artefacts/`
+6. Reports export progress
+7. Removes `gaai-cloud` from `.claude/settings.json`
+8. Writes `backend: local` to `.gaai/project/config.yaml`
+
+## When to Use
+
+- You want to work offline or without a GAAI Cloud subscription
+- You need to restore full local context files from cloud
+- You are migrating to a different machine and want a local snapshot first
+
+## Prerequisites
+
+- GAAI Cloud is currently active (`.claude/settings.json` contains `gaai-cloud` under `mcpServers`)
+- `git` is available (required if `.gaai/core/` must be installed from the OSS repository)
+
+---
+
+## Instructions for Claude Code
+
+You are running `/gaai-switch oss`. Follow every step in order. Do not skip steps. If any export step fails before Step 7, execute the **Rollback: Export Failure** section and stop.
+
+---
+
+### Guard 1 — Verify cloud is active (AC1)
+
+Check whether `.claude/settings.json` exists and contains a `"gaai-cloud"` key under `mcpServers`.
+
+If the key is absent (file does not exist, or `mcpServers` is absent, or `gaai-cloud` is not present), stop immediately and tell the user:
+
+> **Error:** GAAI Cloud not active. Already on OSS.
+
+Do not proceed.
+
+---
+
+### Guard 2 — Verify backend flag is not already local
+
+Check whether `.gaai/project/config.yaml` exists and contains `backend: local`.
+
+If it does, stop immediately and tell the user:
+
+> **Error:** GAAI Cloud not active. Already on OSS.
+
+Do not proceed.
+
+---
+
+### Step 1 — Check or install `.gaai/core/` (AC2)
+
+Check whether `.gaai/core/` exists in the project root.
+
+**If `.gaai/core/` is absent** (user started on Cloud, never had OSS locally):
+
+Tell the user:
+> `.gaai/core/` not found. Installing GAAI OSS framework from the OSS repository.
+
+Run:
+```bash
+git clone https://github.com/gaai-dev/gaai-oss.git /tmp/gaai-oss-install && bash /tmp/gaai-oss-install/.gaai/core/scripts/install.sh --target . --tool claude-code --yes
+```
+
+If the clone or install fails (non-zero exit), execute **Rollback: Core Install Failure** (AC16) and stop.
+
+Tell the user:
+> `.gaai/core/` installed successfully.
+
+**If `.gaai/core/` is already present** (user previously had OSS before switching to Cloud):
+
+Tell the user:
+> `.gaai/core/` found. Updating to latest version.
+
+Run:
+```bash
+bash .gaai/core/scripts/install.sh --target . --tool claude-code --yes
+```
+
+If the update fails (non-zero exit), continue with the existing `.gaai/core/` — do not abort. Log a warning:
+> Warning: core update failed — proceeding with existing version. Run `/gaai-update oss` separately to retry.
+
+---
+
+### Step 2 — Export memory entries (AC3)
+
+**Scope protection assertion (AC9):** The following directories are NEVER read, modified, or deleted during this command:
+- `.gaai/project/skills/`
+- `.gaai/project/agents/`
+- `.gaai/project/workflows/`
+- `.gaai/project/scripts/`
+- `.gaai/project/hooks/`
+
+Only `.gaai/project/contexts/` is written to.
+
+**AC10 check:** If `.gaai/project/contexts-pre-cloud-backup/` exists, do NOT overwrite or delete it. All writes go to `.gaai/project/contexts/` only. If `contexts/` does not exist, create it.
+
+Call `gaai_memory_retrieve` for each known memory category. The standard categories are: `project`, `decisions`, `patterns`, `constraints`, `goals`, `team`, `domain`. Also call with `category: all` or an equivalent wildcard if the tool supports it — to capture any non-standard categories.
+
+For each memory entry returned:
+1. Determine the file path: `.gaai/project/contexts/memory/{category}/{topic}.md`
+2. Write the entry as a markdown file with YAML frontmatter:
+   ```markdown
+   ---
+   category: {category}
+   topic: {topic}
+   tags: {tags}
+   ---
+
+   {content}
+   ```
+3. If the write succeeds, add to the memory success list.
+4. If the write fails (disk error), add to the memory failure list. Do not abort — continue to the next entry.
+
+Keep a running count: `memory_exported` (successes), `memory_failed` (failures).
+
+If `gaai_memory_retrieve` itself returns a network or auth error, execute **Rollback: Export Failure** (AC15) and stop.
+
+---
+
+### Step 3 — Export backlog items (AC4)
+
+Call `gaai_backlog_list` to retrieve all backlog items.
+
+If the call returns a network or auth error, execute **Rollback: Export Failure** (AC15) and stop.
+
+Reconstruct `.gaai/project/contexts/backlog/active.backlog.yaml` from the returned items. Each item is written as a YAML entry preserving all fields verbatim — id, title, status, dependencies, tags (DEC-17). Example structure:
+
+```yaml
+backlog:
+  - id: {id}
+    title: {title}
+    status: {status}
+    dependencies: {dependencies}
+```
+
+If the backlog directory does not exist, create it before writing.
+
+Keep a count: `backlog_exported` (number of items written).
+
+---
+
+### Step 4 — Export artefacts (AC5)
+
+Call `gaai_artefact_read` for each artefact. If the tool supports listing, call a list operation first to enumerate artefact IDs, then read each one individually.
+
+If any `gaai_artefact_read` call returns a network or auth error, execute **Rollback: Export Failure** (AC15) and stop.
+
+For each artefact returned:
+1. Determine the file path from the artefact's `type`, `id`, or embedded path metadata. Write to `.gaai/project/contexts/artefacts/{type}/{id}.md` (or the path embedded in the artefact's content if present).
+2. Write the full content (frontmatter + body) verbatim.
+3. If the write succeeds, add to the artefact success list.
+4. If the write fails (disk error), add to the artefact failure list. Do not abort.
+
+Keep a running count: `artefacts_exported` (successes), `artefacts_failed` (failures).
+
+---
+
+### Step 5 — Report export progress (AC8)
+
+After all three export steps are complete, report:
+
+> **Export complete.**
+>
+> Exported: {memory_exported} memory entries, {backlog_exported} backlog items, {artefacts_exported} artefacts
+
+If any write failures occurred, list them:
+
+> **Write failures (data remains in cloud — not blocking):**
+> - memory: `{file path}` — `{error}`
+> - artefact: `{file path}` — `{error}`
+
+---
+
+### Step 6 — Remove gaai-cloud MCP configuration (AC6)
+
+Read `.claude/settings.json`. Remove the `"gaai-cloud"` key from the `mcpServers` object. If `mcpServers` becomes empty after removal, remove the `mcpServers` key entirely. Write the updated file back to disk.
+
+Tell the user:
+
+> `gaai-cloud` removed from `.claude/settings.json`. The MCP server is no longer configured.
+
+---
+
+### Step 7 — Write backend flag (AC7)
+
+Write `.gaai/project/config.yaml` with the following content:
+
+```yaml
+backend: local
+```
+
+If `.gaai/project/config.yaml` already exists, overwrite it.
+
+Read `.gaai/project/config.yaml` back and confirm it contains `backend: local`.
+
+Tell the user:
+
+> `backend: local` confirmed in `.gaai/project/config.yaml`. GAAI skills will now use local context files.
+
+---
+
+### Completion
+
+Tell the user:
+
+> **GAAI OSS switch complete.**
+>
+> Your project is now running in local OSS mode. All cloud data has been exported to `.gaai/project/contexts/`.
+>
+> Exported: {memory_exported} memory entries, {backlog_exported} backlog items, {artefacts_exported} artefacts
+>
+> Next: run `/gaai-status` to confirm the local backlog is visible.
+
+---
+
+## Rollback: Export Failure (AC15)
+
+If any of Steps 2, 3, or 4 returns a network or auth error from an MCP tool call:
+
+1. Do NOT proceed to Step 6 (MCP config removal).
+2. Do NOT proceed to Step 7 (config.yaml write).
+3. Leave `.claude/settings.json` unchanged — the `gaai-cloud` entry remains active.
+4. Leave `.gaai/project/config.yaml` unchanged (or absent if it did not exist before this command).
+5. Partial files may have been written to `.gaai/project/contexts/` — they are incomplete. Inform the user.
+6. Tell the user:
+
+> **Export failed.** The switch has been aborted.
+>
+> The GAAI Cloud MCP configuration is still active — no data has been lost from the cloud.
+>
+> Partial local files may have been written to `.gaai/project/contexts/` — these are incomplete. Delete them before retrying.
+>
+> Check your network connection and authentication, then run `/gaai-switch oss` again.
+
+---
+
+## Rollback: Core Install Failure (AC16)
+
+If Step 1 fails to install `.gaai/core/` from the OSS repository (non-zero exit from git clone or install script):
+
+1. Do NOT proceed to any export steps.
+2. Do NOT modify `.claude/settings.json`.
+3. Do NOT modify `.gaai/project/config.yaml`.
+4. Tell the user:
+
+> **Error:** `.gaai/core/` installation failed. The switch has been aborted.
+>
+> Check your network connection and git access to the GAAI OSS repository, then run `/gaai-switch oss` again.
