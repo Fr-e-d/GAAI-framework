@@ -29,12 +29,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Derive canonical absolute path and Claude Code memory location
-TARGET_ABS=$(cd "$TARGET" && pwd)
-CLAUDE_SLUG=$(echo "$TARGET_ABS" | tr '/' '-')
-CLAUDE_MEM_DIR="$HOME/.claude/projects/$CLAUDE_SLUG/memory"
-CLAUDE_MEM_FILE="$CLAUDE_MEM_DIR/MEMORY.md"
-
 PASS=0
 FAIL=0
 
@@ -126,89 +120,13 @@ else
   check ".githooks/ directory" "not present (installer will create it)"
 fi
 
-# 7. Claude Code memory integration
+# 7. Cursor integration
 echo ""
-echo "[ Claude Code ]"
-CLAUDE_DETECTED=false
-if [[ -d "$HOME/.claude" ]] || [[ -f "$TARGET/CLAUDE.md" ]]; then
-  CLAUDE_DETECTED=true
-  check "Claude Code detected (~/.claude/ or CLAUDE.md found)" "ok"
+echo "[ Cursor Integration ]"
+if [[ -d "$TARGET/.cursor" ]]; then
+  check "Cursor detected (.cursor/ found) — memory integration will be configured by installer" "ok"
 else
-  echo "  ⏭  Claude Code not detected — skipping memory integration"
-fi
-
-if [[ "$CLAUDE_DETECTED" == true ]]; then
-  # Ensure memory directory and file exist
-  mkdir -p "$CLAUDE_MEM_DIR"
-  [[ -f "$CLAUDE_MEM_FILE" ]] || touch "$CLAUDE_MEM_FILE"
-
-  # Idempotency check (AC4)
-  if grep -q "GAAI-MEMORY-POINTER" "$CLAUDE_MEM_FILE"; then
-    check "GAAI memory pointer already configured — skipping" "ok"
-  else
-    # Append pointer block (AC2, AC3)
-    cat >> "$CLAUDE_MEM_FILE" << 'GAAI_POINTER'
-
-<!-- GAAI-MEMORY-POINTER -->
-## GAAI Project Memory
-
-This project uses GAAI for governed memory management.
-
-**Source of truth:** `.gaai/project/contexts/memory/index.md`
-Read this index FIRST to know what context exists before acting.
-
-**Rules:**
-1. Project decisions, architecture, strategy, patterns → GAAI memory (`.gaai/project/contexts/memory/`)
-2. This tool's native memory → ONLY for tool-specific behavioral feedback (corrections, preferences)
-3. NEVER duplicate GAAI memory content here
-4. When asked to "log" or "remember" something about the project → write to GAAI memory, not here
-5. If you find project knowledge here that should be in GAAI memory → migrate it, then remove it from here
-GAAI_POINTER
-    check "GAAI memory pointer injected into $CLAUDE_MEM_FILE" "ok"
-  fi
-
-  # Scan for migration candidates (AC5)
-  MIGRATE_CANDIDATES=()
-  # Pattern 1: project_*.md files
-  for f in "$CLAUDE_MEM_DIR"/project_*.md; do
-    [[ -f "$f" ]] && MIGRATE_CANDIDATES+=("$f")
-  done
-  # Pattern 2: files whose first non-blank line starts with "# Project" (skip MEMORY.md)
-  for f in "$CLAUDE_MEM_DIR"/*.md; do
-    [[ -f "$f" ]] || continue
-    [[ "$(basename "$f")" == "MEMORY.md" ]] && continue
-    first_line=$(grep -m1 . "$f" 2>/dev/null || true)
-    if [[ "$first_line" == "# Project"* ]]; then
-      already=false
-      for c in "${MIGRATE_CANDIDATES[@]:-}"; do [[ "$c" == "$f" ]] && already=true; done
-      [[ "$already" == false ]] && MIGRATE_CANDIDATES+=("$f")
-    fi
-  done
-  MIGRATE_COUNT=${#MIGRATE_CANDIDATES[@]}
-
-  # Offer migration (AC5)
-  if [[ "$MIGRATE_COUNT" -gt 0 ]]; then
-    echo ""
-    echo "  Detected $MIGRATE_COUNT project-level file(s) in Claude Code memory."
-    printf "  Migrate to GAAI memory? [y/N] "
-    read -r -t 10 MIGRATE_ANSWER || true
-    if [[ "${MIGRATE_ANSWER:-N}" =~ ^[Yy]$ ]]; then
-      # Migration (AC6)
-      GAAI_MIGRATE_DIR="$TARGET/.gaai/project/contexts/memory/migrated"
-      if [[ ! -d "$TARGET/.gaai" ]]; then
-        echo "  ℹ  .gaai/ not yet installed — created migration target at $GAAI_MIGRATE_DIR"
-      fi
-      mkdir -p "$GAAI_MIGRATE_DIR"
-      for f in "${MIGRATE_CANDIDATES[@]}"; do
-        cp "$f" "$GAAI_MIGRATE_DIR/$(basename "$f")"
-        rm "$f"
-        echo "  ✅ Migrated: $(basename "$f")"
-      done
-      check "Migration complete: $MIGRATE_COUNT file(s) moved to .gaai/project/contexts/memory/migrated/" "ok"
-    else
-      echo "  ⏭  Migration skipped."
-    fi
-  fi
+  echo "  ⏭  Cursor not detected (.cursor/ not found) — memory integration will be skipped"
 fi
 
 # Summary
