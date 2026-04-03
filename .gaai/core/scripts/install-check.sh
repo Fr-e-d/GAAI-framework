@@ -220,6 +220,15 @@ else
   echo "  ⏭  Cursor not detected (.cursor/ not found) — memory integration will be skipped"
 fi
 
+# 9. Continue integration
+echo ""
+echo "[ Continue Integration ]"
+if [[ -d "$TARGET/.continue" ]]; then
+  check "Continue detected (.continue/ found) — memory integration will be configured by installer" "ok"
+else
+  echo "  ⏭  Continue not detected (.continue/ not found) — memory integration will be skipped"
+fi
+
 # Summary
 echo ""
 echo "====================="
