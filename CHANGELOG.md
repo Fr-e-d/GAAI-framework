@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.15.0] - 2026-03-26
 
 ### Fixed
+- docs(E24S03): delivery artefacts — plan, impl-report, qa-report, memory-delta
 - feat(E24S03): Continue memory integration in install scripts
 - docs(E24S02): delivery artefacts — plan, impl-report, qa-report, memory-delta
 - feat(E24S02): Cursor memory integration in install scripts
