@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.15.0] - 2026-03-26
 
 ### Fixed
+- feat(E24S01): Claude Code memory integration in install-check.sh
 - feat(E18S03): /gaai-switch cloud — migrate OSS contexts to cloud workspace
 - feat(E19S01): document 3-tier tool compatibility in core docs
 - fix(core): revert daemon-setup to auto-set skipDangerousModePermissionPrompt
