@@ -67,6 +67,8 @@ detect_tool() {
     echo "cursor"
   elif [[ -d "$dir/.windsurf" ]]; then
     echo "windsurf"
+  elif [[ -d "$dir/.continue" ]]; then
+    echo "continue"
   else
     echo ""
   fi
@@ -77,6 +79,7 @@ tool_label() {
     claude-code) echo "Claude Code" ;;
     cursor)      echo "Cursor"      ;;
     windsurf)    echo "Windsurf"    ;;
+    continue)    echo "Continue"    ;;
     other)       echo "Other (generic AGENTS.md)" ;;
     *)           echo "Unknown"     ;;
   esac
@@ -133,14 +136,16 @@ if [[ "$WIZARD" == "true" ]]; then
     echo "    1) Claude Code"
     echo "    2) Cursor"
     echo "    3) Windsurf"
-    echo "    4) Other (generic AGENTS.md)"
+    echo "    4) Continue"
+    echo "    5) Other (generic AGENTS.md)"
     echo ""
-    ask "Enter number [1-4]:" TOOL_CHOICE
+    ask "Enter number [1-5]:" TOOL_CHOICE
     case "$TOOL_CHOICE" in
       1) DETECTED="claude-code" ;;
       2) DETECTED="cursor"      ;;
       3) DETECTED="windsurf"    ;;
-      4) DETECTED="other"       ;;
+      4) DETECTED="continue"    ;;
+      5) DETECTED="other"       ;;
       *) warn "Invalid choice — defaulting to generic (AGENTS.md)"; DETECTED="other" ;;
     esac
   fi
@@ -248,14 +253,16 @@ if [[ -z "$TOOL" ]] && [[ "$YES" == "false" ]]; then
   echo "    1) Claude Code"
   echo "    2) Cursor"
   echo "    3) Windsurf"
-  echo "    4) Other (generic AGENTS.md)"
+  echo "    4) Continue"
+  echo "    5) Other (generic AGENTS.md)"
   echo ""
-  ask "Enter number [1-4]:" TOOL_CHOICE
+  ask "Enter number [1-5]:" TOOL_CHOICE
   case "$TOOL_CHOICE" in
     1) TOOL="claude-code" ;;
     2) TOOL="cursor"      ;;
     3) TOOL="windsurf"    ;;
-    4) TOOL="other"       ;;
+    4) TOOL="continue"    ;;
+    5) TOOL="other"       ;;
     *) warn "Invalid choice — defaulting to generic (AGENTS.md)"; TOOL="other" ;;
   esac
 elif [[ -z "$TOOL" ]]; then
@@ -355,6 +362,45 @@ Activate the correct agent based on context:
 - **Bootstrap Agent** → `.gaai/core/agents/bootstrap.agent.md`
 MDCEOF
       success ".cursor/rules/gaai-memory.mdc deployed"
+    fi
+    ;;
+
+  continue)
+    # gaai-memory.md → .continue/rules/ (plain Markdown — no MDC frontmatter for Continue)
+    mkdir -p "$TARGET/.continue/rules"
+
+    # Idempotent: skip if already exists (AC3, AC4)
+    GAAI_MEM_MD="$TARGET/.continue/rules/gaai-memory.md"
+    if [[ -f "$GAAI_MEM_MD" ]]; then
+      info ".continue/rules/gaai-memory.md already exists — skipping (AC3)"
+    else
+      cat > "$GAAI_MEM_MD" <<'MDEOF'
+# GAAI Project Memory
+
+This project uses GAAI (`.gaai/` folder) for governed memory management.
+
+## Source of Truth
+
+**Read `.gaai/project/contexts/memory/index.md` first** before any planning,
+artefact production, or implementation. This index is the authoritative registry
+of all project context.
+
+## Memory Rules
+
+1. Project decisions, architecture, strategy, patterns → GAAI memory (`.gaai/project/contexts/memory/`)
+2. Continue's own memory (`.continue/`) → ONLY for tool-specific behavioral feedback (corrections, preferences)
+3. NEVER duplicate GAAI memory content into Continue rules or notes
+4. When asked to "log" or "remember" something about the project → write to GAAI memory, not here
+5. If you find project knowledge in Continue-managed files that belongs in GAAI memory → migrate it, then remove it from here
+
+## Agent Identity
+
+Activate the correct agent based on context:
+- **Discovery Agent** → `.gaai/core/agents/discovery.agent.md`
+- **Delivery Agent** → `.gaai/core/agents/delivery.agent.md`
+- **Bootstrap Agent** → `.gaai/core/agents/bootstrap.agent.md`
+MDEOF
+      success ".continue/rules/gaai-memory.md deployed"
     fi
     ;;
 
@@ -463,6 +509,11 @@ case "$TOOL" in
   cursor)
     echo "  Next steps:"
     echo "    Tell Cursor: \"Read .gaai/core/agents/bootstrap.agent.md,"
+    echo "    then follow .gaai/core/workflows/context-bootstrap.workflow.md\""
+    ;;
+  continue)
+    echo "  Next steps:"
+    echo "    Tell Continue: \"Read .gaai/core/agents/bootstrap.agent.md,"
     echo "    then follow .gaai/core/workflows/context-bootstrap.workflow.md\""
     ;;
   *)
