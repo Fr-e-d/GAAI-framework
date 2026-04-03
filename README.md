@@ -63,6 +63,8 @@ AI coding tools are fast — but without governance, speed creates drift: agents
 
 **Delivery** — always runs in an **isolated process**. `/gaai-deliver` launches the Delivery Daemon, which runs each Story in its own `claude -p` session via tmux — a completely separate OS process with no Discovery residue and no conversation history bleed. The Delivery Agent orchestrates specialized sub-agents (Planning, Implementation, QA) per Story. Real-time visibility via `tmux attach`. No improvisation. No scope drift. No context contamination.
 
+`claude -p` (Claude Code CLI) is a **runtime dependency** for autonomous delivery. The daemon requires the `claude` binary in PATH. This applies whether you use GAAI OSS or GAAI Cloud — Discovery and governance are tool-agnostic, autonomous delivery is not.
+
 **The backlog is the contract.** Nothing gets built that isn't in it.
 
 ```
@@ -171,7 +173,9 @@ bash .gaai/core/scripts/daemon-setup.sh
 
 > `/gaai-deliver` and `/gaai-daemon` are aliases — use whichever you prefer.
 
-> Requires: git repo, `staging` branch, an AI coding tool with `/gaai-*` slash commands (e.g. [Claude Code](https://claude.com/claude-code)), python3, tmux (recommended) or Terminal.app (macOS fallback).
+> Requires: git repo, `staging` branch, **Claude Code CLI (`claude` in PATH)**, python3, tmux (recommended) or Terminal.app (macOS fallback).
+>
+> **Note:** The Delivery Daemon requires the `claude` binary regardless of which AI tool you use for Discovery. Discovery and governance work with any tool — autonomous delivery requires Claude Code CLI.
 >
 > **Tested on:** macOS (Apple Silicon). Linux and WSL (Windows) are expected to work but not yet validated — issues and feedback welcome.
 
@@ -197,7 +201,7 @@ bash .gaai/core/scripts/daemon-setup.sh
 | Windsurf | `AGENTS.md` |
 | Any other | Read `.gaai/core/README.md` directly |
 
-One canonical source (`.gaai/`). Thin adapters per tool. No duplication. The framework functions identically across all tools — the difference is activation convenience, not capability.
+One canonical source (`.gaai/`). Thin adapters per tool. No duplication. Discovery, governance, and manual delivery work with any AI coding tool. Autonomous delivery (the Delivery Daemon) requires Claude Code CLI (`claude` in PATH) as a local runtime — this applies whether you use GAAI OSS or GAAI Cloud.
 
 > [Full compatibility details](docs/reference/tool-compatibility.md)
 
