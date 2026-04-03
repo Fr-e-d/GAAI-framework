@@ -316,6 +316,46 @@ case "$TOOL" in
     mkdir -p "$TARGET/.cursor/rules"
     cp "$COMPAT_DIR/cursor.mdc" "$TARGET/.cursor/rules/gaai.mdc"
     success ".cursor/rules/gaai.mdc deployed"
+
+    # gaai-memory.mdc → .cursor/rules/ (idempotent — skip if already exists)
+    GAAI_MEM_MDC="$TARGET/.cursor/rules/gaai-memory.mdc"
+    if [[ -f "$GAAI_MEM_MDC" ]]; then
+      info ".cursor/rules/gaai-memory.mdc already exists — skipping (AC4)"
+    else
+      cat > "$GAAI_MEM_MDC" <<'MDCEOF'
+---
+description: GAAI memory pointer — always active
+globs: ["**"]
+alwaysApply: true
+---
+
+# GAAI Project Memory
+
+This project uses GAAI (`.gaai/` folder) for governed memory management.
+
+## Source of Truth
+
+**Read `.gaai/project/contexts/memory/index.md` first** before any planning,
+artefact production, or implementation. This index is the authoritative registry
+of all project context.
+
+## Memory Rules
+
+1. Project decisions, architecture, strategy, patterns → GAAI memory (`.gaai/project/contexts/memory/`)
+2. Cursor's own memory (`.cursor/`) → ONLY for tool-specific behavioral feedback (corrections, preferences)
+3. NEVER duplicate GAAI memory content into Cursor rules or notes
+4. When asked to "log" or "remember" something about the project → write to GAAI memory, not here
+5. If you find project knowledge in Cursor-managed files that belongs in GAAI memory → migrate it, then remove it from here
+
+## Agent Identity
+
+Activate the correct agent based on context:
+- **Discovery Agent** → `.gaai/core/agents/discovery.agent.md`
+- **Delivery Agent** → `.gaai/core/agents/delivery.agent.md`
+- **Bootstrap Agent** → `.gaai/core/agents/bootstrap.agent.md`
+MDCEOF
+      success ".cursor/rules/gaai-memory.mdc deployed"
+    fi
     ;;
 
   windsurf|other)
