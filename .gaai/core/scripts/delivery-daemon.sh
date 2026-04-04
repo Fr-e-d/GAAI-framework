@@ -1164,7 +1164,10 @@ while true; do
 
     retry_count=$(get_retry_count "$story_id")
     if (( retry_count > 0 )); then
-      log "${YELLOW}Ready story: $story_id — retry $retry_count/$MAX_RETRIES — launching...${NC}"
+      backoff=$(( retry_count * 60 ))
+      log "${YELLOW}Ready story: $story_id — retry $retry_count/$MAX_RETRIES — backing off ${backoff}s before launch...${NC}"
+      sleep "$backoff"
+      log "${YELLOW}$story_id — backoff complete, launching...${NC}"
     else
       log "${GREEN}Ready story: $story_id — launching delivery...${NC}"
     fi
