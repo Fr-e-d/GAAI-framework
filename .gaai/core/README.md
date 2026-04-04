@@ -10,10 +10,11 @@
 |---|---|
 | `/gaai-bootstrap` | Initialize project context on an existing codebase |
 | `/gaai-discover` | Activate Discovery Agent — clarify intent, create Stories |
-| `/gaai-deliver` | Start the Delivery Daemon — deliver refined Stories autonomously via tmux |
+| `/gaai-deliver` | Deliver the next refined Story in the current session (interactive or headless) |
+| `/gaai-daemon` | Start the Delivery Daemon — polls backlog, delivers Stories autonomously via tmux |
 | `/gaai-status` | Show backlog and memory state |
 
-`/gaai-deliver` and `/gaai-daemon` are aliases — both launch the same daemon infrastructure.
+`/gaai-deliver` delivers a single Story in the current context. `/gaai-daemon` launches a background daemon that polls the backlog and delivers multiple Stories in parallel (each in its own tmux session).
 
 Discovery works with any AI coding tool or MCP client (Claude Code, Cursor, Windsurf, and more). The daemon requires the Claude Code CLI (`claude` binary in PATH) as a runtime dependency — not a preference. See `compat/COMPAT.md` for the full 3-tier compatibility model.
 
@@ -46,10 +47,10 @@ Customization lives in `project/` — add your rules, skills, agents, and memory
 If your project uses git with a `staging` branch, the **Delivery Daemon** delivers refined Stories autonomously:
 
 1. One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`
-2. `/gaai-deliver` — starts the daemon (default: 1 slot, auto-opens monitoring)
-3. `/gaai-deliver --stop` — graceful shutdown
+2. `/gaai-daemon` — starts the daemon (default: 1 slot, auto-opens monitoring)
+3. `/gaai-daemon --stop` — graceful shutdown
 
-Override concurrency: `/gaai-deliver --max-concurrent 3`
+Override concurrency: `/gaai-daemon --max-concurrent 3`
 
 The daemon polls for `refined` stories and delivers them in parallel via tmux — each delivery runs in its own tmux session with real-time visibility.
 Full reference: see `GAAI.md` → "Branch Model & Automation".
