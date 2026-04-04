@@ -145,7 +145,7 @@ git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai && \
 
 ## Delivery Daemon
 
-`/gaai-daemon` launches the Delivery Daemon, which delivers Stories autonomously. `/gaai-deliver` delivers a single Story in the current session. Requires a git repo with a `staging` branch:
+`/gaai-deliver` delivers a single Story in the current session. `/gaai-daemon` launches the Delivery Daemon, which delivers Stories autonomously. Requires a git repo with a `staging` branch:
 
 - Polls the backlog for `refined` stories
 - Launches parallel Claude Code sessions in tmux (default: 1 slot, configurable)
