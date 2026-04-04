@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.15.0] - 2026-03-26
 
 ### Fixed
+- fix: enforce YAML safety rules + archive 157 done items
 - feat(E33S01): add exponential backoff between daemon delivery retries
 - docs(E24S03): delivery artefacts — plan, impl-report, qa-report, memory-delta
 - feat(E24S03): Continue memory integration in install scripts
