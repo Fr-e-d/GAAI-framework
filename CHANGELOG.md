@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.16.0] - 2026-03-30
 
 ### Changed
+- fix(core): clarify /gaai-deliver vs /gaai-daemon — not aliases
 - feat(core): harden Review Sub-Agent against LLM evaluation research findings
 - fix(core): enforce YAML safety rules in delivery daemon (validate after every backlog write)
 - fix(core): add write safety rules to generate-stories skill (never yaml.dump, match native indent)
