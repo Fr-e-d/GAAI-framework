@@ -50,7 +50,7 @@ If your project uses git with a `staging` branch, the **Delivery Daemon** delive
 2. `/gaai-daemon` — starts the daemon (default: 3 slots, auto-opens monitoring)
 3. `/gaai-daemon --stop` — graceful shutdown
 
-Override concurrency: `/gaai-daemon --max-concurrent 3`
+Override concurrency: `/gaai-daemon --max-concurrent 5`
 
 The daemon polls for `refined` stories and delivers them in parallel via tmux — each delivery runs in its own tmux session with real-time visibility.
 Full reference: see `GAAI.md` → "Branch Model & Automation".
