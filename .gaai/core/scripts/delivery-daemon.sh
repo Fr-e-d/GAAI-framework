@@ -624,6 +624,14 @@ fi
 # Step 3: Mark in_progress locally + set started_at
 "$SCHEDULER" --set-status "$story_id" in_progress "$BACKLOG"
 "$SCHEDULER" --set-field "$story_id" started_at "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BACKLOG"
+
+# YAML safety check — abort if backlog is corrupted (prevents committing broken YAML)
+if ! python3 -c "import yaml; yaml.safe_load(open('$BACKLOG'))" 2>/dev/null; then
+  echo "YAML_BROKEN: backlog YAML is invalid after status update — aborting" >&2
+  git checkout -- "$BACKLOG_REL" 2>/dev/null || true
+  exit 4
+fi
+
 git add "$BACKLOG_REL"
 git commit -m "chore($story_id): in_progress [daemon]" --quiet
 
