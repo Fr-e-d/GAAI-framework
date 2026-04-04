@@ -11,26 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - feat(core): harden Review Sub-Agent against LLM evaluation research findings
+- fix(core): enforce YAML safety rules in delivery daemon (validate after every backlog write)
+- fix(core): add write safety rules to generate-stories skill (never yaml.dump, match native indent)
+- fix(core): add exponential backoff between daemon delivery retries
+- fix(core): sync local VERSION with OSS + recursion guard for version bump commits
 
 
 ## [2.15.0] - 2026-03-26
 
 ### Fixed
-- fix: enforce YAML safety rules + archive 157 done items
-- feat(E33S01): add exponential backoff between daemon delivery retries
-- docs(E24S03): delivery artefacts — plan, impl-report, qa-report, memory-delta
-- feat(E24S03): Continue memory integration in install scripts
-- docs(E24S02): delivery artefacts — plan, impl-report, qa-report, memory-delta
-- feat(E24S02): Cursor memory integration in install scripts
-- feat(E24S01): Claude Code memory integration in install-check.sh
-- feat(E18S03): /gaai-switch cloud — migrate OSS contexts to cloud workspace
-- feat(E19S01): document 3-tier tool compatibility in core docs
 - fix(core): revert daemon-setup to auto-set skipDangerousModePermissionPrompt
 - fix(core): daemon-setup asks for confirmation before modifying global settings
 - fix(core): stop auto-modifying global Claude Code settings
 - refactor(core): make /gaai-deliver an alias of /gaai-daemon
-- chore: GAAI core independent evaluation principle + E10S08 daemon artifacts
-- chore: regenerate skills indices after community-engage v5
 - fix(gaai): monitor pane layout — 55% split, mouse scroll, clear scrollback
 - fix(core): remove all project-specific references from .gaai/core/
 - fix(discovery): add Brief Self-Assessment checklist to discovery.agent.md
