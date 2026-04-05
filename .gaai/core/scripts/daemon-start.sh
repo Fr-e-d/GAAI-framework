@@ -172,8 +172,8 @@ do_status() {
     tmux new-session -d -s "$monitor_session" \
       "bash '$MONITOR_TOP' '$config_file' '$LOG_FILE'"
 
-    # Bottom pane: active deliveries summary (55% height — fits title + 3 concurrent slots)
-    tmux split-window -t "${monitor_session}:0" -v -p 55 \
+    # Bottom pane: active deliveries summary (65% height — fits title + 3 concurrent slots comfortably)
+    tmux split-window -t "${monitor_session}:0" -v -p 65 \
       "bash '$MONITOR_TAIL' '$LOG_DIR'"
 
     # Enable mouse mode (allows scroll in panes when content exceeds pane height)

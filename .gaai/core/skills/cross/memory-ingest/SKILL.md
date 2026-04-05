@@ -9,7 +9,7 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-MEMORY-INGEST-001
-  updated_at: 2026-04-05
+  updated_at: 2026-02-26
   status: stable
 inputs:
   - discovery_outputs  (validated)
@@ -52,19 +52,7 @@ This guard prevents the silent data loss incident of 2026-03-17 where concurrent
 3. Create or update corresponding memory files using standard templates
 4. Register all new or modified entries in `contexts/memory/index.md` — this is mandatory, not optional. Any file not in the index is invisible to all other memory skills.
 5. **Domain dual-index rule:** When ingesting into a domain category (`domains/{domain}/`), also update the domain's own `index.md` (e.g., `domains/content-production/index.md`). Both the master index AND the domain index must reflect the new entry. Failure to update both causes silent drift — the domain sub-agent won't see entries missing from its domain index.
-<!-- E39S07: Impact Scan added to surface drift risk after ingest. Addresses the gap where ingested
-     content can silently invalidate assumptions in related memory files. Provides informational
-     ripple-effect visibility for OSS Discovery Agent (Cloud enforcement not required). -->
-6. **Impact Scan (post-write) (informational — does not block ingestion).** After writing new memory
-   files and updating all indexes (steps 3–5):
-   - Re-read `contexts/memory/index.md` and collect all entries whose `tags` overlap with the tags
-     of the ingested content.
-   - For each matching entry, check whether the ingested content changes or invalidates assumptions
-     described in that file (load the file, compare topic overlap).
-   - List any potentially stale entries in the session output: entry path, reason suspected stale.
-   - **If `index.md` is missing or a referenced file is unreadable:** skip the Impact Scan and note
-     `"Impact Scan skipped: {reason}"` in session output — do not fail the ingestion.
-7. Ensure memory files remain structured and minimal
+6. Ensure memory files remain structured and minimal
 
 ---
 
