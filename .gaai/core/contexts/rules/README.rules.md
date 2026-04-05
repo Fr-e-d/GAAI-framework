@@ -88,6 +88,7 @@ A rule must define constraints, not workflows or reasoning. If it contains a pro
 → [backlog.rules.md](backlog.rules.md) — backlog lifecycle and state transitions
 → [artefacts.rules.md](artefacts.rules.md) — artefact authority and structure
 → [memory.rules.md](memory.rules.md) — memory retrieval and ingestion
+→ [memory-freshness.rules.md](memory-freshness.rules.md) — `depends_on` schema, refresh tiers, and staleness governance for memory files
 → [context-discovery.rules.md](context-discovery.rules.md) — Discovery track activation
 → [Back to README.contexts.md](../README.contexts.md)
 → [Back to GAAI.md](../../GAAI.md)
