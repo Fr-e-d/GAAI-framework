@@ -175,47 +175,10 @@ if ! field_is_set "pr_url" || ! field_is_set "pr_number" || ! field_is_set "pr_s
   fi
 fi
 
-# ── 7. Freshness signal — detect if delivery touched gaai-cloud code ─────────
-# When a delivery touches workers/gaai-cloud/, Tier 1 memory files (conventions.md,
-# context.md) may be stale. A marker file is written to signal Discovery to run
-# memory-ingest on those files. The marker is consumed by Discovery (read + delete
-# after refresh). If Discovery has not run, the marker persists — this is intentional
-# (the signal must not be lost).
-freshness_marker=""
-freshness_dir="$PROJECT_DIR/.gaai/project/contexts/backlog/.freshness-flags"
-freshness_file="$freshness_dir/tier1-refresh-needed"
-
-# Find the range of commits for this delivery (in_progress → HEAD)
-start_sha=$(git log --all --format='%H' --grep="chore(${story_id}): in_progress" -1 2>/dev/null) || start_sha=""
-if [[ -n "$start_sha" ]]; then
-  changed_paths=$(git diff --name-only "$start_sha" HEAD 2>/dev/null | grep "^workers/gaai-cloud/" | head -1) || changed_paths=""
-else
-  # Fallback: check last 2 hours of commits (same window as story_id detection)
-  changed_paths=$(git log --name-only --since="2 hours ago" --format="" 2>/dev/null | grep "^workers/gaai-cloud/" | head -1) || changed_paths=""
-fi
-
-if [[ -n "$changed_paths" ]]; then
-  {
-    mkdir -p "$freshness_dir" && \
-    cat > "$freshness_file" <<MARKER
-# Tier 1 memory refresh needed
-triggered_by: ${story_id}
-triggered_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-reason: delivery touched workers/gaai-cloud/
-files_to_refresh:
-  - contexts/memory/project/context.md
-  - contexts/memory/patterns/conventions.md
-MARKER
-    freshness_marker="$freshness_file"
-    echo "[post-delivery-hook] tier1 refresh marker written for $story_id" >&2
-  } || echo "[post-delivery-hook] Warning: could not write freshness marker for $story_id" >&2
-fi
-
-# ── 8. Commit + push if any field was updated or freshness marker was written ─
-if [[ "$fields_updated" -eq 1 || -n "$freshness_marker" ]]; then
+# ── 7. Commit + push if any field was updated ────────────────────────────────
+if [[ "$fields_updated" -eq 1 ]]; then
   (
     git add "$BACKLOG" 2>/dev/null || exit 1
-    [[ -n "$freshness_marker" ]] && git add "$freshness_marker" 2>/dev/null || true
     git diff --cached --quiet 2>/dev/null && exit 0  # No actual change
     git commit -m "chore($story_id): delivery-metadata [stop-hook]" --quiet 2>/dev/null || exit 1
     git push origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
