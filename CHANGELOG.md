@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.16.0] - 2026-03-30
 
 ### Changed
+- fix(monitor): adjust bottom pane split to 60%
 - fix(monitor): increase bottom pane split to 65% for active deliveries visibility
 - fix(governance): add Epic dependency propagation rule to generate-stories + validate-artefacts
 - chore: update gaai-status command (add done/archive step) + clear daemon log
