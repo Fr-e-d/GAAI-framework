@@ -33,6 +33,7 @@ Activate:
 - After a major refactor has landed and existing memory files may reference superseded decisions.
 - After a decision has been superseded and files referencing the old DEC need to be identified.
 - When memory files have not been reconciled in more than 30 days.
+- After an epic completes that modifies code structure — code-path staleness check surfaces architecture files that may need refresh.
 
 This skill **MAY be triggered by cron** per `orchestration.rules.md`.
 
@@ -57,6 +58,21 @@ For each DEC reference collected in Step 2: check whether the corresponding deci
 **4. Freshness check — detect stale files**
 For each overview, strategy, or architecture file in the manifest: compare its `updated_at` against the `updated_at` of every DEC it references. If any referenced DEC has an `updated_at` newer than the file's own `updated_at`, flag the file as `STALE`. This indicates the file was written before the referenced decision changed and may no longer reflect current governance.
 
+**4b. Code-path freshness check**
+Before proceeding to Step 5, run a supplementary check against `git` history for files that declare code-path dependencies.
+
+Pre-condition: verify that `git` is available on the PATH (`git --version`). If `git` is unavailable, log the note "Code-path freshness check skipped: git not available." in the report and skip the remainder of this sub-step. The rest of reconciliation proceeds normally.
+
+For each file in the scan manifest that has a non-empty `depends_on.code_paths` array:
+1. Read the file's `updated_at` timestamp (from the index entry).
+2. For each path listed in `code_paths`, run:
+   ```
+   git log --oneline --since="{updated_at}" -- "{path}"
+   ```
+3. If the command returns one or more lines (commits exist after `updated_at`), flag the memory file as a `CODE_PATH_CHANGED` finding. Record: the memory file path, the code path, the commit count, and the number of days elapsed since `updated_at`.
+
+Files without `depends_on`, or with an empty `code_paths` array, are silently skipped — they do not produce a finding of any kind.
+
 **5. Produce reconciliation report**
 Write the report to `contexts/artefacts/reconciliation-reports/{YYYY-MM-DD}.reconciliation-report.md` using the output format defined in the Output Format section. One file per scan run. If a file already exists for today's date, append a sequence suffix: `{YYYY-MM-DD}-02.reconciliation-report.md` (incrementing as needed).
 
@@ -77,6 +93,7 @@ generated_at: YYYY-MM-DD
 scan_manifest_source: contexts/memory/index.md
 files_scanned: N
 findings_count: N
+code_path_findings_count: N
 ---
 ```
 
@@ -96,6 +113,17 @@ Patterns or decisions referenced in memory files but not yet represented by a de
 
 **5. Missing Files**
 Files registered in `index.md` that could not be read (see Process Step 6). Each entry: path, error class (`MISSING_FILE` | `UNREADABLE`).
+
+**6. Code-Path Staleness**
+Memory files whose `depends_on.code_paths` reference one or more code paths that have received commits since the file's `updated_at`. Each entry: memory file path, code path, commit count since `updated_at`, days stale.
+
+Example:
+
+| File | code_path | Commits since updated_at | Days stale |
+|---|---|---|---|
+| architecture/cf-bindings-audit.md | workers/gaai-cloud/api/wrangler.jsonc | 3 | 2 |
+
+If the code-path freshness check was skipped (git unavailable), this section contains only the skip note: "Code-path freshness check skipped: git not available."
 
 ---
 
