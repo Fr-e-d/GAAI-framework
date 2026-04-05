@@ -9,7 +9,7 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-DECISION-EXTRACTION-001
-  updated_at: 2026-04-05
+  updated_at: 2026-03-03
   status: stable
 inputs:
   - recent_agent_outputs: session outputs from the invoking agent, or file paths to artefacts produced in the current session (e.g., evaluation reports, refined stories, approach-evaluation outputs)
@@ -40,17 +40,7 @@ Do NOT use for trivial steps, implementation details, brainstorming, or reversib
    - Read `contexts/memory/index.md` → scan the Decision Registry by domain to identify relevant existing decisions
    - Load the specific `decisions/DEC-{ID}.md` files for decisions in the affected domain(s)
    - Verify the proposed decision does NOT contradict any active decision
-   - If contradiction found: either explicitly supersede (set `superseded_by` in old file + `supersedes` in new file) with rationale, or STOP and escalate to human.
-     <!-- E39S07: Impact list added before escalation to give the human full ripple-effect context
-          at decision time. Prevents escalations that lack scope — the human needs to know what
-          else references the contradicted decision before resolving it. Drift prevention. -->
-     **When escalating due to contradiction:** before surfacing the escalation, grep
-     `contexts/` for all occurrences of `DEC-{id}` (where `{id}` is the contradicted decision's
-     ID). Collect every file path that references the contradicted DEC — memory files, stories,
-     and architecture docs. Present this impact list alongside the escalation message so the human
-     can assess scope before deciding.
-     **If the `contexts/` directory scan fails:** proceed with the escalation without the impact
-     list — the escalation is more important than the impact details.
+   - If contradiction found: either explicitly supersede (set `superseded_by` in old file + `supersedes` in new file) with rationale, or STOP and escalate to human
    - If unable to determine consistency → STOP and escalate to human
    - Never record a decision silently if it may conflict with an existing one
 
