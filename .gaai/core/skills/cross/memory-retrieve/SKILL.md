@@ -5,11 +5,11 @@ license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
-  version: "2.1"
+  version: "2.2"
   category: cross
   track: cross-cutting
   id: SKILL-MEMORY-RETRIEVE-001
-  updated_at: 2026-03-01
+  updated_at: 2026-04-05
   status: stable
 inputs:
   - contexts/memory/index.md        (registry — always read first, contains Decision Registry + file map)
@@ -76,7 +76,41 @@ Level 3 — CROSS-DOMAIN SCAN (only for Decision Consistency Gate)
    → Load the specific `DEC-{ID}.md` files to check for conflicts
    → If uncertain about boundaries, also load decisions from adjacent domains
 
-5. **Return `memory_context_bundle`** — curated, minimal set of memory files relevant to the current task.
+5. **Freshness Check (Tier 2 files only)**
+
+   Pre-condition: verify that `git` is available on the PATH (`git --version`). If `git` is unavailable, append the following note to the `freshness_warnings` section and skip the remainder of this step — proceed to Step 6 normally:
+   > Freshness check skipped: git not available
+
+   For each file in the `memory_context_bundle`:
+
+   a. If the file's frontmatter has no `refresh_tier` field, or `refresh_tier` ≠ 2 → **skip** (Tier 1 files are proactively refreshed via the post-delivery hook; Tier 3-4 are not checked at read time).
+
+   b. If `depends_on` is absent or `depends_on.code_paths` is empty → **skip** (treat as Tier 4 — no check, no warning).
+
+   c. If `updated_at` is absent or unparseable → append to `freshness_warnings`:
+   > Freshness check skipped: no valid updated_at — {file_path}
+   Then **skip** this file.
+
+   d. For each path in `depends_on.code_paths`:
+      - If the path does not exist on disk, append to `freshness_warnings`:
+        > Freshness check skipped: {path} not found — depends_on may be stale
+        Then skip this path.
+      - Run: `git log --oneline --since="{updated_at}" -- "{path}"` (where `{updated_at}` is the file's frontmatter value, quoted exactly as-is).
+      - Count the lines returned. If the count > 0, the file is `POTENTIALLY_STALE` for this path.
+
+   e. If any path produced a non-zero commit count for this file, append one `freshness_warnings` entry per changed path in the format below (AC2):
+
+   ```
+   ⚠ FRESHNESS WARNING — {file_path}
+     refresh_tier: 2
+     updated_at: {date}
+     changed_dependency: {code_path} ({N} commits since updated_at)
+     action: verify content is still accurate before relying on it
+   ```
+
+   If no warnings are produced, the `freshness_warnings` section is omitted from the output (0 tokens).
+
+6. **Return `memory_context_bundle`** — curated, minimal set of memory files relevant to the current task, plus any `freshness_warnings` produced in Step 5.
 
 ---
 
@@ -93,8 +127,9 @@ Level 3 — CROSS-DOMAIN SCAN (only for Decision Consistency Gate)
 - Agent loads only the specific DEC-{ID}.md files relevant to the task (typically 3-10)
 - **Summaries are NEVER substituted for durable memory** (decisions, patterns, project)
 - Decision Registry enables decision identification WITHOUT opening individual files
-- Token budget: index (~1,500) + 3-10 individual decision files (~300 each) = ~4,500 tokens typical
+- Token budget: index (~1,500) + 3-10 individual decision files (~300 each) = ~4,500 tokens typical; `freshness_warnings` section adds ~100-200 tokens when Tier 2 staleness is detected, 0 tokens when all files are clean
 - Only memory directly relevant to the task is included
+- Freshness warnings are emitted for Tier 2 files with changed code dependencies — never silently suppressed.
 
 ---
 
