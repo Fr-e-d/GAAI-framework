@@ -60,6 +60,7 @@ This is the **mandatory gate** between Discovery and Delivery. No Story proceeds
 - No rule violations
 - Marketing artefacts (if present): hypothesis statuses align with Story acceptance criteria
 - Strategy artefacts (if present): GTM phases align with Epic dependencies and gates
+- **Epic dependency propagation check:** If the parent Epic's `## Dependencies` section lists other Epics, verify that every Story's `depends_on` includes at least one terminal story from each listed Epic. A phasing constraint in Epic prose that is not encoded in story `depends_on` is a **FAIL** — the daemon cannot enforce prose constraints, only `depends_on` fields.
 
 ### Skill Attestation (Base Rule #2 Enforcement)
 - **Every artefact** (Epic, Story, PRD) must have a `skills_invoked` field in its frontmatter

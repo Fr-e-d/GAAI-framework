@@ -80,7 +80,13 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 
    **Rationale:** (1) In a past incident, Discovery produced 14 stories and registered them as `refined` without running either gate — the gates were not in the skill's step list. (2) Later, Discovery self-validated both gates inline, using the "no Session Brief" skip condition to bypass the alignment gate entirely. In both cases, the main agent marked its own homework — no independent review occurred. This step closes both gaps by mandating sub-agent execution with no skip conditions. (3) Updated 2026-03-30: the alignment gate is now executed by the Review Sub-Agent (SUB-AGENT-REVIEW-001), enforcing Core Principle #5 (Independent Evaluation).
 
-10. **MANDATORY — Register in backlog.** After writing all story files, add each story to `contexts/backlog/active.backlog.yaml` with:
+10. **MANDATORY — Epic dependency propagation (MUST execute before backlog registration).**
+   - **a)** Read the parent Epic's `## Dependencies` section. If it lists other Epics (e.g., "E39 must be complete before E40 starts"), identify the **terminal stories** of each listed Epic — the stories with the highest IDs or the ones that other stories in that Epic depend on.
+   - **b)** Every story in the current Epic MUST include at least one terminal story from each dependent Epic in its `depends_on` list. This ensures the daemon cannot pick up stories from this Epic until the dependent Epic is fully delivered.
+   - **c)** If the parent Epic has no Dependencies or lists "None", skip this step.
+   - **Rationale (2026-04-05):** E40S02 was picked up by the daemon before E39 was complete because the phasing constraint ("E39 done before E40") was written in Epic prose but not encoded in story-level `depends_on`. The daemon's scheduler reads `depends_on`, not Epic prose. Prose constraints that are not encoded in story dependencies are invisible to the daemon.
+
+11. **MANDATORY — Register in backlog.** After writing all story files, add each story to `contexts/backlog/active.backlog.yaml` with:
    - `id`, `epic`, `title` (from story frontmatter)
    - `status: refined` (if validated) or `status: draft` (if pending validation)
    - `priority` (derived from Epic priority or explicit input)
