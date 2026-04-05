@@ -64,7 +64,21 @@ This guard prevents the silent data loss incident of 2026-03-17 where concurrent
    - List any potentially stale entries in the session output: entry path, reason suspected stale.
    - **If `index.md` is missing or a referenced file is unreadable:** skip the Impact Scan and note
      `"Impact Scan skipped: {reason}"` in session output — do not fail the ingestion.
-7. Ensure memory files remain structured and minimal
+7. **Freshness metadata governance (Tier 1–2 files)** After writing any memory file under `architecture/`, `patterns/conventions.md`, or `project/context.md`, verify that both `depends_on` and `refresh_tier` are present in the file's YAML frontmatter before proceeding.
+   - If both are present → continue.
+   - If either is absent → **add them before this step completes**. Do not exit the skill without freshness metadata on a Tier 1–2 file.
+   - If the code paths are unknown, use the safe fallback:
+     ```yaml
+     depends_on:
+       code_paths: []
+       decisions: []
+       epics: []
+     refresh_tier: 2
+     ```
+     Then add a session note: `"[FRESHNESS TODO] {file_path}: depends_on.code_paths not populated — manual enrichment required."`
+   - **All other memory files** (outside the three paths above): `depends_on` is optional. If present, validate that `refresh_tier` is also declared and is a value 1–4. If `refresh_tier` is absent but `depends_on` is present, default to `refresh_tier: 2` and note for review.
+   - Rule reference: `contexts/rules/memory-freshness.rules.md` §3 (which files must declare) and §4 (graceful degradation).
+8. Ensure memory files remain structured and minimal
 
 ---
 
