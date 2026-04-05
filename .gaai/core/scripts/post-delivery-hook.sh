@@ -175,11 +175,11 @@ if ! field_is_set "pr_url" || ! field_is_set "pr_number" || ! field_is_set "pr_s
   fi
 fi
 
-# ── 7. Freshness signal — detect if delivery touched gaai-cloud code ─────────
-# When a delivery touches workers/gaai-cloud/, Tier 1 memory files (conventions.md,
-# context.md) may be stale. A marker file is written to signal Discovery to run
-# memory-ingest on those files. The marker is consumed by Discovery (read + delete
-# after refresh). If Discovery has not run, the marker persists — this is intentional
+# ── 7. Freshness signal — detect code changes and flag stale memory + docs ────
+# When a delivery touches source code, Tier 1 memory files and nearby documentation
+# (**/docs/**/*.md, **/README.md) may be stale. A marker file is written to signal
+# Discovery to run memory-reconcile. The marker is consumed by Discovery (read +
+# delete after refresh). If Discovery has not run, the marker persists — intentional
 # (the signal must not be lost).
 freshness_marker=""
 freshness_dir="$PROJECT_DIR/.gaai/project/contexts/backlog/.freshness-flags"
@@ -188,23 +188,51 @@ freshness_file="$freshness_dir/tier1-refresh-needed"
 # Find the range of commits for this delivery (in_progress → HEAD)
 start_sha=$(git log --all --format='%H' --grep="chore(${story_id}): in_progress" -1 2>/dev/null) || start_sha=""
 if [[ -n "$start_sha" ]]; then
-  changed_paths=$(git diff --name-only "$start_sha" HEAD 2>/dev/null | grep "^workers/gaai-cloud/" | head -1) || changed_paths=""
+  all_changed=$(git diff --name-only "$start_sha" HEAD 2>/dev/null) || all_changed=""
 else
   # Fallback: check last 2 hours of commits (same window as story_id detection)
-  changed_paths=$(git log --name-only --since="2 hours ago" --format="" 2>/dev/null | grep "^workers/gaai-cloud/" | head -1) || changed_paths=""
+  all_changed=$(git log --name-only --since="2 hours ago" --format="" 2>/dev/null) || all_changed=""
 fi
 
-if [[ -n "$changed_paths" ]]; then
+# Filter to source code changes (exclude .gaai/, docs, README, config-only changes)
+code_changed=$(echo "$all_changed" | grep -vE '^\.(gaai|github|vscode)/|/docs/|README\.md$|\.ya?ml$|\.json$|\.md$' | head -1) || code_changed=""
+
+# Find docs/README files near changed code (same parent directory tree)
+stale_docs=""
+if [[ -n "$code_changed" && -n "$all_changed" ]]; then
+  # Collect unique parent directories of changed source files
+  changed_dirs=$(echo "$all_changed" | grep -vE '^\.(gaai|github)/' | xargs -I{} dirname {} 2>/dev/null | sort -u) || changed_dirs=""
+  # Find docs/ and README.md files that are siblings or ancestors of changed code
+  for dir in $changed_dirs; do
+    # Walk up directory tree looking for docs/ or README.md
+    check_dir="$dir"
+    while [[ "$check_dir" != "." && "$check_dir" != "/" ]]; do
+      if [[ -d "$PROJECT_DIR/$check_dir/docs" ]]; then
+        stale_docs="$stale_docs\n  - $check_dir/docs/"
+      fi
+      if [[ -f "$PROJECT_DIR/$check_dir/README.md" ]]; then
+        stale_docs="$stale_docs\n  - $check_dir/README.md"
+      fi
+      check_dir=$(dirname "$check_dir")
+    done
+  done
+  # Deduplicate
+  stale_docs=$(echo -e "$stale_docs" | sort -u | grep -v '^$') || stale_docs=""
+fi
+
+if [[ -n "$code_changed" ]]; then
   {
     mkdir -p "$freshness_dir" && \
     cat > "$freshness_file" <<MARKER
-# Tier 1 memory refresh needed
+# Tier 1 memory + documentation refresh needed
 triggered_by: ${story_id}
 triggered_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-reason: delivery touched workers/gaai-cloud/
+reason: delivery touched source code
 files_to_refresh:
   - contexts/memory/project/context.md
   - contexts/memory/patterns/conventions.md
+docs_potentially_stale:
+$(echo "$stale_docs" | sed 's/^/  /')
 MARKER
     freshness_marker="$freshness_file"
     echo "[post-delivery-hook] tier1 refresh marker written for $story_id" >&2
