@@ -791,6 +791,38 @@ on_exit() {
     # Story done — capture delivery metadata (stop hook doesn't fire in -p mode)
     echo "[WRAPPER] Story $story_id done. Capturing metadata..."
     capture_metadata
+  elif [[ "\$current_status" == "in_progress" && \$EXIT_CODE -eq 0 ]]; then
+    # Agent exited cleanly but didn't mark done — likely escalated (e.g. diff-scope
+    # reviewer said ESCALATE, governance block, human review required).
+    # 1. Push story branch to preserve work (the human can inspect/resume)
+    # 2. Mark escalated so daemon doesn't re-pick and human is notified
+    echo "[WRAPPER] Agent exited 0 but story still in_progress — preserving work + marking escalated..."
+
+    # Push story branch (best-effort — worktree may already be cleaned)
+    local worktree_path
+    worktree_path=\$(git -C "$PROJECT_DIR" worktree list --porcelain 2>/dev/null \
+      | grep -B1 "branch.*story/$story_id" | head -1 | sed 's/^worktree //' || echo "")
+    if [[ -n "\$worktree_path" && -d "\$worktree_path" ]]; then
+      git -C "\$worktree_path" push origin "story/$story_id" 2>/dev/null \
+        && echo "[WRAPPER] Story branch pushed to origin (work preserved)" \
+        || echo "[WRAPPER] Warning: could not push story branch"
+    fi
+
+    (
+      if command -v flock &>/dev/null; then
+        flock "$STAGING_LOCK" bash -c "
+          '$SCHEDULER' --set-status '$story_id' escalated '$BACKLOG' 2>/dev/null || true
+          git add '$BACKLOG_REL' 2>/dev/null
+          git commit -m 'chore($story_id): escalated [daemon-wrapper]' --quiet 2>/dev/null
+          git push origin '$TARGET_BRANCH' --quiet 2>&1
+        "
+      else
+        '$SCHEDULER' --set-status '$story_id' escalated '$BACKLOG' 2>/dev/null || true
+        git add '$BACKLOG_REL' 2>/dev/null
+        git commit -m 'chore($story_id): escalated [daemon-wrapper]' --quiet 2>/dev/null
+        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+      fi
+    ) || echo "[WRAPPER] Warning: could not mark $story_id as escalated (will be caught by staleness detection)"
   elif [[ \$EXIT_CODE -ne 0 ]]; then
     echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
     (
@@ -967,6 +999,26 @@ on_exit() {
   if [[ "\$current_status" == "done" ]]; then
     echo "[WRAPPER] Story $story_id done. Capturing metadata..."
     capture_metadata
+  elif [[ "\$current_status" == "in_progress" && \$EXIT_CODE -eq 0 ]]; then
+    # Agent exited cleanly but didn't mark done — likely escalated.
+    # Push story branch to preserve work, then mark escalated.
+    echo "[WRAPPER] Agent exited 0 but story still in_progress — preserving work + marking escalated..."
+
+    local worktree_path
+    worktree_path=\$(git -C "$PROJECT_DIR" worktree list --porcelain 2>/dev/null \
+      | grep -B1 "branch.*story/$story_id" | head -1 | sed 's/^worktree //' || echo "")
+    if [[ -n "\$worktree_path" && -d "\$worktree_path" ]]; then
+      git -C "\$worktree_path" push origin "story/$story_id" 2>/dev/null \
+        && echo "[WRAPPER] Story branch pushed to origin (work preserved)" \
+        || echo "[WRAPPER] Warning: could not push story branch"
+    fi
+
+    (
+      '$SCHEDULER' --set-status '$story_id' escalated '$BACKLOG' 2>/dev/null || true
+      git add '$BACKLOG_REL' 2>/dev/null
+      git commit -m 'chore($story_id): escalated [daemon-wrapper]' --quiet 2>/dev/null
+      git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+    ) || echo "[WRAPPER] Warning: could not mark $story_id as escalated"
   elif [[ \$EXIT_CODE -ne 0 ]]; then
     echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
     (

@@ -208,32 +208,78 @@ git -C "$WORKTREE_PATH" commit -m "docs({id}): delivery artefacts — plan, impl
 
 ### 7c. Diff-Scope Sanity Check (MANDATORY)
 
-**Before pushing, verify the diff is consistent with the Story scope.** This catches corrupted trees, accidental `git add .` on wrong directories, or GIT_DIR contamination from hooks.
+**Before pushing, verify the diff is consistent with the Story scope.** This is a safety heuristic to catch corrupted trees, accidental `git add .` on wrong directories, or GIT_DIR contamination from hooks. It is NOT a hard limit on story size.
 
 ```bash
 # Count files changed vs staging baseline
 DIFF_STAT=$(git -C "$WORKTREE_PATH" diff --stat staging..HEAD)
-CHANGED_COUNT=$(git -C "$WORKTREE_PATH" diff --name-only staging..HEAD | wc -l)
+CHANGED_FILES=$(git -C "$WORKTREE_PATH" diff --name-only staging..HEAD)
+CHANGED_COUNT=$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')
 DELETED_COUNT=$(git -C "$WORKTREE_PATH" diff --diff-filter=D --name-only staging..HEAD | wc -l)
 
 echo "Diff-scope check: $CHANGED_COUNT files changed, $DELETED_COUNT deleted"
 
-# ESCALATE if diff is anomalous:
-#   - More than 30 files changed for a single story
-#   - Any file deleted that is NOT a .gaai/ artefact or backlog file
-#   - Deletions exceed 10x the insertions (tree replacement signal)
 NON_GAAI_DELETIONS=$(git -C "$WORKTREE_PATH" diff --diff-filter=D --name-only staging..HEAD \
   | grep -vcE '^\.gaai/' || true)
+```
 
-if [ "$CHANGED_COUNT" -gt 30 ] || [ "$NON_GAAI_DELETIONS" -gt 0 ]; then
-  echo "ESCALATE: diff anomaly detected — $CHANGED_COUNT files changed, $NON_GAAI_DELETIONS non-.gaai deletions"
-  echo "Expected: small diff matching Story ACs. Actual diff suggests tree corruption."
+#### Hard escalation triggers (always STOP — no reviewer)
+
+These are mechanical signals of tree corruption. No judgment needed.
+
+```bash
+# Non-.gaai file deletions → possible tree corruption
+if [ "$NON_GAAI_DELETIONS" -gt 0 ]; then
+  echo "ESCALATE: $NON_GAAI_DELETIONS non-.gaai deletions — possible tree corruption"
   echo "$DIFF_STAT"
-  exit 1  # Do NOT push. ESCALATE to human.
+  # Push story branch to preserve work before stopping
+  git -C "$WORKTREE_PATH" push origin "story/{id}" 2>/dev/null || true
+  exit 1  # Do NOT merge. ESCALATE to human.
 fi
 ```
 
-If this check fails, **STOP immediately**. Do NOT push, do NOT create PR, do NOT mark done. Report the anomaly to the human with the full `git diff --stat` output.
+#### Soft threshold (> 30 files) — sub-agent reviewer decides
+
+When the diff exceeds 30 files, the Delivery Agent MUST NOT decide alone whether to proceed. Instead, **spawn a sub-agent reviewer** to evaluate whether the diff is consistent with the Story scope. The Delivery Agent is the generator — it cannot be the sole evaluator of its own output (base.rules.md Rule 5).
+
+```
+Reviewer input:
+  - Story title + Acceptance Criteria (from the story artefact)
+  - CHANGED_FILES list (full paths, one per line)
+  - CHANGED_COUNT
+
+Reviewer task:
+  "This delivery changed {CHANGED_COUNT} files (exceeds the 30-file soft threshold).
+   Determine whether ALL changed files are traceable to the Story's scope.
+
+   Story: {title}
+   ACs: {acceptance criteria}
+
+   Changed files:
+   {CHANGED_FILES}
+
+   Answer with a structured verdict:
+   - PROCEED: every file is within the Story's domain — the count is high but
+     explainable (e.g., test-rewrite story touching many test files).
+   - ESCALATE: one or more files are outside the Story's expected scope, OR the
+     changes span unrelated modules, OR you cannot confidently trace all files
+     to the ACs.
+
+   Be conservative: when in doubt, ESCALATE."
+```
+
+**Decision flow:**
+
+```
+CHANGED_COUNT > 30
+  → spawn sub-agent reviewer (isolated context, no conversation history)
+    → reviewer says PROCEED → continue to Step 8 (push + PR + merge)
+    → reviewer says ESCALATE → push story branch to preserve work, then exit 1
+```
+
+**Important:** The reviewer runs in an **isolated context window** — it receives only the Story ACs and the file list, NOT the Delivery Agent's self-assessment or conversation history. This prevents confirmation bias (base.rules.md Rule 5).
+
+If the reviewer is unavailable (sub-agent spawn fails), treat as ESCALATE — fail safe.
 
 ### 8. Create PR & Complete Story
 
@@ -284,7 +330,7 @@ gh pr merge --squash --delete-branch
 
 > **CI advisory mode:** When no branch protection exists on the target branch, CI failures caused by infrastructure issues (billing, quotas) do not block merge. The `ci-watch-and-fix` skill checks branch protection status before deciding whether to block or proceed. See `ci-watch-and-fix/SKILL.md` Step 0.
 >
-> **Staging self-merge: PERMITTED** after diff-sanity check (max 30 changed files, zero non-.gaai deletions — see §7c above). If the check fails → ESCALATE, do NOT merge.
+> **Staging self-merge: PERMITTED** after diff-sanity check passes (zero non-.gaai deletions; if > 30 files, sub-agent reviewer must verdict PROCEED — see §7c). If the check fails → ESCALATE, do NOT merge.
 >
 > **Production/main merge: FORBIDDEN.** The AI MUST NEVER run `gh pr merge` targeting `main` or `production`. The human reviews and merges to production. This is a non-negotiable safety boundary.
 

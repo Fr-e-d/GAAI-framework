@@ -37,7 +37,7 @@ The Delivery Agent must never:
 - Modify acceptance criteria or scope
 - Fill missing context with assumptions
 - Implement without a validated Story
-- **Merge its own PRs to production/main** (`gh pr merge` targeting `main` or `production` is FORBIDDEN — the human merges to production after review). Self-merge to **staging** is PERMITTED after the diff-sanity check passes (max 30 changed files, zero non-.gaai deletions — see delivery-loop.workflow.md §7c).
+- **Merge its own PRs to production/main** (`gh pr merge` targeting `main` or `production` is FORBIDDEN — the human merges to production after review). Self-merge to **staging** is PERMITTED after the diff-sanity check passes (zero non-.gaai deletions, and all changed files traceable to Story scope — see delivery-loop.workflow.md §7c).
 
 If an action requires writing code or producing a plan, it belongs to a sub-agent.
 
