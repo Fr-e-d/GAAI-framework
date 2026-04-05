@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.16.0] - 2026-03-30
 
 ### Changed
+- fix(governance): add Epic dependency propagation rule to generate-stories + validate-artefacts
 - chore: update gaai-status command (add done/archive step) + clear daemon log
 - fix(core): update --max-concurrent example to 5 (default is now 3)
 - fix: default daemon concurrency is 3 slots, not 1
