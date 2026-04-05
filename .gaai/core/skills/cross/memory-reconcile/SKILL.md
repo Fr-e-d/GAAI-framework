@@ -1,11 +1,11 @@
 ---
 name: memory-reconcile
-description: Scan all memory files for drift, contradictions, and stale references. Produce a reconciliation report for Discovery to action. Activate on demand or via cron.
+description: Scan all memory files, documentation (**/docs/**/*.md), and README files (**/README.md) for drift, contradictions, and stale references. Produce a reconciliation report for Discovery to action. Activate on demand or via cron.
 license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
-  version: "1.0"
+  version: "1.1"
   category: cross
   track: cross-cutting
   id: SKILL-MEMORY-RECONCILE-001
@@ -14,6 +14,8 @@ metadata:
 inputs:
   - contexts/memory/index.md  (entry registry)
   - contexts/memory/**  (all files registered in index.md)
+  - "**/docs/**/*.md"  (documentation files — discovered via glob, not index)
+  - "**/README.md"     (README files — discovered via glob, not index)
 outputs:
   - contexts/artefacts/reconciliation-reports/{date}.reconciliation-report.md
 ---
@@ -43,8 +45,18 @@ This skill **reports issues** — it does not fix them. See Non-Goals.
 
 ## Process
 
-**1. Read index — build scan manifest**
-Read `contexts/memory/index.md`. Extract the list of all active registered entries: file paths, categories, topic labels, and `updated_at` timestamps. This list is the scan manifest for all subsequent steps. Do not scan files that are not registered in the index.
+**1. Build scan manifest (memory + documentation + README)**
+The scan manifest has two sources:
+
+**1a. Memory files** — read `contexts/memory/index.md`. Extract the list of all active registered entries: file paths, categories, topic labels, and `updated_at` timestamps.
+
+**1b. Documentation and README files** — discover files via two glob patterns run from the project root:
+- `**/docs/**/*.md` — all Markdown files in any `docs/` directory at any depth
+- `**/README.md` — all README files at any depth
+
+Exclude paths matching `node_modules/`, `.git/`, `dist/`, `build/`, or any other common vendored/generated directories. For each discovered file, extract `updated_at` from YAML frontmatter if present; if absent, use the file's `git log -1 --format='%aI'` (last commit date) as a proxy.
+
+Tag each manifest entry with its source (`memory` or `documentation`) for reporting purposes. Do not register documentation files in `contexts/memory/index.md` — they remain outside the memory index.
 
 **2. Extract DEC references from overview, strategy, and architecture files**
 For each file in the manifest whose category is `project`, `decisions`, `patterns`, or any strategy/architecture category: scan the file content for all occurrences of the pattern `DEC-\d+`. Record every reference found along with the source file path and the approximate line number where the reference appears.
@@ -73,6 +85,21 @@ For each file in the scan manifest that has a non-empty `depends_on.code_paths` 
 
 Files without `depends_on`, or with an empty `code_paths` array, are silently skipped — they do not produce a finding of any kind.
 
+**4c. Documentation proximity check**
+For documentation files (source = `documentation`) that do NOT declare `depends_on`, apply an automatic proximity heuristic:
+
+1. Determine the parent directory of the documentation file.
+2. Identify the nearest source code directory (sibling or parent `src/`, `lib/`, `api/`, or equivalent).
+3. Run:
+   ```
+   git log --oneline --since="{updated_at}" -- "{nearest_source_dir}"
+   ```
+4. If the command returns commits, flag the documentation file as a `DOC_PROXIMITY_STALE` finding. Record: the doc file path, the source directory checked, the commit count, and the number of days since `updated_at`.
+
+This heuristic catches the common case where code evolves but nearby documentation is not updated. It applies ONLY to documentation files without explicit `depends_on` — files with `depends_on` are handled by Step 4b.
+
+For `**/README.md` files: the proximity directory is the README's own parent directory (a README describes its enclosing module/package).
+
 **5. Produce reconciliation report**
 Write the report to `contexts/artefacts/reconciliation-reports/{YYYY-MM-DD}.reconciliation-report.md` using the output format defined in the Output Format section. One file per scan run. If a file already exists for today's date, append a sequence suffix: `{YYYY-MM-DD}-02.reconciliation-report.md` (incrementing as needed).
 
@@ -91,9 +118,12 @@ Report frontmatter:
 skill: memory-reconcile
 generated_at: YYYY-MM-DD
 scan_manifest_source: contexts/memory/index.md
-files_scanned: N
+files_scanned: N          # total (memory + documentation + README)
+memory_files_scanned: N
+doc_files_scanned: N      # docs + README combined
 findings_count: N
 code_path_findings_count: N
+doc_staleness_findings_count: N
 ---
 ```
 
@@ -124,6 +154,18 @@ Example:
 | architecture/cf-bindings-audit.md | workers/gaai-cloud/api/wrangler.jsonc | 3 | 2 |
 
 If the code-path freshness check was skipped (git unavailable), this section contains only the skip note: "Code-path freshness check skipped: git not available."
+
+**7. Documentation & README Staleness**
+Documentation files (`**/docs/**/*.md`) and README files (`**/README.md`) that are flagged by Step 4b (explicit `depends_on`) or Step 4c (proximity heuristic). Each entry: doc file path, source type (`depends_on` or `proximity`), reference checked (code_path or nearest source dir), commit count since `updated_at`, days stale.
+
+Example:
+
+| File | Source | Reference | Commits since updated_at | Days stale |
+|---|---|---|---|---|
+| api/docs/overview/what-is-gaai-cloud.md | proximity | api/src/ | 12 | 8 |
+| README.md | depends_on | src/index.ts | 3 | 2 |
+
+If no documentation files were discovered, this section contains: "No documentation or README files found in project."
 
 ---
 

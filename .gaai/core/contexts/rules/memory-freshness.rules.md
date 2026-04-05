@@ -117,6 +117,39 @@ Tier 1–2 files are those under these paths (relative to project root):
 
 All other memory files MAY declare `depends_on` but are not required to.
 
+### 3.1 Documentation and README Files
+
+Documentation files (`**/docs/**/*.md`) and README files (`**/README.md`) are
+**in-scope for freshness tracking** alongside memory files. They describe the
+project to external consumers and drift silently when the codebase evolves.
+
+Documentation files SHOULD declare `depends_on` frontmatter when they describe
+code, APIs, architecture, or capabilities that change with the implementation.
+The schema is identical to memory files:
+
+```yaml
+---
+depends_on:
+  code_paths: ["src/"]      # directories or files this doc describes
+  decisions: [DEC-11]        # decisions referenced in the content
+  epics: []
+refresh_tier: 2
+---
+```
+
+**Rules for documentation freshness:**
+
+- Documentation files default to **Tier 3** (cadence review) when `depends_on`
+  is absent. This differs from memory files (which default to Tier 4) because
+  documentation is externally visible and staleness has higher cost.
+- Documentation files with `depends_on` declared follow the same tier logic as
+  memory files (Tier 1–4 based on `refresh_tier` value).
+- `memory-reconcile` discovers documentation files via glob patterns
+  (`**/docs/**/*.md`, `**/README.md`) — they do NOT need to be registered in
+  `contexts/memory/index.md`. The memory index is for memory only.
+- Discovery and reconciliation patterns use project-agnostic globs — no
+  hardcoded project-specific paths.
+
 When the author cannot determine the correct `code_paths`, use this safe fallback:
 
 ```yaml
