@@ -114,6 +114,7 @@ STAGING_LOCK="$LOCK_DIR/.staging.lock"
 RETRY_FILE="$LOCK_DIR/.retry-counts"
 LOG_FILE="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-daemon.log"
 MAX_RETRIES=3
+NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
 
 # Staleness: stories in_progress for longer than this are considered orphaned
 # Default: delivery timeout + 10 min buffer
@@ -181,6 +182,36 @@ sed_inplace() {
     sed -i '' "$@"
   else
     sed -i "$@"
+  fi
+}
+
+# ── Escalation notifications (daemon scope — staleness detection) ─────────
+notify_escalation() {
+  local story_id="$1"
+  local reason="$2"
+  local remediation="$3"
+
+  # AC1: terminal bell in daemon's session
+  printf '\a'
+
+  # AC2 / AC-ERR: OS-level notification on macOS only
+  if [[ "$PLATFORM" == "Darwin" ]]; then
+    osascript -e "display notification \"${remediation}\" with title \"GAAI Escalation: ${story_id}\" subtitle \"${reason}\"" 2>/dev/null || true
+  fi
+
+  # AC3 / AC4: webhook POST (best-effort, never blocks daemon)
+  if [[ -n "$NOTIFICATION_WEBHOOK" ]]; then
+    local ts
+    ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    local json="{\"story_id\":\"${story_id}\",\"reason\":\"${reason}\",\"remediation\":\"${remediation}\",\"timestamp\":\"${ts}\"}"
+    if ! curl -s -o /dev/null -w "%{http_code}" \
+        --max-time 5 \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -d "$json" \
+        "$NOTIFICATION_WEBHOOK" 2>/dev/null | grep -qE '^2'; then
+      log "${YELLOW}[NOTIFY] Webhook failed for $story_id (warning only)${NC}"
+    fi
   fi
 }
 
@@ -538,6 +569,7 @@ RSTEOF
       chmod +x "$reset_script"
       if with_staging_lock bash "$reset_script" 2>/dev/null; then
         log "${GREEN}$sid marked as failed (stale recovery)${NC}"
+        notify_escalation "$sid" "Stale: stuck in_progress for ${age_min}min" "Run: git log --oneline origin/staging | grep $sid — then reset manually or re-refine"
       else
         log "${RED}Could not mark $sid as failed — manual intervention needed${NC}"
       fi
@@ -770,6 +802,38 @@ PYEOF
   fi
 }
 
+notify_escalation_inline() {
+  local story_id="\$1"
+  local reason="\$2"
+  local remediation="\$3"
+
+  # AC1: bell in current (delivery) session
+  printf '\a'
+
+  # AC1: also ring bell in daemon's session if it exists
+  tmux send-keys -t gaai-daemon $'\a' 2>/dev/null || true
+
+  # AC2 / AC-ERR: OS notification on macOS only (detected at runtime in wrapper)
+  if [[ "\$(uname)" == "Darwin" ]]; then
+    osascript -e "display notification \"\${remediation}\" with title \"GAAI Escalation: \${story_id}\" subtitle \"\${reason}\"" 2>/dev/null || true
+  fi
+
+  # AC3 / AC4: webhook (URL baked in at generation time from NOTIFICATION_WEBHOOK)
+  local webhook="$NOTIFICATION_WEBHOOK"
+  if [[ -n "\$webhook" ]]; then
+    local ts="\$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    local json="{\"story_id\":\"\${story_id}\",\"reason\":\"\${reason}\",\"remediation\":\"\${remediation}\",\"timestamp\":\"\${ts}\"}"
+    if ! curl -s -o /dev/null -w "%{http_code}" \
+        --max-time 5 \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -d "\$json" \
+        "\$webhook" 2>/dev/null | grep -qE '^2'; then
+      echo "[NOTIFY] Webhook failed for \${story_id} (warning only)"
+    fi
+  fi
+}
+
 on_exit() {
   # Prevent re-entry (cleanup_children sends signals that re-trigger trap)
   \$EXITING && return
@@ -823,6 +887,7 @@ on_exit() {
         git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
       fi
     ) || echo "[WRAPPER] Warning: could not mark $story_id as escalated (will be caught by staleness detection)"
+    notify_escalation_inline "$story_id" "Escalated: agent stopped without completing delivery" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
   elif [[ \$EXIT_CODE -ne 0 ]]; then
     echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
     (
@@ -840,6 +905,7 @@ on_exit() {
         git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
       fi
     ) || echo "[WRAPPER] Warning: could not mark $story_id as failed (will be caught by staleness detection)"
+    notify_escalation_inline "$story_id" "Failed: delivery exit code \$EXIT_CODE" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
   fi
 }
 trap on_exit EXIT INT TERM
@@ -980,6 +1046,38 @@ PYEOF
   fi
 }
 
+notify_escalation_inline() {
+  local story_id="\$1"
+  local reason="\$2"
+  local remediation="\$3"
+
+  # AC1: bell in current (delivery) session
+  printf '\a'
+
+  # AC1: also ring bell in daemon's session if it exists
+  tmux send-keys -t gaai-daemon $'\a' 2>/dev/null || true
+
+  # AC2 / AC-ERR: OS notification on macOS only (detected at runtime in wrapper)
+  if [[ "\$(uname)" == "Darwin" ]]; then
+    osascript -e "display notification \"\${remediation}\" with title \"GAAI Escalation: \${story_id}\" subtitle \"\${reason}\"" 2>/dev/null || true
+  fi
+
+  # AC3 / AC4: webhook (URL baked in at generation time from NOTIFICATION_WEBHOOK)
+  local webhook="$NOTIFICATION_WEBHOOK"
+  if [[ -n "\$webhook" ]]; then
+    local ts="\$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    local json="{\"story_id\":\"\${story_id}\",\"reason\":\"\${reason}\",\"remediation\":\"\${remediation}\",\"timestamp\":\"\${ts}\"}"
+    if ! curl -s -o /dev/null -w "%{http_code}" \
+        --max-time 5 \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -d "\$json" \
+        "\$webhook" 2>/dev/null | grep -qE '^2'; then
+      echo "[NOTIFY] Webhook failed for \${story_id} (warning only)"
+    fi
+  fi
+}
+
 on_exit() {
   # Prevent re-entry (kill signals can re-trigger trap)
   \$EXITING && return
@@ -1019,6 +1117,7 @@ on_exit() {
       git commit -m 'chore($story_id): escalated [daemon-wrapper]' --quiet 2>/dev/null
       git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
     ) || echo "[WRAPPER] Warning: could not mark $story_id as escalated"
+    notify_escalation_inline "$story_id" "Escalated: agent stopped without completing delivery" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
   elif [[ \$EXIT_CODE -ne 0 ]]; then
     echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
     (
@@ -1027,6 +1126,7 @@ on_exit() {
       git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
       git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
     ) || echo "[WRAPPER] Warning: could not mark $story_id as failed"
+    notify_escalation_inline "$story_id" "Failed: delivery exit code \$EXIT_CODE" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
   fi
 }
 trap on_exit EXIT INT TERM
@@ -1139,6 +1239,7 @@ DRY_RUN="$DRY_RUN"
 HOST="$(hostname -s 2>/dev/null || hostname)"
 CAFFEINATE_PID="${CAFFEINATE_PID:-}"
 STARTED="$(date '+%H:%M:%S')"
+NOTIFICATION_WEBHOOK="$NOTIFICATION_WEBHOOK"
 EOF
 
 # ── Banner (2-column) ────────────────────────────────────────────────────
