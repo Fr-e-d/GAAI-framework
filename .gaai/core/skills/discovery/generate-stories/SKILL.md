@@ -57,14 +57,15 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
    - **d)** If the Epic has `mandatory_ac_categories: []` (empty), skip this step.
    - **Rationale:** In a past incident, stories omitted mandatory AC categories (e.g., i18n, copy-quality) despite existing DECs requiring them. The Epic did not declare mandatory AC categories, so the omission went undetected. This step ensures domain-critical requirements cannot be silently skipped.
 
-2. Write from the user's perspective
-3. Focus on behavior, not UI or technology
-4. Keep stories small and independent
-5. Ensure every story is testable
-6. Avoid technical solutions in story body
-7. For each story, answer: "What should the user be able to do or experience?"
-8. Output using canonical Story template
-9. **MANDATORY — Validation gates via isolated sub-agents (MUST pass before backlog registration).**
+2. Read parent Epic domain. If Epic has a domain, set it as the story's default. Allow explicit override per story.
+3. Write from the user's perspective
+4. Focus on behavior, not UI or technology
+5. Keep stories small and independent
+6. Ensure every story is testable
+7. Avoid technical solutions in story body
+8. For each story, answer: "What should the user be able to do or experience?"
+9. Output using canonical Story template
+10. **MANDATORY — Validation gates via isolated sub-agents (MUST pass before backlog registration).**
 
    Before registering ANY story in the backlog, the Discovery Agent MUST execute both gates in sequence. **Both gates MUST be invoked as isolated sub-agents** (via the Agent tool) — never executed inline by the main Discovery agent, even if the main agent is the one that created the story. The author of a story cannot objectively validate its own work (Core Principle #5 — Independent Evaluation).
 
@@ -80,13 +81,13 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 
    **Rationale:** (1) In a past incident, Discovery produced 14 stories and registered them as `refined` without running either gate — the gates were not in the skill's step list. (2) Later, Discovery self-validated both gates inline, using the "no Session Brief" skip condition to bypass the alignment gate entirely. In both cases, the main agent marked its own homework — no independent review occurred. This step closes both gaps by mandating sub-agent execution with no skip conditions. (3) Updated 2026-03-30: the alignment gate is now executed by the Review Sub-Agent (SUB-AGENT-REVIEW-001), enforcing Core Principle #5 (Independent Evaluation).
 
-10. **MANDATORY — Epic dependency propagation (MUST execute before backlog registration).**
+11. **MANDATORY — Epic dependency propagation (MUST execute before backlog registration).**
    - **a)** Read the parent Epic's `## Dependencies` section. If it lists other Epics (e.g., "E39 must be complete before E40 starts"), identify the **terminal stories** of each listed Epic — the stories with the highest IDs or the ones that other stories in that Epic depend on.
    - **b)** Every story in the current Epic MUST include at least one terminal story from each dependent Epic in its `depends_on` list. This ensures the daemon cannot pick up stories from this Epic until the dependent Epic is fully delivered.
    - **c)** If the parent Epic has no Dependencies or lists "None", skip this step.
    - **Rationale (2026-04-05):** E40S02 was picked up by the daemon before E39 was complete because the phasing constraint ("E39 done before E40") was written in Epic prose but not encoded in story-level `depends_on`. The daemon's scheduler reads `depends_on`, not Epic prose. Prose constraints that are not encoded in story dependencies are invisible to the daemon.
 
-11. **MANDATORY — Register in backlog.** After writing all story files, add each story to `contexts/backlog/active.backlog.yaml` with:
+12. **MANDATORY — Register in backlog.** After writing all story files, add each story to `contexts/backlog/active.backlog.yaml` with:
    - `id`, `epic`, `title` (from story frontmatter)
    - `status: refined` (if validated) or `status: draft` (if pending validation)
    - `priority` (derived from Epic priority or explicit input)
@@ -102,7 +103,7 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
    - **Validate YAML after every write:** `python3 -c "import yaml; yaml.safe_load(open('<backlog>'))"`. If validation fails, fix before committing.
    - **Rationale (2026-04-04):** Mixed indentation from `cat >> heredoc` (2-space items appended to a 0-space file) + `yaml.dump()` reformatting broke the backlog YAML, blocked the daemon, and required manual cleanup. These rules prevent recurrence.
 
-11. **MANDATORY — Commit & push to staging (ATOMIC).** After all story files are written and registered in the backlog, commit all generated/modified files **and push to `staging` in the same step**. Commit without push is a violation — Delivery cannot pick up stories that exist only locally.
+13. **MANDATORY — Commit & push to staging (ATOMIC).** After all story files are written and registered in the backlog, commit all generated/modified files **and push to `staging` in the same step**. Commit without push is a violation — Delivery cannot pick up stories that exist only locally.
     - Stage: story files (`contexts/artefacts/stories/*.story.md`), backlog (`contexts/backlog/active.backlog.yaml`), and any other modified GAAI context files (memory, decisions, etc.)
     - Commit message format: `chore(discovery): generate stories {id_range} for Epic {epic_id}`
       - Example: `chore(discovery): generate stories E06S46–E06S50 for Epic E06`

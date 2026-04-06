@@ -47,7 +47,8 @@ Works with or without a PRD.
 4. Avoid implementation detail
 5. Limit to 3–7 Epics maximum
 6. For each Epic, answer: "What meaningful user result will this create?"
-7. Output using the canonical Epic template
+7. Set domain based on the Epic's primary intent (e.g., engineering, marketing, legal). Leave empty if not applicable.
+8. Output using the canonical Epic template
 
 ---
 
