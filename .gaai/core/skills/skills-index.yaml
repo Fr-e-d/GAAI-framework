@@ -2,8 +2,8 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md — core framework skills only
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-03-29
-total: 48
+generated_at: 2026-04-12
+total: 49
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -424,6 +424,15 @@ cross:
     tags: []
     updated_at: 2026-03-21
     path: core/skills/cross/skill-usage-audit/SKILL.md
+  - id: SKILL-MEMORY-DELTA-TRIAGE-001
+    name: memory-delta-triage
+    source: core
+    description: "Apply three deterministic heuristics to a single memory-delta file to produce a structured verdict block; invoke memory-ingest on ACCEPTED candidates only in validate mode. Activate when Discovery processes a raw memory-delta from contexts/artefacts/memory-deltas/."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-04-12
+    path: core/skills/cross/memory-delta-triage/SKILL.md
   - id: SKILL-SUCCESS-METRICS-EVALUATION-001
     name: success-metrics-evaluation
     source: core

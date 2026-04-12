@@ -262,6 +262,42 @@ Cron MUST NOT:
 - Both may be triggered by cron or Discovery
 - Neither may create new project knowledge
 
+### Memory Ingestion and Delta Triage
+
+**Authority split (draft vs validate):**
+
+a. `memory-ingest` remains Discovery-only. No agent other than Discovery (human-initiated
+   or autonomous) may invoke `memory-ingest`. This rule is not modified by E62.
+
+b. `memory-delta-triage` in `draft` mode writes no memory. It produces a Triage Verdict
+   block and stops. The draft mode verdict is for Discovery's review — it does not
+   authorize or trigger any memory write.
+
+c. `memory-delta-triage` in `validate` mode instructs Discovery to invoke `memory-ingest`
+   for ACCEPTED candidates. The skill issues an explicit instruction per candidate;
+   Discovery (the human-facing agent) executes the `memory-ingest` invocations.
+   Validate mode requires human-initiated Discovery — never autonomous.
+
+d. The only skill permitted in autonomous Discovery draft mode is `memory-delta-triage`.
+   Autonomous Discovery may not invoke `memory-ingest`, `memory-refresh`, `memory-compact`,
+   or any skill outside the scope whitelist `[memory-delta-triage]`.
+
+**Daemon-spawn-Discovery pattern:**
+
+The Delivery Daemon is authorized to spawn an isolated Discovery agent process in
+`memory-delta-triage` draft mode after a successful QA PASS delivery. This is the sole
+authorized cross-agent-identity spawn pattern — the only case in which the Delivery
+Daemon may launch a Discovery agent. All other Discovery activation is human-initiated.
+
+The spawned Discovery context is bounded: it contains only the `memory-delta-triage`
+skill file, the target delta file, and the base governance rules. No other context
+is provided and no other skill may be invoked within this spawn.
+
+**Forbidden (in addition to base.rules.md and flow-specific forbidden patterns above):**
+- Autonomous Discovery invoking `memory-ingest` (permitted only in human-initiated validate mode)
+- Autonomous Discovery loading skills outside `[memory-delta-triage]`
+- The Delivery Daemon spawning Discovery for any purpose other than `memory-delta-triage` draft mode
+
 ## 🔁 Canonical Execution Flows
 
 → See `workflows/delivery-loop.workflow.md` (delivery) and `workflows/discovery-to-delivery.workflow.md` (end-to-end).
