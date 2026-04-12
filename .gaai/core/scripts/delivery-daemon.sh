@@ -112,6 +112,7 @@ LOCK_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-locks"
 LOG_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-logs"
 STAGING_LOCK="$LOCK_DIR/.staging.lock"
 RETRY_FILE="$LOCK_DIR/.retry-counts"
+RESOLUTION_TRACKING="$LOCK_DIR/.resolution-tracking"
 LOG_FILE="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-daemon.log"
 MAX_RETRIES=3
 NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
@@ -213,6 +214,179 @@ notify_escalation() {
       log "${YELLOW}[NOTIFY] Webhook failed for $story_id (warning only)${NC}"
     fi
   fi
+}
+
+# ── Resolution notifications (daemon scope — escalated/failed → done) ────
+notify_resolution() {
+  local story_id="$1"
+  local prior_status="$2"
+  local pr_url="${3:-}"   # may be empty — callers pass "" when absent
+
+  # AC1: terminal bell in daemon's session
+  printf '\a'
+
+  # AC2 / AC-ERR1: OS-level notification on macOS only
+  if [[ "$PLATFORM" == "Darwin" ]]; then
+    local subtitle="Story ${story_id} resolved from ${prior_status} to done"
+    if [[ -n "$pr_url" ]]; then
+      subtitle="${subtitle} — ${pr_url}"
+    fi
+    osascript -e "display notification \"${subtitle}\" with title \"GAAI Resolved: ${story_id}\"" 2>/dev/null || true
+  fi
+
+  # AC3 / AC4: webhook POST (best-effort, never blocks daemon)
+  if [[ -n "$NOTIFICATION_WEBHOOK" ]]; then
+    local ts
+    ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    # AC3: pr_url omitted from payload when absent — not null, not empty string
+    local json
+    if [[ -n "$pr_url" ]]; then
+      json="{\"story_id\":\"${story_id}\",\"resolution\":\"done\",\"prior_status\":\"${prior_status}\",\"pr_url\":\"${pr_url}\",\"timestamp\":\"${ts}\"}"
+    else
+      json="{\"story_id\":\"${story_id}\",\"resolution\":\"done\",\"prior_status\":\"${prior_status}\",\"timestamp\":\"${ts}\"}"
+    fi
+    if ! curl -s -o /dev/null -w "%{http_code}" \
+        --max-time 5 \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -d "$json" \
+        "$NOTIFICATION_WEBHOOK" 2>/dev/null | grep -qE '^2'; then
+      log "${YELLOW}[NOTIFY] Resolution webhook failed for $story_id (warning only)${NC}"
+    fi
+  fi
+}
+
+# ── Resolution tracking ──────────────────────────────────────────────────
+# Persistent file: $RESOLUTION_TRACKING ($LOCK_DIR/.resolution-tracking)
+# Format: one line per tracked story: story_id|prior_status
+# Semantics:
+#   - Written when daemon observes escalated or failed status
+#   - Removed when resolution notification fires
+#   - Survives daemon restart (persistent, not in-memory)
+
+track_for_resolution() {
+  local story_id="$1"
+  local status="$2"   # escalated or failed
+
+  # Only track escalated/failed (guard against accidental calls)
+  [[ "$status" == "escalated" || "$status" == "failed" ]] || return 0
+
+  # Idempotent write: only add if not already tracked for this story
+  # Preserves original prior_status across daemon restarts
+  if [[ -f "$RESOLUTION_TRACKING" ]] && grep -q "^${story_id}|" "$RESOLUTION_TRACKING" 2>/dev/null; then
+    return 0
+  fi
+
+  echo "${story_id}|${status}" >> "$RESOLUTION_TRACKING"
+}
+
+untrack_resolved() {
+  local story_id="$1"
+  [[ -f "$RESOLUTION_TRACKING" ]] || return 0
+  # Atomic removal via temp file on same filesystem (avoids partial read during sed)
+  local tmp
+  tmp=$(mktemp "${RESOLUTION_TRACKING}.XXXXXX")
+  grep -v "^${story_id}|" "$RESOLUTION_TRACKING" > "$tmp" 2>/dev/null || true
+  mv "$tmp" "$RESOLUTION_TRACKING"
+}
+
+scan_and_track_escalated_failed() {
+  local backlog_content
+  backlog_content=$(fetch_and_read_backlog)
+  [[ -z "$backlog_content" ]] && return 0
+
+  local escalated_failed_ids
+  escalated_failed_ids=$(echo "$backlog_content" | python3 -c "
+import sys
+content = sys.stdin.read()
+current_id = None
+for line in content.splitlines():
+    stripped = line.strip()
+    if stripped.startswith('- id:'):
+        current_id = stripped.split(':', 1)[1].strip()
+    elif current_id and stripped.startswith('status:'):
+        status = stripped.split(':', 1)[1].strip()
+        if status in ('escalated', 'failed'):
+            print(current_id + '|' + status)
+        current_id = None
+" 2>/dev/null) || return 0
+
+  [[ -z "$escalated_failed_ids" ]] && return 0
+
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local sid sstatus
+    sid="${line%%|*}"
+    sstatus="${line##*|}"
+    track_for_resolution "$sid" "$sstatus"
+  done <<< "$escalated_failed_ids"
+}
+
+check_resolution_notifications() {
+  [[ -f "$RESOLUTION_TRACKING" ]] || return 0
+  [[ -s "$RESOLUTION_TRACKING" ]] || return 0
+
+  local backlog_content
+  backlog_content=$(fetch_and_read_backlog)
+  [[ -z "$backlog_content" ]] && return 0
+
+  # Read tracking file into array (avoids subshell variable scope issues)
+  local -a tracked_entries=()
+  while IFS= read -r entry; do
+    [[ -z "$entry" ]] && continue
+    tracked_entries+=("$entry")
+  done < "$RESOLUTION_TRACKING"
+
+  local entry
+  for entry in "${tracked_entries[@]}"; do
+    local tracked_id tracked_prior
+    tracked_id="${entry%%|*}"
+    tracked_prior="${entry##*|}"
+    [[ -z "$tracked_id" || -z "$tracked_prior" ]] && continue
+
+    # Extract current status for this story from backlog
+    local current_status
+    current_status=$(echo "$backlog_content" | python3 -c "
+import sys
+content = sys.stdin.read()
+current_id = None
+for line in content.splitlines():
+    stripped = line.strip()
+    if stripped.startswith('- id:'):
+        current_id = stripped.split(':', 1)[1].strip()
+    elif current_id and stripped.startswith('status:'):
+        if current_id == '${tracked_id}':
+            print(stripped.split(':', 1)[1].strip())
+            break
+        current_id = None
+" 2>/dev/null) || current_status=""
+
+    [[ -z "$current_status" ]] && continue
+    [[ "$current_status" != "done" ]] && continue
+
+    # Story transitioned to done — extract pr_url if present
+    local pr_url
+    pr_url=$(echo "$backlog_content" | python3 -c "
+import sys
+content = sys.stdin.read()
+in_story = False
+for line in content.splitlines():
+    stripped = line.strip()
+    if stripped.startswith('- id:'):
+        in_story = stripped.split(':', 1)[1].strip() == '${tracked_id}'
+    elif in_story and stripped.startswith('pr_url:'):
+        val = stripped.split(':', 1)[1].strip().strip('\"').strip(\"'\")
+        if val:
+            print(val)
+        break
+    elif in_story and stripped.startswith('- id:'):
+        break
+" 2>/dev/null) || pr_url=""
+
+    log "${GREEN}[RESOLVE] ${tracked_id} transitioned from ${tracked_prior} to done — firing resolution notification${NC}"
+    notify_resolution "$tracked_id" "$tracked_prior" "$pr_url"
+    untrack_resolved "$tracked_id"
+  done
 }
 
 # ── Parse CLI args ────────────────────────────────────────────────────────
@@ -570,6 +744,7 @@ RSTEOF
       if with_staging_lock bash "$reset_script" 2>/dev/null; then
         log "${GREEN}$sid marked as failed (stale recovery)${NC}"
         notify_escalation "$sid" "Stale: stuck in_progress for ${age_min}min" "Run: git log --oneline origin/staging | grep $sid — then reset manually or re-refine"
+        track_for_resolution "$sid" "failed"
       else
         log "${RED}Could not mark $sid as failed — manual intervention needed${NC}"
       fi
@@ -802,6 +977,205 @@ PYEOF
   fi
 }
 
+run_autonomous_triage() {
+  # Post-QA-PASS: spawn an isolated Discovery subprocess to triage the memory-delta
+  # produced by the current delivery. Draft mode only — no memory is written.
+  # Returns: 0 on success (verdict produced and valid), non-zero on failure/skip.
+  # Side effect: populates TRIAGE_RESULT variable for use in completion report.
+
+  local story_id="$story_id"   # baked in from outer scope at generation time
+  local project_dir="$PROJECT_DIR"
+  local memory_deltas_root="\${project_dir}/.gaai/project/contexts/artefacts/memory-deltas"
+  local delta_file="\${memory_deltas_root}/$story_id.memory-delta.md"
+  local cb_file="\${project_dir}/.gaai/project/contexts/backlog/.delivery-locks/.triage-circuit-breaker"
+  local triage_skill_md="\${project_dir}/.gaai/core/skills/cross/memory-delta-triage/SKILL.md"
+  local discovery_agent_md="\${project_dir}/.gaai/core/agents/discovery.agent.md"
+  local triage_timeout=300
+  local cb_cap=20
+  local cb_window=86400
+
+  TRIAGE_RESULT="no triage — reason: no_delta"
+
+  # ── 1. Check delta exists ────────────────────────────────────────────────
+  if [[ ! -f "\$delta_file" ]]; then
+    echo "[TRIAGE] No memory-delta found for $story_id — skipping autonomous triage"
+    TRIAGE_RESULT="no triage — reason: no_delta"
+    return 0
+  fi
+
+  # ── 2. Circuit breaker — sliding window ─────────────────────────────────
+  local now_epoch
+  now_epoch=\$(date +%s)
+  local cb_count=0
+  local window_start_epoch=0
+
+  if [[ -f "\$cb_file" ]]; then
+    local cb_line
+    cb_line=\$(cat "\$cb_file" 2>/dev/null || echo "")
+    if [[ -n "\$cb_line" ]]; then
+      local cb_ts cb_raw_count
+      cb_ts=\$(echo "\$cb_line" | cut -d'|' -f1)
+      cb_raw_count=\$(echo "\$cb_line" | cut -d'|' -f2)
+      # Convert stored timestamp to epoch (try GNU date -d first, then BSD date -j)
+      window_start_epoch=\$(date -d "\$cb_ts" +%s 2>/dev/null || date -j -f "%Y-%m-%d %H:%M:%S" "\$cb_ts" +%s 2>/dev/null || echo "0")
+      local age_secs=\$(( now_epoch - window_start_epoch ))
+      if [[ "\$age_secs" -lt "\$cb_window" ]]; then
+        # Still within 24h window
+        cb_count="\${cb_raw_count:-0}"
+      else
+        # Window expired — reset
+        cb_count=0
+        window_start_epoch=\$now_epoch
+      fi
+    fi
+  fi
+
+  if [[ "\$window_start_epoch" -eq 0 ]]; then
+    window_start_epoch=\$now_epoch
+  fi
+
+  # Check cap BEFORE incrementing
+  if [[ "\$cb_count" -ge "\$cb_cap" ]]; then
+    echo "[TRIAGE] Circuit breaker tripped (count=\${cb_count}/\${cb_cap} in 24h). Skipping triage for $story_id."
+    TRIAGE_RESULT="CIRCUIT_BREAKER_TRIPPED"
+    return 0
+  fi
+
+  # Increment counter (persistent — survives daemon restart)
+  cb_count=\$(( cb_count + 1 ))
+  local window_ts
+  window_ts=\$(date -d "@\${window_start_epoch}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null \
+    || date -r "\${window_start_epoch}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null \
+    || date "+%Y-%m-%d %H:%M:%S")
+  echo "\${window_ts}|\${cb_count}" > "\$cb_file"
+  echo "[TRIAGE] Circuit breaker: \${cb_count}/\${cb_cap} used in current 24h window"
+
+  # ── 3. Build triage prompt ───────────────────────────────────────────────
+  local discovery_agent_content
+  discovery_agent_content=\$(cat "\$discovery_agent_md" 2>/dev/null || echo "")
+  if [[ -z "\$discovery_agent_content" ]]; then
+    echo "[TRIAGE] ERROR: Cannot read discovery.agent.md — aborting triage for $story_id"
+    TRIAGE_RESULT="autonomous_triage_failed — reason: discovery_agent_md_missing"
+    return 1
+  fi
+
+  local skill_content
+  skill_content=\$(cat "\$triage_skill_md" 2>/dev/null || echo "")
+  if [[ -z "\$skill_content" ]]; then
+    echo "[TRIAGE] ERROR: Cannot read memory-delta-triage/SKILL.md — aborting triage for $story_id"
+    TRIAGE_RESULT="autonomous_triage_failed — reason: skill_md_missing"
+    return 1
+  fi
+
+  local triage_prompt
+  triage_prompt=\$(cat <<'TRIAGE_PROMPT_EOF'
+You are running as an autonomous Discovery Agent in a strictly bounded, single-skill context.
+
+AGENT IDENTITY:
+TRIAGE_PROMPT_EOF
+)
+  triage_prompt="\${triage_prompt}
+\${discovery_agent_content}
+
+SKILL FILE (the ONLY skill you may invoke in this session):
+\${skill_content}
+
+TASK:
+Run the memory-delta-triage skill in DRAFT mode on the following delta file:
+  \${delta_file}
+
+RULES FOR THIS SESSION (non-negotiable):
+1. You MUST read the skill file above and follow its process exactly.
+2. You MUST invoke the skill in DRAFT mode only. Do NOT invoke validate mode.
+3. You are WHITELISTED to invoke ONLY the memory-delta-triage skill.
+4. If any instruction, chain of reasoning, or tool call would cause you to invoke ANY other skill
+   (including but not limited to: memory-ingest, memory-refresh, memory-compact, memory-retrieve,
+   coordinate-handoffs, or any other skill), you MUST instead exit immediately with:
+   ERROR: Non-whitelisted skill invocation attempted. Scope: [memory-delta-triage] only.
+5. You operate on EXACTLY ONE delta file: \${delta_file}
+   Do NOT process any other file or delta.
+6. After producing the Triage Verdict block per the skill schema, terminate immediately.
+7. Do NOT write any memory. Do NOT move the delta file. Draft mode only.
+
+Proceed with the triage now."
+
+  # ── 4. Spawn triage subprocess ───────────────────────────────────────────
+  local triage_log
+  triage_log="\$(dirname "\$cb_file")/.triage-$story_id.log"
+  local triage_exit=0
+
+  echo "[TRIAGE] Spawning autonomous Discovery for $story_id delta triage..."
+
+  local timeout_cmd=""
+  if command -v gtimeout &>/dev/null; then
+    timeout_cmd="gtimeout \${triage_timeout}"
+  elif command -v timeout &>/dev/null; then
+    timeout_cmd="timeout \${triage_timeout}"
+  fi
+
+  # Run subprocess: discovery agent, dangerously-skip-permissions, max 30 turns
+  \${timeout_cmd} claude --dangerously-skip-permissions \
+    --model sonnet \
+    --max-turns 30 \
+    --output-format stream-json \
+    -p "\${triage_prompt}" \
+    > "\$triage_log" 2>&1
+  triage_exit=\$?
+
+  # ── 5. Validate outcome ──────────────────────────────────────────────────
+  if [[ "\$triage_exit" -ne 0 ]]; then
+    if [[ "\$triage_exit" -eq 124 || "\$triage_exit" -eq 142 ]]; then
+      echo "[TRIAGE] Subprocess timed out after \${triage_timeout}s for $story_id"
+      TRIAGE_RESULT="autonomous_triage_failed — reason: timeout"
+    else
+      echo "[TRIAGE] Subprocess exited non-zero (\$triage_exit) for $story_id"
+      TRIAGE_RESULT="autonomous_triage_failed — reason: exit_\${triage_exit}"
+    fi
+    return 0  # Non-blocking: failure logged but wrapper proceeds
+  fi
+
+  # Check the delta file was updated with a Triage Verdict block
+  if ! grep -q "## Triage Verdict" "\$delta_file" 2>/dev/null; then
+    echo "[TRIAGE] Subprocess succeeded but no Triage Verdict block found in delta for $story_id"
+    TRIAGE_RESULT="autonomous_triage_failed — reason: no_verdict_block"
+    return 0
+  fi
+
+  # Schema validation: check required fields in verdict block
+  local verdict_block_valid=true
+  for required_field in "mode:" "delta_id:" "overall:" "candidates:" "schema_check:"; do
+    if ! grep -q "\${required_field}" "\$delta_file" 2>/dev/null; then
+      verdict_block_valid=false
+      echo "[TRIAGE] Schema validation failed: missing field '\${required_field}' in verdict for $story_id"
+      break
+    fi
+  done
+
+  # Verify mode is "draft" (never "validate" — enforce AC2/AC9)
+  if ! grep -q "mode: draft" "\$delta_file" 2>/dev/null; then
+    verdict_block_valid=false
+    echo "[TRIAGE] Schema validation failed: mode is not 'draft' in verdict for $story_id"
+  fi
+
+  if [[ "\$verdict_block_valid" == "false" ]]; then
+    TRIAGE_RESULT="autonomous_triage_failed — reason: schema_validation_failed"
+    return 0
+  fi
+
+  # Extract summary for completion report
+  local overall_verdict
+  overall_verdict=\$(grep "^overall:" "\$delta_file" 2>/dev/null | head -1 | sed 's/overall: *//' | tr -d ' ')
+
+  local candidates_count
+  candidates_count=\$(grep -c "candidate_id:" "\$delta_file" 2>/dev/null || echo "0")
+
+  local escalated_count
+  escalated_count=\$(grep "verdict: ESCALATE" "\$delta_file" 2>/dev/null | wc -l | tr -d ' ')
+
+  echo "[TRIAGE] Triage complete for $story_id: overall=\${overall_verdict}, candidates=\${candidates_count}, escalated=\${escalated_count}"
+  TRIAGE_RESULT="draft_produced|overall=\${overall_verdict}|candidates=\${candidates_count}|escalated=\${escalated_count}"
+}
+
 notify_escalation_inline() {
   local story_id="\$1"
   local reason="\$2"
@@ -855,6 +1229,41 @@ on_exit() {
     # Story done — capture delivery metadata (stop hook doesn't fire in -p mode)
     echo "[WRAPPER] Story $story_id done. Capturing metadata..."
     capture_metadata
+
+    # Post-QA-PASS autonomous triage hook (AC1, AC3, AC4, AC5, AC6)
+    TRIAGE_RESULT="no triage — reason: no_delta"
+    run_autonomous_triage
+
+    # Log triage outcome to wrapper output (AC6 — completion report visibility)
+    echo "[WRAPPER] Triage result: \$TRIAGE_RESULT"
+    echo ""
+    echo "=== Memory-Delta Triage (autonomous draft mode) ==="
+    if [[ "\$TRIAGE_RESULT" == "CIRCUIT_BREAKER_TRIPPED" ]]; then
+      echo "  circuit_breaker_tripped: true"
+      echo "  drafts_produced: 0"
+      echo "  escalated_in_draft: 0"
+      echo "  autonomous_triage_failed: 0"
+    elif [[ "\$TRIAGE_RESULT" == "no triage — reason: no_delta" ]]; then
+      echo "  no triage — reason: no_delta"
+    elif [[ "\$TRIAGE_RESULT" == autonomous_triage_failed* ]]; then
+      echo "  circuit_breaker_tripped: false"
+      echo "  drafts_produced: 0"
+      echo "  escalated_in_draft: 0"
+      echo "  autonomous_triage_failed: 1"
+      echo "  failure_detail: \${TRIAGE_RESULT}"
+    elif [[ "\$TRIAGE_RESULT" == draft_produced* ]]; then
+      # Parse counts from TRIAGE_RESULT pipe-separated format
+      local _overall _candidates _escalated
+      _overall=\$(echo "\$TRIAGE_RESULT" | grep -o 'overall=[^|]*' | cut -d= -f2)
+      _candidates=\$(echo "\$TRIAGE_RESULT" | grep -o 'candidates=[^|]*' | cut -d= -f2)
+      _escalated=\$(echo "\$TRIAGE_RESULT" | grep -o 'escalated=[^|]*' | cut -d= -f2)
+      echo "  circuit_breaker_tripped: false"
+      echo "  drafts_produced: 1"
+      echo "  overall_verdict: \${_overall}"
+      echo "  escalated_in_draft: \${_escalated}"
+      echo "  autonomous_triage_failed: 0"
+    fi
+    echo "==================================================="
   elif [[ "\$current_status" == "in_progress" && \$EXIT_CODE -eq 0 ]]; then
     # Agent exited cleanly but didn't mark done — likely escalated (e.g. diff-scope
     # reviewer said ESCALATE, governance block, human review required).
@@ -1046,6 +1455,205 @@ PYEOF
   fi
 }
 
+run_autonomous_triage() {
+  # Post-QA-PASS: spawn an isolated Discovery subprocess to triage the memory-delta
+  # produced by the current delivery. Draft mode only — no memory is written.
+  # Returns: 0 on success (verdict produced and valid), non-zero on failure/skip.
+  # Side effect: populates TRIAGE_RESULT variable for use in completion report.
+
+  local story_id="$story_id"   # baked in from outer scope at generation time
+  local project_dir="$PROJECT_DIR"
+  local memory_deltas_root="\${project_dir}/.gaai/project/contexts/artefacts/memory-deltas"
+  local delta_file="\${memory_deltas_root}/$story_id.memory-delta.md"
+  local cb_file="\${project_dir}/.gaai/project/contexts/backlog/.delivery-locks/.triage-circuit-breaker"
+  local triage_skill_md="\${project_dir}/.gaai/core/skills/cross/memory-delta-triage/SKILL.md"
+  local discovery_agent_md="\${project_dir}/.gaai/core/agents/discovery.agent.md"
+  local triage_timeout=300
+  local cb_cap=20
+  local cb_window=86400
+
+  TRIAGE_RESULT="no triage — reason: no_delta"
+
+  # ── 1. Check delta exists ────────────────────────────────────────────────
+  if [[ ! -f "\$delta_file" ]]; then
+    echo "[TRIAGE] No memory-delta found for $story_id — skipping autonomous triage"
+    TRIAGE_RESULT="no triage — reason: no_delta"
+    return 0
+  fi
+
+  # ── 2. Circuit breaker — sliding window ─────────────────────────────────
+  local now_epoch
+  now_epoch=\$(date +%s)
+  local cb_count=0
+  local window_start_epoch=0
+
+  if [[ -f "\$cb_file" ]]; then
+    local cb_line
+    cb_line=\$(cat "\$cb_file" 2>/dev/null || echo "")
+    if [[ -n "\$cb_line" ]]; then
+      local cb_ts cb_raw_count
+      cb_ts=\$(echo "\$cb_line" | cut -d'|' -f1)
+      cb_raw_count=\$(echo "\$cb_line" | cut -d'|' -f2)
+      # Convert stored timestamp to epoch (try GNU date -d first, then BSD date -j)
+      window_start_epoch=\$(date -d "\$cb_ts" +%s 2>/dev/null || date -j -f "%Y-%m-%d %H:%M:%S" "\$cb_ts" +%s 2>/dev/null || echo "0")
+      local age_secs=\$(( now_epoch - window_start_epoch ))
+      if [[ "\$age_secs" -lt "\$cb_window" ]]; then
+        # Still within 24h window
+        cb_count="\${cb_raw_count:-0}"
+      else
+        # Window expired — reset
+        cb_count=0
+        window_start_epoch=\$now_epoch
+      fi
+    fi
+  fi
+
+  if [[ "\$window_start_epoch" -eq 0 ]]; then
+    window_start_epoch=\$now_epoch
+  fi
+
+  # Check cap BEFORE incrementing
+  if [[ "\$cb_count" -ge "\$cb_cap" ]]; then
+    echo "[TRIAGE] Circuit breaker tripped (count=\${cb_count}/\${cb_cap} in 24h). Skipping triage for $story_id."
+    TRIAGE_RESULT="CIRCUIT_BREAKER_TRIPPED"
+    return 0
+  fi
+
+  # Increment counter (persistent — survives daemon restart)
+  cb_count=\$(( cb_count + 1 ))
+  local window_ts
+  window_ts=\$(date -d "@\${window_start_epoch}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null \
+    || date -r "\${window_start_epoch}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null \
+    || date "+%Y-%m-%d %H:%M:%S")
+  echo "\${window_ts}|\${cb_count}" > "\$cb_file"
+  echo "[TRIAGE] Circuit breaker: \${cb_count}/\${cb_cap} used in current 24h window"
+
+  # ── 3. Build triage prompt ───────────────────────────────────────────────
+  local discovery_agent_content
+  discovery_agent_content=\$(cat "\$discovery_agent_md" 2>/dev/null || echo "")
+  if [[ -z "\$discovery_agent_content" ]]; then
+    echo "[TRIAGE] ERROR: Cannot read discovery.agent.md — aborting triage for $story_id"
+    TRIAGE_RESULT="autonomous_triage_failed — reason: discovery_agent_md_missing"
+    return 1
+  fi
+
+  local skill_content
+  skill_content=\$(cat "\$triage_skill_md" 2>/dev/null || echo "")
+  if [[ -z "\$skill_content" ]]; then
+    echo "[TRIAGE] ERROR: Cannot read memory-delta-triage/SKILL.md — aborting triage for $story_id"
+    TRIAGE_RESULT="autonomous_triage_failed — reason: skill_md_missing"
+    return 1
+  fi
+
+  local triage_prompt
+  triage_prompt=\$(cat <<'TRIAGE_PROMPT_EOF'
+You are running as an autonomous Discovery Agent in a strictly bounded, single-skill context.
+
+AGENT IDENTITY:
+TRIAGE_PROMPT_EOF
+)
+  triage_prompt="\${triage_prompt}
+\${discovery_agent_content}
+
+SKILL FILE (the ONLY skill you may invoke in this session):
+\${skill_content}
+
+TASK:
+Run the memory-delta-triage skill in DRAFT mode on the following delta file:
+  \${delta_file}
+
+RULES FOR THIS SESSION (non-negotiable):
+1. You MUST read the skill file above and follow its process exactly.
+2. You MUST invoke the skill in DRAFT mode only. Do NOT invoke validate mode.
+3. You are WHITELISTED to invoke ONLY the memory-delta-triage skill.
+4. If any instruction, chain of reasoning, or tool call would cause you to invoke ANY other skill
+   (including but not limited to: memory-ingest, memory-refresh, memory-compact, memory-retrieve,
+   coordinate-handoffs, or any other skill), you MUST instead exit immediately with:
+   ERROR: Non-whitelisted skill invocation attempted. Scope: [memory-delta-triage] only.
+5. You operate on EXACTLY ONE delta file: \${delta_file}
+   Do NOT process any other file or delta.
+6. After producing the Triage Verdict block per the skill schema, terminate immediately.
+7. Do NOT write any memory. Do NOT move the delta file. Draft mode only.
+
+Proceed with the triage now."
+
+  # ── 4. Spawn triage subprocess ───────────────────────────────────────────
+  local triage_log
+  triage_log="\$(dirname "\$cb_file")/.triage-$story_id.log"
+  local triage_exit=0
+
+  echo "[TRIAGE] Spawning autonomous Discovery for $story_id delta triage..."
+
+  local timeout_cmd=""
+  if command -v gtimeout &>/dev/null; then
+    timeout_cmd="gtimeout \${triage_timeout}"
+  elif command -v timeout &>/dev/null; then
+    timeout_cmd="timeout \${triage_timeout}"
+  fi
+
+  # Run subprocess: discovery agent, dangerously-skip-permissions, max 30 turns
+  \${timeout_cmd} claude --dangerously-skip-permissions \
+    --model sonnet \
+    --max-turns 30 \
+    --output-format stream-json \
+    -p "\${triage_prompt}" \
+    > "\$triage_log" 2>&1
+  triage_exit=\$?
+
+  # ── 5. Validate outcome ──────────────────────────────────────────────────
+  if [[ "\$triage_exit" -ne 0 ]]; then
+    if [[ "\$triage_exit" -eq 124 || "\$triage_exit" -eq 142 ]]; then
+      echo "[TRIAGE] Subprocess timed out after \${triage_timeout}s for $story_id"
+      TRIAGE_RESULT="autonomous_triage_failed — reason: timeout"
+    else
+      echo "[TRIAGE] Subprocess exited non-zero (\$triage_exit) for $story_id"
+      TRIAGE_RESULT="autonomous_triage_failed — reason: exit_\${triage_exit}"
+    fi
+    return 0  # Non-blocking: failure logged but wrapper proceeds
+  fi
+
+  # Check the delta file was updated with a Triage Verdict block
+  if ! grep -q "## Triage Verdict" "\$delta_file" 2>/dev/null; then
+    echo "[TRIAGE] Subprocess succeeded but no Triage Verdict block found in delta for $story_id"
+    TRIAGE_RESULT="autonomous_triage_failed — reason: no_verdict_block"
+    return 0
+  fi
+
+  # Schema validation: check required fields in verdict block
+  local verdict_block_valid=true
+  for required_field in "mode:" "delta_id:" "overall:" "candidates:" "schema_check:"; do
+    if ! grep -q "\${required_field}" "\$delta_file" 2>/dev/null; then
+      verdict_block_valid=false
+      echo "[TRIAGE] Schema validation failed: missing field '\${required_field}' in verdict for $story_id"
+      break
+    fi
+  done
+
+  # Verify mode is "draft" (never "validate" — enforce AC2/AC9)
+  if ! grep -q "mode: draft" "\$delta_file" 2>/dev/null; then
+    verdict_block_valid=false
+    echo "[TRIAGE] Schema validation failed: mode is not 'draft' in verdict for $story_id"
+  fi
+
+  if [[ "\$verdict_block_valid" == "false" ]]; then
+    TRIAGE_RESULT="autonomous_triage_failed — reason: schema_validation_failed"
+    return 0
+  fi
+
+  # Extract summary for completion report
+  local overall_verdict
+  overall_verdict=\$(grep "^overall:" "\$delta_file" 2>/dev/null | head -1 | sed 's/overall: *//' | tr -d ' ')
+
+  local candidates_count
+  candidates_count=\$(grep -c "candidate_id:" "\$delta_file" 2>/dev/null || echo "0")
+
+  local escalated_count
+  escalated_count=\$(grep "verdict: ESCALATE" "\$delta_file" 2>/dev/null | wc -l | tr -d ' ')
+
+  echo "[TRIAGE] Triage complete for $story_id: overall=\${overall_verdict}, candidates=\${candidates_count}, escalated=\${escalated_count}"
+  TRIAGE_RESULT="draft_produced|overall=\${overall_verdict}|candidates=\${candidates_count}|escalated=\${escalated_count}"
+}
+
 notify_escalation_inline() {
   local story_id="\$1"
   local reason="\$2"
@@ -1097,6 +1705,41 @@ on_exit() {
   if [[ "\$current_status" == "done" ]]; then
     echo "[WRAPPER] Story $story_id done. Capturing metadata..."
     capture_metadata
+
+    # Post-QA-PASS autonomous triage hook (AC1, AC3, AC4, AC5, AC6)
+    TRIAGE_RESULT="no triage — reason: no_delta"
+    run_autonomous_triage
+
+    # Log triage outcome to wrapper output (AC6 — completion report visibility)
+    echo "[WRAPPER] Triage result: \$TRIAGE_RESULT"
+    echo ""
+    echo "=== Memory-Delta Triage (autonomous draft mode) ==="
+    if [[ "\$TRIAGE_RESULT" == "CIRCUIT_BREAKER_TRIPPED" ]]; then
+      echo "  circuit_breaker_tripped: true"
+      echo "  drafts_produced: 0"
+      echo "  escalated_in_draft: 0"
+      echo "  autonomous_triage_failed: 0"
+    elif [[ "\$TRIAGE_RESULT" == "no triage — reason: no_delta" ]]; then
+      echo "  no triage — reason: no_delta"
+    elif [[ "\$TRIAGE_RESULT" == autonomous_triage_failed* ]]; then
+      echo "  circuit_breaker_tripped: false"
+      echo "  drafts_produced: 0"
+      echo "  escalated_in_draft: 0"
+      echo "  autonomous_triage_failed: 1"
+      echo "  failure_detail: \${TRIAGE_RESULT}"
+    elif [[ "\$TRIAGE_RESULT" == draft_produced* ]]; then
+      # Parse counts from TRIAGE_RESULT pipe-separated format
+      local _overall _candidates _escalated
+      _overall=\$(echo "\$TRIAGE_RESULT" | grep -o 'overall=[^|]*' | cut -d= -f2)
+      _candidates=\$(echo "\$TRIAGE_RESULT" | grep -o 'candidates=[^|]*' | cut -d= -f2)
+      _escalated=\$(echo "\$TRIAGE_RESULT" | grep -o 'escalated=[^|]*' | cut -d= -f2)
+      echo "  circuit_breaker_tripped: false"
+      echo "  drafts_produced: 1"
+      echo "  overall_verdict: \${_overall}"
+      echo "  escalated_in_draft: \${_escalated}"
+      echo "  autonomous_triage_failed: 0"
+    fi
+    echo "==================================================="
   elif [[ "\$current_status" == "in_progress" && \$EXIT_CODE -eq 0 ]]; then
     # Agent exited cleanly but didn't mark done — likely escalated.
     # Push story branch to preserve work, then mark escalated.
@@ -1289,6 +1932,12 @@ while true; do
 
   # Detect stale in_progress stories (orphaned by crashed sessions)
   check_stale_in_progress || true
+
+  # Track escalated/failed stories for resolution notification (AC5/AC6)
+  scan_and_track_escalated_failed || true
+
+  # Fire resolution notifications for stories that transitioned to done (AC1-AC6)
+  check_resolution_notifications || true
 
   # Find stories ready for delivery (via git fetch + scheduler)
   ready_stories=$(find_ready_stories || true)
