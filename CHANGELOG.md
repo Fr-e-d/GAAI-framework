@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.17.0] - 2026-04-05
 
 ### Changed
-- feat: update gaai-cloud docs + extend memory freshness to docs and README
+- feat: extend memory freshness checks to docs and README
 
 
 ## [2.16.0] - 2026-03-30
