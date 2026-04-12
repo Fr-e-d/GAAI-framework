@@ -114,6 +114,7 @@ verdict: ALIGNED | DRIFT_DETECTED | NEW_KNOWLEDGE_FOUND | DRIFT_AND_NEW_KNOWLEDG
   suggested_tags: [api, resilience, patterns]
   ingestion_priority: high | medium | low
 ```
+Downstream consumer: `memory-delta-triage` (`.gaai/core/skills/cross/memory-delta-triage/SKILL.md`) processes these delta files to produce a governed triage verdict before Discovery invokes `memory-ingest`.
 
 ---
 

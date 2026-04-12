@@ -82,6 +82,36 @@ Only Epics and Stories are valid inputs for Delivery. Marketing and Strategy art
 - `summarization` — compact exploration into long-term knowledge
 - `skill-optimize` — run a structured evaluate-analyze-improve cycle on any skill to measure quality, detect regressions, and propose targeted improvements. Discovery orchestrates the full loop with human checkpoints.
 - `pattern-transfer` — discover structurally similar patterns across domains, assess transfer viability, and propose domain adaptations with risk gates. Activate when a problem may have been solved in another domain.
+- `memory-delta-triage` — apply three deterministic heuristics to a single memory-delta to produce a structured triage verdict block. In `validate` mode, instructs Discovery to invoke `memory-ingest` for ACCEPTED candidates and moves the delta to `processed/`. Activate when processing raw memory-deltas from `contexts/artefacts/memory-deltas/`. See autonomous draft mode definition below.
+
+#### Autonomous Discovery Draft Mode (memory-delta-triage only)
+
+Discovery may be spawned autonomously by the Delivery Daemon to process memory-deltas
+in `draft` mode after QA PASS, without human initiation.
+
+**Scope whitelist: `[memory-delta-triage]`** — this is the only skill permitted in
+autonomous Discovery draft mode.
+
+In autonomous draft mode, Discovery loads only the `memory-delta-triage` skill file
+and is forbidden from invoking any other skill (including `memory-ingest`).
+Enforcement is prompt-level: the spawned Discovery context includes only the
+`memory-delta-triage` skill file and the target delta file; no other skill files
+are loaded. The autonomy boundary is structural, not advisory.
+
+Discovery in autonomous draft mode:
+1. Reads the target delta file
+2. Invokes `memory-delta-triage` in `draft` mode
+3. Writes the Triage Verdict block to the session output
+4. Terminates
+
+It does NOT:
+- Invoke `memory-ingest` (forbidden in draft mode)
+- Interact with humans
+- Load memory beyond what `memory-delta-triage` Step 3 requires
+- Transition any backlog items
+
+Transition to `validate` mode (which invokes `memory-ingest` and writes memory)
+always requires human-initiated Discovery.
 
 ### Memory Skills (Agent-Owned)
 
