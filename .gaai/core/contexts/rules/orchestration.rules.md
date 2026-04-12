@@ -288,6 +288,7 @@ The Delivery Daemon is authorized to spawn an isolated Discovery agent process i
 `memory-delta-triage` draft mode after a successful QA PASS delivery. This is the sole
 authorized cross-agent-identity spawn pattern — the only case in which the Delivery
 Daemon may launch a Discovery agent. All other Discovery activation is human-initiated.
+(Delivery daemon may spawn one autonomous subprocess per QA PASS for memory-delta-triage in draft mode.)
 
 The spawned Discovery context is bounded: it contains only the `memory-delta-triage`
 skill file, the target delta file, and the base governance rules. No other context
