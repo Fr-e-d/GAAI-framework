@@ -48,15 +48,17 @@ echo "║      GAAI Context Summary v$VERSION      ║"
 echo "╚══════════════════════════════════════╝"
 echo ""
 
-# Project memory
-PROJECT_MEMORY="$GAAI_DIR/contexts/memory/project.memory.md"
+# Project memory — canonical path is contexts/memory/project/context.md
+# (legacy flat path contexts/memory/project.memory.md also supported)
+PROJECT_MEMORY="$GAAI_DIR/contexts/memory/project/context.md"
+[[ ! -f "$PROJECT_MEMORY" ]] && PROJECT_MEMORY="$GAAI_DIR/contexts/memory/project.memory.md"
 if [[ -f "$PROJECT_MEMORY" ]]; then
   echo "── Project Memory ──────────────────────"
   # Print non-frontmatter content (after second ---)
   awk '/^---/{n++; if(n==2){found=1; next}} found{print}' "$PROJECT_MEMORY" | head -30
   echo ""
 else
-  echo "⚠  project.memory.md not found — bootstrap not complete"
+  echo "⚠  project memory not found (checked project/context.md and project.memory.md) — bootstrap not complete"
   echo ""
 fi
 
