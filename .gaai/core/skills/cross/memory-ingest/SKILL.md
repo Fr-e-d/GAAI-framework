@@ -64,6 +64,13 @@ This guard prevents the silent data loss incident of 2026-03-17 where concurrent
    - List any potentially stale entries in the session output: entry path, reason suspected stale.
    - **If `index.md` is missing or a referenced file is unreadable:** skip the Impact Scan and note
      `"Impact Scan skipped: {reason}"` in session output — do not fail the ingestion.
+6b. **Architecture file gate (applies ONLY to writes under `contexts/memory/architecture/`).**
+   Before writing or updating any file in that folder:
+   - Read `contexts/rules/memory-architecture.rules.md` in full
+   - Apply the **Content Principle** (§1) — if the content is a code snapshot rather than a conceptual invariant, STOP and reclassify (either rewrite at the invariant level or discard — do not weaken the rule)
+   - Apply the **Verify-Before-Update Protocol** (§2) — load each path in `depends_on.code_paths`, confirm every claim in the content still matches current code; on divergence, escalate (never silent-rewrite)
+   - Populate the attestation fields in frontmatter: `verified_against_commit_sha: <40-char sha>` and `verified_at: <ISO 8601 timestamp>`
+   - Writing an architecture file without running this gate, or writing content copied from a memory-delta without independent code verification, is forbidden
 7. **Freshness metadata governance (Tier 1–2 files)** After writing any memory file under `architecture/`, `patterns/conventions.md`, or `project/context.md`, verify that both `depends_on` and `refresh_tier` are present in the file's YAML frontmatter before proceeding.
    - If both are present → continue.
    - If either is absent → **add them before this step completes**. Do not exit the skill without freshness metadata on a Tier 1–2 file.

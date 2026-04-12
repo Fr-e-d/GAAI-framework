@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- chore(memory): Discovery ingestion pass + architecture governance
 - fix: prevent silent daemon orphans + sub-agent reviewer for diff-scope
 
 ## [2.17.0] - 2026-04-05
