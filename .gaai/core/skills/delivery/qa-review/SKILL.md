@@ -63,6 +63,10 @@ Activate after implementation is complete. This is a **hard quality gate**.
 - Dead code or unreachable branches present → FAIL
 - Tests were disabled or skipped to make the suite pass → FAIL
 
+### 6. Memory Alignment (PASS only)
+
+On PASS verdict, the skill MUST invoke `memory-alignment-check` (SKILL-MEMORY-ALIGNMENT-CHECK-001) before returning. The canonical schema for `{id}.memory-delta.md` is defined authoritatively in `memory-alignment-check/SKILL.md` Outputs section (lines 85–116). QA MUST NOT write or modify `{id}.memory-delta.md` directly — only `memory-alignment-check` writes the delta.
+
 ---
 
 ## Outputs
@@ -100,5 +104,6 @@ This skill must NEVER:
 - Reinterpret Stories
 - Negotiate acceptance criteria
 - Approve partial conformance
+- MUST NOT write or modify `contexts/artefacts/memory-deltas/{id}.memory-delta.md` directly. The delta is written exclusively by `memory-alignment-check` (invoked at Step 6). Free-form delta variants are a governance violation.
 
 **If it's not explicitly validated → it's broken. If it's broken → it doesn't ship.**
