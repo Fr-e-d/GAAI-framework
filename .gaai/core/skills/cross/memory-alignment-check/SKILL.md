@@ -109,7 +109,7 @@ verdict: ALIGNED | DRIFT_DETECTED | NEW_KNOWLEDGE_FOUND | DRIFT_AND_NEW_KNOWLEDG
 ## New Knowledge Candidates
 
 - candidate_id: CANDIDATE-001
-  category: patterns | decisions | project
+  category: architecture | decisions | patterns | project | strategy | domains
   description: New retry pattern introduced in services/api/client.ts — not yet in memory.
   suggested_tags: [api, resilience, patterns]
   ingestion_priority: high | medium | low
