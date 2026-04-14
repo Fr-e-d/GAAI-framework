@@ -33,7 +33,7 @@ Activate when an agent needs to **find** relevant memory but does not know the e
 This skill **locates** memory — it does not **load** it. After results are returned, the agent invokes `memory-retrieve` to load the specific files.
 
 Use cases:
-- "Which decisions relate to Hyperdrive?" → Mode A (frontmatter: domain=infrastructure, tags contains hyperdrive)
+- "Which decisions relate to database connection pooling?" → Mode A (frontmatter: domain=infrastructure, tags contains database)
 - "Where did we discuss pool exhaustion?" → Mode B (full-text keyword: "pool exhaustion")
 - "What decisions are related to DEC-42?" → Mode C (cross-reference: DEC-42 → related_to + mentions)
 
@@ -45,7 +45,7 @@ Use cases:
 
 Search YAML frontmatter fields across `decisions/DEC-*.md` files.
 
-1. Accept query as field-value pairs: `{domain: "infrastructure", level: "operational"}` and/or `{tags: ["hyperdrive"]}` and/or `{related_to: ["DEC-5"]}` and/or `{status: "active"}`
+1. Accept query as field-value pairs: `{domain: "infrastructure", level: "operational"}` and/or `{tags: ["connection-pooling"]}` and/or `{related_to: ["DEC-5"]}` and/or `{status: "active"}`
 2. Grep frontmatter blocks (between `---` delimiters) of all `decisions/DEC-*.md` files
 3. Match files where ALL specified fields match (AND logic)
 4. Extract `id`, `title`, and matched field values from each hit

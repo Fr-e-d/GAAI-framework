@@ -66,14 +66,14 @@ The Orchestrator cannot proceed to the next phase until it has validated the cur
         - If unclear → **ESCALATE** with error list
      3. **Verify tests**: `npx vitest run` in worktree
         - Same triage: story-introduced failures → fix; pre-existing → proceed; unclear → **ESCALATE**
-     3b. **Wrangler dry-run** (local bundle check — no upload): detect worker directories with changed source or config files in the story worktree diff, then for each affected worker run `npx wrangler deploy --env staging --dry-run` from that worker's directory.
-         - **Skip condition**: if `git diff staging --name-only` yields no files matching `workers/**/*.{ts,js,json,toml,jsonc}` → skip with log note: `no worker changes — skipping wrangler dry-run`. A story modifying both `.gaai/` files AND any worker file does NOT qualify for the skip — run dry-run for the affected worker(s).
-         - **Affected workers**: collect unique worker root directories (pattern: `workers/<team>/<component>/`) from the diff. For each directory: run `npx wrangler deploy --env staging --dry-run` from `<worktree-root>/<worker-dir>/`.
+     3b. **Pre-push validation** (project-defined commands): detect worker directories with changed source or config files in the story worktree diff, then for each affected worker execute the project-defined pre-push validation commands (see the project's delivery-validation rules in `.gaai/project/contexts/rules/infrastructure.rules.md`).
+         - **Skip condition**: if `git diff staging --name-only` yields no files under any worker directory → skip with log note: `no worker changes — skipping pre-push validation`. A story modifying both `.gaai/` files AND any worker file does NOT qualify for the skip — run validation for the affected worker(s).
+         - **Affected workers**: collect unique worker root directories from the diff (any path under a `workers/` subdirectory). For each directory: execute the project-defined validation commands from `<worktree-root>/<worker-dir>/`.
          - **Triage logic** (same as steps 2–3):
            - Failure **introduced by this story** → fix in worktree and re-commit before proceeding to step 4.
-           - Failure **pre-existing** (reproducible on staging HEAD without this story's changes) → proceed without blocking. To verify: `git stash` the story's changes, re-run `npx wrangler deploy --env staging --dry-run` from the same worker directory, then `git stash pop`. If staging HEAD also fails → pre-existing; if only story HEAD fails → story-introduced.
+           - Failure **pre-existing** (reproducible on staging HEAD without this story's changes) → proceed without blocking. To verify: stash the story's changes, re-run the validation commands from the same worker directory, then pop the stash. If staging HEAD also fails → pre-existing; if only story HEAD fails → story-introduced.
            - Failure where provenance is **unclear** → **ESCALATE** with full error output; do not proceed to step 4.
-         - **Token requirement**: `--dry-run` performs local compilation only — no CF API upload. If a `CLOUDFLARE_API_TOKEN` is requested at runtime, **ESCALATE** immediately (DEC-54 Boundary 2); do not add the token.
+         - **Credential requirement**: the project-defined validation commands MUST NOT require external API credentials. If any validation command requests credentials at runtime, **ESCALATE** immediately (project deploy-credential boundary); do not supply the credential.
      4. Push story branch to origin
      5. `gh pr create --base staging --head story/{id}`
      6. Wait for PR CI check to reach a terminal state (`gh run watch`)
