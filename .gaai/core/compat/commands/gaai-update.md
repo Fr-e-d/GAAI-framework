@@ -24,7 +24,7 @@ Before doing anything, check both conditions:
 
 If `.gaai/core/` is absent, stop and tell the user:
 
-> **Error:** `.gaai/core/` not found. GAAI OSS does not appear to be installed. Run `/gaai-switch oss` or install the GAAI OSS framework first.
+> **Error:** `.gaai/core/` not found. GAAI OSS does not appear to be installed. Run `/gaai-switch oss` or install via gaai.dev first.
 
 If `gaai-cloud` is present in `.claude/settings.json` (regardless of whether `.gaai/core/` exists), stop and tell the user:
 

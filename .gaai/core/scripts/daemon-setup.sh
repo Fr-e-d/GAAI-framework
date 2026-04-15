@@ -201,8 +201,8 @@ fi
 
 # Secrets file from template (optional — only if project uses .env.example)
 if [[ -f "$PROJECT_ROOT/.env.example" ]]; then
-  # Detect target: .dev.vars if project has any framework config file, .env otherwise
-  if compgen -G "$PROJECT_ROOT/wrangler.*" &>/dev/null; then
+  # Detect target: .dev.vars if wrangler config exists, .env otherwise
+  if [[ -f "$PROJECT_ROOT/wrangler.toml" ]] || [[ -f "$PROJECT_ROOT/wrangler.jsonc" ]]; then
     SECRETS_FILE="$PROJECT_ROOT/.dev.vars"
   else
     SECRETS_FILE="$PROJECT_ROOT/.env"
