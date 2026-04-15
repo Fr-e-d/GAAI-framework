@@ -1208,6 +1208,22 @@ notify_escalation_inline() {
   fi
 }
 
+# Detect if delivery failure is due to Anthropic rate-limit (transient, retry-eligible).
+# A rate-limit rejection typically occurs before any tool call — no work to preserve,
+# no deterministic bug to surface. Caller should revert story to 'refined' so the daemon
+# retries after the limit resets, rather than terminally marking 'failed'.
+is_rate_limit_failure() {
+  local log_file="$LOG_DIR/${story_id}.log"
+  [[ -f "\$log_file" ]] || return 1
+  if grep -q '"type":"rate_limit_event"' "\$log_file" && grep -q '"status":"rejected"' "\$log_file"; then
+    return 0
+  fi
+  if grep -q '"error":"rate_limit"' "\$log_file"; then
+    return 0
+  fi
+  return 1
+}
+
 on_exit() {
   # Prevent re-entry (cleanup_children sends signals that re-trigger trap)
   \$EXITING && return
@@ -1298,23 +1314,43 @@ on_exit() {
     ) || echo "[WRAPPER] Warning: could not mark $story_id as escalated (will be caught by staleness detection)"
     notify_escalation_inline "$story_id" "Escalated: agent stopped without completing delivery" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
   elif [[ \$EXIT_CODE -ne 0 ]]; then
-    echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
-    (
-      if command -v flock &>/dev/null; then
-        flock "$STAGING_LOCK" bash -c "
+    if is_rate_limit_failure; then
+      echo "[WRAPPER] Delivery hit Anthropic rate-limit (transient). Reverting $story_id to refined for retry..."
+      (
+        if command -v flock &>/dev/null; then
+          flock "$STAGING_LOCK" bash -c "
+            '$SCHEDULER' --set-status '$story_id' refined '$BACKLOG' 2>/dev/null || true
+            git add '$BACKLOG_REL' 2>/dev/null
+            git commit -m 'chore($story_id): rate_limit_retry [delivery-wrapper]' --quiet 2>/dev/null
+            git push origin '$TARGET_BRANCH' --quiet 2>&1
+          "
+        else
+          '$SCHEDULER' --set-status '$story_id' refined '$BACKLOG' 2>/dev/null || true
+          git add '$BACKLOG_REL' 2>/dev/null
+          git commit -m 'chore($story_id): rate_limit_retry [delivery-wrapper]' --quiet 2>/dev/null
+          git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+        fi
+      ) || echo "[WRAPPER] Warning: could not revert $story_id to refined"
+      # No escalation notification — rate-limit is a transient platform event, not an incident
+    else
+      echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
+      (
+        if command -v flock &>/dev/null; then
+          flock "$STAGING_LOCK" bash -c "
+            '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
+            git add '$BACKLOG_REL' 2>/dev/null
+            git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
+            git push origin '$TARGET_BRANCH' --quiet 2>&1
+          "
+        else
           '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
           git add '$BACKLOG_REL' 2>/dev/null
           git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
-          git push origin '$TARGET_BRANCH' --quiet 2>&1
-        "
-      else
-        '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
-        git add '$BACKLOG_REL' 2>/dev/null
-        git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
-        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
-      fi
-    ) || echo "[WRAPPER] Warning: could not mark $story_id as failed (will be caught by staleness detection)"
-    notify_escalation_inline "$story_id" "Failed: delivery exit code \$EXIT_CODE" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
+          git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+        fi
+      ) || echo "[WRAPPER] Warning: could not mark $story_id as failed (will be caught by staleness detection)"
+      notify_escalation_inline "$story_id" "Failed: delivery exit code \$EXIT_CODE" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
+    fi
   fi
 }
 trap on_exit EXIT INT TERM
@@ -1686,6 +1722,22 @@ notify_escalation_inline() {
   fi
 }
 
+# Detect if delivery failure is due to Anthropic rate-limit (transient, retry-eligible).
+# A rate-limit rejection typically occurs before any tool call — no work to preserve,
+# no deterministic bug to surface. Caller should revert story to 'refined' so the daemon
+# retries after the limit resets, rather than terminally marking 'failed'.
+is_rate_limit_failure() {
+  local log_file="$LOG_DIR/${story_id}.log"
+  [[ -f "\$log_file" ]] || return 1
+  if grep -q '"type":"rate_limit_event"' "\$log_file" && grep -q '"status":"rejected"' "\$log_file"; then
+    return 0
+  fi
+  if grep -q '"error":"rate_limit"' "\$log_file"; then
+    return 0
+  fi
+  return 1
+}
+
 on_exit() {
   # Prevent re-entry (kill signals can re-trigger trap)
   \$EXITING && return
@@ -1762,14 +1814,25 @@ on_exit() {
     ) || echo "[WRAPPER] Warning: could not mark $story_id as escalated"
     notify_escalation_inline "$story_id" "Escalated: agent stopped without completing delivery" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
   elif [[ \$EXIT_CODE -ne 0 ]]; then
-    echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
-    (
-      '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
-      git add '$BACKLOG_REL' 2>/dev/null
-      git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
-      git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
-    ) || echo "[WRAPPER] Warning: could not mark $story_id as failed"
-    notify_escalation_inline "$story_id" "Failed: delivery exit code \$EXIT_CODE" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
+    if is_rate_limit_failure; then
+      echo "[WRAPPER] Delivery hit Anthropic rate-limit (transient). Reverting $story_id to refined for retry..."
+      (
+        '$SCHEDULER' --set-status '$story_id' refined '$BACKLOG' 2>/dev/null || true
+        git add '$BACKLOG_REL' 2>/dev/null
+        git commit -m 'chore($story_id): rate_limit_retry [delivery-wrapper]' --quiet 2>/dev/null
+        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+      ) || echo "[WRAPPER] Warning: could not revert $story_id to refined"
+      # No escalation notification — rate-limit is a transient platform event, not an incident
+    else
+      echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
+      (
+        '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
+        git add '$BACKLOG_REL' 2>/dev/null
+        git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
+        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+      ) || echo "[WRAPPER] Warning: could not mark $story_id as failed"
+      notify_escalation_inline "$story_id" "Failed: delivery exit code \$EXIT_CODE" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
+    fi
   fi
 }
 trap on_exit EXIT INT TERM

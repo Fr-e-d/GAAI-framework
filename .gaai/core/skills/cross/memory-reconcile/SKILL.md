@@ -151,7 +151,7 @@ Example:
 
 | File | code_path | Commits since updated_at | Days stale |
 |---|---|---|---|
-| architecture/cf-bindings-audit.md | workers/gaai-cloud/api/wrangler.jsonc | 3 | 2 |
+| architecture/<binding-audit>.md | workers/<worker-dir>/<config-file> | 3 | 2 |
 
 If the code-path freshness check was skipped (git unavailable), this section contains only the skip note: "Code-path freshness check skipped: git not available."
 

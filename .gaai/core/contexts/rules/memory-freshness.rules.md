@@ -31,7 +31,7 @@ fields at the time of ingest:
 
 ```yaml
 depends_on:
-  code_paths: ["workers/gaai-cloud/api/src/services/"]  # git-trackable paths
+  code_paths: ["workers/<worker-dir>/<source-tree>/"]  # git-trackable paths
   decisions: [DEC-11, DEC-20]                            # DEC IDs referenced in content
   epics: [E33, E34]                                      # epics whose completion may invalidate content
 refresh_tier: 1  # 1=post-epic-hook, 2=read-time-check, 3=cadence, 4=stable
@@ -44,8 +44,8 @@ refresh_tier: 1  # 1=post-epic-hook, 2=read-time-check, 3=cadence, 4=stable
 - **Glob patterns are NOT supported** — too fragile across renames; use explicit paths only
 - An empty list (`[]`) is a valid declaration — it means "no code dependency identified"
 - Examples:
-  - `"workers/gaai-cloud/api/src/services/"` — directory watch
-  - `"workers/gaai-cloud/api/src/services/backlog.service.ts"` — file watch
+  - `"workers/<worker-dir>/<source-tree>/"` — directory watch
+  - `"workers/<worker-dir>/<source-tree>/<service>.ts"` — file watch
   - `[]` — no code dependency (or not yet identified)
 
 ### 1.2 `depends_on.decisions`

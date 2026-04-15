@@ -41,6 +41,18 @@ Connect this project to a GAAI Cloud workspace. Installs the cloud connector, au
 
 ---
 
+## Configuration
+
+The GAAI Cloud MCP endpoint defaults to `https://app.gaai.cloud/mcp`. To use a custom endpoint, set the `GAAI_CLOUD_URL` environment variable before running this command:
+
+```bash
+export GAAI_CLOUD_URL=https://your-custom-endpoint
+```
+
+The `gaai-cloud` MCP server connector key (the JSON object key in `.claude/settings.json`) is the canonical OSS identifier — it is not configurable.
+
+---
+
 ## Instructions for Claude Code
 
 You are running `/gaai-switch cloud`. Follow every step in order. Do not skip steps. Do not proceed past a STOP point without explicit user confirmation.
@@ -53,7 +65,7 @@ Check whether `.gaai/core/` exists in the project root.
 
 If `.gaai/core/` is absent, stop immediately and tell the user:
 
-> **Error:** GAAI OSS not detected — install via gaai.dev first.
+> **Error:** GAAI OSS not detected — install the GAAI OSS framework first.
 
 Do not proceed.
 
@@ -84,7 +96,7 @@ Add or merge the following into the `mcpServers` object:
 ```json
 "gaai-cloud": {
   "command": "npx",
-  "args": ["mcp-remote", "https://app.gaai.cloud/mcp"]
+  "args": ["mcp-remote", "${GAAI_CLOUD_URL:-https://app.gaai.cloud}/mcp"]
 }
 ```
 
@@ -92,7 +104,7 @@ Write the updated `.claude/settings.json` back to disk.
 
 Tell the user:
 
-> MCP config written to `.claude/settings.json`. The gaai-cloud server points to `https://app.gaai.cloud/mcp` via mcp-remote.
+> MCP config written to `.claude/settings.json`. The gaai-cloud server points to `${GAAI_CLOUD_URL:-https://app.gaai.cloud}/mcp` via mcp-remote.
 
 ---
 
@@ -119,7 +131,7 @@ After the user confirms OAuth is complete, instruct them to verify:
 >
 > If you see fewer than 32 tools or a connection error, stop here and check:
 > - Your OAuth token is valid (try the browser flow again)
-> - The MCP server URL `https://app.gaai.cloud/mcp` is reachable
+> - The MCP server URL `${GAAI_CLOUD_URL:-https://app.gaai.cloud}/mcp` is reachable
 >
 > Confirm when you see "32 tools" before I continue.
 

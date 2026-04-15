@@ -7,15 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.17.0] - 2026-04-15
 
 ### Changed
-- wip(E63S03): snapshot validate-memory-deltas scaffolding
+- feat(daemon): classify Anthropic rate-limit as transient, revert to refined
+- chore(backlog): reset 7 stories failed by Anthropic rate-limit → refined
 - chore(qa-gate): add Build/Type Integrity step to qa-review skill
+- wip(E63S03): snapshot validate-memory-deltas scaffolding
 - docs(core): extend memory-alignment-check category enum to match operational reality
 - fix(core): context-bootstrap checks canonical memory path project/context.md
 - chore(memory): Discovery ingestion pass + architecture governance
 - fix: prevent silent daemon orphans + sub-agent reviewer for diff-scope
+
 
 ## [2.17.0] - 2026-04-05
 
