@@ -9,7 +9,7 @@ metadata:
   category: delivery
   track: delivery
   id: SKILL-QA-REVIEW-001
-  updated_at: 2026-04-15
+  updated_at: 2026-02-26
   status: stable
 inputs:
   - contexts/artefacts/stories/**
@@ -55,21 +55,7 @@ Activate after implementation is complete. This is a **hard quality gate**.
 - Behavior drift → FAIL
 - Known risk patterns from memory → FAIL
 
-### 5. Build / Type / Lint Integrity
-
-Test runners that transpile (vitest, jest, ts-jest, swc, esbuild, babel) execute code WITHOUT type checking — a green test suite does not prove the code compiles. Static-type or linter errors in test files, fixtures, and adjacent modules will pass tests locally and only surface at deploy time.
-
-Identify and run the project's full static-analysis gate for every workspace package whose files were modified (directly or via type/dep propagation):
-- TypeScript: `tsc --noEmit` (or `pnpm typecheck` / equivalent script)
-- For Cloudflare Workers projects: regenerate runtime types first (`wrangler types`) — drift between `worker-configuration.d.ts` and `wrangler.jsonc` masks real errors
-- Lint (if the project enforces it as a gate): `eslint`, `ruff`, `clippy`, etc.
-- Other ecosystems: `cargo check`, `mypy`, `go vet`, etc.
-
-If the project documents the exact command in `contexts/memory/patterns/conventions.md` or a delivery rules file, use that command verbatim — do not improvise.
-
-Any error → FAIL. "Test files only" is not a mitigation: test files are part of the typecheck graph and break the deploy gate.
-
-### 6. Quality Checks
+### 5. Quality Checks
 - Error-prone operations lack error handling → FAIL
 - External input enters functions without validation → FAIL
 - Identifiers are ambiguous or non-descriptive → FAIL
@@ -77,7 +63,7 @@ Any error → FAIL. "Test files only" is not a mitigation: test files are part o
 - Dead code or unreachable branches present → FAIL
 - Tests were disabled or skipped to make the suite pass → FAIL
 
-### 7. Memory Alignment (PASS only)
+### 6. Memory Alignment (PASS only)
 
 On PASS verdict, the skill MUST invoke `memory-alignment-check` (SKILL-MEMORY-ALIGNMENT-CHECK-001) before returning. The canonical schema for `{id}.memory-delta.md` is defined authoritatively in `memory-alignment-check/SKILL.md` Outputs section (lines 85–116). QA MUST NOT write or modify `{id}.memory-delta.md` directly — only `memory-alignment-check` writes the delta.
 

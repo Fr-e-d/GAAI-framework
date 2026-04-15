@@ -2,8 +2,8 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md — core framework skills only
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-04-15
-total: 50
+generated_at: 2026-04-12
+total: 49
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -150,7 +150,7 @@ delivery:
     category: delivery
     track: delivery
     tags: []
-    updated_at: 2026-04-15
+    updated_at: 2026-02-26
     path: core/skills/delivery/qa-review/SKILL.md
   - id: SKILL-REMEDIATE-FAILURES-001
     name: remediate-failures
@@ -242,7 +242,7 @@ cross:
     category: cross
     track: cross-cutting
     tags: []
-    updated_at: 2026-04-05
+    updated_at: 2026-03-03
     path: core/skills/cross/decision-extraction/SKILL.md
   - id: SKILL-CRS-019
     name: delivery-readiness-audit
@@ -316,15 +316,6 @@ cross:
     tags: []
     updated_at: 2026-03-01
     path: core/skills/cross/memory-compact/SKILL.md
-  - id: SKILL-MEMORY-DELTA-TRIAGE-001
-    name: memory-delta-triage
-    source: core
-    description: "Apply three deterministic heuristics to a single memory-delta file to produce a structured verdict block; invoke memory-ingest on ACCEPTED candidates only in validate mode. Activate when Discovery processes a raw memory-delta from contexts/artefacts/memory-deltas/."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-04-12
-    path: core/skills/cross/memory-delta-triage/SKILL.md
   - id: SKILL-MEMORY-INDEX-SYNC-001
     name: memory-index-sync
     source: core
@@ -341,17 +332,8 @@ cross:
     category: cross
     track: cross-cutting
     tags: []
-    updated_at: 2026-04-05
+    updated_at: 2026-02-26
     path: core/skills/cross/memory-ingest/SKILL.md
-  - id: SKILL-MEMORY-RECONCILE-001
-    name: memory-reconcile
-    source: core
-    description: "Scan all memory files, documentation (**/docs/**/*.md), and README files (**/README.md) for drift, contradictions, and stale references. Produce a reconciliation report for Discovery to action. Activate on demand or via cron."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-04-05
-    path: core/skills/cross/memory-reconcile/SKILL.md
   - id: SKILL-MEMORY-REFRESH-001
     name: memory-refresh
     source: core
@@ -368,7 +350,7 @@ cross:
     category: cross
     track: cross-cutting
     tags: []
-    updated_at: 2026-04-05
+    updated_at: 2026-03-01
     path: core/skills/cross/memory-retrieve/SKILL.md
   - id: SKILL-CRS-024
     name: memory-search
@@ -442,6 +424,15 @@ cross:
     tags: []
     updated_at: 2026-03-21
     path: core/skills/cross/skill-usage-audit/SKILL.md
+  - id: SKILL-MEMORY-DELTA-TRIAGE-001
+    name: memory-delta-triage
+    source: core
+    description: "Apply three deterministic heuristics to a single memory-delta file to produce a structured verdict block; invoke memory-ingest on ACCEPTED candidates only in validate mode. Activate when Discovery processes a raw memory-delta from contexts/artefacts/memory-deltas/."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-04-12
+    path: core/skills/cross/memory-delta-triage/SKILL.md
   - id: SKILL-SUCCESS-METRICS-EVALUATION-001
     name: success-metrics-evaluation
     source: core

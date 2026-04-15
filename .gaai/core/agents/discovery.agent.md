@@ -355,7 +355,7 @@ Standard categories (select those applicable to the Epic's domain):
 - `icp-targeting` — which ICP the feature/page targets and why
 - `error-handling` — edge cases, fallbacks, degraded states
 - `compliance` — GDPR, privacy, data handling
-- `analytics` — analytics platform events, tracking requirements
+- `analytics` — PostHog events, tracking requirements
 
 If a Story is missing an AC for a declared mandatory category, it is **not ready for delivery** and must be refined.
 

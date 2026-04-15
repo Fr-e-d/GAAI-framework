@@ -427,7 +427,7 @@ In GAAI Cloud, the DO tracks per-workspace:
 
 ## Cloud Extension Points
 
-In the cloud backend (`<cloud backend>`), the Review Sub-Agent gains capabilities that address the proven limitations of same-model evaluation.
+In GAAI Cloud (`gaai.cloud`), the Review Sub-Agent gains capabilities that address the proven limitations of same-model evaluation.
 
 ### Architecture — Cascade, Not Aggregation
 
@@ -486,7 +486,7 @@ This is a simplified version of the **Simulated Annotators** method (Trust or Es
 
 ### Capability Comparison
 
-| Capability | OSS (`.gaai/core`) | Cloud (`<cloud backend>`) |
+| Capability | OSS (`.gaai/core`) | Cloud (`gaai.cloud`) |
 |---|---|---|
 | Context isolation | Same model, isolated context window | Same model, isolated context window |
 | Model diversity | Not available (same model, proven ceiling) | Built-in — DO routes review to a configurable model (different provider than generator) |
