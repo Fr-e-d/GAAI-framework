@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- chore(qa-gate): add Build/Type Integrity step to qa-review skill
 - docs(core): extend memory-alignment-check category enum to match operational reality
 - fix(core): context-bootstrap checks canonical memory path project/context.md
 - chore(memory): Discovery ingestion pass + architecture governance
