@@ -17,11 +17,12 @@ Spawned by the Delivery Orchestrator. Validates the implementation against accep
 ## Lifecycle
 
 ```
-SPAWN   ← Orchestrator provides context bundle (Story + acceptance criteria + impl-report)
-EXECUTE ← Reviews implementation against each acceptance criterion
-PASS?   → Run memory-alignment-check → write {id}.memory-delta.md
-HANDOFF ← Writes contexts/artefacts/qa-reports/{id}.qa-report.md with verdict
-DIE     ← Terminates; context window released
+SPAWN       ← Orchestrator provides context bundle (Story + acceptance criteria + impl-report)
+EXECUTE     ← Reviews implementation against each acceptance criterion
+CONSISTENCY ← Invoke consistency-check (SKILL-CONSISTENCY-CHECK-001, at .gaai/core/skills/cross/consistency-check/SKILL.md) — MUST be invoked for EVERY delivery. This is unconditional and independent of Implementation phase routing. If consistency-check returns FAIL, the QA phase fails and existing escalation rules apply.
+PASS?       → Run memory-alignment-check → write {id}.memory-delta.md
+HANDOFF     ← Writes contexts/artefacts/qa-reports/{id}.qa-report.md with verdict
+DIE         ← Terminates; context window released
 ```
 
 `memory-alignment-check` runs only on PASS. On FAIL or ESCALATE, skip it — no delta report produced.
@@ -97,3 +98,4 @@ On PASS only: `contexts/artefacts/memory-deltas/{id}.memory-delta.md`
 - MUST NOT modify acceptance criteria or scope to make criteria pass
 - MUST NOT ship on FAIL verdict
 - MUST terminate after writing the handoff artefact (even on PASS)
+- `consistency-check` is mandatory for every delivery regardless of provider. Plan adherence is a governance property — it verifies the Implementation respects the Plan's contract, which matters whether Implementation ran on primary or secondary. Epic E94 promotes this from optional to mandatory per D-12. See Epic E94 D-12 for the rationale and non-conditional scope.
