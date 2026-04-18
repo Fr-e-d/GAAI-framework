@@ -62,7 +62,7 @@ AI coding tools are fast — but without governance, speed creates drift: agents
 
 **Delivery** — always runs in an **isolated process**. `/gaai-daemon` launches the Delivery Daemon, which runs each Story in its own `claude -p` session via tmux — a completely separate OS process with no Discovery residue and no conversation history bleed. The Delivery Agent orchestrates specialized sub-agents (Planning, Implementation, QA) per Story. Real-time visibility via `tmux attach`. No improvisation. No scope drift. No context contamination.
 
-`claude -p` (Claude Code CLI) is a **runtime dependency** for autonomous delivery. The daemon requires the `claude` binary in PATH. This applies whether you use GAAI OSS or GAAI Cloud — Discovery and governance are tool-agnostic, autonomous delivery is not.
+The delivery workflow is **portable to sub-agent-capable AI coding runtimes**. Claude Code is the reference implementation — the daemon uses `claude -p` because Claude Code was the first coding agent to expose sub-agent primitives (isolated contexts per sub-task, required for Planning → Implementation → QA separation). Discovery and governance work with any AI coding tool.
 
 **The backlog is the contract.** Nothing gets built that isn't in it.
 
@@ -200,7 +200,7 @@ bash .gaai/core/scripts/daemon-setup.sh
 | Windsurf | `AGENTS.md` |
 | Any other | Read `.gaai/core/README.md` directly |
 
-One canonical source (`.gaai/`). Thin adapters per tool. No duplication. Discovery, governance, and manual delivery work with any AI coding tool. Autonomous delivery (the Delivery Daemon) requires Claude Code CLI (`claude` in PATH) as a local runtime — this applies whether you use GAAI OSS or GAAI Cloud.
+One canonical source (`.gaai/`). Thin adapters per tool. No duplication. Discovery, governance, and manual delivery work with any AI coding tool. The delivery workflow is portable to sub-agent-capable AI coding runtimes — Claude Code is the reference implementation today.
 
 > [Full compatibility details](docs/reference/tool-compatibility.md)
 
