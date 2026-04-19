@@ -5,11 +5,11 @@ license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
-  version: "1.0"
+  version: "1.1"
   category: discovery
   track: discovery
   id: SKILL-VALIDATE-ARTEFACTS-001
-  updated_at: 2026-02-26
+  updated_at: 2026-04-18
   status: stable
 inputs:
   - contexts/artefacts/epics/**
@@ -53,6 +53,29 @@ This is the **mandatory gate** between Discovery and Delivery. No Story proceeds
 - Avoids solution design
 - Has `related_decs` field in frontmatter (list or explicit empty `[]`)
 - Has `skills_invoked` field in frontmatter (must list the skill IDs that were read to produce it)
+
+### `impl_model` Field Validation (optional field — E94)
+
+The `impl_model` field is **optional**. Stories without it validate exactly as before (non-regression guarantee).
+
+**Valid values:** `['primary', 'secondary']` — checked as a list lookup, not an if/else chain, so V2 extension (e.g., `tertiary`) is a one-line change.
+
+| Condition | Verdict |
+|---|---|
+| `impl_model` absent (story frontmatter or backlog entry) | **PASS** — default behavior |
+| `impl_model: primary` | **PASS** |
+| `impl_model: secondary` | **PASS** |
+| Any other value (e.g. `tertiary`, `claude-opus-4-6`, `""`) | **FAIL** — `impl_model must be 'primary' or 'secondary' (got: '<value>')` |
+| `impl_model` in frontmatter AND backlog entry with different values | **FAIL** — `impl_model mismatch: frontmatter=<X>, backlog=<Y>` |
+
+**Field location rules (AC6 — canonical resolution):**
+- **Canonical source:** the backlog entry (`active.backlog.yaml`). Delivery reads `impl_model` from the backlog at claim time.
+- **Advisory source:** story frontmatter (`.story.md`). Allows Discovery to author the tag authoritatively.
+- If only one source is present → accept it.
+- If both are present and agree → PASS.
+- If both are present and differ → **FAIL** with mismatch message above.
+
+Test fixtures: `.gaai/core/skills/discovery/validate-artefacts/tests/impl_model.test.yaml`
 
 ### Cross-checks
 - No Story exists without a parent Epic

@@ -107,7 +107,7 @@ The **Delivery Daemon** automates delivery end-to-end:
 - Monitors session health via heartbeat and `--max-turns` safety limits
 - Auto-opens a monitoring dashboard (tmux split: daemon config + active deliveries)
 
-**Runtime dependency:** The daemon requires the Claude Code CLI (`claude` binary in PATH, local). This applies whether you are using GAAI OSS or GAAI Cloud — the LLM runs in your tool, not on the server. Discovery and Delivery interactive work with any AI coding tool; the Claude CLI requirement is specific to autonomous delivery. See `core/compat/COMPAT.md` for the full 3-tier compatibility model.
+**Runtime model:** The delivery workflow is portable to sub-agent-capable AI coding runtimes. Claude Code is the reference implementation — the daemon uses `claude -p` (binary in PATH, local) because Claude Code was the first coding agent to expose sub-agent primitives (isolated contexts per sub-task, required for Planning → Implementation → QA separation). Other runtimes can be adopted as they expose equivalent primitives. Discovery and interactive Delivery work with any AI coding tool. See `core/compat/COMPAT.md` for the full 3-tier compatibility model.
 
 Usage: `/gaai-daemon` to start, `/gaai-daemon --stop` to stop. One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`.
 

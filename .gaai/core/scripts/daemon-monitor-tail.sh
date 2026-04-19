@@ -126,7 +126,7 @@ parse_log() {
   fi
 
   echo -e "  ${color}${health_icon}${NC} ${tool_count} tools | Last update: ${color}${age_label} ago${NC}${duration_label:+ | Running: ${duration_label}}${cost:+ | \$${cost}}"
-  [[ -n "$last_activity" ]] && echo -e "  ${DIM}→ ${last_activity:0:100}${NC}"
+  [[ -n "$last_activity" ]] && echo -e "  ${DIM}→ ${last_activity}${NC}"
 }
 
 while true; do

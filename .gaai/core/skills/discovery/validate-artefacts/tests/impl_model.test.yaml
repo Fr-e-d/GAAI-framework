@@ -1,0 +1,87 @@
+# validate-artefacts — impl_model field test fixtures
+#
+# How to run:
+#   Present each fixture to the validate-artefacts skill and confirm the expected verdict.
+#   The impl_model check is embedded in the Story Validation section of SKILL.md.
+#   A passing run outputs the verdict in the Validation Report under the story ID.
+#
+# Fixtures: A (absent), B (primary), C (secondary), D (invalid value)
+
+fixtures:
+
+  - id: fixture-A
+    description: "Story without impl_model — non-regression guarantee (D-0)"
+    story_frontmatter:
+      id: TEST-A
+      impl_model: ~   # absent (null)
+    backlog_entry:
+      id: TEST-A
+      impl_model: ~   # absent (null)
+    expected_verdict: PASS
+    expected_message: ~
+
+  - id: fixture-B
+    description: "Story with impl_model: primary — explicit opt-out marker"
+    story_frontmatter:
+      id: TEST-B
+      impl_model: primary
+    backlog_entry:
+      id: TEST-B
+      impl_model: primary
+    expected_verdict: PASS
+    expected_message: ~
+
+  - id: fixture-C
+    description: "Story with impl_model: secondary — route Implementation to secondary provider"
+    story_frontmatter:
+      id: TEST-C
+      impl_model: secondary
+    backlog_entry:
+      id: TEST-C
+      impl_model: secondary
+    expected_verdict: PASS
+    expected_message: ~
+
+  - id: fixture-D
+    description: "Story with invalid impl_model value — must produce explicit FAIL"
+    story_frontmatter:
+      id: TEST-D
+      impl_model: claude-opus-4-6
+    backlog_entry:
+      id: TEST-D
+      impl_model: claude-opus-4-6
+    expected_verdict: FAIL
+    expected_message: "impl_model must be 'primary' or 'secondary' (got: 'claude-opus-4-6')"
+
+  - id: fixture-E
+    description: "Mismatch between frontmatter and backlog entry — must FAIL with mismatch message"
+    story_frontmatter:
+      id: TEST-E
+      impl_model: primary
+    backlog_entry:
+      id: TEST-E
+      impl_model: secondary
+    expected_verdict: FAIL
+    expected_message: "impl_model mismatch: frontmatter=primary, backlog=secondary"
+
+  - id: fixture-F
+    description: "impl_model only in backlog (no frontmatter field) — valid single-source"
+    story_frontmatter:
+      id: TEST-F
+      impl_model: ~   # absent
+    backlog_entry:
+      id: TEST-F
+      impl_model: secondary
+    expected_verdict: PASS
+    expected_message: ~
+
+  - id: fixture-G
+    description: "impl_model only in frontmatter (no backlog field) — valid single-source"
+    story_frontmatter:
+      id: TEST-G
+      impl_model: secondary
+    backlog_entry:
+      id: TEST-G
+      impl_model: ~   # absent
+    expected_verdict: PASS
+    expected_message: ~
