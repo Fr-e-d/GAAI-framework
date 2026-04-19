@@ -120,7 +120,13 @@ Override the default worktree location by setting `GAAI_WORKTREE_BASE` (e.g., `e
 
 ### 1. Select Next Story
 
-Read `.gaai/project/contexts/backlog/active.backlog.yaml`. Select the highest-priority ready Story (status: `refined`, no unresolved dependencies). Use `.gaai/core/scripts/backlog-scheduler.sh --next .gaai/project/contexts/backlog/active.backlog.yaml` for automated selection.
+**Do NOT `Read` the full backlog file** — it routinely exceeds Claude's 25k-token single-Read limit and will error out mid-delivery. Use the scheduler script to pick the next ready story:
+
+```bash
+STORY_ID=$(.gaai/core/scripts/backlog-scheduler.sh --next .gaai/project/contexts/backlog/active.backlog.yaml)
+```
+
+The scheduler returns the highest-priority Story with `status: refined` and all dependencies satisfied. If a specific Story was requested by the user (e.g. `/gaai-deliver E19S01`), use `--ready-ids` to verify it's schedulable, or inspect a single entry with `grep -A 20 "^- id: $STORY_ID$" .gaai/project/contexts/backlog/active.backlog.yaml` — never load the whole file.
 
 ### 2. Evaluate Story
 
