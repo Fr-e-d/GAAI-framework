@@ -25,6 +25,12 @@ Read the active agent definition before acting:
 
 @.gaai/core/contexts/rules/base.rules.md
 
+### Memory Catalog (navigable map — the saillance kernel)
+
+Load the index at every session so you know *what exists* in GAAI memory before acting — categories, decisions, patterns, architecture, strategy. Don't retrieve content blindly; browse the catalog first.
+
+@.gaai/project/contexts/memory/index.md
+
 ### Canonical Files
 
 | Purpose | File |

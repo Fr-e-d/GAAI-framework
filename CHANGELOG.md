@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.18.0] - 2026-04-20
+
+### Changed
+- feat(E95): memory catalog saillance — cloud MCP metadata + OSS installer adapters
+
+
 ## [2.17.0] - 2026-04-15
 
 ### Changed

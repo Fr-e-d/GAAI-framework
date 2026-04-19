@@ -28,6 +28,10 @@ Activate based on context:
 
 For flow-specific rules (agent responsibilities, context isolation, branch rules, cron, capability readiness): `.gaai/core/contexts/rules/orchestration.rules.md`
 
+## Memory Catalog (navigable map)
+
+**Read `.gaai/project/contexts/memory/index.md` at the start of every session.** This is the catalog — categories, decisions, patterns, architecture, strategy, domains. Browse the index before retrieving content so you know *what exists* before acting. Do not retrieve memory blindly; the index tells you what's there and how to reach it.
+
 ## Key Paths
 
 ```
