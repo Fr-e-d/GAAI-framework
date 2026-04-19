@@ -143,7 +143,35 @@ Invoke `compose-team` → assembles context bundles for each sub-agent in the se
 
 If `risk_analysis_required: true` → invoke `risk-analysis` and add output to Planning Sub-Agent context bundle.
 
+#### Per-story trace_id
+
+Before spawning any sub-agent, generate a trace_id that will flow through Plan, Impl, and QA logging calls:
+
+```bash
+STORY_TRACE_ID="$(node -e 'import("node:crypto").then(m=>process.stdout.write(m.randomUUID()))')"
+```
+
+If the Implementation phase uses the secondary path, `STORY_TRACE_ID` is replaced by the wrapper's `trace_id` (see §6a). The same `STORY_TRACE_ID` is passed to all phase observability hooks (E94S06 defines the call; reserved here).
+
 ### 4. Execute — Tier 1 (MicroDelivery)
+
+> **Scope note — `impl_model` is IGNORED for Tier 1 (V1 design):**
+> MicroDelivery runs Plan+Impl+QA in a single sub-agent context. This is incompatible with isolated-Impl-phase routing to a secondary provider. For a true Tier 1 story (≤ 2 complexity, ≤ 3 ACs, minimal files), the overhead of splitting into Plan/Impl/QA sub-agents to enable secondary routing would COST MORE (3× context loading, 3× rules/memory retrieval) than the savings on a ≤10 LoC Impl phase.
+>
+> **Behavior:** if `impl_model: secondary` is set on a Tier 1 story, the tag is ignored with a log warning. Delivery proceeds as standard MicroDelivery on primary.
+>
+> **Log the ignored tag** at MicroDelivery entry:
+> ```bash
+> if [ "$impl_model" = "secondary" ]; then
+>   echo "⚠ impl_model=secondary ignored for Tier 1 (MicroDelivery design). Running on primary."
+>   node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
+>     --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
+>     --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
+>     --duration-ms 0 --fallback-reason "" --impl-model-tag "secondary_ignored_tier1" 2>/dev/null || true
+> fi
+> ```
+>
+> **Rationale:** Epic E94 D-0 non-regression and D-2 (Plan/QA primary) both hold; stories that want secondary routing should be Tier 2+ at discovery-time. If a Tier 1 story truly benefits from secondary, revisit its tiering at Discovery.
 
 Spawn `micro-delivery.sub-agent.md` with minimal context bundle.
 
@@ -158,13 +186,138 @@ Invoke `coordinate-handoffs`:
 
 ### 5. Execute — Tier 2/3: Planning Phase
 
+> **Provider:** Task tool on primary (regardless of `impl_model`). *Plan phase authors the contract; reasoning stays on primary per Epic E94 D-2.*
+
 Spawn `planning.sub-agent.md` with Planning context bundle.
 
 Collect `{id}.execution-plan.md`.
 
 Invoke `coordinate-handoffs` → validate artefact → PROCEED or RE-SPAWN or ESCALATE.
 
+**After PROCEED — log Plan phase:**
+```bash
+node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
+  --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "plan" \
+  --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
+  --duration-ms 0 --fallback-reason "" --impl-model-tag "${impl_model_tag:-absent}" 2>/dev/null || true
+```
+
 ### 6. Execute — Tier 2/3: Implementation Phase
+
+#### 6a. Implementation Phase Routing
+
+> **Plan phase:** Always uses the Task tool on primary regardless of `impl_model`.
+> *Plan phase authors the contract; reasoning stays on primary per Epic E94 D-2.*
+
+> **QA phase:** Always uses the Task tool on primary regardless of `impl_model`.
+> *QA validates against the Plan's contract; consistency stays on primary per Epic E94 D-2.*
+
+The routing decision is evaluated **exactly once** at Implementation phase entry. Mid-phase changes to env vars or the backlog entry do NOT re-trigger evaluation.
+
+> **🔒 Mode invariance (NON-NEGOTIABLE — applies to ALL Implementation Agents):**
+> The decision to invoke `nested-claude-spawn.js` is based EXCLUSIVELY on the two conditions in the decision matrix below:
+> (a) `impl_model == "secondary"` in the backlog entry, AND
+> (b) all three `GAAI_IMPL_*` environment variables are present and non-empty.
+>
+> **No other factor influences this decision.** In particular:
+> - Whether the delivery was launched by the daemon, by `/gaai-deliver` manually, or in any other context is **IRRELEVANT**. `nested-claude-spawn.js` is a standalone Node.js module callable from ANY bash context — it does not require, detect, or care about "daemon mode".
+> - Whether the current session feels "interactive" or "non-interactive" is **IRRELEVANT**. The wrapper spawns a `claude -p` subprocess regardless.
+> - The agent's subjective judgment about whether the story "really needs" secondary routing is **IRRELEVANT**. If the two conditions are met, the wrapper MUST be invoked. There is no "prefer primary because simpler" escape hatch.
+>
+> **If you (the agent) find yourself reasoning "I'll use primary because X":** STOP. X is invalid unless X is literally one of the two matrix conditions. Route to nested wrapper per the matrix.
+>
+> **Rationale:** Epic E94 D-0 (non-regression) is preserved by the `impl_model` tag itself — stories without the tag use primary. Agents second-guessing the matrix defeat the entire Epic's purpose (quota savings) and produce misleading `runtime-routing.jsonl` logs (e.g., `secondary_but_env_missing` logged when env was actually present).
+
+**Decision matrix:**
+
+```
+read impl_model from backlog entry    # canonical runtime source per E94S02 AC6
+
+# Non-behaviors (V1 — explicit):
+#   - No "try with half-quota first" or tiered fallback
+#   - No exponential backoff on endpoint errors
+#   - No retry on the nested subprocess
+#   - No circuit-breaker auto-disable of secondary
+# Fallback is atomic binary: secondary failed → primary runs (or escalates). T-2.
+
+if impl_model == "secondary":
+    # Pre-flight env check (never attempt secondary if env missing)
+    missing = []
+    if not GAAI_IMPL_BASE_URL  (non-empty): missing += ["GAAI_IMPL_BASE_URL"]
+    if not GAAI_IMPL_AUTH_TOKEN(non-empty): missing += ["GAAI_IMPL_AUTH_TOKEN"]
+    if not GAAI_IMPL_MODEL     (non-empty): missing += ["GAAI_IMPL_MODEL"]
+
+    if missing:
+        warn("IMPL_ROUTING_ENV_MISSING: expected GAAI_IMPL_BASE_URL|AUTH_TOKEN|MODEL, got: " + join(missing, ", "))
+        echo "⚠ impl_model=secondary but GAAI_IMPL_* env vars missing; using primary."
+        node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
+          --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
+          --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
+          --duration-ms 0 --fallback-reason "" --impl-model-tag "secondary_but_env_missing" 2>/dev/null || true
+        route → Task tool on primary
+
+    else:
+        # EXPLICIT BASH INVOCATION (mandatory — do NOT attempt the Task tool here).
+        # The nested-claude-spawn.js module now exposes a CLI (since commit 252f60b7+).
+        # Write the impl prompt to a tempfile and invoke the wrapper via Bash tool:
+        #
+        #   IMPL_PROMPT_FILE="$(mktemp -t gaai-impl-prompt.XXXXXX)"
+        #   printf '%s' "$IMPL_PROMPT" > "$IMPL_PROMPT_FILE"
+        #   result_json=$(node .gaai/core/adapters/claude-code/nested-claude-spawn.js \
+        #     --prompt-file "$IMPL_PROMPT_FILE" \
+        #     --report-path "$IMPL_REPORT_PATH")
+        #   rm -f "$IMPL_PROMPT_FILE"
+        #   result_trace_id=$(echo "$result_json" | jq -r '.trace_id')
+        #   result_success=$(echo "$result_json" | jq -r '.success')
+        #   result_model_actual=$(echo "$result_json" | jq -r '.model_actual')
+        #   result_error_reason=$(echo "$result_json" | jq -r '.error_reason // empty')
+        #   result_duration=$(echo "$result_json" | jq -r '.duration_ms')
+        #
+        # The CLI exits 0 regardless of business-logic success (distinguish via result_success).
+        # IMPL_PROMPT is the same impl prompt you would pass to an Implementation Sub-Agent
+        # via Task tool — just redirected to the wrapper via CLI.
+        #
+        # After this call, STORY_TRACE_ID is replaced with result_trace_id.
+        STORY_TRACE_ID="$result_trace_id"
+        # Pass result.error_reason as fallback_reason: non-null on failure, null on success.
+        # On success the logger prints "... done"; on failure "... ⚠ Falling back to primary (reason: <CLASS>)".
+        node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
+          --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
+          --provider "secondary" --model "${result.model_actual:-$GAAI_IMPL_MODEL}" \
+          --duration-ms "${result.duration_ms}" --fallback-reason "${result.error_reason:-}" \
+          --impl-model-tag "secondary" 2>/dev/null || true
+        if result.success:
+            proceed to QA (§7)
+        else:
+            # Universal fallback — any error class triggers primary re-invocation (E94S05)
+            fallback_reason = result.error_reason   # exact error class name; passed to E94S06 log
+            # trace_id is already captured from result.trace_id above (shared across both attempts)
+            primary_result = invoke Implementation Sub-Agent via Task tool on primary
+                             with identical implPrompt, implReportPath, story context
+            # Log primary fallback attempt (stdout: "▸ Phase Impl (primary / <model>) ... done|failed")
+            node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
+              --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
+              --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
+              --duration-ms 0 --fallback-reason "" --impl-model-tag "secondary" 2>/dev/null || true
+            if primary_result.success:
+                proceed to QA (§7)
+            else:
+                # Primary also failed — existing escalation path runs unchanged (AC6)
+                ESCALATE via existing daemon behavior (backlog status update + notes)
+                # Note: no retry, no tier-based strategy, no circuit-breaker (AC3, AC18, AC19)
+
+elif impl_model == "primary" OR impl_model is absent:
+    # Task tool on primary — byte-for-byte identical to pre-Epic delivery
+    node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
+      --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
+      --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
+      --duration-ms 0 --fallback-reason "" --impl-model-tag "${impl_model_tag:-absent}" 2>/dev/null || true
+    route → Task tool on primary
+```
+
+The routing helper is implemented in `.gaai/core/adapters/claude-code/impl-routing.js` (`resolveImplRouting(implModelTag)`) — testable without invoking a real subprocess.
+
+**Compliance:** no specific provider names appear in this workflow file. Only generic terms: "secondary provider", "nested subprocess", "user-configured endpoint" (AC13).
 
 Spawn `implementation.sub-agent.md` with Implementation context bundle.
 
@@ -187,6 +340,8 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 
 ### 7. Execute — Tier 2/3: QA Phase
 
+> **Provider:** Task tool on primary (regardless of `impl_model`). *QA validates against the Plan's contract; consistency stays on primary per Epic E94 D-2.*
+
 Spawn `qa.sub-agent.md` with QA context bundle.
 
 Collect `{id}.qa-report.md`.
@@ -195,6 +350,15 @@ Invoke `coordinate-handoffs`:
 - PASS → proceed to step 8
 - FAIL → re-spawn Implementation Sub-Agent with qa-report, then re-spawn QA Sub-Agent (max 3 cycles — see `qa.sub-agent.md`)
 - ESCALATE → stop, surface to human
+
+**After PASS — log QA phase and print consistency-check summary:**
+```bash
+node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
+  --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "qa" \
+  --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
+  --duration-ms 0 --fallback-reason "" --impl-model-tag "${impl_model_tag:-absent}" 2>/dev/null || true
+echo "✓ Plan adherence check: passed"
+```
 
 ### 7b. Commit Delivery Artefacts to Story Branch
 
