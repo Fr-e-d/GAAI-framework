@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.19.0] - 2026-04-20
 
 ### Changed
+- feat(impl-routing): DEC-72 — env-driven default (secondary when configured)
+- chore: bump local VERSION to v2.19.0 [sync]
+- feat(delivery-loop): §7c unify non-.gaai deletions into sub-agent reviewer
+
+
+## [2.19.0] - 2026-04-20
+
+### Changed
 - feat(delivery-loop): §7c unify non-.gaai deletions into sub-agent reviewer
 
 

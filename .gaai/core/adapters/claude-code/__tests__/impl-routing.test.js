@@ -54,8 +54,9 @@ describe('resolveImplRouting', () => {
     assert.ok(warnings.some(w => w.includes('GAAI_IMPL_MODEL')), 'warning must mention GAAI_IMPL_MODEL');
   });
 
-  // AC10: impl_model absent → primary, no routing warnings
-  test('AC10: impl_model absent → provider: primary, no routing log', () => {
+  // AC10 (DEC-72): impl_model absent + env MISSING → primary, no routing warnings
+  // Preserves OSS non-regression (E94 D-0 intent scoped to pre-configuration state).
+  test('AC10: impl_model absent + env missing → provider: primary, no routing log (OSS non-regression)', () => {
     clearEnv();
     const warnings = [];
     const orig = console.warn;
@@ -71,12 +72,58 @@ describe('resolveImplRouting', () => {
     assert.equal(warnings.filter(w => w.includes('IMPL_ROUTING')).length, 0, 'no IMPL_ROUTING warnings on primary path');
   });
 
-  // AC10 variant: impl_model: "primary" → same as absent
-  test('AC10b: impl_model: primary → provider: primary', () => {
+  // DEC-72: impl_model absent + env CONFIGURED → secondary (NEW default post-E94 validation)
+  test('DEC-72: impl_model absent + env configured → provider: secondary (env-driven default)', () => {
+    setValidEnv();
+    const r = resolveImplRouting(undefined);
+    assert.equal(r.provider, 'secondary');
+    assert.equal(r.implModelTag, null);
+    assert.equal(r.envMissing, null);
+    assert.equal(r.reason, null);
+  });
+
+  // DEC-72: impl_model null (explicit null) + env configured → secondary
+  test('DEC-72: impl_model null + env configured → provider: secondary', () => {
+    setValidEnv();
+    const r = resolveImplRouting(null);
+    assert.equal(r.provider, 'secondary');
+    assert.equal(r.implModelTag, null);
+  });
+
+  // DEC-72: impl_model absent + partial env → primary (no warn because no explicit opt-in)
+  test('DEC-72: impl_model absent + partial env → provider: primary, no warn (silent fallback)', () => {
+    process.env.GAAI_IMPL_BASE_URL = 'https://test.example.com';
+    // AUTH_TOKEN and MODEL not set
+    const warnings = [];
+    const orig = console.warn;
+    console.warn = (...args) => warnings.push(args.join(' '));
+
+    const r = resolveImplRouting(undefined);
+
+    console.warn = orig;
+    assert.equal(r.provider, 'primary');
+    assert.equal(r.reason, null, 'no reason when tag is absent (silent fallback, not opt-in failure)');
+    assert.equal(r.envMissing, null, 'envMissing is null when tag is absent (no explicit opt-in to report)');
+    assert.equal(warnings.filter(w => w.includes('IMPL_ROUTING')).length, 0, 'no warn when tag absent');
+  });
+
+  // AC10b (DEC-72): impl_model: "primary" → always primary, regardless of env (explicit opt-out)
+  test('AC10b: impl_model: primary + env missing → provider: primary (explicit opt-out)', () => {
+    clearEnv();
     const r = resolveImplRouting('primary');
     assert.equal(r.provider, 'primary');
     assert.equal(r.implModelTag, 'primary');
     assert.equal(r.reason, null);
+  });
+
+  // DEC-72: impl_model: "primary" + env configured → STILL primary (explicit opt-out is absolute)
+  test('DEC-72: impl_model: primary + env configured → provider: primary (explicit opt-out overrides env default)', () => {
+    setValidEnv();
+    const r = resolveImplRouting('primary');
+    assert.equal(r.provider, 'primary');
+    assert.equal(r.implModelTag, 'primary');
+    assert.equal(r.reason, null);
+    assert.equal(r.envMissing, null);
   });
 
   // AC7: decision is stable (called multiple times with same args → same provider)
