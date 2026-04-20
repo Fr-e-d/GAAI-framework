@@ -393,34 +393,25 @@ NON_GAAI_DELETIONS=$(git -C "$WORKTREE_PATH" diff --diff-filter=D --name-only st
   | grep -vcE '^\.gaai/' || true)
 ```
 
-#### Hard escalation triggers (always STOP — no reviewer)
+#### Diff-consistency check — sub-agent reviewer decides
 
-These are mechanical signals of tree corruption. No judgment needed.
+Two diff signals trigger the consistency check:
+- `NON_GAAI_DELETIONS > 0` — any non-`.gaai/` file deleted (possible tree corruption OR legitimate story-scoped removal).
+- `CHANGED_COUNT > 30` — diff exceeds the soft threshold (possible scope drift OR legitimate wide-touch story like test rewrites).
 
-```bash
-# Non-.gaai file deletions → possible tree corruption
-if [ "$NON_GAAI_DELETIONS" -gt 0 ]; then
-  echo "ESCALATE: $NON_GAAI_DELETIONS non-.gaai deletions — possible tree corruption"
-  echo "$DIFF_STAT"
-  # Push story branch to preserve work before stopping
-  git -C "$WORKTREE_PATH" push origin "story/{id}" 2>/dev/null || true
-  exit 1  # Do NOT merge. ESCALATE to human.
-fi
-```
-
-#### Soft threshold (> 30 files) — sub-agent reviewer decides
-
-When the diff exceeds 30 files, the Delivery Agent MUST NOT decide alone whether to proceed. Instead, **spawn a sub-agent reviewer** to evaluate whether the diff is consistent with the Story scope. The Delivery Agent is the generator — it cannot be the sole evaluator of its own output (base.rules.md Rule 5).
+In both cases, the Delivery Agent MUST NOT decide alone whether to proceed. **Spawn a sub-agent reviewer** to evaluate whether the diff is consistent with the Story scope. The Delivery Agent is the generator — it cannot be the sole evaluator of its own output (base.rules.md Rule 5).
 
 ```
 Reviewer input:
   - Story title + Acceptance Criteria (from the story artefact)
   - CHANGED_FILES list (full paths, one per line)
-  - CHANGED_COUNT
+  - DELETED_FILES list (non-.gaai deletions specifically, if any)
+  - CHANGED_COUNT, NON_GAAI_DELETIONS
 
 Reviewer task:
-  "This delivery changed {CHANGED_COUNT} files (exceeds the 30-file soft threshold).
-   Determine whether ALL changed files are traceable to the Story's scope.
+  "This delivery triggered a diff-consistency check ({CHANGED_COUNT} files changed,
+   {NON_GAAI_DELETIONS} non-.gaai deletions). Determine whether ALL changed and
+   deleted files are traceable to the Story's scope.
 
    Story: {title}
    ACs: {acceptance criteria}
@@ -428,12 +419,16 @@ Reviewer task:
    Changed files:
    {CHANGED_FILES}
 
+   Non-.gaai deletions (if any):
+   {DELETED_FILES}
+
    Answer with a structured verdict:
-   - PROCEED: every file is within the Story's domain — the count is high but
-     explainable (e.g., test-rewrite story touching many test files).
-   - ESCALATE: one or more files are outside the Story's expected scope, OR the
-     changes span unrelated modules, OR you cannot confidently trace all files
-     to the ACs.
+   - PROCEED: every file is within the Story's domain — the count is high or
+     the deletion is explainable (e.g., test-rewrite story, refactor removing
+     a generated/dead file declared in an AC).
+   - ESCALATE: one or more files are outside the Story's expected scope, OR
+     the changes span unrelated modules, OR a deletion has no trace to any AC,
+     OR you cannot confidently trace all files to the ACs.
 
    Be conservative: when in doubt, ESCALATE."
 ```
@@ -441,7 +436,7 @@ Reviewer task:
 **Decision flow:**
 
 ```
-CHANGED_COUNT > 30
+NON_GAAI_DELETIONS > 0  OR  CHANGED_COUNT > 30
   → spawn sub-agent reviewer (isolated context, no conversation history)
     → reviewer says PROCEED → continue to Step 8 (push + PR + merge)
     → reviewer says ESCALATE → push story branch to preserve work, then exit 1
@@ -500,7 +495,7 @@ gh pr merge --squash --delete-branch
 
 > **CI advisory mode:** When no branch protection exists on the target branch, CI failures caused by infrastructure issues (billing, quotas) do not block merge. The `ci-watch-and-fix` skill checks branch protection status before deciding whether to block or proceed. See `ci-watch-and-fix/SKILL.md` Step 0.
 >
-> **Staging self-merge: PERMITTED** after diff-sanity check passes (zero non-.gaai deletions; if > 30 files, sub-agent reviewer must verdict PROCEED — see §7c). If the check fails → ESCALATE, do NOT merge.
+> **Staging self-merge: PERMITTED** after diff-sanity check passes (if any non-.gaai deletion OR > 30 files, sub-agent reviewer must verdict PROCEED — see §7c). If the check fails → ESCALATE, do NOT merge.
 >
 > **Production/main merge: FORBIDDEN.** The AI MUST NEVER run `gh pr merge` targeting `main` or `production`. The human reviews and merges to production. This is a non-negotiable safety boundary.
 
