@@ -221,8 +221,8 @@ node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
 The routing decision is evaluated **exactly once** at Implementation phase entry. Mid-phase changes to env vars or the backlog entry do NOT re-trigger evaluation.
 
 > **🔒 Mode invariance (NON-NEGOTIABLE — applies to ALL Implementation Agents):**
-> The decision to invoke `nested-claude-spawn.js` is based EXCLUSIVELY on the two conditions in the decision matrix below:
-> (a) `impl_model == "secondary"` in the backlog entry, AND
+> The decision to invoke `nested-claude-spawn.js` is based EXCLUSIVELY on the conditions in the decision matrix below (per DEC-72, amends E94 D-0):
+> (a) `impl_model != "primary"` in the backlog entry (i.e., `secondary` OR absent), AND
 > (b) all three `GAAI_IMPL_*` environment variables are present and non-empty.
 >
 > **No other factor influences this decision.** In particular:
@@ -232,7 +232,7 @@ The routing decision is evaluated **exactly once** at Implementation phase entry
 >
 > **If you (the agent) find yourself reasoning "I'll use primary because X":** STOP. X is invalid unless X is literally one of the two matrix conditions. Route to nested wrapper per the matrix.
 >
-> **Rationale:** Epic E94 D-0 (non-regression) is preserved by the `impl_model` tag itself — stories without the tag use primary. Agents second-guessing the matrix defeat the entire Epic's purpose (quota savings) and produce misleading `runtime-routing.jsonl` logs (e.g., `secondary_but_env_missing` logged when env was actually present).
+> **Rationale:** Epic E94 D-0's OSS non-regression intent is preserved by condition (b) — users without `GAAI_IMPL_*` env vars configured see zero behavioral change. DEC-72 (2026-04-20) amends the post-E94S10 default: when env vars are configured, secondary is used by default (tag absent → secondary). `impl_model: primary` is the explicit opt-out for stories that must run on primary (complex reasoning, frontend/UX judgment, security-critical). Agents second-guessing the matrix defeat the entire Epic's purpose (quota savings) and produce misleading `runtime-routing.jsonl` logs.
 
 **Decision matrix:**
 
@@ -246,7 +246,18 @@ read impl_model from backlog entry    # canonical runtime source per E94S02 AC6
 #   - No circuit-breaker auto-disable of secondary
 # Fallback is atomic binary: secondary failed → primary runs (or escalates). T-2.
 
-if impl_model == "secondary":
+# DEC-72 (2026-04-20): tag absent + env configured routes to secondary by default.
+# tag === 'primary' → explicit opt-out (always primary, regardless of env).
+
+if impl_model == "primary":
+    # Explicit opt-out — always primary, regardless of env
+    node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
+      --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
+      --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
+      --duration-ms 0 --fallback-reason "" --impl-model-tag "primary" 2>/dev/null || true
+    route → Task tool on primary
+
+elif impl_model == "secondary" OR impl_model is absent:
     # Pre-flight env check (never attempt secondary if env missing)
     missing = []
     if not GAAI_IMPL_BASE_URL  (non-empty): missing += ["GAAI_IMPL_BASE_URL"]
@@ -254,8 +265,11 @@ if impl_model == "secondary":
     if not GAAI_IMPL_MODEL     (non-empty): missing += ["GAAI_IMPL_MODEL"]
 
     if missing:
-        warn("IMPL_ROUTING_ENV_MISSING: expected GAAI_IMPL_BASE_URL|AUTH_TOKEN|MODEL, got: " + join(missing, ", "))
-        echo "⚠ impl_model=secondary but GAAI_IMPL_* env vars missing; using primary."
+        # Only warn when the user explicitly opted in via tag='secondary'.
+        # When tag is absent and env is missing, silent primary fallback preserves OSS non-regression (E94 D-0 intent, DEC-72).
+        if impl_model == "secondary":
+            warn("IMPL_ROUTING_ENV_MISSING: expected GAAI_IMPL_BASE_URL|AUTH_TOKEN|MODEL, got: " + join(missing, ", "))
+            echo "⚠ impl_model=secondary but GAAI_IMPL_* env vars missing; using primary."
         node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
           --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
           --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
@@ -312,16 +326,13 @@ if impl_model == "secondary":
                 ESCALATE via existing daemon behavior (backlog status update + notes)
                 # Note: no retry, no tier-based strategy, no circuit-breaker (AC3, AC18, AC19)
 
-elif impl_model == "primary" OR impl_model is absent:
-    # Task tool on primary — byte-for-byte identical to pre-Epic delivery
-    node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
-      --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
-      --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
-      --duration-ms 0 --fallback-reason "" --impl-model-tag "${impl_model_tag:-absent}" 2>/dev/null || true
-    route → Task tool on primary
+# Note: the 'impl_model is absent' path is now consolidated into the 'secondary OR absent'
+# branch above per DEC-72. The 'primary' branch at the top of this matrix handles the
+# explicit opt-out. There is no separate 'absent → primary' path anymore — absence means
+# "follow env-driven default" which is secondary when env is configured, primary otherwise.
 ```
 
-The routing helper is implemented in `.gaai/core/adapters/claude-code/impl-routing.js` (`resolveImplRouting(implModelTag)`) — testable without invoking a real subprocess.
+The routing helper is implemented in `.gaai/core/adapters/claude-code/impl-routing.js` (`resolveImplRouting(implModelTag)`) — testable without invoking a real subprocess. Default routing semantics per DEC-72 (2026-04-20).
 
 **Compliance:** no specific provider names appear in this workflow file. Only generic terms: "secondary provider", "nested subprocess", "user-configured endpoint" (AC13).
 
