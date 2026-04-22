@@ -1365,6 +1365,7 @@ echo ""
 
 cd "$PROJECT_DIR"
 unset CLAUDECODE 2>/dev/null || true
+export GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log"
 
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
@@ -1847,6 +1848,7 @@ echo ""
 
 cd "$PROJECT_DIR"
 unset CLAUDECODE 2>/dev/null || true
+export GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log"
 
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"

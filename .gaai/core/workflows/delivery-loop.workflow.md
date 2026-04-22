@@ -84,7 +84,7 @@ git remote get-url origin 2>/dev/null || {
 # Resolve worktree path ONCE as absolute — all subsequent operations use $WORKTREE_PATH
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_NAME="$(basename "$REPO_ROOT")"
-WORKTREE_PATH="${GAAI_WORKTREE_BASE:-${REPO_ROOT}/../.gaai-worktrees/${REPO_NAME}}/${id}-workspace"
+WORKTREE_PATH="${GAAI_WORKTREE_BASE:-${REPO_ROOT}/../.gaai/${REPO_NAME}/worktrees}/${id}-workspace"
 mkdir -p "$(dirname "$WORKTREE_PATH")"
 
 # Step 0a: Sync with latest staging (under flock if concurrent)
@@ -118,7 +118,7 @@ fi
 
 All sub-agents operate exclusively inside `$WORKTREE_PATH`. The main working directory stays on `staging` and is never switched. If two Stories run in parallel, each has its own worktree — zero filesystem conflicts. Worktree isolation is **unconditional** regardless of story tier.
 
-Default worktree location is `<parent-of-repo>/.gaai-worktrees/<repo-name>/<story-id>-workspace` — this groups all GAAI worktrees under a single dedicated folder at the parent level, avoiding pollution of the parent directory when multiple projects share it. The `.gaai-worktrees/` name avoids collision with the in-project `.gaai/` folder. Override by setting `GAAI_WORKTREE_BASE` (e.g., `export GAAI_WORKTREE_BASE=/tmp/gaai-worktrees` for cloud-synced repos).
+Default worktree location is `<parent-of-repo>/.gaai/<repo-name>/worktrees/<story-id>-workspace` — this keeps all GAAI worktrees grouped under a single `.gaai/` folder at the parent level, avoiding pollution of the parent directory when multiple projects share it. Override by setting `GAAI_WORKTREE_BASE` (e.g., `export GAAI_WORKTREE_BASE=/tmp/gaai-worktrees` for cloud-synced repos).
 
 ### 1. Select Next Story
 
@@ -287,7 +287,15 @@ elif impl_model == "secondary" OR impl_model is absent:
         #   printf '%s' "$IMPL_PROMPT" > "$IMPL_PROMPT_FILE"
         #   result_json=$(node .gaai/core/adapters/claude-code/nested-claude-spawn.js \
         #     --prompt-file "$IMPL_PROMPT_FILE" \
-        #     --report-path "$IMPL_REPORT_PATH")
+        #     --report-path "$IMPL_REPORT_PATH" \
+        #     --log-file "$GAAI_DELIVERY_LOG_FILE")
+        #
+        # Note: --log-file streams the nested claude -p stdout (stream-json events) into the
+        # same per-story delivery log that the outer claude -p writes to via tee. This keeps
+        # daemon-monitor-tail.sh indicators (tool-call count, task_progress, log mtime / health
+        # icon) updating during the Implementation phase. When $GAAI_DELIVERY_LOG_FILE is
+        # empty or unset (e.g., manual invocation without the daemon), the flag is a no-op and
+        # behavior is byte-identical to pre-story operation.
         #   rm -f "$IMPL_PROMPT_FILE"
         #   result_trace_id=$(echo "$result_json" | jq -r '.trace_id')
         #   result_success=$(echo "$result_json" | jq -r '.success')
