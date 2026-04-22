@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- fix(daemon-monitor): classify nested claude -p (Implement Agent) as sub-agent
+
 ## [2.19.0] - 2026-04-22
 
 ### Changed

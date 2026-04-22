@@ -89,45 +89,42 @@ parse_log() {
     tool_count=$(grep -c '"type":"tool_use"' "$log_file" 2>/dev/null || echo 0)
   fi
 
-  # ── Last activity: main agent + sub-agent (implement / QA), same compact format ──
-  # jq filter: per-tool arg formatting (basename ONLY for file_path-based tools,
-  # raw command for Bash — avoids "null" from `split("/") | last` on `2>/dev/null`).
-  local JQ_TOOL_LINE='
-    def clean: tostring | gsub("\n"; " ") | gsub("  +"; " ");
-    def arg:
-      if .name == "Bash" then (.input.command // "" | clean)
-      elif .name == "Grep" then (.input.pattern // "" | clean)
-      elif (.name == "Read" or .name == "Edit" or .name == "Write" or .name == "NotebookEdit") then ((.input.file_path // "" | clean) | split("/") | .[-1] // "")
-      elif .name == "Task" then (.input.description // "" | clean)
-      elif .name == "TodoWrite" then "(todos updated)"
-      else ((.input.description // .input.file_path // .input.command // .input.query // "") | clean) end;
-    "\(.name) \(arg)"
-  '
-  local last_main="" last_sub=""
+  # ── Last activity (single line — whichever of main or sub-agent was most recent) ──
+  # Sub-agent origin = either (a) Task tool sub-agent: same session, parent_tool_use_id != null,
+  # or (b) nested `claude -p` (Implement Agent via nested-claude-spawn.js --log-file):
+  #         DIFFERENT session_id than the root delivery session.
+  # Root session_id = first session_id seen in the log (init event).
+  local last_event="" last_origin="" last_text="" root_sid=""
   if $HAS_JQ; then
-    # Main: task_progress.description first, fall back to compact tool_use
-    last_main=$(tail -500 "$log_file" 2>/dev/null \
-      | jq -r 'select(.type=="system" and .subtype=="task_progress" and (.parent_tool_use_id // null) == null) | .description // empty' 2>/dev/null \
+    root_sid=$(head -5 "$log_file" 2>/dev/null \
+      | jq -r '.session_id // empty' 2>/dev/null \
+      | head -1 || true)
+    last_event=$(tail -500 "$log_file" 2>/dev/null \
+      | jq -r --arg root_sid "$root_sid" '
+        def clean: tostring | gsub("\n"; " ") | gsub("  +"; " ");
+        def arg:
+          if .name == "Bash" then (.input.command // "" | clean)
+          elif .name == "Grep" then (.input.pattern // "" | clean)
+          elif (.name == "Read" or .name == "Edit" or .name == "Write" or .name == "NotebookEdit") then ((.input.file_path // "" | clean) | split("/") | .[-1] // "")
+          elif .name == "Task" then (.input.description // "" | clean)
+          elif .name == "TodoWrite" then "(todos updated)"
+          else ((.input.description // .input.file_path // .input.command // .input.query // "") | clean) end;
+        . as $m |
+        (if (($m.parent_tool_use_id // null) == null) and (($m.session_id // "") == $root_sid) then "MAIN" else "SUB" end) as $origin |
+        if ($m.type=="system" and $m.subtype=="task_progress") then
+          $origin + "\t" + ($m.description // "")
+        elif $m.type=="assistant" then
+          $m.message.content[]? | select(.type=="tool_use") | $origin + "\t" + .name + " " + arg
+        else empty end' 2>/dev/null \
       | tail -1 || true)
-    if [[ -z "$last_main" ]]; then
-      last_main=$(tail -500 "$log_file" 2>/dev/null \
-        | jq -r "select(.type==\"assistant\" and (.parent_tool_use_id // null) == null) | .message.content[]? | select(.type==\"tool_use\") | $JQ_TOOL_LINE" 2>/dev/null \
-        | tail -1 || true)
-    fi
-    # Sub-agent: same logic, ptuid != null
-    last_sub=$(tail -500 "$log_file" 2>/dev/null \
-      | jq -r 'select(.type=="system" and .subtype=="task_progress" and (.parent_tool_use_id // null) != null) | .description // empty' 2>/dev/null \
-      | tail -1 || true)
-    if [[ -z "$last_sub" ]]; then
-      last_sub=$(tail -500 "$log_file" 2>/dev/null \
-        | jq -r "select(.type==\"assistant\" and (.parent_tool_use_id // null) != null) | .message.content[]? | select(.type==\"tool_use\") | $JQ_TOOL_LINE" 2>/dev/null \
-        | tail -1 || true)
-    fi
+    last_origin="${last_event%%$'\t'*}"
+    last_text="${last_event#*$'\t'}"
   else
-    last_main=$(tail -200 "$log_file" 2>/dev/null \
+    last_text=$(tail -200 "$log_file" 2>/dev/null \
       | grep -o '"type":"tool_use"[^}]*"name":"[^"]*"' \
       | tail -1 \
       | sed 's/.*"name":"\([^"]*\)".*/\1/' 2>/dev/null || true)
+    last_origin="MAIN"
   fi
 
   # ── Cost ──
@@ -146,9 +143,15 @@ parse_log() {
   fi
 
   echo -e "  ${color}${health_icon}${NC} ${tool_count} tools | Last update: ${color}${age_label} ago${NC}${duration_label:+ | Running: ${duration_label}}${cost:+ | \$${cost}}"
-  # Use printf %s for data so literal "\n" in Bash commands stays literal (not interpreted)
-  [[ -n "$last_main" ]] && printf '  %b→ %s%b\n' "$DIM" "$last_main" "$NC"
-  [[ -n "$last_sub" ]]  && printf '  %b  ↳ %s%b\n' "$DIM" "$last_sub" "$NC"
+  # Single activity line — prefix switches based on origin (main delivery vs nested sub-agent).
+  # printf %s keeps literal "\n" in Bash commands literal (echo -e would interpret them).
+  if [[ -n "$last_text" ]]; then
+    if [[ "$last_origin" == "SUB" ]]; then
+      printf '  %b↳ %s%b\n' "$DIM" "$last_text" "$NC"
+    else
+      printf '  %b→ %s%b\n' "$DIM" "$last_text" "$NC"
+    fi
+  fi
 }
 
 while true; do
