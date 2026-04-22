@@ -8,8 +8,9 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, mkdtempSync, statSync, chmodSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import {
   spawnNestedClaude,
@@ -316,6 +317,79 @@ describe('nested-claude-spawn', () => {
     assert.equal(r.model_requested,          'test-model');
     // model_fallback_triggered is false here (model_actual is null since mock emits no JSON model line)
     assert.equal(typeof r.model_fallback_triggered, 'boolean');
+  });
+
+  // -------------------------------------------------------------------------
+  // T11: logFile absent → no file I/O
+  // -------------------------------------------------------------------------
+  test('T11: logFile absent — no file I/O occurs', async () => {
+    setValidEnv();
+    const reportPath = join(tmpdir(), `gaai-test-E94S12-T11-report-${Date.now()}.md`);
+    writeFileSync(reportPath, '## QA\nAll good.\n');
+    _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: '## QA\nAll good.\n' }));
+    const r = await spawnNestedClaude('test-prompt', reportPath);
+    assert.equal(r.success, true);
+    assert.equal(r.error_reason, null);
+    assert.ok(r.trace_id);
+    try { await import('node:fs').then(m => m.unlinkSync(reportPath)); } catch { /* ok */ }
+  });
+
+  // -------------------------------------------------------------------------
+  // T12: logFile set + writable → chunks appended, file grows
+  // -------------------------------------------------------------------------
+  test('T12: logFile set and writable — chunks appended, existing content preserved', async () => {
+    setValidEnv();
+    const tmpDir = mkdtempSync(join(tmpdir(), 'gaai-test-E94S12-T12-'));
+    const logFile = join(tmpDir, 'delivery.log');
+    const reportPath = join(tmpDir, 'impl-report.md');
+    writeFileSync(logFile, '{"type":"system","content":"outer-event"}\n', { encoding: 'utf8', flag: 'w' });
+    const initialSize = statSync(logFile).size;
+    writeFileSync(reportPath, '## QA\nAll good.\n');
+    const stdoutPayload = '{"type":"assistant","model":"test-model"}\n{"type":"result","subtype":"success"}\n';
+    _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: stdoutPayload }));
+    const r = await spawnNestedClaude('test-prompt', reportPath, [], logFile);
+    assert.equal(r.success, true);
+    const finalSize = statSync(logFile).size;
+    assert.ok(finalSize > initialSize, `log file must grow: was ${initialSize}, now ${finalSize}`);
+    const logContent = readFileSync(logFile, 'utf8');
+    assert.ok(logContent.includes('outer-event'), 'existing content must be preserved');
+    assert.ok(logContent.includes('"type":"assistant"'), 'child stdout must appear in log');
+  });
+
+  // -------------------------------------------------------------------------
+  // T13: logFile set + unwritable → completes normally, single warning on stderr, no throw
+  // -------------------------------------------------------------------------
+  test('T13: logFile unwritable — completes normally, single warning on stderr', async () => {
+    setValidEnv();
+    const tmpDir = mkdtempSync(join(tmpdir(), 'gaai-test-E94S12-T13-'));
+    const logFile = join(tmpDir, 'readonly.log');
+    const reportPath = join(tmpDir, 'impl-report.md');
+    writeFileSync(logFile, '', { encoding: 'utf8' });
+    chmodSync(logFile, 0o444);
+    writeFileSync(reportPath, '## QA\nAll good.\n');
+    const stderrLines = [];
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (msg, ...rest) => {
+      stderrLines.push(typeof msg === 'string' ? msg : msg.toString());
+      return originalStderrWrite(msg, ...rest);
+    };
+    _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: '{"type":"assistant"}\n{"type":"result"}\n' }));
+    let threw = false;
+    let r;
+    try {
+      r = await spawnNestedClaude('test-prompt', reportPath, [], logFile);
+    } catch (e) {
+      threw = true;
+    } finally {
+      process.stderr.write = originalStderrWrite;
+      try { chmodSync(logFile, 0o644); } catch { /* ok */ }
+    }
+    assert.equal(threw, false, 'must not throw');
+    assert.equal(r.success, true);
+    const warnings = stderrLines.filter(l => l.includes('[nested-claude-spawn] WARNING'));
+    assert.ok(warnings.length >= 1, 'at least one WARNING must be emitted');
+    assert.ok(warnings[0].includes(logFile), 'warning must contain log file path');
+    assert.ok(!warnings[0].includes('test-token-do-not-log'), 'warning must not contain auth token');
   });
 
 });

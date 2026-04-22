@@ -17,7 +17,7 @@
  */
 
 import { spawn as _childSpawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -233,6 +233,40 @@ function extractModelActual(stdout) {
 }
 
 // ---------------------------------------------------------------------------
+// Private helper: _makeLogFlusher
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a line-oriented flusher that appends complete stdout lines to `logFile`.
+ * Returns a no-op flusher when logFile is falsy.
+ * @param {string} [logFile] - Path to append stream-json lines to.
+ * @returns {{ flush(chunk: Buffer|string): void }}
+ */
+function _makeLogFlusher(logFile) {
+  if (!logFile) return { flush() {} };
+  let partial = '';
+  let warnEmitted = false;
+  return {
+    flush(chunk) {
+      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const combined = partial + text;
+      const lines = combined.split('\n');
+      partial = lines.pop(); // last element is incomplete (or '' if text ended with \n)
+      if (lines.length === 0) return;
+      const toWrite = lines.join('\n') + '\n';
+      try {
+        appendFileSync(logFile, toWrite, { encoding: 'utf8', flag: 'a' });
+      } catch (e) {
+        if (!warnEmitted) {
+          process.stderr.write(`[nested-claude-spawn] WARNING: cannot append to log file ${logFile} (${e.code || e.message})\n`);
+          warnEmitted = true;
+        }
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Core spawn logic (shared between public and override export)
 // ---------------------------------------------------------------------------
 
@@ -245,7 +279,7 @@ function extractModelActual(stdout) {
  * @param {number}   heartbeatTimeoutMs
  * @returns {Promise<SpawnResult>}
  */
-function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeatTimeoutMs) {
+function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeatTimeoutMs, logFile) {
   const traceId   = randomUUID();
   const startMs   = Date.now();
   const modelReq  = process.env.GAAI_IMPL_MODEL   || '';
@@ -287,6 +321,7 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
 
     let globalTimer    = null;
     let heartbeatTimer = null;
+    const logFlusher   = _makeLogFlusher(logFile);
 
     function clearTimers() {
       if (globalTimer)    { clearTimeout(globalTimer);    globalTimer    = null; }
@@ -314,6 +349,7 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
     resetHeartbeat();
 
     child.stdout.on('data', (chunk) => {
+      logFlusher.flush(chunk);
       stdoutChunks.push(chunk);
       resetHeartbeat();
     });
@@ -380,7 +416,7 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
  * @param {string[]} [extraArgs=[]]  - Additional argv to append
  * @returns {Promise<SpawnResult>}
  */
-export async function spawnNestedClaude(prompt, implReportPath, extraArgs = []) {
+export async function spawnNestedClaude(prompt, implReportPath, extraArgs = [], logFile = '') {
   // Guard: required env vars
   const missing = [];
   if (!process.env.GAAI_IMPL_BASE_URL)   missing.push('GAAI_IMPL_BASE_URL');
@@ -404,7 +440,7 @@ export async function spawnNestedClaude(prompt, implReportPath, extraArgs = []) 
     };
   }
 
-  return spawnCore(prompt, implReportPath, extraArgs, GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS);
+  return spawnCore(prompt, implReportPath, extraArgs, GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile);
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +457,7 @@ export async function spawnNestedClaude(prompt, implReportPath, extraArgs = []) 
  * @param {{ globalTimeoutMs?: number, heartbeatTimeoutMs?: number }} overrides
  * @returns {Promise<SpawnResult>}
  */
-export async function _spawnWithTimerOverride(prompt, implReportPath, extraArgs, overrides = {}) {
+export async function _spawnWithTimerOverride(prompt, implReportPath, extraArgs, overrides = {}, logFile = '') {
   // Guard: required env vars (same as spawnNestedClaude)
   const missing = [];
   if (!process.env.GAAI_IMPL_BASE_URL)   missing.push('GAAI_IMPL_BASE_URL');
@@ -446,7 +482,7 @@ export async function _spawnWithTimerOverride(prompt, implReportPath, extraArgs,
 
   const gMs = overrides.globalTimeoutMs    ?? GLOBAL_TIMEOUT_MS;
   const hMs = overrides.heartbeatTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
-  return spawnCore(prompt, implReportPath, extraArgs, gMs, hMs);
+  return spawnCore(prompt, implReportPath, extraArgs, gMs, hMs, logFile);
 }
 
 // ---------------------------------------------------------------------------
@@ -478,6 +514,7 @@ async function _cli() {
     else if (k === '--prompt-inline') opts.promptInline = args[++i];
     else if (k === '--report-path') opts.reportPath = args[++i];
     else if (k === '--extra-arg') { (opts.extraArgs ||= []).push(args[++i]); }
+    else if (k === '--log-file') opts.logFile = args[++i];
     else if (k === '--help' || k === '-h') {
       process.stdout.write(`Usage: node nested-claude-spawn.js [options]
 
@@ -486,12 +523,17 @@ Options:
   --prompt-inline <txt>  Pass prompt inline (for short prompts only)
   --report-path <path>   Path where the nested claude -p will write impl-report.md
   --extra-arg <arg>      Append extra argv to child (repeatable, e.g. --extra-arg --model)
+  --log-file <path>      Append child stdout stream-json lines to this log file (optional; no-op if absent)
   --help, -h             Show this help
 
 Output: SpawnResult JSON on stdout on success. Exit 1 on invocation error.
 `);
       process.exit(0);
     }
+  }
+
+  if (!opts.logFile && process.env.GAAI_DELIVERY_LOG_FILE) {
+    opts.logFile = process.env.GAAI_DELIVERY_LOG_FILE;
   }
 
   if (!opts.reportPath) {
@@ -509,7 +551,7 @@ Output: SpawnResult JSON on stdout on success. Exit 1 on invocation error.
     process.exit(1);
   }
 
-  const result = await spawnNestedClaude(prompt, opts.reportPath, opts.extraArgs || []);
+  const result = await spawnNestedClaude(prompt, opts.reportPath, opts.extraArgs || [], opts.logFile || '');
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   // Exit 0 regardless of result.success — the caller reads success from the JSON.
   // This way the wrapper's business-logic failure (e.g. AUTH_FAILED) is not conflated
