@@ -89,25 +89,45 @@ parse_log() {
     tool_count=$(grep -c '"type":"tool_use"' "$log_file" 2>/dev/null || echo 0)
   fi
 
-  # ── Last activity (from system task_progress events) ──
-  local last_activity=""
-  local last_tool=""
+  # ── Last activity: main agent + sub-agent (implement / QA), same compact format ──
+  # jq filter: per-tool arg formatting (basename ONLY for file_path-based tools,
+  # raw command for Bash — avoids "null" from `split("/") | last` on `2>/dev/null`).
+  local JQ_TOOL_LINE='
+    def clean: tostring | gsub("\n"; " ") | gsub("  +"; " ");
+    def arg:
+      if .name == "Bash" then (.input.command // "" | clean)
+      elif .name == "Grep" then (.input.pattern // "" | clean)
+      elif (.name == "Read" or .name == "Edit" or .name == "Write" or .name == "NotebookEdit") then ((.input.file_path // "" | clean) | split("/") | .[-1] // "")
+      elif .name == "Task" then (.input.description // "" | clean)
+      elif .name == "TodoWrite" then "(todos updated)"
+      else ((.input.description // .input.file_path // .input.command // .input.query // "") | clean) end;
+    "\(.name) \(arg)"
+  '
+  local last_main="" last_sub=""
   if $HAS_JQ; then
-    last_activity=$(tail -300 "$log_file" 2>/dev/null \
-      | jq -r 'select(.type=="system" and .subtype=="task_progress") | .description // empty' 2>/dev/null \
+    # Main: task_progress.description first, fall back to compact tool_use
+    last_main=$(tail -500 "$log_file" 2>/dev/null \
+      | jq -r 'select(.type=="system" and .subtype=="task_progress" and (.parent_tool_use_id // null) == null) | .description // empty' 2>/dev/null \
       | tail -1 || true)
-    if [[ -z "$last_activity" ]]; then
-      # Fallback: last tool_use name + file_path if available
-      last_activity=$(tail -300 "$log_file" 2>/dev/null \
-        | jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | "\(.name) \(.input.file_path // .input.command // .input.pattern // "" | tostring | split("/") | last // "")"' 2>/dev/null \
+    if [[ -z "$last_main" ]]; then
+      last_main=$(tail -500 "$log_file" 2>/dev/null \
+        | jq -r "select(.type==\"assistant\" and (.parent_tool_use_id // null) == null) | .message.content[]? | select(.type==\"tool_use\") | $JQ_TOOL_LINE" 2>/dev/null \
+        | tail -1 || true)
+    fi
+    # Sub-agent: same logic, ptuid != null
+    last_sub=$(tail -500 "$log_file" 2>/dev/null \
+      | jq -r 'select(.type=="system" and .subtype=="task_progress" and (.parent_tool_use_id // null) != null) | .description // empty' 2>/dev/null \
+      | tail -1 || true)
+    if [[ -z "$last_sub" ]]; then
+      last_sub=$(tail -500 "$log_file" 2>/dev/null \
+        | jq -r "select(.type==\"assistant\" and (.parent_tool_use_id // null) != null) | .message.content[]? | select(.type==\"tool_use\") | $JQ_TOOL_LINE" 2>/dev/null \
         | tail -1 || true)
     fi
   else
-    last_tool=$(tail -200 "$log_file" 2>/dev/null \
+    last_main=$(tail -200 "$log_file" 2>/dev/null \
       | grep -o '"type":"tool_use"[^}]*"name":"[^"]*"' \
       | tail -1 \
       | sed 's/.*"name":"\([^"]*\)".*/\1/' 2>/dev/null || true)
-    last_activity="$last_tool"
   fi
 
   # ── Cost ──
@@ -126,7 +146,9 @@ parse_log() {
   fi
 
   echo -e "  ${color}${health_icon}${NC} ${tool_count} tools | Last update: ${color}${age_label} ago${NC}${duration_label:+ | Running: ${duration_label}}${cost:+ | \$${cost}}"
-  [[ -n "$last_activity" ]] && echo -e "  ${DIM}→ ${last_activity}${NC}"
+  # Use printf %s for data so literal "\n" in Bash commands stays literal (not interpreted)
+  [[ -n "$last_main" ]] && printf '  %b→ %s%b\n' "$DIM" "$last_main" "$NC"
+  [[ -n "$last_sub" ]]  && printf '  %b  ↳ %s%b\n' "$DIM" "$last_sub" "$NC"
 }
 
 while true; do
