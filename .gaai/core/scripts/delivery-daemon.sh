@@ -45,6 +45,16 @@ set -euo pipefail
 #   GAAI_SKIP_PERMISSIONS=true       force --dangerously-skip-permissions
 #   GAAI_SKIP_PERMISSIONS=false      force interactive mode (even on VPS)
 #
+# Session env (DEC-75 §6 — injected into every spawned claude -p subprocess):
+#   GAAI_WORKSPACE_ID=<uuid>         workspace UUIDv4; if unset at daemon start, read from
+#                                    .gaai/local/workspace-preference.json hint file (E99S11)
+#   GAAI_ORG_ID=<uuid>               org UUIDv4; same fallback as GAAI_WORKSPACE_ID
+#   GAAI_IMPL_BASE_URL=<url>         secondary impl provider base URL (DEC-72)
+#   GAAI_IMPL_AUTH_TOKEN=<token>     secondary impl provider auth token (DEC-72)
+#   GAAI_IMPL_MODEL=<model>          secondary impl provider model name (DEC-72)
+#   Subprocess fallback: if env unresolved after hint read, E99S05 AC5 surfaces
+#   "session binding unresolved" to the user (daemon itself never aborts — AC5).
+#
 # Requirements:
 #   - python3 (macOS built-in, or apt install python3 on VPS)
 #   - claude CLI in PATH
@@ -1353,6 +1363,54 @@ on_exit() {
     fi
   fi
 }
+
+# [E99S11] Reads workspace hint and exports GAAI_WORKSPACE_ID / GAAI_ORG_ID (DEC-75 §6)
+_gaai_read_hint_for_env() {
+  local hint_json
+  local _timeout_cmd=""
+  if command -v gtimeout &>/dev/null; then _timeout_cmd="gtimeout 5"
+  elif command -v timeout &>/dev/null; then _timeout_cmd="timeout 5"
+  fi
+  hint_json=\$(\${_timeout_cmd} node -e "
+    import('$PROJECT_DIR/packages/gaai-cloud-plugin/src/hint-file.mjs').then(m => {
+      const h = m.readHint('$PROJECT_DIR');
+      if (h) console.log(JSON.stringify(h));
+    }).catch(() => {});
+  " 2>/dev/null)
+  if [[ -n "\$hint_json" ]]; then
+    export GAAI_WORKSPACE_ID=\$(echo "\$hint_json" | python3 -c "import json,sys;print(json.load(sys.stdin).get('workspace_id',''))" 2>/dev/null || echo "")
+    export GAAI_ORG_ID=\$(echo "\$hint_json" | python3 -c "import json,sys;print(json.load(sys.stdin).get('org_id',''))" 2>/dev/null || echo "")
+  fi
+}
+
+# [E99S11] Priority chain: operator env > hint file > unset (DEC-75 §6, AC1–AC5)
+_gaai_resolve_session_env() {
+  local UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\$'
+  # AC3: validate operator-provided vars; WARN + unset on mismatch (non-throwing)
+  if [[ -n "\${GAAI_WORKSPACE_ID:-}" ]]; then
+    if ! echo "\$GAAI_WORKSPACE_ID" | grep -qE "\$UUID_RE"; then
+      echo "[E99S11] GAAI_WORKSPACE_ID malformed (expected UUIDv4, got: \${GAAI_WORKSPACE_ID:0:8}…); treating as unset." >&2
+      unset GAAI_WORKSPACE_ID
+    fi
+  fi
+  if [[ -n "\${GAAI_ORG_ID:-}" ]]; then
+    if ! echo "\$GAAI_ORG_ID" | grep -qE "\$UUID_RE"; then
+      echo "[E99S11] GAAI_ORG_ID malformed (expected UUIDv4, got: \${GAAI_ORG_ID:0:8}…); treating as unset." >&2
+      unset GAAI_ORG_ID
+    fi
+  fi
+  # AC1(i): both operator vars valid — use as-is
+  if [[ -n "\${GAAI_WORKSPACE_ID:-}" && -n "\${GAAI_ORG_ID:-}" ]]; then
+    return 0
+  fi
+  # AC1(ii): fallback to hint file
+  _gaai_read_hint_for_env
+  # AC1(iii): still unset — log WARN; daemon never aborts (AC5)
+  if [[ -z "\${GAAI_WORKSPACE_ID:-}" || -z "\${GAAI_ORG_ID:-}" ]]; then
+    echo "[E99S11] Session env unresolved — spawned subprocesses will see no workspace binding; E99S05 AC5 will surface 'session binding unresolved' to the user." >&2
+  fi
+}
+
 trap on_exit EXIT INT TERM
 
 echo "================================================================"
@@ -1367,6 +1425,9 @@ cd "$PROJECT_DIR"
 unset CLAUDECODE 2>/dev/null || true
 export GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log"
 
+# [E99S11] Resolve session env per DEC-75 §6 before spawning subprocess
+_gaai_resolve_session_env
+
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
 
@@ -1378,16 +1439,34 @@ DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/
 #   - tee updates the log file continuously (natural heartbeat for daemon monitor)
 #   - tail -f shows progress in real-time
 if command -v gtimeout &>/dev/null; then
+  GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
+  GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+  GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
+  GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
+  GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
+  GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
   gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 elif command -v timeout &>/dev/null; then
+  GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
+  GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+  GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
+  GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
+  GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
+  GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
   timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 else
+  GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
+  GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+  GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
+  GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
+  GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
+  GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
   claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
@@ -1836,6 +1915,54 @@ on_exit() {
     fi
   fi
 }
+
+# [E99S11] Reads workspace hint and exports GAAI_WORKSPACE_ID / GAAI_ORG_ID (DEC-75 §6)
+_gaai_read_hint_for_env() {
+  local hint_json
+  local _timeout_cmd=""
+  if command -v gtimeout &>/dev/null; then _timeout_cmd="gtimeout 5"
+  elif command -v timeout &>/dev/null; then _timeout_cmd="timeout 5"
+  fi
+  hint_json=\$(\${_timeout_cmd} node -e "
+    import('$PROJECT_DIR/packages/gaai-cloud-plugin/src/hint-file.mjs').then(m => {
+      const h = m.readHint('$PROJECT_DIR');
+      if (h) console.log(JSON.stringify(h));
+    }).catch(() => {});
+  " 2>/dev/null)
+  if [[ -n "\$hint_json" ]]; then
+    export GAAI_WORKSPACE_ID=\$(echo "\$hint_json" | python3 -c "import json,sys;print(json.load(sys.stdin).get('workspace_id',''))" 2>/dev/null || echo "")
+    export GAAI_ORG_ID=\$(echo "\$hint_json" | python3 -c "import json,sys;print(json.load(sys.stdin).get('org_id',''))" 2>/dev/null || echo "")
+  fi
+}
+
+# [E99S11] Priority chain: operator env > hint file > unset (DEC-75 §6, AC1–AC5)
+_gaai_resolve_session_env() {
+  local UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\$'
+  # AC3: validate operator-provided vars; WARN + unset on mismatch (non-throwing)
+  if [[ -n "\${GAAI_WORKSPACE_ID:-}" ]]; then
+    if ! echo "\$GAAI_WORKSPACE_ID" | grep -qE "\$UUID_RE"; then
+      echo "[E99S11] GAAI_WORKSPACE_ID malformed (expected UUIDv4, got: \${GAAI_WORKSPACE_ID:0:8}…); treating as unset." >&2
+      unset GAAI_WORKSPACE_ID
+    fi
+  fi
+  if [[ -n "\${GAAI_ORG_ID:-}" ]]; then
+    if ! echo "\$GAAI_ORG_ID" | grep -qE "\$UUID_RE"; then
+      echo "[E99S11] GAAI_ORG_ID malformed (expected UUIDv4, got: \${GAAI_ORG_ID:0:8}…); treating as unset." >&2
+      unset GAAI_ORG_ID
+    fi
+  fi
+  # AC1(i): both operator vars valid — use as-is
+  if [[ -n "\${GAAI_WORKSPACE_ID:-}" && -n "\${GAAI_ORG_ID:-}" ]]; then
+    return 0
+  fi
+  # AC1(ii): fallback to hint file
+  _gaai_read_hint_for_env
+  # AC1(iii): still unset — log WARN; daemon never aborts (AC5)
+  if [[ -z "\${GAAI_WORKSPACE_ID:-}" || -z "\${GAAI_ORG_ID:-}" ]]; then
+    echo "[E99S11] Session env unresolved — spawned subprocesses will see no workspace binding; E99S05 AC5 will surface 'session binding unresolved' to the user." >&2
+  fi
+}
+
 trap on_exit EXIT INT TERM
 
 echo ""
@@ -1849,6 +1976,9 @@ echo ""
 cd "$PROJECT_DIR"
 unset CLAUDECODE 2>/dev/null || true
 export GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log"
+
+# [E99S11] Resolve session env per DEC-75 §6 before spawning subprocess
+_gaai_resolve_session_env
 
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
@@ -1865,11 +1995,23 @@ DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/
 #   - tail -f shows progress in real-time
 
 if command -v gtimeout &>/dev/null; then
+  GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
+  GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+  GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
+  GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
+  GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
+  GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
   gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 else
+  GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
+  GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+  GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
+  GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
+  GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
+  GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
   claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
