@@ -44,6 +44,12 @@ set -euo pipefail
 #   GAAI_STALENESS_THRESHOLD=15000   seconds before orphan in_progress is stale (default: timeout+10min)
 #   GAAI_SKIP_PERMISSIONS=true       force --dangerously-skip-permissions
 #   GAAI_SKIP_PERMISSIONS=false      force interactive mode (even on VPS)
+#   GAAI_DAEMON_WEBHOOK_SECRET=<hex> HMAC-SHA256 secret for signing outgoing webhook POSTs.
+#                                    Generate: openssl rand -hex 32
+#                                    Provision in cloud: PUT /api/v1/workspaces/:id/webhook-secrets/gaai-daemon
+#                                      Body: {"secret":"<hex>"}  Auth: Bearer token (workspace owner)
+#                                    When unset, webhooks are sent unsigned and cloud endpoint returns 401.
+#                                    See E101S07b FAQ for full provisioning walkthrough.
 #
 # Session env (DEC-75 §6 — injected into every spawned claude -p subprocess):
 #   GAAI_WORKSPACE_ID=<uuid>         workspace UUIDv4; if unset at daemon start, read from
@@ -126,6 +132,7 @@ RESOLUTION_TRACKING="$LOCK_DIR/.resolution-tracking"
 LOG_FILE="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-daemon.log"
 MAX_RETRIES=3
 NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
+WEBHOOK_SECRET="${GAAI_DAEMON_WEBHOOK_SECRET:-}"
 
 # Staleness: stories in_progress for longer than this are considered orphaned
 # Default: delivery timeout + 10 min buffer
@@ -196,6 +203,19 @@ sed_inplace() {
   fi
 }
 
+# ── HMAC signing helper for outgoing webhook POSTs (AC1 — E101S07a) ──────────
+# Returns lowercase-hex HMAC-SHA256. Emits a warning and returns "" when
+# openssl or xxd is unavailable — callers skip the X-Hub-Signature-256 header.
+compute_webhook_hmac() {
+  local json="$1" secret="$2"
+  if ! command -v openssl &>/dev/null || ! command -v xxd &>/dev/null; then
+    log "${YELLOW}[NOTIFY] openssl or xxd not found — webhook sent unsigned (install openssl+xxd for HMAC signing)${NC}"
+    echo ""
+    return 0
+  fi
+  printf '%s' "$json" | openssl dgst -sha256 -mac HMAC -macopt "key:$secret" -binary | xxd -p -c 256 | tr -d '\n'
+}
+
 # ── Escalation notifications (daemon scope — staleness detection) ─────────
 notify_escalation() {
   local story_id="$1"
@@ -210,15 +230,24 @@ notify_escalation() {
     osascript -e "display notification \"${remediation}\" with title \"GAAI Escalation: ${story_id}\" subtitle \"${reason}\"" 2>/dev/null || true
   fi
 
-  # AC3 / AC4: webhook POST (best-effort, never blocks daemon)
+  # AC3 / AC4 / AC2(E101S07a): webhook POST (best-effort, never blocks daemon)
   if [[ -n "$NOTIFICATION_WEBHOOK" ]]; then
     local ts
     ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     local json="{\"story_id\":\"${story_id}\",\"reason\":\"${reason}\",\"remediation\":\"${remediation}\",\"timestamp\":\"${ts}\"}"
+    local hmac_hex=""
+    if [[ -n "$WEBHOOK_SECRET" ]]; then
+      hmac_hex="$(compute_webhook_hmac "$json" "$WEBHOOK_SECRET")"
+    else
+      log "${YELLOW}[NOTIFY] GAAI_DAEMON_WEBHOOK_SECRET unset — webhook will be rejected by cloud${NC}"
+    fi
+    local -a hmac_args=()
+    [[ -n "$hmac_hex" ]] && hmac_args=(-H "X-Hub-Signature-256: sha256=$hmac_hex" -H "X-Webhook-Source: gaai-daemon")
     if ! curl -s -o /dev/null -w "%{http_code}" \
         --max-time 5 \
         -X POST \
         -H "Content-Type: application/json" \
+        "${hmac_args[@]}" \
         -d "$json" \
         "$NOTIFICATION_WEBHOOK" 2>/dev/null | grep -qE '^2'; then
       log "${YELLOW}[NOTIFY] Webhook failed for $story_id (warning only)${NC}"
@@ -244,7 +273,7 @@ notify_resolution() {
     osascript -e "display notification \"${subtitle}\" with title \"GAAI Resolved: ${story_id}\"" 2>/dev/null || true
   fi
 
-  # AC3 / AC4: webhook POST (best-effort, never blocks daemon)
+  # AC3 / AC4 / AC2(E101S07a): webhook POST (best-effort, never blocks daemon)
   if [[ -n "$NOTIFICATION_WEBHOOK" ]]; then
     local ts
     ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -255,10 +284,19 @@ notify_resolution() {
     else
       json="{\"story_id\":\"${story_id}\",\"resolution\":\"done\",\"prior_status\":\"${prior_status}\",\"timestamp\":\"${ts}\"}"
     fi
+    local hmac_hex=""
+    if [[ -n "$WEBHOOK_SECRET" ]]; then
+      hmac_hex="$(compute_webhook_hmac "$json" "$WEBHOOK_SECRET")"
+    else
+      log "${YELLOW}[NOTIFY] GAAI_DAEMON_WEBHOOK_SECRET unset — webhook will be rejected by cloud${NC}"
+    fi
+    local -a hmac_args=()
+    [[ -n "$hmac_hex" ]] && hmac_args=(-H "X-Hub-Signature-256: sha256=$hmac_hex" -H "X-Webhook-Source: gaai-daemon")
     if ! curl -s -o /dev/null -w "%{http_code}" \
         --max-time 5 \
         -X POST \
         -H "Content-Type: application/json" \
+        "${hmac_args[@]}" \
         -d "$json" \
         "$NOTIFICATION_WEBHOOK" 2>/dev/null | grep -qE '^2'; then
       log "${YELLOW}[NOTIFY] Resolution webhook failed for $story_id (warning only)${NC}"
@@ -1202,15 +1240,29 @@ notify_escalation_inline() {
     osascript -e "display notification \"\${remediation}\" with title \"GAAI Escalation: \${story_id}\" subtitle \"\${reason}\"" 2>/dev/null || true
   fi
 
-  # AC3 / AC4: webhook (URL baked in at generation time from NOTIFICATION_WEBHOOK)
+  # AC3 / AC4 / AC2(E101S07a): webhook (URL + secret baked in at generation time)
   local webhook="$NOTIFICATION_WEBHOOK"
+  local webhook_secret="$WEBHOOK_SECRET"
   if [[ -n "\$webhook" ]]; then
     local ts="\$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     local json="{\"story_id\":\"\${story_id}\",\"reason\":\"\${reason}\",\"remediation\":\"\${remediation}\",\"timestamp\":\"\${ts}\"}"
+    local hmac_hex=""
+    if [[ -n "\$webhook_secret" ]]; then
+      if command -v openssl &>/dev/null && command -v xxd &>/dev/null; then
+        hmac_hex="\$(printf '%s' "\$json" | openssl dgst -sha256 -mac HMAC -macopt "key:\$webhook_secret" -binary | xxd -p -c 256 | tr -d '\n')"
+      else
+        echo "[NOTIFY] openssl or xxd not found — webhook sent unsigned"
+      fi
+    else
+      echo "[NOTIFY] GAAI_DAEMON_WEBHOOK_SECRET unset — webhook will be rejected by cloud"
+    fi
+    local -a hmac_args=()
+    [[ -n "\$hmac_hex" ]] && hmac_args=(-H "X-Hub-Signature-256: sha256=\$hmac_hex" -H "X-Webhook-Source: gaai-daemon")
     if ! curl -s -o /dev/null -w "%{http_code}" \
         --max-time 5 \
         -X POST \
         -H "Content-Type: application/json" \
+        "\${hmac_args[@]}" \
         -d "\$json" \
         "\$webhook" 2>/dev/null | grep -qE '^2'; then
       echo "[NOTIFY] Webhook failed for \${story_id} (warning only)"
@@ -1786,15 +1838,29 @@ notify_escalation_inline() {
     osascript -e "display notification \"\${remediation}\" with title \"GAAI Escalation: \${story_id}\" subtitle \"\${reason}\"" 2>/dev/null || true
   fi
 
-  # AC3 / AC4: webhook (URL baked in at generation time from NOTIFICATION_WEBHOOK)
+  # AC3 / AC4 / AC2(E101S07a): webhook (URL + secret baked in at generation time)
   local webhook="$NOTIFICATION_WEBHOOK"
+  local webhook_secret="$WEBHOOK_SECRET"
   if [[ -n "\$webhook" ]]; then
     local ts="\$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     local json="{\"story_id\":\"\${story_id}\",\"reason\":\"\${reason}\",\"remediation\":\"\${remediation}\",\"timestamp\":\"\${ts}\"}"
+    local hmac_hex=""
+    if [[ -n "\$webhook_secret" ]]; then
+      if command -v openssl &>/dev/null && command -v xxd &>/dev/null; then
+        hmac_hex="\$(printf '%s' "\$json" | openssl dgst -sha256 -mac HMAC -macopt "key:\$webhook_secret" -binary | xxd -p -c 256 | tr -d '\n')"
+      else
+        echo "[NOTIFY] openssl or xxd not found — webhook sent unsigned"
+      fi
+    else
+      echo "[NOTIFY] GAAI_DAEMON_WEBHOOK_SECRET unset — webhook will be rejected by cloud"
+    fi
+    local -a hmac_args=()
+    [[ -n "\$hmac_hex" ]] && hmac_args=(-H "X-Hub-Signature-256: sha256=\$hmac_hex" -H "X-Webhook-Source: gaai-daemon")
     if ! curl -s -o /dev/null -w "%{http_code}" \
         --max-time 5 \
         -X POST \
         -H "Content-Type: application/json" \
+        "\${hmac_args[@]}" \
         -d "\$json" \
         "\$webhook" 2>/dev/null | grep -qE '^2'; then
       echo "[NOTIFY] Webhook failed for \${story_id} (warning only)"
@@ -2090,6 +2156,7 @@ HOST="$(hostname -s 2>/dev/null || hostname)"
 CAFFEINATE_PID="${CAFFEINATE_PID:-}"
 STARTED="$(date '+%H:%M:%S')"
 NOTIFICATION_WEBHOOK="$NOTIFICATION_WEBHOOK"
+WEBHOOK_SECRET_SET="$([ -n "$WEBHOOK_SECRET" ] && echo "yes" || echo "no")"
 EOF
 
 # ── Banner (2-column) ────────────────────────────────────────────────────
