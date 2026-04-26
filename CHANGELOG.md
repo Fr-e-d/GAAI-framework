@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.20.0] - 2026-04-27
+
+### Changed
+- feat(governance): SKILL-RIN-001 review-input + anti-girouette research bundle
+- feat(E101S07a): daemon HMAC signing + webhook secret provisioning (#466)
+
+
 ## [2.19.0] - 2026-04-25
 
 ### Changed
