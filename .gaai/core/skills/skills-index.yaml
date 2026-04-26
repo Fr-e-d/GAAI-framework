@@ -2,8 +2,8 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md — core framework skills only
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-04-18
-total: 50
+generated_at: 2026-04-26
+total: 51
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -51,6 +51,15 @@ discovery:
     tags: []
     updated_at: 2026-01-28
     path: core/skills/discovery/refine-scope/SKILL.md
+  - id: SKILL-RIN-001
+    name: review-input
+    source: core
+    description: "Adversarial review of any input (human idea, agent analysis, research report, feedback, observation) BEFORE it mutates persistent project state. Universal interceptor with domain auto-detection, 2-phase classification + evaluation, and triple-verdict output (veracity / fit / actionability). Anti-girouette guardrail that distinguishes drift from pivot — preserves human decisional authority. Manual invocation only (no hooks, no enforcement). Activate when an input may affect strategic-frame.md, a DEC, an OT, an architecture/pattern doc, an agent definition, a backlog story scope/AC/wedge field, or user-facing copy."
+    category: discovery
+    track: discovery
+    tags: []
+    updated_at: 2026-04-27
+    path: core/skills/discovery/review-input/SKILL.md
   - id: SKILL-RSA-001
     name: review-story-alignment
     source: core
