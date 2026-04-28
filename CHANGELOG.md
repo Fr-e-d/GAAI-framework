@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.21.0] - 2026-04-28
 
 ### Changed
+- feat(daemon-monitor): show pipeline phase per active delivery
 - chore: regenerate skills indices + framework sync trace post SKILL-RIN-001
+
 
 ## [2.20.0] - 2026-04-27
 

@@ -95,6 +95,7 @@ parse_log() {
   #         DIFFERENT session_id than the root delivery session.
   # Root session_id = first session_id seen in the log (init event).
   local last_event="" last_origin="" last_text="" root_sid=""
+  local phase_label="" phase_origin=""
   if $HAS_JQ; then
     root_sid=$(head -5 "$log_file" 2>/dev/null \
       | jq -r '.session_id // empty' 2>/dev/null \
@@ -119,6 +120,45 @@ parse_log() {
       | tail -1 || true)
     last_origin="${last_event%%$'\t'*}"
     last_text="${last_event#*$'\t'}"
+
+    # ── Phase detection ──
+    # Walk recent events, classify each Bash command / Write target into a phase tag,
+    # keep the LAST non-empty classification — that's the current phase.
+    # Origin is captured from the same event so we can show e.g. "IMPL (sub)" when
+    # the nested claude -p subprocess is the most recent actor.
+    local phase_event
+    phase_event=$(tail -1500 "$log_file" 2>/dev/null \
+      | jq -r --arg root_sid "$root_sid" '
+        def signal:
+          if .name == "Bash" then (.input.command // "" | tostring)
+          elif (.name == "Write" or .name == "Edit") then (.input.file_path // "" | tostring)
+          else "" end;
+        def classify($s):
+          if   ($s | test("gh pr merge"))                          then "DONE"
+          elif ($s | test("Mark Story done|chore.*: done"))        then "DONE"
+          elif ($s | test("ci-watch-and-fix|gh pr checks|ci_watch")) then "CI"
+          elif ($s | test("gh pr create"))                         then "PR"
+          elif ($s | test("--phase qa"))                           then "QA→PR"
+          elif ($s | test("qa-report\\.md"))                       then "QA"
+          elif ($s | test("--phase impl"))                         then "IMPL→QA"
+          elif ($s | test("nested-claude-spawn"))                  then "IMPL(nested)"
+          elif ($s | test("impl-report\\.md"))                     then "IMPL"
+          elif ($s | test("--phase plan"))                         then "PLAN→IMPL"
+          elif ($s | test("execution-plan\\.md"))                  then "PLAN"
+          elif ($s | test("git worktree add|Mark in_progress|in_progress \\[delivery\\]")) then "SETUP"
+          else "" end;
+        . as $m |
+        (if (($m.parent_tool_use_id // null) == null) and (($m.session_id // "") == $root_sid) then "main" else "sub" end) as $origin |
+        if $m.type=="assistant" then
+          $m.message.content[]? | select(.type=="tool_use")
+            | classify(signal) as $p
+            | select($p != "")
+            | $p + "\t" + $origin
+        else empty end' 2>/dev/null \
+      | tail -1 || true)
+    phase_label="${phase_event%%$'\t'*}"
+    phase_origin="${phase_event#*$'\t'}"
+    [[ "$phase_label" == "$phase_origin" ]] && phase_origin=""
   else
     last_text=$(tail -200 "$log_file" 2>/dev/null \
       | grep -o '"type":"tool_use"[^}]*"name":"[^"]*"' \
@@ -143,6 +183,27 @@ parse_log() {
   fi
 
   echo -e "  ${color}${health_icon}${NC} ${tool_count} tools | Last update: ${color}${age_label} ago${NC}${duration_label:+ | Running: ${duration_label}}${cost:+ | \$${cost}}"
+
+  # Phase line — coarse-grained pipeline position, derived from log signals.
+  # Tags ending with "→X" mean "phase X just completed, next phase starting".
+  if [[ -n "$phase_label" ]]; then
+    local phase_icon="◆" phase_color="$YELLOW"
+    case "$phase_label" in
+      SETUP)        phase_icon="⚙️" ; phase_color="$DIM"    ;;
+      PLAN|PLAN→*)  phase_icon="📋"; phase_color="$YELLOW" ;;
+      IMPL|IMPL→*|"IMPL(nested)") phase_icon="🛠" ; phase_color="$YELLOW" ;;
+      QA|QA→*)      phase_icon="🧪"; phase_color="$YELLOW" ;;
+      PR)           phase_icon="🚀"; phase_color="$GREEN"  ;;
+      CI)           phase_icon="🤖"; phase_color="$GREEN"  ;;
+      DONE)         phase_icon="✅"; phase_color="$GREEN"  ;;
+    esac
+    # Only annotate when the most-recent phase signal came from a sub-agent /
+    # nested claude session — main is the implicit default and would just add noise.
+    local origin_suffix=""
+    [[ "$phase_origin" == "sub" ]] && origin_suffix=" (sub)"
+    printf '  %bPhase: %b%s %s%s%b\n' "$DIM" "$phase_color" "$phase_icon" "$phase_label" "$origin_suffix" "$NC"
+  fi
+
   # Single activity line — prefix switches based on origin (main delivery vs nested sub-agent).
   # printf %s keeps literal "\n" in Bash commands literal (echo -e would interpret them).
   if [[ -n "$last_text" ]]; then
