@@ -1,25 +1,45 @@
 /**
  * nested-claude-spawn.js
  *
- * Purpose: Single-file isolation of multi-provider routing fragility per Epic E94 decision D-10.
+ * Single-file routing module for the Implementation phase of the GAAI Delivery Loop.
+ * Serves as the SINGLE SOURCE OF TRUTH for all routing decisions (primary and secondary).
  *
- * Obsolescence: Retire this file (and its callers in workflows + story fields) when Anthropic
- * ships native multi-provider routing — tracked in github.com/anthropics/claude-code issue #38698.
+ * Architecture (E131S02 — DEC-72, DEC-13, DEC-69):
+ *   The routing decision is a deterministic function of (impl_model_tag, env state).
+ *   Both primary and secondary execution paths go through subprocess isolation —
+ *   the agent has no routing decision to interpret from a prompt.
+ *
+ * Resolution rules (DEC-72 five-row matrix):
+ *   | impl_model_tag | env configured | mode      |
+ *   |----------------|----------------|-----------|
+ *   | 'primary'      | any            | primary   |  ← explicit opt-out
+ *   | 'secondary'    | yes            | secondary |  ← explicit opt-in
+ *   | 'secondary'    | no             | primary   |  ← warn + silent fallback
+ *   | 'absent'/null  | yes            | secondary |  ← env-driven default (DEC-72)
+ *   | 'absent'/null  | no             | primary   |  ← OSS non-regression (E94 D-0)
+ *
+ * Entry points:
+ *   - runImpl(opts)          — new high-level API; deterministic routing + audit emit (E131S02+)
+ *   - spawnNestedClaude(...) — legacy secondary-only API; preserved for backward compat (AC6)
+ *
+ * Observability: logPhase() from runtime-routing-logger is called internally by runImpl().
+ *   The delivery agent no longer needs to emit phase:impl records from the workflow prompt.
+ *
+ * Obsolescence: Retire this file when Anthropic ships native multi-provider routing —
+ *   tracked in github.com/anthropics/claude-code issue #38698.
  *
  * Community workaround: `CLAUDECODE=""` required to bypass parent-process env inheritance that
- * blocks nested spawn — see anthropics/claude-code #28339, #25803, #28407.
- *
- * Non-regression: Callers MUST NOT invoke this wrapper for stories without `impl_model: secondary`
- * tag AND user env vars configured — Epic E94 D-0.
+ *   blocks nested spawn — see anthropics/claude-code #28339, #25803, #28407.
  *
  * ToS caveat: secondary provider account ToS must permit programmatic API; parent OAuth Max Plan
- * terms respected by process isolation.
+ *   terms respected by process isolation.
  */
 
 import { spawn as _childSpawn } from 'node:child_process';
 import { existsSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { logPhase, formatPhaseStdout } from './runtime-routing-logger.js';
 
 // ---------------------------------------------------------------------------
 // Spawn injection seam (for tests only)
@@ -91,11 +111,11 @@ function findCLI() {
 }
 
 // ---------------------------------------------------------------------------
-// Private helper: buildChildEnv
+// Private helper: buildChildEnv (secondary path — remaps GAAI_IMPL_* vars)
 // ---------------------------------------------------------------------------
 
 /**
- * Constructs the child process environment for the nested claude spawn.
+ * Constructs the child process environment for the secondary subprocess path.
  * Maps GAAI_IMPL_* vars to Anthropic SDK vars, clears parent OAuth/key vars.
  * NEVER logs token values.
  * @returns {Record<string,string>} The environment object for the child.
@@ -123,27 +143,50 @@ function buildChildEnv() {
 }
 
 // ---------------------------------------------------------------------------
+// Private helper: buildPrimaryChildEnv (primary path — keeps parent auth)
+// ---------------------------------------------------------------------------
+
+/**
+ * Constructs the child process environment for the primary subprocess path.
+ * Bypasses nested Claude Code detection but preserves parent auth credentials.
+ * Does NOT remap GAAI_IMPL_* vars — the subprocess uses the operator's own account.
+ * @returns {Record<string,string>} The environment object for the child.
+ */
+function buildPrimaryChildEnv() {
+  const env = { ...process.env };
+
+  // Required: bypass nested Claude Code detection
+  env.CLAUDECODE = '';
+
+  // Parent auth credentials (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, etc.) are kept
+  // GAAI_IMPL_* vars are NOT remapped — subprocess uses operator's own Claude account
+
+  return env;
+}
+
+// ---------------------------------------------------------------------------
 // Private helper: buildSpawnArgs
 // ---------------------------------------------------------------------------
 
 /**
  * Builds the argv array for the claude child process.
- * Always uses `--model opus` regardless of GAAI_IMPL_MODEL (AC6).
- * @param {string} prompt
+ * @param {string}   prompt
  * @param {string[]} extraArgs
+ * @param {string}   [model='opus']              - --model value passed to claude CLI
+ * @param {boolean}  [includeFallbackModel=true] - include --fallback-model when GAAI_IMPL_MODEL_FALLBACK is set
  * @returns {string[]}
  */
-function buildSpawnArgs(prompt, extraArgs) {
+function buildSpawnArgs(prompt, extraArgs, model = 'opus', includeFallbackModel = true) {
   return [
     '-p', prompt,
     '--no-session-persistence',
     '--dangerously-skip-permissions',  // nested child cannot answer permission prompts; would hang forever
     '--output-format', 'stream-json',
     '--verbose',
-    '--model', 'opus',
+    '--model', model,
     '--max-turns', String(MAX_TURNS),
     ...extraArgs,
-    ...(process.env.GAAI_IMPL_MODEL_FALLBACK ? ['--fallback-model', 'sonnet'] : []),
+    ...(includeFallbackModel && process.env.GAAI_IMPL_MODEL_FALLBACK ? ['--fallback-model', 'sonnet'] : []),
   ];
 }
 
@@ -267,24 +310,28 @@ function _makeLogFlusher(logFile) {
 }
 
 // ---------------------------------------------------------------------------
-// Core spawn logic (shared between public and override export)
+// Core spawn logic (shared between all public exports)
 // ---------------------------------------------------------------------------
 
 /**
- * Core implementation: spawns a nested claude process with configurable timeouts.
+ * Core implementation: spawns a nested claude process with configurable env, model, and timeouts.
  * @param {string}   prompt
  * @param {string}   implReportPath
  * @param {string[]} extraArgs
  * @param {number}   globalTimeoutMs
  * @param {number}   heartbeatTimeoutMs
+ * @param {string}   logFile
+ * @param {Function} [envFn=buildChildEnv]          - returns the child process env object
+ * @param {string}   [model='opus']                 - --model value passed to claude CLI
+ * @param {boolean}  [includeFallbackModel=true]    - include --fallback-model when GAAI_IMPL_MODEL_FALLBACK is set
  * @returns {Promise<SpawnResult>}
  */
-function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeatTimeoutMs, logFile) {
+function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeatTimeoutMs, logFile,
+                   envFn = buildChildEnv, model = 'opus', includeFallbackModel = true) {
   const traceId   = randomUUID();
   const startMs   = Date.now();
   const modelReq  = process.env.GAAI_IMPL_MODEL   || '';
   const baseUrl   = process.env.GAAI_IMPL_BASE_URL || '';
-  const fallback  = process.env.GAAI_IMPL_MODEL_FALLBACK || null;
 
   // Log spawn start — never log token values
   console.log(`[nested-claude-spawn] spawn trace_id=${traceId} model=${modelReq} url=${baseUrl}`);
@@ -310,8 +357,8 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
       return;
     }
 
-    const args  = buildSpawnArgs(prompt, extraArgs);
-    const env   = buildChildEnv();
+    const args  = buildSpawnArgs(prompt, extraArgs, model, includeFallbackModel);
+    const env   = envFn();
     const child = _spawnFn(claudePath, args, { env, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
 
     const stdoutChunks = [];
@@ -404,12 +451,212 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
 }
 
 // ---------------------------------------------------------------------------
-// Public export: spawnNestedClaude
+// @internal resolveMode — pure routing decision helper (AC10, DEC-72)
+// ---------------------------------------------------------------------------
+
+/**
+ * Determines the Implementation phase routing mode from the story tag and env state.
+ * Pure function — no I/O, no env mutation, no side effects. Exported for E131S03 tests.
+ *
+ * Implements the DEC-72 five-row decision matrix deterministically.
+ * The 'absent' sentinel string and null are treated identically (no backlog tag supplied).
+ *
+ * @internal — exported for E131S03 unit tests only; production callers use runImpl().
+ *
+ * @param {'primary'|'secondary'|'absent'|null|undefined} implModelTag
+ *   Value of the story's impl_model field. Use 'absent' or null/undefined when no tag exists.
+ * @param {{ hasBaseUrl: boolean, hasAuthToken: boolean, hasModel: boolean }} envState
+ *   Snapshot of the three required GAAI_IMPL_* env vars (no direct process.env access).
+ * @returns {{ mode: 'primary'|'secondary', tag_recorded: 'primary'|'secondary'|'absent' }}
+ *   mode        — which subprocess path to use
+ *   tag_recorded — the impl_model_tag value written to the audit log record
+ */
+export function resolveMode(implModelTag, envState) {
+  const tag = implModelTag ?? null;
+  // Normalize: 'absent' sentinel and null both mean "no tag supplied"
+  const normalized = (tag === 'absent' || tag === null) ? null : tag;
+  const tag_recorded = normalized === null ? 'absent' : normalized;
+  const envConfigured = envState.hasBaseUrl && envState.hasAuthToken && envState.hasModel;
+
+  // Row 1: explicit opt-out — always primary regardless of env
+  if (normalized === 'primary') {
+    return { mode: 'primary', tag_recorded: 'primary' };
+  }
+
+  // Row 2 / Row 4: secondary (explicit or env-driven default) + env configured → secondary
+  if (envConfigured) {
+    return { mode: 'secondary', tag_recorded };
+  }
+
+  // Row 3 / Row 5: env missing → primary (caller emits warn for explicit 'secondary' tag)
+  return { mode: 'primary', tag_recorded };
+}
+
+// ---------------------------------------------------------------------------
+// Private helper: _emitLog — wraps logPhase with best-effort error handling (AC5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Calls logPhase() and catches any synchronous exception (token guard, missing field, I/O).
+ * Writes a WARNING to stderr on failure. Never propagates the exception to the caller.
+ * @returns {boolean} true if the emit failed, false on success.
+ */
+function _emitLog({ traceId, storyId, provider, modelActual, durationMs, fallbackReason, tagRecorded }) {
+  try {
+    logPhase({
+      trace_id:        traceId,
+      story_id:        storyId,
+      phase:           'impl',
+      provider,
+      model:           modelActual ?? '',
+      duration_ms:     durationMs,
+      fallback_reason: fallbackReason,
+      impl_model_tag:  tagRecorded,
+    });
+    return false;
+  } catch (e) {
+    process.stderr.write(`[nested-claude-spawn] WARNING: routing log emit failed: ${e.message}\n`);
+    return true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public export: runImpl — deterministic routing + audit emit (E131S02+)
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs the Implementation phase with deterministic routing.
+ *
+ * Single entry point for both primary and secondary subprocess paths. The routing
+ * decision is resolved by resolveMode() — a pure function — so identical inputs
+ * always produce identical routing outcomes regardless of agent prompt interpretation.
+ *
+ * Emits exactly one `phase: impl` record on success; two records when secondary
+ * fails and primary fallback is invoked (per DEC-72 atomic-binary fallback). Never throws.
+ *
+ * Constraining DECs: DEC-72 (routing matrix), DEC-13 (client-side execution),
+ *   DEC-69 (deterministic hard gate), DEC-65 (token guard in logPhase).
+ *
+ * @param {{
+ *   implModelTag: 'primary'|'secondary'|'absent'|null|undefined,
+ *   prompt:       string,
+ *   reportPath:   string,
+ *   storyId:      string,
+ *   extraArgs?:   string[],
+ *   logFile?:     string,
+ * }} opts
+ * @returns {Promise<SpawnResult & { log_emit_failed: boolean }>}
+ *   log_emit_failed — true if any routing log emit threw (best-effort; never a spawn failure)
+ */
+export async function runImpl({ implModelTag, prompt, reportPath, storyId, extraArgs = [], logFile = '' }) {
+  const envState = {
+    hasBaseUrl:   !!(process.env.GAAI_IMPL_BASE_URL?.trim()),
+    hasAuthToken: !!(process.env.GAAI_IMPL_AUTH_TOKEN?.trim()),
+    hasModel:     !!(process.env.GAAI_IMPL_MODEL?.trim()),
+  };
+
+  const { mode, tag_recorded } = resolveMode(implModelTag, envState);
+
+  // Warn when caller explicitly opted in to secondary but env is missing
+  if (implModelTag === 'secondary' && mode === 'primary') {
+    console.warn(
+      'IMPL_ROUTING_ENV_MISSING: expected GAAI_IMPL_BASE_URL|GAAI_IMPL_AUTH_TOKEN|GAAI_IMPL_MODEL; ' +
+      'falling back to primary.'
+    );
+    process.stdout.write('⚠ impl_model=secondary but GAAI_IMPL_* env vars missing; using primary.\n');
+  }
+
+  if (mode === 'secondary') {
+    // Secondary path: spawn with secondary env (GAAI_IMPL_* remapped to Anthropic SDK vars)
+    const result = await spawnCore(
+      prompt, reportPath, extraArgs,
+      GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
+      buildChildEnv, 'opus', /* includeFallbackModel */ true
+    );
+
+    const logFailed = _emitLog({
+      traceId:        result.trace_id,
+      storyId,
+      provider:       'secondary',
+      modelActual:    result.model_actual ?? (process.env.GAAI_IMPL_MODEL || ''),
+      durationMs:     result.duration_ms,
+      fallbackReason: null,
+      tagRecorded:    tag_recorded,
+    });
+
+    if (!result.success) {
+      // Universal fallback to primary — exactly one retry, no recursion (AC3)
+      const fallbackReason = result.error_reason;
+      process.stdout.write(
+        formatPhaseStdout('impl', 'secondary',
+          result.model_actual ?? (process.env.GAAI_IMPL_MODEL || ''), fallbackReason)
+      );
+
+      const primaryResult = await spawnCore(
+        prompt, reportPath, extraArgs,
+        GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
+        buildPrimaryChildEnv, 'sonnet', /* includeFallbackModel */ false
+      );
+
+      const primaryLogFailed = _emitLog({
+        traceId:        result.trace_id,  // shared trace_id across both attempt log lines
+        storyId,
+        provider:       'primary',
+        modelActual:    primaryResult.model_actual ?? 'sonnet',
+        durationMs:     primaryResult.duration_ms,
+        fallbackReason,
+        tagRecorded:    tag_recorded,
+      });
+
+      process.stdout.write(
+        formatPhaseStdout('impl', 'primary', primaryResult.model_actual ?? 'sonnet', null)
+      );
+
+      return { ...primaryResult, log_emit_failed: logFailed || primaryLogFailed };
+    }
+
+    // Secondary success
+    process.stdout.write(
+      formatPhaseStdout('impl', 'secondary',
+        result.model_actual ?? (process.env.GAAI_IMPL_MODEL || ''), null)
+    );
+    return { ...result, log_emit_failed: logFailed };
+  }
+
+  // Primary path: explicit opt-out or env missing — no fallback attempted (AC4)
+  const result = await spawnCore(
+    prompt, reportPath, extraArgs,
+    GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
+    buildPrimaryChildEnv, 'sonnet', /* includeFallbackModel */ false
+  );
+
+  const logFailed = _emitLog({
+    traceId:        result.trace_id,
+    storyId,
+    provider:       'primary',
+    modelActual:    result.model_actual ?? 'sonnet',
+    durationMs:     result.duration_ms,
+    fallbackReason: null,
+    tagRecorded:    tag_recorded,
+  });
+
+  process.stdout.write(
+    formatPhaseStdout('impl', 'primary', result.model_actual ?? 'sonnet', null)
+  );
+
+  return { ...result, log_emit_failed: logFailed };
+}
+
+// ---------------------------------------------------------------------------
+// Public export: spawnNestedClaude (legacy secondary-only API — preserved AC6)
 // ---------------------------------------------------------------------------
 
 /**
  * Spawns a nested `claude -p` process using the secondary provider env vars.
  * Returns a SpawnResult — never throws.
+ *
+ * @deprecated Use runImpl() for new callers. This function is preserved for
+ *   backward compatibility (AC6/AC7) — it supports the secondary path only.
  *
  * @param {string}   prompt          - The prompt to pass to `claude -p`
  * @param {string}   implReportPath  - Expected path to the impl-report artefact
@@ -489,18 +736,22 @@ export async function _spawnWithTimerOverride(prompt, implReportPath, extraArgs,
 // CLI entry point — enables bash-native invocation by delivery agents
 // ---------------------------------------------------------------------------
 //
-// Usage (from Bash tool in delivery workflow §6a):
+// Legacy usage (backward compatible — routes to spawnNestedClaude, AC7):
 //   node .gaai/core/adapters/claude-code/nested-claude-spawn.js \
 //     --prompt-file /path/to/impl-prompt.md \
 //     --report-path /path/to/impl-report.md
 //
-// Result: JSON SpawnResult printed to stdout on exit 0; exits 1 on invocation error.
-// The SpawnResult.success field (true/false) indicates whether the nested claude -p
-// produced a valid impl-report. Caller should parse stdout JSON and act on it.
+// New usage (routes to runImpl — deterministic routing + internal audit emit):
+//   node .gaai/core/adapters/claude-code/nested-claude-spawn.js \
+//     --prompt-file /path/to/impl-prompt.md \
+//     --report-path /path/to/impl-report.md \
+//     --story-id E99S01 \
+//     [--impl-model-tag primary|secondary|absent]
 //
-// Rationale: ES module functions are not directly callable from bash. Without this
-// CLI, delivery agents looking at the module couldn't invoke the wrapper and fell
-// back to Task tool on primary (observed in E77S02, E77S03, E78S01, E64S01 deliveries).
+// Result: JSON SpawnResult printed to stdout on exit 0; exits 1 on invocation error.
+// When --story-id is provided: uses runImpl() — deterministic routing + internal audit log.
+// When --story-id is absent:   uses spawnNestedClaude() — legacy secondary-only path (AC7).
+// AC12: audit log emission uses logPhase() library (imported above), not a separate CLI spawn.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -515,18 +766,25 @@ async function _cli() {
     else if (k === '--report-path') opts.reportPath = args[++i];
     else if (k === '--extra-arg') { (opts.extraArgs ||= []).push(args[++i]); }
     else if (k === '--log-file') opts.logFile = args[++i];
+    else if (k === '--story-id') opts.storyId = args[++i];
+    else if (k === '--impl-model-tag') opts.implModelTag = args[++i];
     else if (k === '--help' || k === '-h') {
       process.stdout.write(`Usage: node nested-claude-spawn.js [options]
 
 Options:
-  --prompt-file <path>   Read prompt text from file (preferred for large prompts)
-  --prompt-inline <txt>  Pass prompt inline (for short prompts only)
-  --report-path <path>   Path where the nested claude -p will write impl-report.md
-  --extra-arg <arg>      Append extra argv to child (repeatable, e.g. --extra-arg --model)
-  --log-file <path>      Append child stdout stream-json lines to this log file (optional; no-op if absent)
-  --help, -h             Show this help
+  --prompt-file <path>       Read prompt text from file (preferred for large prompts)
+  --prompt-inline <txt>      Pass prompt inline (for short prompts only)
+  --report-path <path>       Path where the nested claude -p will write impl-report.md
+  --story-id <id>            Story ID for audit log (enables runImpl path)
+  --impl-model-tag <tag>     Routing tag: primary|secondary|absent (default: absent)
+  --extra-arg <arg>          Append extra argv to child (repeatable)
+  --log-file <path>          Append child stdout stream-json lines to this log file
+  --help, -h                 Show this help
 
-Output: SpawnResult JSON on stdout on success. Exit 1 on invocation error.
+When --story-id is provided: uses runImpl() — deterministic routing + internal audit log emit.
+When --story-id is absent:   uses spawnNestedClaude() — legacy secondary-only path (AC7).
+
+Output: SpawnResult JSON on stdout. Exit 1 on invocation error.
 `);
       process.exit(0);
     }
@@ -551,11 +809,24 @@ Output: SpawnResult JSON on stdout on success. Exit 1 on invocation error.
     process.exit(1);
   }
 
-  const result = await spawnNestedClaude(prompt, opts.reportPath, opts.extraArgs || [], opts.logFile || '');
+  let result;
+  if (opts.storyId) {
+    // New path: runImpl() — deterministic routing, internal audit log emit (AC7)
+    result = await runImpl({
+      implModelTag: opts.implModelTag ?? null,
+      prompt,
+      reportPath:   opts.reportPath,
+      storyId:      opts.storyId,
+      extraArgs:    opts.extraArgs || [],
+      logFile:      opts.logFile || '',
+    });
+  } else {
+    // Legacy path: spawnNestedClaude() — backward compat (AC7)
+    result = await spawnNestedClaude(prompt, opts.reportPath, opts.extraArgs || [], opts.logFile || '');
+  }
+
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   // Exit 0 regardless of result.success — the caller reads success from the JSON.
-  // This way the wrapper's business-logic failure (e.g. AUTH_FAILED) is not conflated
-  // with invocation errors (missing args, unreadable file).
   process.exit(0);
 }
 
