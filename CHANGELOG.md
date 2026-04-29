@@ -7,12 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.22.0] - 2026-04-29
 
 ### Changed
 - fix(impl-routing): apply Claude Code proxy / gateway compat flags for secondary path
 - fix(impl-routing): add Haiku model mapping for secondary path Task sub-agents
 - fix(impl-routing): apply Z.AI-recommended CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000
+- chore: bump local VERSION to v2.24.0 [sync]
+- fix(impl-routing): apply Z.AI-recommended API_TIMEOUT_MS=3000000 for secondary path
+- feat(E107bS09): streaming progress UX during Q&A (#543)
+- chore: bump local VERSION to v2.22.0 [sync]
+- fix(monitor): monotone phase state machine + tighten nested regex + (sub) model annotation
+- chore: bump local VERSION to v2.23.0 [sync]
+- feat(monitor): add WORKING fallback phase for active coding without specific marker
+- fix(monitor): render model id as-is instead of short-label formatting
+- feat(monitor): show active model on Phase line + double-space emoji gap
+- feat(E107bS05): abort-safe handler — Stage 4 pre-loop skip option (#518)
+- feat(E107bS03): ambiguity detector — heuristic + AST signal severity scoring (#516)
+- feat(E107bS02): qa-loop-ui skill — sequential Q&A loop with skip, skip-all, partial-answer preservation (#514)
+- feat(E107bS01): smart-question-generator skill — ranked questions from ambiguity feed (#500)
+- chore(daemon): add agent_exit phase logging for DEC-72 wrapper audit trail
+
 
 ## [2.24.0] - 2026-04-29
 
