@@ -77,7 +77,13 @@ const MAX_TURNS            =        150;
  * @property {number}       duration_ms       - wall-clock ms from spawn to close
  * @property {string}       model_requested   - value of GAAI_IMPL_MODEL at spawn time
  * @property {boolean}      model_fallback_triggered - true iff model_actual !== model_requested
- * @property {string}       provider_base_url     - value of GAAI_IMPL_BASE_URL at spawn time (no token)
+ * @property {string}       provider_base_url - value of GAAI_IMPL_BASE_URL at spawn time (no token)
+ * @property {{ context_size_at_spawn?: number, compact_events_count?: number,
+ *              retry_429_count?: number, nested_session_completed?: boolean }|null} telemetry
+ *   Secondary-mode telemetry for capability-matrix decision baseline (E131S08).
+ *   null for primary-path invocations or when collectTelemetry was not requested.
+ *   context_size_at_spawn: absent if no assistant event with input_tokens was found.
+ *   compact_events_count/retry_429_count/nested_session_completed: always present (may be 0/false).
  */
 
 // ---------------------------------------------------------------------------
@@ -159,6 +165,33 @@ function buildChildEnv() {
   }
   if (!env.CLAUDE_CODE_AUTO_COMPACT_WINDOW) {
     env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = '200000';
+  }
+
+  // Claude Code proxy / gateway compat flags (we ARE a gateway here — Z.AI's
+  // /api/anthropic shim translates between Anthropic API protocol and GLM).
+  // Each flag is explicitly recommended by Anthropic's Claude Code docs for
+  // gateway / non-first-party-provider scenarios. Operator override preserved.
+  //
+  //   - CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 : strips anthropic-beta
+  //     headers and beta tool-schema fields that gateways reject with
+  //     "Unexpected value(s) for the anthropic-beta header" errors.
+  //   - DISABLE_INTERLEAVED_THINKING=1 : prevents the interleaved-thinking
+  //     beta header from being sent. Gateways that don't support interleaved
+  //     thinking typically error or silently strip the field, causing
+  //     downstream parser divergence.
+  //   - CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 : disables the
+  //     non-streaming fallback when a streaming request fails mid-stream.
+  //     Gateways often cause the fallback to produce duplicate tool
+  //     execution — better to propagate the streaming error to the retry
+  //     layer than to double-execute.
+  if (!env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) {
+    env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = '1';
+  }
+  if (!env.DISABLE_INTERLEAVED_THINKING) {
+    env.DISABLE_INTERLEAVED_THINKING = '1';
+  }
+  if (!env.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK) {
+    env.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK = '1';
   }
 
   // Remove parent auth credentials to prevent credential leakage / conflict
@@ -303,6 +336,72 @@ function extractModelActual(stdout) {
 }
 
 // ---------------------------------------------------------------------------
+// Private helper: collectSecondaryTelemetry (E131S08)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses stream-json stdout to collect four secondary-mode telemetry fields.
+ * Best-effort — fields that cannot be computed are omitted.
+ *
+ * Fields (secondary mode only — capability-matrix decision baseline):
+ *   context_size_at_spawn   — input_tokens from the last assistant event (integer)
+ *   compact_events_count    — count of system.subtype="compact_boundary" events (integer)
+ *   retry_429_count         — count of system.subtype="api_retry" with error_status=429 (integer)
+ *   nested_session_completed — true iff stop_reason ∈ {end_turn, stop_sequence} (boolean)
+ *
+ * All fields are integers or boolean — DEC-65 token-guard cannot trigger on them.
+ *
+ * @param {string} stdout - raw stream-json stdout from the nested claude -p invocation
+ * @returns {{ fields: object, missing: string[] }}
+ *   fields  — successfully-collected telemetry values
+ *   missing — names of fields that could not be computed
+ */
+function collectSecondaryTelemetry(stdout) {
+  const fields  = {};
+  const missing = [];
+
+  let lastInputTokens  = null;
+  let compactCount     = 0;
+  let retryCount       = 0;
+  let sessionCompleted = false;
+
+  try {
+    for (const line of stdout.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('{')) continue;
+      try {
+        const obj = JSON.parse(trimmed);
+        if (obj.type === 'assistant') {
+          if (typeof obj.message?.usage?.input_tokens === 'number') {
+            lastInputTokens = obj.message.usage.input_tokens;
+          }
+          const stop = obj.message?.stop_reason;
+          if (stop === 'end_turn' || stop === 'stop_sequence') sessionCompleted = true;
+        } else if (obj.type === 'system') {
+          if (obj.subtype === 'compact_boundary') compactCount++;
+          else if (obj.subtype === 'api_retry' && obj.error_status === 429) retryCount++;
+        }
+      } catch { /* skip unparseable line */ }
+    }
+  } catch (e) {
+    // Outer-loop failure — all fields unavailable
+    missing.push('context_size_at_spawn', 'compact_events_count', 'retry_429_count', 'nested_session_completed');
+    return { fields, missing };
+  }
+
+  if (lastInputTokens !== null) {
+    fields.context_size_at_spawn = lastInputTokens;
+  } else {
+    missing.push('context_size_at_spawn');
+  }
+  fields.compact_events_count     = compactCount;
+  fields.retry_429_count          = retryCount;
+  fields.nested_session_completed = sessionCompleted;
+
+  return { fields, missing };
+}
+
+// ---------------------------------------------------------------------------
 // Private helper: _makeLogFlusher
 // ---------------------------------------------------------------------------
 
@@ -351,10 +450,11 @@ function _makeLogFlusher(logFile) {
  * @param {Function} [envFn=buildChildEnv]          - returns the child process env object
  * @param {string}   [model='opus']                 - --model value passed to claude CLI
  * @param {boolean}  [includeFallbackModel=true]    - include --fallback-model when GAAI_IMPL_MODEL_FALLBACK is set
+ * @param {boolean}  [collectTelemetry=false]       - parse stdout for secondary-mode telemetry fields (E131S08)
  * @returns {Promise<SpawnResult>}
  */
 function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeatTimeoutMs, logFile,
-                   envFn = buildChildEnv, model = 'opus', includeFallbackModel = true) {
+                   envFn = buildChildEnv, model = 'opus', includeFallbackModel = true, collectTelemetry = false) {
   const traceId   = randomUUID();
   const startMs   = Date.now();
   const modelReq  = process.env.GAAI_IMPL_MODEL   || '';
@@ -380,6 +480,7 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
         model_requested:  modelReq,
         model_fallback_triggered: false,
         provider_base_url:       baseUrl,
+        telemetry:               null,
       });
       return;
     }
@@ -459,6 +560,16 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
 
       const modelFallbackTriggered = !!(modelActual && modelActual !== modelReq);
 
+      // Collect secondary-mode telemetry when requested (primary path: no-op, AC5)
+      let telemetry = null;
+      if (collectTelemetry) {
+        const { fields, missing } = collectSecondaryTelemetry(stdout);
+        for (const fieldName of missing) {
+          process.stderr.write(`[nested-claude-spawn] WARNING: telemetry field ${fieldName} unavailable: no matching event in stream-json\n`);
+        }
+        telemetry = fields;
+      }
+
       console.log(`[nested-claude-spawn] done trace_id=${traceId} success=${success} reason=${errorReason} duration_ms=${duration}`);
 
       resolve({
@@ -472,6 +583,7 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
         model_requested:  modelReq,
         model_fallback_triggered: modelFallbackTriggered,
         provider_base_url:       baseUrl,
+        telemetry,
       });
     });
   });
@@ -526,9 +638,10 @@ export function resolveMode(implModelTag, envState) {
 /**
  * Calls logPhase() and catches any synchronous exception (token guard, missing field, I/O).
  * Writes a WARNING to stderr on failure. Never propagates the exception to the caller.
+ * @param {object|null} [telemetry=null] - secondary-mode telemetry fields to spread into the log record (AC1/AC2)
  * @returns {boolean} true if the emit failed, false on success.
  */
-function _emitLog({ traceId, storyId, provider, modelActual, durationMs, fallbackReason, tagRecorded }) {
+function _emitLog({ traceId, storyId, provider, modelActual, durationMs, fallbackReason, tagRecorded, telemetry = null }) {
   try {
     logPhase({
       trace_id:        traceId,
@@ -539,6 +652,7 @@ function _emitLog({ traceId, storyId, provider, modelActual, durationMs, fallbac
       duration_ms:     durationMs,
       fallback_reason: fallbackReason,
       impl_model_tag:  tagRecorded,
+      ...(telemetry !== null ? telemetry : {}),
     });
     return false;
   } catch (e) {
@@ -598,7 +712,7 @@ export async function runImpl({ implModelTag, prompt, reportPath, storyId, extra
     const result = await spawnCore(
       prompt, reportPath, extraArgs,
       GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
-      buildChildEnv, 'opus', /* includeFallbackModel */ true
+      buildChildEnv, 'opus', /* includeFallbackModel */ true, /* collectTelemetry */ true
     );
 
     const logFailed = _emitLog({
@@ -609,6 +723,7 @@ export async function runImpl({ implModelTag, prompt, reportPath, storyId, extra
       durationMs:     result.duration_ms,
       fallbackReason: null,
       tagRecorded:    tag_recorded,
+      telemetry:      result.telemetry,
     });
 
     if (!result.success) {
