@@ -19,6 +19,10 @@ set -euo pipefail
 # Options (passed through to delivery-daemon.sh):
 #   --max-concurrent N     Parallel delivery slots (default: 3)
 #   --interval N           Poll interval in seconds (default: 30)
+#   --exit-when-idle [N]   Auto-stop daemon after N consecutive idle polls
+#                          (no ready stories + zero in-flight). N optional,
+#                          default 5. Useful for one-shot batches that should
+#                          drain the backlog and then exit cleanly.
 #   --dry-run              Show what would launch, don't execute
 #
 # Exit codes:

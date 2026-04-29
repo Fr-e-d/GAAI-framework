@@ -32,10 +32,13 @@ set -euo pipefail
 #   .gaai/core/scripts/delivery-daemon.sh --max-concurrent 2  # parallel deliveries
 #   .gaai/core/scripts/delivery-daemon.sh --dry-run           # show what would launch
 #   .gaai/core/scripts/delivery-daemon.sh --status            # show active/ready/exceeded
+#   .gaai/core/scripts/delivery-daemon.sh --exit-when-idle    # auto-stop after 5 idle polls
+#   .gaai/core/scripts/delivery-daemon.sh --exit-when-idle 10 # auto-stop after 10 idle polls
 #
 # Environment overrides:
 #   GAAI_POLL_INTERVAL=15            poll every 15s
 #   GAAI_MAX_CONCURRENT=2            allow 2 parallel deliveries
+#   GAAI_EXIT_WHEN_IDLE=5            auto-stop after N consecutive idle polls (0 = disabled)
 #   GAAI_TARGET_BRANCH=staging       target branch (default: staging)
 #   GAAI_DELIVERY_TIMEOUT=14400      hard kill timeout in seconds (default: 4h, last resort)
 #   GAAI_MAX_TURNS=200               max claude tool-call turns per delivery (primary safety)
@@ -113,6 +116,10 @@ fi
 POLL_INTERVAL="${GAAI_POLL_INTERVAL:-30}"
 MAX_CONCURRENT="${GAAI_MAX_CONCURRENT:-3}"
 TARGET_BRANCH="${GAAI_TARGET_BRANCH:-staging}"
+# Auto-stop when fully idle (no ready stories + zero in-flight deliveries) for
+# this many consecutive polls. 0 = disabled (default ; daemon polls forever).
+# Set via --exit-when-idle [N] CLI flag or GAAI_EXIT_WHEN_IDLE env var.
+EXIT_WHEN_IDLE_THRESHOLD="${GAAI_EXIT_WHEN_IDLE:-0}"
 DELIVERY_TIMEOUT="${GAAI_DELIVERY_TIMEOUT:-14400}"   # 4h hard kill (last resort)
 MAX_TURNS="${GAAI_MAX_TURNS:-200}"                    # primary safety net
 CLAUDE_MODEL="${GAAI_CLAUDE_MODEL:-sonnet}"           # model (sonnet = cost-effective)
@@ -442,6 +449,16 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --interval)       POLL_INTERVAL="$2"; shift 2 ;;
     --max-concurrent) MAX_CONCURRENT="$2"; shift 2 ;;
+    --exit-when-idle)
+      # Optional N — if next arg is a positive integer, use it ; else default 5.
+      if [[ -n "${2:-}" && "$2" =~ ^[1-9][0-9]*$ ]]; then
+        EXIT_WHEN_IDLE_THRESHOLD="$2"
+        shift 2
+      else
+        EXIT_WHEN_IDLE_THRESHOLD=5
+        shift
+      fi
+      ;;
     --dry-run)        DRY_RUN=true; shift ;;
     --status)         STATUS_MODE=true; shift ;;
     --help|-h)
@@ -2255,8 +2272,17 @@ echo ""
 echo -e "  ${YELLOW}Ctrl+C to stop (active sessions keep running)${NC}"
 echo ""
 log "${GREEN}Daemon started on $(hostname) — target: $TARGET_BRANCH${NC}"
+if (( EXIT_WHEN_IDLE_THRESHOLD > 0 )); then
+  log "${BLUE}Auto-stop enabled — daemon will exit after $EXIT_WHEN_IDLE_THRESHOLD consecutive idle polls (no ready stories + zero in-flight)${NC}"
+fi
 
 # ── Main loop ─────────────────────────────────────────────────────────────
+# Counter for consecutive polls where active=0 AND no ready stories. Resets to
+# 0 whenever a delivery launches OR an in-flight delivery is observed. When it
+# reaches EXIT_WHEN_IDLE_THRESHOLD (and that threshold is > 0), the daemon
+# logs an auto-stop marker and exits 0 cleanly.
+empty_idle_polls=0
+
 while true; do
   clean_stale_locks
   check_heartbeats || true
@@ -2264,6 +2290,7 @@ while true; do
   active=$(active_count)
 
   if (( active >= MAX_CONCURRENT )); then
+    empty_idle_polls=0  # not idle — slots full means deliveries are running
     log "${BLUE}Slots full ($active/$MAX_CONCURRENT). Waiting...${NC}"
     sleep "$POLL_INTERVAL"
     continue
@@ -2282,10 +2309,32 @@ while true; do
   ready_stories=$(find_ready_stories || true)
 
   if [[ -z "$ready_stories" ]]; then
-    log "${BLUE}No stories ready. Waiting...${NC}"
+    if (( active > 0 )); then
+      # Not idle — in-flight deliveries still running, more stories may surface
+      # once they complete (e.g. dependency chains). Reset counter.
+      empty_idle_polls=0
+      log "${BLUE}No stories ready (waiting on $active in-flight delivery/ies)...${NC}"
+    else
+      # Truly idle: zero in-flight + nothing ready. Eligible for auto-stop.
+      empty_idle_polls=$(( empty_idle_polls + 1 ))
+      if (( EXIT_WHEN_IDLE_THRESHOLD > 0 && empty_idle_polls >= EXIT_WHEN_IDLE_THRESHOLD )); then
+        log "${GREEN}Auto-stop fired — idle for $empty_idle_polls consecutive polls (threshold: $EXIT_WHEN_IDLE_THRESHOLD), zero in-flight deliveries.${NC}"
+        log "${GREEN}Daemon exiting cleanly. Active tmux delivery sessions (if any) keep running independently.${NC}"
+        exit 0
+      fi
+      if (( EXIT_WHEN_IDLE_THRESHOLD > 0 )); then
+        log "${BLUE}No stories ready (idle ${empty_idle_polls}/${EXIT_WHEN_IDLE_THRESHOLD} before auto-stop)...${NC}"
+      else
+        log "${BLUE}No stories ready. Waiting...${NC}"
+      fi
+    fi
     sleep "$POLL_INTERVAL"
     continue
   fi
+
+  # Reaching this point means at least one story is ready to launch — reset
+  # the idle counter so a transient empty window doesn't carry over.
+  empty_idle_polls=0
 
   # Launch deliveries up to available slots
   available_slots=$(( MAX_CONCURRENT - active ))

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.26.0] - 2026-04-30
+
+### Changed
+- feat(daemon): add --exit-when-idle auto-stop when backlog drained
+- feat(E107bS08): User-skip telemetry — count + skip reason (#557)
+
+
 ## [2.25.0] - 2026-04-29
 
 ### Changed
