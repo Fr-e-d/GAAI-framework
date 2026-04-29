@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.22.0] - 2026-04-29
 
 ### Changed
+- feat(monitor): show active model on Phase line + double-space emoji gap
+- feat(E107bS05): abort-safe handler — Stage 4 pre-loop skip option (#518)
+- feat(E107bS03): ambiguity detector — heuristic + AST signal severity scoring (#516)
+- feat(E107bS02): qa-loop-ui skill — sequential Q&A loop with skip, skip-all, partial-answer preservation (#514)
+- feat(E107bS01): smart-question-generator skill — ranked questions from ambiguity feed (#500)
+- chore(daemon): add agent_exit phase logging for DEC-72 wrapper audit trail
+
+
+## [2.22.0] - 2026-04-29
+
+### Changed
 - feat(E107bS05): abort-safe handler — Stage 4 pre-loop skip option (#518)
 - feat(E107bS03): ambiguity detector — heuristic + AST signal severity scoring (#516)
 - feat(E107bS02): qa-loop-ui skill — sequential Q&A loop with skip, skip-all, partial-answer preservation (#514)
