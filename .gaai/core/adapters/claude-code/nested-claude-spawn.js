@@ -132,7 +132,14 @@ function buildChildEnv() {
   if (env.GAAI_IMPL_MODEL)         { env.ANTHROPIC_DEFAULT_OPUS_MODEL   = env.GAAI_IMPL_MODEL; }
   if (env.GAAI_IMPL_MODEL_FALLBACK){ env.ANTHROPIC_DEFAULT_SONNET_MODEL = env.GAAI_IMPL_MODEL_FALLBACK; }
 
-  // API_TIMEOUT_MS inherited via spread — no extra code needed
+  // Apply Z.AI vendor-recommended API_TIMEOUT_MS for Claude Code compat with GLM
+  // (Z.AI docs recommend 3,000,000 ms / 50 min — GLM responses can be slower than
+  // Anthropic's, and the Claude Code default 600,000 ms / 10 min triggers premature
+  // timeouts on some completions). Per-call timeout, not session timeout. Only set
+  // when not already explicitly configured by the operator — operator override wins.
+  if (!env.API_TIMEOUT_MS) {
+    env.API_TIMEOUT_MS = '3000000';
+  }
 
   // Remove parent auth credentials to prevent credential leakage / conflict
   delete env.CLAUDE_CODE_OAUTH_TOKEN;
