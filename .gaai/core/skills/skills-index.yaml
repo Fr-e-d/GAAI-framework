@@ -235,6 +235,15 @@ cross:
     tags: [bootstrap, llm-synthesis, clarity-tags, memory-entries, parsing]
     updated_at: 2026-04-29
     path: core/skills/cross/bootstrap-llm-synthesis/SKILL.md
+  - id: SKILL-AMBIGUITY-DETECTOR-001
+    name: ambiguity-detector
+    source: core
+    description: "Scores project ambiguities (1-10) from surface scan language distribution, framework conflict detection via ext_counts, optional tree-sitter AST signals (import pattern conflicts, directory structure conflicts), and optional LLM synthesis open-question entries. Outputs structured ambiguity_feed for smart-question-generator. Pure heuristic — no LLM calls. Stage 3.5 of the /gaai:bootstrap pipeline."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, ambiguity, heuristic, severity-scoring, ast-signals, surface-scan]
+    updated_at: 2026-04-29
+    path: core/skills/cross/ambiguity-detector/SKILL.md
   - id: SKILL-SMART-QUESTION-GENERATOR-001
     name: smart-question-generator
     source: core
