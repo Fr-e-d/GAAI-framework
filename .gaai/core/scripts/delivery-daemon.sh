@@ -1483,6 +1483,38 @@ _gaai_resolve_session_env
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
 
+# ── Routing matrix preflight (DEC-72 wrapper-side audit trail) ──────────────
+# Reads backlog impl_model + observed env, emits a deterministic record before
+# the agent spawns. Consumed by daemon-monitor-tail.sh (phase display) and by
+# .gaai/core/hooks/pre-push.d/20-routing-matrix-compliance.sh (matrix gate).
+IMPL_MODEL_BACKLOG="\$(grep -A 30 '^- id: $story_id\$' '$BACKLOG' 2>/dev/null \
+  | grep -m1 'impl_model:' \
+  | sed 's/.*impl_model: *//;s/ *\$//;s/^\"//;s/\"\$//' \
+  | tr -d '[:space:]')"
+[[ -z "\$IMPL_MODEL_BACKLOG" ]] && IMPL_MODEL_BACKLOG="absent"
+
+STORY_TRACE_ID="\$(node -e 'import(\"node:crypto\").then(m=>process.stdout.write(m.randomUUID()))' 2>/dev/null)"
+[[ -z "\$STORY_TRACE_ID" ]] && STORY_TRACE_ID="wrapper-\$(date +%s)-$story_id"
+export STORY_TRACE_ID
+
+if [[ -n "\${GAAI_IMPL_BASE_URL:-}" && -n "\${GAAI_IMPL_AUTH_TOKEN:-}" && -n "\${GAAI_IMPL_MODEL:-}" ]]; then
+  PREFLIGHT_ENV_STATE="env_available"
+else
+  PREFLIGHT_ENV_STATE="env_missing"
+fi
+
+node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
+  --trace-id "\$STORY_TRACE_ID" \\
+  --story-id "$story_id" \\
+  --phase "preflight" \\
+  --provider "wrapper" \\
+  --model "n/a" \\
+  --duration-ms 0 \\
+  --fallback-reason "\$PREFLIGHT_ENV_STATE" \\
+  --impl-model-tag "\$IMPL_MODEL_BACKLOG" >/dev/null 2>&1 || true
+
+PREFLIGHT_TS=\$(date +%s)
+
 # Slash commands don't work in -p mode — expand the command file into a prompt
 # Strip YAML frontmatter (--+\n...\n--+) — claude -p treats leading dashes as a CLI option
 DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
@@ -1524,6 +1556,21 @@ else
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 fi
+
+# ── Agent exit signal (DEC-72 wrapper-side audit trail) ─────────────────────
+EXIT_TS=\$(date +%s)
+DURATION_MS=\$(( (EXIT_TS - PREFLIGHT_TS) * 1000 ))
+EXIT_REASON=""
+[[ "\$EXIT_CODE" != "0" ]] && EXIT_REASON="exit_\$EXIT_CODE"
+node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
+  --trace-id "\$STORY_TRACE_ID" \\
+  --story-id "$story_id" \\
+  --phase "agent_exit" \\
+  --provider "wrapper" \\
+  --model "n/a" \\
+  --duration-ms "\$DURATION_MS" \\
+  --fallback-reason "\$EXIT_REASON" \\
+  --impl-model-tag "\$IMPL_MODEL_BACKLOG" >/dev/null 2>&1 || true
 
 echo ""
 echo "================================================================"
@@ -2049,6 +2096,38 @@ _gaai_resolve_session_env
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
 
+# ── Routing matrix preflight (DEC-72 wrapper-side audit trail) ──────────────
+# Reads backlog impl_model + observed env, emits a deterministic record before
+# the agent spawns. Consumed by daemon-monitor-tail.sh (phase display) and by
+# .gaai/core/hooks/pre-push.d/20-routing-matrix-compliance.sh (matrix gate).
+IMPL_MODEL_BACKLOG="\$(grep -A 30 '^- id: $story_id\$' '$BACKLOG' 2>/dev/null \
+  | grep -m1 'impl_model:' \
+  | sed 's/.*impl_model: *//;s/ *\$//;s/^\"//;s/\"\$//' \
+  | tr -d '[:space:]')"
+[[ -z "\$IMPL_MODEL_BACKLOG" ]] && IMPL_MODEL_BACKLOG="absent"
+
+STORY_TRACE_ID="\$(node -e 'import(\"node:crypto\").then(m=>process.stdout.write(m.randomUUID()))' 2>/dev/null)"
+[[ -z "\$STORY_TRACE_ID" ]] && STORY_TRACE_ID="wrapper-\$(date +%s)-$story_id"
+export STORY_TRACE_ID
+
+if [[ -n "\${GAAI_IMPL_BASE_URL:-}" && -n "\${GAAI_IMPL_AUTH_TOKEN:-}" && -n "\${GAAI_IMPL_MODEL:-}" ]]; then
+  PREFLIGHT_ENV_STATE="env_available"
+else
+  PREFLIGHT_ENV_STATE="env_missing"
+fi
+
+node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
+  --trace-id "\$STORY_TRACE_ID" \\
+  --story-id "$story_id" \\
+  --phase "preflight" \\
+  --provider "wrapper" \\
+  --model "n/a" \\
+  --duration-ms 0 \\
+  --fallback-reason "\$PREFLIGHT_ENV_STATE" \\
+  --impl-model-tag "\$IMPL_MODEL_BACKLOG" >/dev/null 2>&1 || true
+
+PREFLIGHT_TS=\$(date +%s)
+
 # Slash commands don't work in -p mode — expand the command file into a prompt
 # Strip YAML frontmatter (--+\n...\n--+) — claude -p treats leading dashes as a CLI option
 # See: https://code.claude.com/docs/en/headless
@@ -2083,6 +2162,21 @@ else
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
 fi
+
+# ── Agent exit signal (DEC-72 wrapper-side audit trail) ─────────────────────
+EXIT_TS=\$(date +%s)
+DURATION_MS=\$(( (EXIT_TS - PREFLIGHT_TS) * 1000 ))
+EXIT_REASON=""
+[[ "\$EXIT_CODE" != "0" ]] && EXIT_REASON="exit_\$EXIT_CODE"
+node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
+  --trace-id "\$STORY_TRACE_ID" \\
+  --story-id "$story_id" \\
+  --phase "agent_exit" \\
+  --provider "wrapper" \\
+  --model "n/a" \\
+  --duration-ms "\$DURATION_MS" \\
+  --fallback-reason "\$EXIT_REASON" \\
+  --impl-model-tag "\$IMPL_MODEL_BACKLOG" >/dev/null 2>&1 || true
 
 echo ""
 echo "Delivery finished (exit \$EXIT_CODE). Closing in 10s..."

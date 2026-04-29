@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- discovery(E121-E125): Phase D2 — 17 stories Pro multi-user collaboration
+
 ## [2.21.0] - 2026-04-28
 
 ### Changed
