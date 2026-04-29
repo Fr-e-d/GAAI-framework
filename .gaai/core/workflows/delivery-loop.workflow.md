@@ -222,7 +222,11 @@ node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
 
 The routing decision is evaluated inside `runImpl()` — a deterministic pure function (`resolveMode()`) within `nested-claude-spawn.js`. The workflow invokes the module via its CLI; **no routing logic lives here**.
 
-**Invoke the module:**
+> **🔒 MANDATORY — NON-NEGOTIABLE :** the Implementation phase MUST be executed by invoking the CLI block below. Do **NOT** spawn `implementation.sub-agent.md` via the Task tool. Do **NOT** perform implementation work inline in the orchestrator session via Read/Edit/Write/Bash. The CLI is the **only** path. Skipping it produces a delivery that bypasses routing, audit logging, and the universal fallback — exactly the failure mode E131 was created to eliminate.
+>
+> The CLI invocation is **mandatory regardless of impl_model tag value** : even when the resolved mode is primary, the spawn happens through this CLI (the module routes primary internally for architectural consistency).
+
+**Invoke the module (this is the only impl spawn — no Task tool sub-agent for impl) :**
 
 ```bash
 IMPL_PROMPT_FILE="$(mktemp -t gaai-impl-prompt.XXXXXX)"
@@ -272,9 +276,9 @@ fi
 
 **Compliance:** no specific provider names appear in this workflow file. Only generic terms: "secondary provider", "nested subprocess", "user-configured endpoint".
 
-Spawn `implementation.sub-agent.md` with Implementation context bundle.
+**Implementation context bundle :** the `IMPL_PROMPT` written to `IMPL_PROMPT_FILE` is the bundle. It contains the same content the legacy `implementation.sub-agent.md` Task spawn used to receive — story context, AC list, plan output, codebase pointers. The CLI passes the file content as the spawned `claude -p` prompt ; the spawned subprocess reads it and performs the implementation work end-to-end inside its own session.
 
-For Tier 3: Implementation Sub-Agent spawns Specialists per registry triggers.
+**Tier 3 specialists :** the spawned subprocess invokes Specialists via Task tool from inside its own session per `agents/specialists.registry.yaml`. The orchestrator does **not** spawn Specialists directly ; specialist coordination lives inside the impl subprocess so it shares the impl model + isolated context.
 
 Collect `{id}.impl-report.md`.
 
