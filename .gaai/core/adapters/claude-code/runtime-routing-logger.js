@@ -58,9 +58,19 @@ const REQUIRED_FIELDS = [
 /**
  * Appends one JSONL line to the routing log.
  *
+ * Optional secondary-mode telemetry fields (E131S08 / AC1 / DEC-65):
+ *   context_size_at_spawn   — cumulative input_tokens from the last assistant event (integer)
+ *   compact_events_count    — count of compact_boundary system events (integer)
+ *   retry_429_count         — count of api_retry events with error_status=429 (integer)
+ *   nested_session_completed — true iff stop_reason ∈ {end_turn, stop_sequence} (boolean)
+ * These fields are integers/boolean only — the token-detection guard cannot trigger on them.
+ * When absent, the field is omitted from the log record (not null, not zero — absent per AC2).
+ *
  * @param {{ trace_id: string, story_id: string, phase: string, provider: string,
  *           model: string, duration_ms: number, fallback_reason: string|null,
- *           impl_model_tag: string }} params
+ *           impl_model_tag: string,
+ *           context_size_at_spawn?: number, compact_events_count?: number,
+ *           retry_429_count?: number, nested_session_completed?: boolean }} params
  * @throws {Error} if a required field is missing or a token-like value is detected
  */
 export function logPhase(params) {
@@ -87,8 +97,15 @@ export function logPhase(params) {
     duration_ms:     params.duration_ms,
     fallback_reason: params.fallback_reason,
     impl_model_tag:  params.impl_model_tag,
-    timestamp:       new Date().toISOString(),
   };
+
+  // Append optional secondary-mode telemetry fields when present (integers/boolean, DEC-65)
+  const TELEMETRY_FIELDS = ['context_size_at_spawn', 'compact_events_count', 'retry_429_count', 'nested_session_completed'];
+  for (const f of TELEMETRY_FIELDS) {
+    if (f in params) entry[f] = params[f];
+  }
+
+  entry.timestamp = new Date().toISOString();
 
   const line = JSON.stringify(entry) + '\n';
 
