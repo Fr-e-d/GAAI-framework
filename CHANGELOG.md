@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.23.0] - 2026-04-29
+
+### Changed
+- feat(E107bS03): ambiguity detector skill — heuristic + AST signal severity scoring
+- feat(E107bS02): qa-loop-ui skill — sequential Q&A loop with skip, skip-all, partial-answer preservation (#514)
+
+
 ## [2.22.0] - 2026-04-29
 
 ### Changed
