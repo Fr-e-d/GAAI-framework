@@ -145,7 +145,7 @@ parse_log() {
           elif ($s | test("impl-report\\.md"))                     then "IMPL"
           elif ($s | test("--phase plan"))                         then "PLAN→IMPL"
           elif ($s | test("execution-plan\\.md"))                  then "PLAN"
-          elif ($s | test("git worktree add|Mark in_progress|in_progress \\[delivery\\]")) then "SETUP"
+          elif ($s | test("git worktree add|Mark in_progress|in_progress \\[delivery\\]|routing-logger.*preflight")) then "PREFLIGHT"
           else "" end;
         . as $m |
         (if (($m.parent_tool_use_id // null) == null) and (($m.session_id // "") == $root_sid) then "main" else "sub" end) as $origin |
@@ -189,7 +189,7 @@ parse_log() {
   if [[ -n "$phase_label" ]]; then
     local phase_icon="◆" phase_color="$YELLOW"
     case "$phase_label" in
-      SETUP)        phase_icon="⚙️" ; phase_color="$DIM"    ;;
+      PREFLIGHT)    phase_icon="⚙️" ; phase_color="$DIM"    ;;
       PLAN|PLAN→*)  phase_icon="📋"; phase_color="$YELLOW" ;;
       IMPL|IMPL→*|"IMPL(nested)") phase_icon="🛠" ; phase_color="$YELLOW" ;;
       QA|QA→*)      phase_icon="🧪"; phase_color="$YELLOW" ;;
