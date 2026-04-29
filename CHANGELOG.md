@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.23.0] - 2026-04-29
+
+### Changed
+- feat(E107bS09): streaming progress UX during Q&A — AC1/AC2/AC3
+
+
 ## [2.22.0] - 2026-04-29
 
 ### Changed
