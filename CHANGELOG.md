@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(impl-routing): add Haiku model mapping for secondary path Task sub-agents
 - fix(impl-routing): apply Z.AI-recommended CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000
 
 ## [2.24.0] - 2026-04-29
