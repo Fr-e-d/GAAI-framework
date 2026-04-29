@@ -222,6 +222,8 @@ node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
 
 The routing decision is evaluated inside `runImpl()` — a deterministic pure function (`resolveMode()`) within `nested-claude-spawn.js`. The workflow invokes the module via its CLI; **no routing logic lives here**.
 
+> **Rationale and deeper context:** see `contexts/memory/architecture/impl-phase-spawn-pattern.md` for the operational summary (why always-subprocess, the mode resolution table, the forbidden anti-pattern). For the formal decision record, see DEC-86 (amends DEC-72).
+
 > **🔒 MANDATORY — NON-NEGOTIABLE :** the Implementation phase MUST be executed by invoking the CLI block below. Do **NOT** spawn `implementation.sub-agent.md` via the Task tool. Do **NOT** perform implementation work inline in the orchestrator session via Read/Edit/Write/Bash. The CLI is the **only** path. Skipping it produces a delivery that bypasses routing, audit logging, and the universal fallback — exactly the failure mode E131 was created to eliminate.
 >
 > The CLI invocation is **mandatory regardless of impl_model tag value** : even when the resolved mode is primary, the spawn happens through this CLI (the module routes primary internally for architectural consistency).

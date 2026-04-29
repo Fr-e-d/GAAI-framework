@@ -271,6 +271,15 @@ cross:
     tags: [bootstrap, stage-4, abort-safe, skip-qa, telemetry, entry-gate]
     updated_at: 2026-04-29
     path: core/skills/cross/abort-safe-handler/SKILL.md
+  - id: SKILL-USER-SKIP-TELEMETRY-001
+    name: user-skip-telemetry
+    source: core
+    description: "Counts Q&A skip events from abort-safe-handler and qa-loop-ui outputs. Shows an optional skip-reason dropdown (not_relevant | too_vague | time_pressed | other) for user-initiated skips. Produces a structured skip_metrics_record for PostHog ingestion. Used in Stage 4 of the /gaai:bootstrap pipeline."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, stage-4, telemetry, skip-telemetry, qa-skip, posthog, observability]
+    updated_at: 2026-04-29
+    path: core/skills/cross/user-skip-telemetry/SKILL.md
   - id: SKILL-CONSISTENCY-CHECK-001
     name: consistency-check
     source: core
