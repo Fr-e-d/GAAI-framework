@@ -154,7 +154,10 @@ parse_log() {
           elif ($s | test("--phase qa"))                           then "QA→PR"
           elif ($s | test("qa-report\\.md"))                       then "QA"
           elif ($s | test("--phase impl"))                         then "IMPL→QA"
-          elif ($s | test("nested-claude-spawn"))                  then "IMPL(nested)"
+          # Match only actual node invocations of the nested wrapper, NOT mentions
+          # in research / grep / cat / vim. False positive observed on E131S04
+          # where the agent was studying the module file itself.
+          elif ($s | test("node[^|]+nested-claude-spawn\\.js"))    then "IMPL(nested)"
           elif ($s | test("impl-report\\.md"))                     then "IMPL"
           elif ($s | test("--phase plan"))                         then "PLAN→IMPL"
           elif ($s | test("execution-plan\\.md"))                  then "PLAN"
@@ -167,16 +170,34 @@ parse_log() {
           elif ($s | test(".+"))                                   then "WORKING"
           else "" end;
         . as $m |
+        # Monotone state machine — every event emits its phase rank as the FIRST
+        # column. We then sort by rank in bash and take the highest one observed
+        # in the recent window. This prevents WORKING (rank 2) from overriding
+        # PLAN/IMPL/QA (rank 3-5) when the agent does generic Bash/Edit between
+        # the artefact-write events that mark phase transitions. PREFLIGHT (rank 1)
+        # similarly cannot regress once a higher phase has been observed.
+        def rank_of($p):
+          if   $p == "DONE"                          then 8
+          elif $p == "CI"                            then 7
+          elif $p == "PR"                            then 6
+          elif ($p | startswith("QA"))               then 5
+          elif ($p | startswith("IMPL"))             then 4
+          elif ($p | startswith("PLAN"))             then 3
+          elif $p == "WORKING"                       then 2
+          elif $p == "PREFLIGHT"                     then 1
+          else 0 end;
         (if (($m.parent_tool_use_id // null) == null) and (($m.session_id // "") == $root_sid) then "main" else "sub" end) as $origin |
         if $m.type=="assistant" then
           $m.message.content[]? | select(.type=="tool_use")
             | classify(signal) as $p
             | select($p != "")
-            | $p + "\t" + $origin
+            | (rank_of($p) | tostring) + "\t" + $p + "\t" + $origin
         else empty end' 2>/dev/null \
+      | sort -t$'\t' -k1n -s \
       | tail -1 || true)
-    phase_label="${phase_event%%$'\t'*}"
-    phase_origin="${phase_event#*$'\t'}"
+    # Three tab-separated fields: rank <TAB> phase_label <TAB> origin
+    phase_label=$(printf  '%s' "$phase_event" | awk -F'\t' '{print $2}')
+    phase_origin=$(printf '%s' "$phase_event" | awk -F'\t' '{print $3}')
     [[ "$phase_label" == "$phase_origin" ]] && phase_origin=""
   else
     last_text=$(tail -200 "$log_file" 2>/dev/null \
@@ -222,11 +243,21 @@ parse_log() {
     local origin_suffix=""
     [[ "$phase_origin" == "sub" ]] && origin_suffix=" (sub)"
     # Append the model from the most recent tool_use event so the operator sees
-    # which provider is doing this phase's work (Sonnet 4.6, GLM 5.1, ...).
-    # SUB origin = nested-claude-spawn (typically secondary). MAIN = orchestrator.
+    # which provider is doing the work right now (claude-sonnet-4-6, glm-5.1,
+    # claude-haiku-4-5-…, …). When the source event came from a SUB origin —
+    # either a Task tool sub-agent (typically Haiku by Claude Code default) or
+    # a nested-claude-spawn subprocess (typically the routing-secondary provider)
+    # — annotate explicitly so the operator understands why a smaller/different
+    # model may flash by even when the orchestrator itself runs on Sonnet/Opus.
     local model_label model_suffix=""
     model_label=$(format_model "$last_model")
-    [[ -n "$model_label" ]] && model_suffix=" | model: ${model_label}"
+    if [[ -n "$model_label" ]]; then
+      if [[ "$last_origin" == "SUB" ]]; then
+        model_suffix=" | model: ${model_label} (sub)"
+      else
+        model_suffix=" | model: ${model_label}"
+      fi
+    fi
     # Two spaces between icon and label — many emojis (🛠 in particular) render
     # as a single column on some terminals and the visual gap looks squished.
     printf '  %bPhase: %b%s  %s%s%b%b%s%b\n' "$DIM" "$phase_color" "$phase_icon" "$phase_label" "$origin_suffix" "$NC" "$DIM" "$model_suffix" "$NC"

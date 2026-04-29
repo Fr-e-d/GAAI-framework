@@ -3,6 +3,10 @@
  *
  * Unit tests for nested-claude-spawn.js using node:test and node:assert (built-in).
  * Run with: node --test .gaai/core/adapters/claude-code/__tests__/nested-claude-spawn.test.js
+ *
+ * Updated for E131S03: covers resolveMode() DEC-72 matrix (AC1), runImpl() routing log
+ * record counts (AC2), universal fallback (AC4), and the rewritten T1 — ENV_MISSING no
+ * longer applies to the new runImpl() API; silent primary routing is the correct contract.
  */
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
@@ -17,7 +21,11 @@ import {
   _spawnWithTimerOverride,
   _setSpawnFn,
   _resetSpawnFn,
+  resolveMode,
+  runImpl,
 } from '../nested-claude-spawn.js';
+
+import { _setLogPath, _resetLogPath } from '../runtime-routing-logger.js';
 
 // ---------------------------------------------------------------------------
 // Mock child factory helpers
@@ -98,6 +106,23 @@ function clearEnv() {
 }
 
 // ---------------------------------------------------------------------------
+// Routing log fixture helpers (AC2, AC6)
+// ---------------------------------------------------------------------------
+
+function makeTmpLog() {
+  const dir = mkdtempSync(join(tmpdir(), 'gaai-test-E131S03-log-'));
+  return join(dir, 'runtime-routing.jsonl');
+}
+
+function readLogLines(logPath) {
+  if (!existsSync(logPath)) return [];
+  return readFileSync(logPath, 'utf8')
+    .split('\n')
+    .filter(l => l.trim() !== '')
+    .map(l => JSON.parse(l));
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -105,24 +130,54 @@ describe('nested-claude-spawn', () => {
 
   afterEach(() => {
     _resetSpawnFn();
+    _resetLogPath();
     clearEnv();
   });
 
   // -------------------------------------------------------------------------
-  // T1: ENV_MISSING
+  // T1 (rewritten — AC3): runImpl with no env + no tag routes silently to primary
+  //
+  // Previously asserted ENV_MISSING via spawnNestedClaude(). That contract is
+  // gone from the new runImpl() API: absent env + absent tag → silent primary
+  // routing (DEC-72 Row 5 / OSS non-regression). No ENV_MISSING, no warning.
   // -------------------------------------------------------------------------
-  test('T1: ENV_MISSING - returns ENV_MISSING without spawning', async () => {
+  test('T1: no-env + no-tag routes to primary silently — error_reason is not ENV_MISSING', async () => {
     clearEnv();
+    const tmpLog = makeTmpLog();
+    _setLogPath(tmpLog);
 
-    const r = await spawnNestedClaude('test-prompt', '/tmp/test-report.md');
+    const reportPath = join(tmpdir(), `gaai-test-E131S03-T1-${Date.now()}.md`);
+    writeFileSync(reportPath, '## QA\nAll good.\n');
 
-    assert.equal(r.error_reason, 'ENV_MISSING');
-    assert.equal(r.success, false);
-    assert.equal(r.exit_code, null);
-    assert.equal(r.impl_report_path, null);
-    // UUID must be present (non-empty string matching UUID pattern)
-    assert.ok(r.trace_id, 'trace_id must be non-empty');
-    assert.match(r.trace_id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    // Capture stdout to verify no ⚠ warning is emitted (no explicit secondary tag)
+    const stdoutLines = [];
+    const origWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (msg, ...rest) => {
+      stdoutLines.push(typeof msg === 'string' ? msg : msg.toString());
+      return origWrite(msg, ...rest);
+    };
+
+    _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: '## QA\nAll good.\n' }));
+
+    let r;
+    try {
+      r = await runImpl({
+        implModelTag: null,
+        prompt: 'test-prompt',
+        reportPath,
+        storyId: 'E131S03-T1',
+      });
+    } finally {
+      process.stdout.write = origWrite;
+    }
+
+    // Core assertion: ENV_MISSING must never appear in the new routing API
+    assert.notEqual(r.error_reason, 'ENV_MISSING', 'ENV_MISSING must not be returned by runImpl');
+    // The mock succeeds → primary spawn succeeds
+    assert.equal(r.success, true, 'primary spawn must succeed with mock');
+    // No ⚠ warning when tag is absent (warning only for explicit secondary tag per AC3)
+    const hasWarning = stdoutLines.some(l => l.includes('⚠ impl_model=secondary'));
+    assert.equal(hasWarning, false, 'no warning must be emitted for absent tag');
   });
 
   // -------------------------------------------------------------------------
@@ -390,6 +445,223 @@ describe('nested-claude-spawn', () => {
     assert.ok(warnings.length >= 1, 'at least one WARNING must be emitted');
     assert.ok(warnings[0].includes(logFile), 'warning must contain log file path');
     assert.ok(!warnings[0].includes('test-token-do-not-log'), 'warning must not contain auth token');
+  });
+
+  // -------------------------------------------------------------------------
+  // T14 (AC2): runImpl success → exactly one phase:impl record in routing log
+  // -------------------------------------------------------------------------
+  test('T14: runImpl success → exactly one phase:impl record in routing log', async () => {
+    setValidEnv();
+    const tmpLog = makeTmpLog();
+    _setLogPath(tmpLog);
+
+    const reportPath = join(tmpdir(), `gaai-test-E131S03-T14-${Date.now()}.md`);
+    writeFileSync(reportPath, '## QA\nAll good.\n');
+
+    // implModelTag absent + env configured → secondary (DEC-72 Row 4)
+    _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: '## QA\nAll good.\n' }));
+
+    const r = await runImpl({
+      implModelTag: null,
+      prompt: 'test-prompt',
+      reportPath,
+      storyId: 'E131S03-T14',
+    });
+
+    assert.equal(r.success, true);
+
+    const records = readLogLines(tmpLog);
+    assert.equal(records.length, 1, 'must have exactly one log record for a successful invocation');
+    assert.equal(records[0].phase, 'impl');
+    assert.equal(records[0].provider, 'secondary', 'env configured + absent tag → secondary per DEC-72 Row 4');
+    assert.equal(records[0].impl_model_tag, 'absent', 'tag_recorded must reflect absent sentinel');
+    assert.equal(records[0].fallback_reason, null, 'no fallback on success');
+  });
+
+  // -------------------------------------------------------------------------
+  // T15 (AC2 + AC4): runImpl secondary→primary fallback → exactly two phase:impl records
+  //
+  // Verifies the universal fallback (AC4): secondary subprocess fails with a
+  // classified error; module retries once on primary and returns primary's outcome.
+  // Two routing log records are emitted — one per attempt.
+  // -------------------------------------------------------------------------
+  test('T15: runImpl fallback (secondary→primary) → exactly two phase:impl records in routing log', async () => {
+    setValidEnv();
+    const tmpLog = makeTmpLog();
+    _setLogPath(tmpLog);
+
+    const reportPath = join(tmpdir(), `gaai-test-E131S03-T15-${Date.now()}.md`);
+    // Pre-create report so primary succeeds (secondary fails via non-zero exit + auth error before file check)
+    writeFileSync(reportPath, '## QA\nAll good.\n');
+
+    // Stateful mock: first call (secondary) → AUTH_FAILED; second call (primary) → success
+    let spawnCallCount = 0;
+    _setSpawnFn(() => {
+      spawnCallCount++;
+      if (spawnCallCount === 1) {
+        return createMockChild({ exitCode: 1, stderrData: '401 Unauthorized — invalid_api_key' });
+      }
+      return createMockChild({ exitCode: 0, stdoutData: '## QA\nAll good.\n' });
+    });
+
+    const r = await runImpl({
+      implModelTag: 'secondary',
+      prompt: 'test-prompt',
+      reportPath,
+      storyId: 'E131S03-T15',
+    });
+
+    assert.equal(r.success, true, 'primary fallback must succeed');
+    assert.equal(spawnCallCount, 2, 'exactly two spawn calls must occur (secondary + primary fallback)');
+
+    const records = readLogLines(tmpLog);
+    assert.equal(records.length, 2, 'must have exactly two log records (one per attempt)');
+
+    // Record 1: secondary attempt (failed, but logged before triggering fallback)
+    assert.equal(records[0].phase, 'impl');
+    assert.equal(records[0].provider, 'secondary');
+    assert.equal(records[0].impl_model_tag, 'secondary');
+    assert.equal(records[0].fallback_reason, null, 'first record has no fallback_reason — it IS the attempt that triggered the fallback');
+
+    // Record 2: primary fallback (carries the reason that triggered the switch)
+    assert.equal(records[1].phase, 'impl');
+    assert.equal(records[1].provider, 'primary');
+    assert.equal(records[1].fallback_reason, 'AUTH_FAILED', 'second record carries the reason that triggered the fallback');
+
+    // Both records share the same trace_id (per runImpl contract)
+    assert.equal(records[0].trace_id, records[1].trace_id, 'both records must share the same trace_id');
+  });
+
+  // -------------------------------------------------------------------------
+  // T16 (AC3): explicit secondary tag + missing env → ⚠ warning emitted, routes to primary
+  //
+  // Verifies the warning fires only when the operator explicitly tagged the
+  // story as secondary — absent/null tags produce no warning (verified in T1).
+  // -------------------------------------------------------------------------
+  test('T16: explicit secondary tag + missing env → ⚠ warning emitted, routes to primary', async () => {
+    clearEnv();
+    const tmpLog = makeTmpLog();
+    _setLogPath(tmpLog);
+
+    const reportPath = join(tmpdir(), `gaai-test-E131S03-T16-${Date.now()}.md`);
+    writeFileSync(reportPath, '## QA\nAll good.\n');
+
+    // Capture stdout to detect the ⚠ warning line (runImpl writes it via process.stdout.write)
+    const stdoutLines = [];
+    const origWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (msg, ...rest) => {
+      stdoutLines.push(typeof msg === 'string' ? msg : msg.toString());
+      return origWrite(msg, ...rest);
+    };
+
+    _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: '## QA\nAll good.\n' }));
+
+    let r;
+    try {
+      r = await runImpl({
+        implModelTag: 'secondary',
+        prompt: 'test-prompt',
+        reportPath,
+        storyId: 'E131S03-T16',
+      });
+    } finally {
+      process.stdout.write = origWrite;
+    }
+
+    // Routes to primary (env missing) → mock succeeds
+    assert.notEqual(r.error_reason, 'ENV_MISSING');
+    assert.equal(r.success, true);
+
+    // Warning must be emitted because operator explicitly tagged as secondary
+    const hasWarning = stdoutLines.some(l => l.includes('⚠ impl_model=secondary'));
+    assert.equal(hasWarning, true, '⚠ warning must be emitted when explicit secondary tag + missing env');
+  });
+
+});
+
+// ---------------------------------------------------------------------------
+// resolveMode — DEC-72 five-row decision matrix (AC1)
+//
+// Pure function tests: no I/O, no env mutation, no subprocess. Each test
+// verifies both the resolved routing mode and the tag_recorded value written
+// to the audit log — covering all five rows of the DEC-72 matrix.
+// ---------------------------------------------------------------------------
+
+describe('resolveMode (DEC-72 five-row matrix)', () => {
+
+  const fullEnv    = { hasBaseUrl: true,  hasAuthToken: true,  hasModel: true  };
+  const emptyEnv   = { hasBaseUrl: false, hasAuthToken: false, hasModel: false };
+  const partialEnv = { hasBaseUrl: true,  hasAuthToken: false, hasModel: true  };
+
+  // Row 1: explicit primary opt-out — always primary regardless of env
+  test('Row 1a: primary tag + env configured → mode=primary, tag_recorded=primary', () => {
+    const r = resolveMode('primary', fullEnv);
+    assert.equal(r.mode, 'primary');
+    assert.equal(r.tag_recorded, 'primary');
+  });
+
+  test('Row 1b: primary tag + env missing → mode=primary, tag_recorded=primary', () => {
+    const r = resolveMode('primary', emptyEnv);
+    assert.equal(r.mode, 'primary');
+    assert.equal(r.tag_recorded, 'primary');
+  });
+
+  // Row 2: explicit secondary + env configured → secondary
+  test('Row 2: secondary tag + env configured → mode=secondary, tag_recorded=secondary', () => {
+    const r = resolveMode('secondary', fullEnv);
+    assert.equal(r.mode, 'secondary');
+    assert.equal(r.tag_recorded, 'secondary');
+  });
+
+  // Row 3: explicit secondary + env missing → primary (warn path; tag still recorded as secondary)
+  test('Row 3a: secondary tag + env fully missing → mode=primary, tag_recorded=secondary', () => {
+    const r = resolveMode('secondary', emptyEnv);
+    assert.equal(r.mode, 'primary');
+    assert.equal(r.tag_recorded, 'secondary');
+  });
+
+  test('Row 3b: secondary tag + env partially configured → mode=primary, tag_recorded=secondary', () => {
+    const r = resolveMode('secondary', partialEnv);
+    assert.equal(r.mode, 'primary');
+    assert.equal(r.tag_recorded, 'secondary');
+  });
+
+  // Row 4: absent/null tag + env configured → secondary (DEC-72 new default — was primary in E94 D-0)
+  test('Row 4a: absent sentinel + env configured → mode=secondary, tag_recorded=absent', () => {
+    const r = resolveMode('absent', fullEnv);
+    assert.equal(r.mode, 'secondary');
+    assert.equal(r.tag_recorded, 'absent');
+  });
+
+  test('Row 4b: null (no backlog tag) + env configured → mode=secondary, tag_recorded=absent', () => {
+    const r = resolveMode(null, fullEnv);
+    assert.equal(r.mode, 'secondary');
+    assert.equal(r.tag_recorded, 'absent');
+  });
+
+  test('Row 4c: undefined (no backlog tag) + env configured → mode=secondary, tag_recorded=absent', () => {
+    const r = resolveMode(undefined, fullEnv);
+    assert.equal(r.mode, 'secondary');
+    assert.equal(r.tag_recorded, 'absent');
+  });
+
+  // Row 5: absent/null tag + env missing → primary (OSS non-regression, E94 D-0 preserved)
+  test('Row 5a: absent sentinel + env missing → mode=primary, tag_recorded=absent', () => {
+    const r = resolveMode('absent', emptyEnv);
+    assert.equal(r.mode, 'primary');
+    assert.equal(r.tag_recorded, 'absent');
+  });
+
+  test('Row 5b: null + env missing → mode=primary, tag_recorded=absent', () => {
+    const r = resolveMode(null, emptyEnv);
+    assert.equal(r.mode, 'primary');
+    assert.equal(r.tag_recorded, 'absent');
+  });
+
+  test('Row 5c: undefined + env missing → mode=primary, tag_recorded=absent', () => {
+    const r = resolveMode(undefined, emptyEnv);
+    assert.equal(r.mode, 'primary');
+    assert.equal(r.tag_recorded, 'absent');
   });
 
 });
