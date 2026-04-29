@@ -38,6 +38,22 @@ health_color() {
   fi
 }
 
+# Render an Anthropic / GLM model id as a short human label.
+# Empty/sentinel values return empty so callers can omit the field cleanly.
+format_model() {
+  case "$1" in
+    claude-opus-4-7*)         echo "Opus 4.7" ;;
+    claude-opus-4-6*)         echo "Opus 4.6" ;;
+    claude-sonnet-4-7*)       echo "Sonnet 4.7" ;;
+    claude-sonnet-4-6*)       echo "Sonnet 4.6" ;;
+    claude-haiku-4-5*)        echo "Haiku 4.5" ;;
+    claude-*)                 echo "${1#claude-}" ;;
+    glm-*)                    echo "GLM ${1#glm-}" ;;
+    n/a|null|"")              echo "" ;;
+    *)                        echo "$1" ;;
+  esac
+}
+
 parse_log() {
   local log_file="$1"
   local story_id="$2"
@@ -94,7 +110,7 @@ parse_log() {
   # or (b) nested `claude -p` (Implement Agent via nested-claude-spawn.js --log-file):
   #         DIFFERENT session_id than the root delivery session.
   # Root session_id = first session_id seen in the log (init event).
-  local last_event="" last_origin="" last_text="" root_sid=""
+  local last_event="" last_origin="" last_text="" last_model="" root_sid=""
   local phase_label="" phase_origin=""
   if $HAS_JQ; then
     root_sid=$(head -5 "$log_file" 2>/dev/null \
@@ -112,14 +128,17 @@ parse_log() {
           else ((.input.description // .input.file_path // .input.command // .input.query // "") | clean) end;
         . as $m |
         (if (($m.parent_tool_use_id // null) == null) and (($m.session_id // "") == $root_sid) then "MAIN" else "SUB" end) as $origin |
+        (($m.message.model // "") | tostring) as $model |
         if ($m.type=="system" and $m.subtype=="task_progress") then
-          $origin + "\t" + ($m.description // "")
+          $origin + "\t" + ($m.description // "") + "\t"
         elif $m.type=="assistant" then
-          $m.message.content[]? | select(.type=="tool_use") | $origin + "\t" + .name + " " + arg
+          $m.message.content[]? | select(.type=="tool_use") | $origin + "\t" + .name + " " + arg + "\t" + $model
         else empty end' 2>/dev/null \
       | tail -1 || true)
-    last_origin="${last_event%%$'\t'*}"
-    last_text="${last_event#*$'\t'}"
+    # Three tab-separated fields: origin <TAB> text <TAB> model
+    last_origin=$(printf '%s' "$last_event" | awk -F'\t' '{print $1}')
+    last_text=$(printf   '%s' "$last_event" | awk -F'\t' '{print $2}')
+    last_model=$(printf  '%s' "$last_event" | awk -F'\t' '{print $3}')
 
     # ── Phase detection ──
     # Walk recent events, classify each Bash command / Write target into a phase tag,
@@ -201,7 +220,15 @@ parse_log() {
     # nested claude session — main is the implicit default and would just add noise.
     local origin_suffix=""
     [[ "$phase_origin" == "sub" ]] && origin_suffix=" (sub)"
-    printf '  %bPhase: %b%s %s%s%b\n' "$DIM" "$phase_color" "$phase_icon" "$phase_label" "$origin_suffix" "$NC"
+    # Append the model from the most recent tool_use event so the operator sees
+    # which provider is doing this phase's work (Sonnet 4.6, GLM 5.1, ...).
+    # SUB origin = nested-claude-spawn (typically secondary). MAIN = orchestrator.
+    local model_label model_suffix=""
+    model_label=$(format_model "$last_model")
+    [[ -n "$model_label" ]] && model_suffix=" | model: ${model_label}"
+    # Two spaces between icon and label — many emojis (🛠 in particular) render
+    # as a single column on some terminals and the visual gap looks squished.
+    printf '  %bPhase: %b%s  %s%s%b%b%s%b\n' "$DIM" "$phase_color" "$phase_icon" "$phase_label" "$origin_suffix" "$NC" "$DIM" "$model_suffix" "$NC"
   fi
 
   # Single activity line — prefix switches based on origin (main delivery vs nested sub-agent).
