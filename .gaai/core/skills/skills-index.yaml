@@ -3,7 +3,7 @@
 # Regenerate: invoke build-skills-index skill
 
 generated_at: 2026-04-29
-total: 53
+total: 54
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -235,6 +235,15 @@ cross:
     tags: [bootstrap, llm-synthesis, clarity-tags, memory-entries, parsing]
     updated_at: 2026-04-29
     path: core/skills/cross/bootstrap-llm-synthesis/SKILL.md
+  - id: SKILL-SMART-QUESTION-GENERATOR-001
+    name: smart-question-generator
+    source: core
+    description: "Takes aggregated ambiguity insights from the LLM synthesis stage and produces ≤5 ranked questions to surface to the user during bootstrap Q&A. Two-layer anti-fabrication filter (pre-LLM exclusion + post-LLM structural strip) ensures only genuine ambiguities (score>=3) reach the user. Failure semantics distinguish legitimate-empty from LLM-failure to allow orchestrator degraded-mode fallback."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, qa-loop, smart-questions, anti-fabrication, ambiguity]
+    updated_at: 2026-04-29
+    path: core/skills/cross/smart-question-generator/SKILL.md
   - id: SKILL-CONSISTENCY-CHECK-001
     name: consistency-check
     source: core
