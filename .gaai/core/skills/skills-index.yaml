@@ -3,7 +3,7 @@
 # Regenerate: invoke build-skills-index skill
 
 generated_at: 2026-04-29
-total: 54
+total: 55
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -244,6 +244,15 @@ cross:
     tags: [bootstrap, qa-loop, smart-questions, anti-fabrication, ambiguity]
     updated_at: 2026-04-29
     path: core/skills/cross/smart-question-generator/SKILL.md
+  - id: SKILL-QA-LOOP-UI-001
+    name: qa-loop-ui
+    source: core
+    description: "Presents up to 5 questions from smart-question-generator one at a time, records answers with per-question skip and skip-all support, captures per-question response time, and preserves partial answers on abort. Used as the interaction layer of Stage 4 of the /gaai:bootstrap pipeline."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, qa-loop, interaction, sequential, answer-recording]
+    updated_at: 2026-04-29
+    path: core/skills/cross/qa-loop-ui/SKILL.md
   - id: SKILL-CONSISTENCY-CHECK-001
     name: consistency-check
     source: core
