@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.23.0] - 2026-04-29
 
 ### Changed
+- feat(monitor): add WORKING fallback phase for active coding without specific marker
 - fix(monitor): render model id as-is instead of short-label formatting
+
 
 ## [2.22.0] - 2026-04-29
 

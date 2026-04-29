@@ -38,19 +38,13 @@ health_color() {
   fi
 }
 
-# Render an Anthropic / GLM model id as a short human label.
-# Empty/sentinel values return empty so callers can omit the field cleanly.
+# Pass-through model id, filtering out sentinel values (n/a / null / empty)
+# so callers can omit the field cleanly. Real model strings render as-is
+# (claude-sonnet-4-6, glm-5.1, ...).
 format_model() {
   case "$1" in
-    claude-opus-4-7*)         echo "Opus 4.7" ;;
-    claude-opus-4-6*)         echo "Opus 4.6" ;;
-    claude-sonnet-4-7*)       echo "Sonnet 4.7" ;;
-    claude-sonnet-4-6*)       echo "Sonnet 4.6" ;;
-    claude-haiku-4-5*)        echo "Haiku 4.5" ;;
-    claude-*)                 echo "${1#claude-}" ;;
-    glm-*)                    echo "GLM ${1#glm-}" ;;
-    n/a|null|"")              echo "" ;;
-    *)                        echo "$1" ;;
+    n/a|null|"") echo "" ;;
+    *)           echo "$1" ;;
   esac
 }
 
@@ -165,6 +159,12 @@ parse_log() {
           elif ($s | test("--phase plan"))                         then "PLAN→IMPL"
           elif ($s | test("execution-plan\\.md"))                  then "PLAN"
           elif ($s | test("git worktree add|Mark in_progress|in_progress \\[delivery\\]|routing-logger.*preflight")) then "PREFLIGHT"
+          # Catch-all for non-specific Bash commands / Write/Edit file_paths after
+          # PREFLIGHT — visible signal that the agent is actively working even when
+          # no phase-specific marker fires (typical for Tier 1 MicroDelivery, where
+          # plan+impl+qa run in a single sub-agent and produce no execution-plan.md).
+          # More-specific phases above (PLAN/IMPL/QA/PR/CI/DONE) still take priority.
+          elif ($s | test(".+"))                                   then "WORKING"
           else "" end;
         . as $m |
         (if (($m.parent_tool_use_id // null) == null) and (($m.session_id // "") == $root_sid) then "main" else "sub" end) as $origin |
@@ -209,6 +209,7 @@ parse_log() {
     local phase_icon="◆" phase_color="$YELLOW"
     case "$phase_label" in
       PREFLIGHT)    phase_icon="⚙️" ; phase_color="$DIM"    ;;
+      WORKING)      phase_icon="🚧"; phase_color="$YELLOW" ;;
       PLAN|PLAN→*)  phase_icon="📋"; phase_color="$YELLOW" ;;
       IMPL|IMPL→*|"IMPL(nested)") phase_icon="🛠" ; phase_color="$YELLOW" ;;
       QA|QA→*)      phase_icon="🧪"; phase_color="$YELLOW" ;;
