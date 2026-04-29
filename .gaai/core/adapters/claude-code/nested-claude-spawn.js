@@ -132,13 +132,22 @@ function buildChildEnv() {
   if (env.GAAI_IMPL_MODEL)         { env.ANTHROPIC_DEFAULT_OPUS_MODEL   = env.GAAI_IMPL_MODEL; }
   if (env.GAAI_IMPL_MODEL_FALLBACK){ env.ANTHROPIC_DEFAULT_SONNET_MODEL = env.GAAI_IMPL_MODEL_FALLBACK; }
 
-  // Apply Z.AI vendor-recommended API_TIMEOUT_MS for Claude Code compat with GLM
-  // (Z.AI docs recommend 3,000,000 ms / 50 min — GLM responses can be slower than
-  // Anthropic's, and the Claude Code default 600,000 ms / 10 min triggers premature
-  // timeouts on some completions). Per-call timeout, not session timeout. Only set
-  // when not already explicitly configured by the operator — operator override wins.
+  // Apply Z.AI vendor-recommended Claude Code compat settings for GLM. Each
+  // setting respects an operator override : if already set in the parent env,
+  // we don't touch it. Sources :
+  //   - API_TIMEOUT_MS=3000000 (50 min) : Z.AI docs — GLM responses slower
+  //     than Anthropic's, default 10 min triggers premature timeouts.
+  //   - CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000 : Z.AI docs — tells Claude
+  //     Code the effective context window is 200K, so auto-compaction triggers
+  //     at the right capacity for GLM rather than assuming a different
+  //     window size. Avoids the auto-compact thrashing observed empirically
+  //     on E112S03 (context refilled to limit within 3 turns of compact, 3
+  //     times in a row).
   if (!env.API_TIMEOUT_MS) {
     env.API_TIMEOUT_MS = '3000000';
+  }
+  if (!env.CLAUDE_CODE_AUTO_COMPACT_WINDOW) {
+    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = '200000';
   }
 
   // Remove parent auth credentials to prevent credential leakage / conflict
