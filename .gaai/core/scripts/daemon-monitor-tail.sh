@@ -157,6 +157,15 @@ parse_log() {
           # Match only actual node invocations of the nested wrapper, NOT mentions
           # in research / grep / cat / vim. False positive observed on E131S04
           # where the agent was studying the module file itself.
+          # Post-E131S02: the module is always invoked for Tier 2 (routing is not
+          # opt-in from the agent). IMPL(nested) fires while the subprocess runs.
+          # After the module returns, the agent collects impl-report.md — the Read
+          # event matches the pattern below (rank 4, same as IMPL(nested)) and
+          # stable-sort tail-1 advances the display to IMPL regardless of provider
+          # (primary opt-out and universal-fallback both resolve to IMPL this way).
+          # The IMPL(nested) signal remains useful for the legacy-degenerate case:
+          # if the wrapper crashes before agent spawn, IMPL(nested) is never seen
+          # and the operator observes WORKING — a valid anomaly signal. (E131S06)
           elif ($s | test("node[^|]+nested-claude-spawn\\.js"))    then "IMPL(nested)"
           elif ($s | test("impl-report\\.md"))                     then "IMPL"
           elif ($s | test("--phase plan"))                         then "PLAN→IMPL"
