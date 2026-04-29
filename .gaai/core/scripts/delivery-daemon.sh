@@ -934,6 +934,13 @@ launch_delivery_tmux() {
   local story_id="$1"
   local delivery_log="$LOG_DIR/${story_id}.log"
 
+  local impl_model_backlog
+  impl_model_backlog=$(awk -v sid="$story_id" '
+    /^- id: / { found = ($0 == "- id: " sid) }
+    found && /^  impl_model:/ { val=$2; gsub(/"/, "", val); print val; exit }
+  ' "$BACKLOG" 2>/dev/null || true)
+  [[ -z "$impl_model_backlog" ]] && impl_model_backlog="absent"
+
   local wrapper="$LOCK_DIR/${story_id}_run.sh"
   cat > "$wrapper" <<WRAPPER_EOF
 #!/usr/bin/env bash
@@ -1483,6 +1490,24 @@ _gaai_resolve_session_env
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
 
+# ── Routing preflight (DEC-72 observability) ────────────────────────────────
+IMPL_MODEL_BACKLOG="${impl_model_backlog}"
+STORY_TRACE_ID=\$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \\
+  || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \\
+  || echo "\$(date +%s)-\$RANDOM-\$\$")
+[[ -n "\${GAAI_IMPL_BASE_URL:-}" && -n "\${GAAI_IMPL_AUTH_TOKEN:-}" && -n "\${GAAI_IMPL_MODEL:-}" ]] \\
+  && ENV_STATE="env_available" || ENV_STATE="env_missing"
+PREFLIGHT_TS=\$(date +%s)
+node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
+  --trace-id "\$STORY_TRACE_ID" \\
+  --story-id "$story_id" \\
+  --phase "preflight" \\
+  --provider "wrapper" \\
+  --model "n/a" \\
+  --duration-ms 0 \\
+  --fallback-reason "\$ENV_STATE" \\
+  --impl-model-tag "\$IMPL_MODEL_BACKLOG" >/dev/null 2>&1 || true
+
 # Slash commands don't work in -p mode — expand the command file into a prompt
 # Strip YAML frontmatter (--+\n...\n--+) — claude -p treats leading dashes as a CLI option
 DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
@@ -1553,6 +1578,13 @@ WRAPPER_EOF
 launch_delivery_terminal() {
   local story_id="$1"
   local delivery_log="$LOG_DIR/${story_id}.log"
+
+  local impl_model_backlog
+  impl_model_backlog=$(awk -v sid="$story_id" '
+    /^- id: / { found = ($0 == "- id: " sid) }
+    found && /^  impl_model:/ { val=$2; gsub(/"/, "", val); print val; exit }
+  ' "$BACKLOG" 2>/dev/null || true)
+  [[ -z "$impl_model_backlog" ]] && impl_model_backlog="absent"
 
   local wrapper="$LOCK_DIR/${story_id}_run.sh"
   cat > "$wrapper" <<WRAPPER_EOF
@@ -2048,6 +2080,24 @@ _gaai_resolve_session_env
 
 # Truncate stale log from previous runs (prevents false heartbeat kills)
 : > "$delivery_log"
+
+# ── Routing preflight (DEC-72 observability) ────────────────────────────────
+IMPL_MODEL_BACKLOG="${impl_model_backlog}"
+STORY_TRACE_ID=\$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \\
+  || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \\
+  || echo "\$(date +%s)-\$RANDOM-\$\$")
+[[ -n "\${GAAI_IMPL_BASE_URL:-}" && -n "\${GAAI_IMPL_AUTH_TOKEN:-}" && -n "\${GAAI_IMPL_MODEL:-}" ]] \\
+  && ENV_STATE="env_available" || ENV_STATE="env_missing"
+PREFLIGHT_TS=\$(date +%s)
+node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
+  --trace-id "\$STORY_TRACE_ID" \\
+  --story-id "$story_id" \\
+  --phase "preflight" \\
+  --provider "wrapper" \\
+  --model "n/a" \\
+  --duration-ms 0 \\
+  --fallback-reason "\$ENV_STATE" \\
+  --impl-model-tag "\$IMPL_MODEL_BACKLOG" >/dev/null 2>&1 || true
 
 # Slash commands don't work in -p mode — expand the command file into a prompt
 # Strip YAML frontmatter (--+\n...\n--+) — claude -p treats leading dashes as a CLI option
