@@ -38,13 +38,19 @@ health_color() {
   fi
 }
 
-# Pass-through model id, filtering out sentinel values (n/a / null / empty)
-# so callers can omit the field cleanly. Real model strings render as-is
-# (claude-sonnet-4-6, glm-5.1, ...).
+# Render an Anthropic / GLM model id as a short human label.
+# Empty/sentinel values return empty so callers can omit the field cleanly.
 format_model() {
   case "$1" in
-    n/a|null|"") echo "" ;;
-    *)           echo "$1" ;;
+    claude-opus-4-7*)         echo "Opus 4.7" ;;
+    claude-opus-4-6*)         echo "Opus 4.6" ;;
+    claude-sonnet-4-7*)       echo "Sonnet 4.7" ;;
+    claude-sonnet-4-6*)       echo "Sonnet 4.6" ;;
+    claude-haiku-4-5*)        echo "Haiku 4.5" ;;
+    claude-*)                 echo "${1#claude-}" ;;
+    glm-*)                    echo "GLM ${1#glm-}" ;;
+    n/a|null|"")              echo "" ;;
+    *)                        echo "$1" ;;
   esac
 }
 
