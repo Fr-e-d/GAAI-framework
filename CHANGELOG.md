@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.25.0] - 2026-04-29
+
+### Changed
+- feat(E107bS05): abort-safe handler — Stage 4 pre-loop skip option (#518)
+- feat(E107bS03): ambiguity detector — heuristic + AST signal severity scoring (#516)
+
+
 ## [2.24.0] - 2026-04-29
 
 ### Changed
