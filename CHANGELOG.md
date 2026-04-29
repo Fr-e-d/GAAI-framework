@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.24.0] - 2026-04-29
+
+### Changed
+- fix(impl-routing): apply Z.AI-recommended API_TIMEOUT_MS=3000000 for secondary path
+- feat(E107bS09): streaming progress UX during Q&A (#543)
+- chore: bump local VERSION to v2.22.0 [sync]
+- fix(monitor): monotone phase state machine + tighten nested regex + (sub) model annotation
+
+
 ## [2.23.0] - 2026-04-29
 
 ### Changed

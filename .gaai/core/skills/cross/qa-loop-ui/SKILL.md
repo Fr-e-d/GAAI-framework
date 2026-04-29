@@ -1,11 +1,11 @@
 ---
 name: qa-loop-ui
-description: Presents up to 5 questions from smart-question-generator one at a time, records answers, handles per-question skip and skip-all, and captures per-question response time. Used as the interaction layer of Stage 4 of the /gaai:bootstrap pipeline.
+description: Presents up to 5 questions from smart-question-generator one at a time, records answers, handles per-question skip and skip-all, captures per-question response time and total session duration. Renders a streaming progress header with question count and time estimate. Used as the interaction layer of Stage 4 of the /gaai:bootstrap pipeline.
 license: ELv2
 compatibility: Works in any interactive AI coding agent context (Claude Code, Cursor) where inline Q&A is supported
 metadata:
   author: gaai-framework
-  version: "1.0"
+  version: "1.1"
   category: cross
   track: cross-cutting
   id: SKILL-QA-LOOP-UI-001
@@ -14,7 +14,7 @@ metadata:
 inputs:
   - question_result       # {questions[], error, fallback} — output of smart-question-generator
 outputs:
-  - qa_session_result     # {answers[], partial: bool, skipped_all: bool, abort_reason: string|null}
+  - qa_session_result     # {answers[], partial: bool, skipped_all: bool, abort_reason: string|null, qa_duration_ms: number}
 ---
 
 # Q&A Loop UI
@@ -50,7 +50,7 @@ question_result:
 ```
 if question_result.questions.length == 0:
   log: "[qa-loop-ui] no questions to ask — skip loop"
-  return {answers: [], partial: false, skipped_all: false, abort_reason: "no_questions"}
+  return {answers: [], partial: false, skipped_all: false, abort_reason: "no_questions", qa_duration_ms: 0}
 ```
 
 ---
@@ -78,20 +78,46 @@ or "skip all" to skip the entire Q&A.
 
 For each question at `current_index` in `question_result.questions`:
 
-#### Step 2a — Display question
+#### Step 2a — Compute time estimate (AC2)
 
-Format the question for inline presentation:
+Compute a best-effort estimate of time remaining before displaying the question:
+
+```
+if current_index >= 1:
+  # Use elapsed time over completed questions as running average
+  elapsed_ms = current_timestamp_ms() - session_start_ts
+  avg_per_q_ms = elapsed_ms / current_index
+  questions_left = total_questions - current_index   # includes current question
+  estimated_remaining_ms = questions_left * avg_per_q_ms
+  estimated_remaining_s = Math.ceil(estimated_remaining_ms / 1000)
+  rounded_s = Math.max(5, Math.ceil(estimated_remaining_s / 5) * 5)  # round up to nearest 5s
+
+  if rounded_s < 60:
+    time_label = "  |  ~{rounded_s}s remaining"
+  else:
+    time_label = "  |  ~<{Math.ceil(rounded_s / 60)} min remaining"
+else:
+  time_label = ""   # no estimate for the first question
+```
+
+#### Step 2b — Display question with progress header (AC1)
+
+Display the progress header and active question in bold, then options if applicable:
 
 **Without options (open-ended):**
 
 ```
-[{current_index + 1}/{total_questions}] {question.question_text}
+**📋 Q&A Progress — Question {current_index + 1} of {total_questions}{time_label}**
+
+**{question.question_text}**
 ```
 
 **With options:**
 
 ```
-[{current_index + 1}/{total_questions}] {question.question_text}
+**📋 Q&A Progress — Question {current_index + 1} of {total_questions}{time_label}**
+
+**{question.question_text}**
 
 Options:
   {for i, opt in enumerate(question.options)}
@@ -101,17 +127,17 @@ Options:
 (Type your answer, a number to pick an option, "skip", or "skip all")
 ```
 
-#### Step 2b — Record question start time
+#### Step 2c — Record question start time
 
 ```
 question_start_ts = current_timestamp_ms()
 ```
 
-#### Step 2c — Wait for user input
+#### Step 2d — Wait for user input
 
 Await one line of user input. Trim leading/trailing whitespace from the response.
 
-#### Step 2d — Classify response
+#### Step 2e — Classify response
 
 ```
 raw_input = trim(user_input)
@@ -128,11 +154,13 @@ if normalized == "skip all" OR normalized == "s all":
     skipped: true,
     response_time_ms: response_time_ms
   })
+  qa_duration_ms = current_timestamp_ms() - session_start_ts
   return {
     answers: answers,
     partial: true,          # not all questions were presented
     skipped_all: true,
-    abort_reason: null
+    abort_reason: null,
+    qa_duration_ms: qa_duration_ms
   }
 
 elif normalized == "skip" OR normalized == "s" OR normalized == "":
@@ -178,19 +206,19 @@ else:
 When all questions have been presented and answered (or skipped individually):
 
 ```
-log: "[qa-loop-ui] Q&A complete — {answers.length} answers recorded ({skipped_count} skipped, {answered_count} answered)"
+qa_duration_ms = current_timestamp_ms() - session_start_ts
+skipped_count = answers.filter(a => a.skipped).length
+answered_count = answers.filter(a => !a.skipped).length
+log: "[qa-loop-ui] Q&A complete — {answers.length} answers recorded ({skipped_count} skipped, {answered_count} answered), duration={qa_duration_ms}ms"
 
 return {
   answers: answers,
   partial: false,
   skipped_all: false,
-  abort_reason: null
+  abort_reason: null,
+  qa_duration_ms: qa_duration_ms
 }
 ```
-
-Where:
-- `skipped_count = answers.filter(a => a.skipped).length`
-- `answered_count = answers.filter(a => !a.skipped).length`
 
 ### Step 4 — Abort handling (AC5)
 
@@ -201,17 +229,33 @@ be preserved as-is. The orchestrator receives whatever answers were collected up
 Abort is signaled by catching the interrupt and returning:
 
 ```
+qa_duration_ms = current_timestamp_ms() - session_start_ts
 return {
   answers: answers,         # partial — contains only answers collected before abort
   partial: true,
   skipped_all: false,
-  abort_reason: "user_abort"
+  abort_reason: "user_abort",
+  qa_duration_ms: qa_duration_ms
 }
 ```
 
 **Critical:** never discard partial answers on abort. The orchestrator can use partial Q&A answers
 for a degraded-mode synthesis pass via `bootstrap-llm-synthesis` (the `qa_answers` input accepts
 partial arrays).
+
+---
+
+## Orchestrator responsibility after this skill (AC3)
+
+After receiving `qa_session_result`, the orchestrator MUST log the Q&A session duration per workspace:
+
+```
+gaai_admin(action: "log_qa_session", qa_duration_ms: qa_session_result.qa_duration_ms)
+```
+
+This applies on ALL return paths (normal completion, skip-all, abort, no-questions shortcut).
+When `qa_duration_ms == 0` (no-questions shortcut), the log is still emitted — it records that
+Stage 4 was a no-op, which is a useful observability signal.
 
 ---
 
@@ -227,6 +271,7 @@ qa_session_result:
   partial: bool                   # true if loop ended before all questions presented
   skipped_all: bool               # true if user invoked "skip all"
   abort_reason: string | null     # "user_abort" | "no_questions" | null (null = normal completion)
+  qa_duration_ms: number          # total milliseconds from session_start_ts to return; 0 for no-questions path
 
 # Normal completion example:
 qa_session_result:
@@ -242,6 +287,7 @@ qa_session_result:
   partial: false
   skipped_all: false
   abort_reason: null
+  qa_duration_ms: 18500
 
 # Skip-all example (triggered at question 2 of 3):
 qa_session_result:
@@ -257,6 +303,7 @@ qa_session_result:
   partial: true
   skipped_all: true
   abort_reason: null
+  qa_duration_ms: 9100
 
 # Abort example (mid-loop):
 qa_session_result:
@@ -268,6 +315,7 @@ qa_session_result:
   partial: true
   skipped_all: false
   abort_reason: "user_abort"
+  qa_duration_ms: 7800
 ```
 
 ---
@@ -282,6 +330,8 @@ qa_session_result:
 - `skipped: false` always paired with non-empty `answer_text`
 - `response_time_ms` is always a non-negative integer (≥ 0)
 - `answers.length` ≤ `question_result.questions.length` (never more answers than questions)
+- `qa_duration_ms` is always a non-negative integer (≥ 0); 0 only on no-questions shortcut
+- `qa_duration_ms` ≥ sum of all `response_time_ms` entries (session duration includes display time)
 
 ---
 
@@ -296,3 +346,4 @@ This skill MUST NOT:
 - Re-run the Q&A loop after completion (one-shot per bootstrap session)
 - Apply timeouts to individual questions (patience is left to user; no auto-skip on silence)
 - Call the LLM (this is a pure interaction skill; no inference calls)
+- Call `log_qa_session` itself (orchestrator responsibility — see §Orchestrator responsibility above)
