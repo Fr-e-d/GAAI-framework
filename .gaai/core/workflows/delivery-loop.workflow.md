@@ -2,7 +2,7 @@
 type: workflow
 id: WORKFLOW-DELIVERY-LOOP-001
 track: delivery
-updated_at: 2026-02-23
+updated_at: 2026-04-29
 ---
 
 # Delivery Loop Workflow
@@ -159,7 +159,7 @@ Before spawning any sub-agent, generate a trace_id that will flow through Plan, 
 STORY_TRACE_ID="$(node -e 'import("node:crypto").then(m=>process.stdout.write(m.randomUUID()))')"
 ```
 
-If the Implementation phase uses the secondary path, `STORY_TRACE_ID` is replaced by the wrapper's `trace_id` (see §6a). The same `STORY_TRACE_ID` is passed to all phase observability hooks (E94S06 defines the call; reserved here).
+After the Implementation phase call returns, `STORY_TRACE_ID` **must** be overwritten with `result.trace_id` (see §6a). `runImpl()` always returns a `trace_id` — whether the delivery ran on primary or secondary. The same `STORY_TRACE_ID` is then passed to the QA phase observability hook (E94S06 defines the call; reserved here).
 
 ### 4. Execute — Tier 1 (MicroDelivery)
 
@@ -220,131 +220,57 @@ node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
 > **QA phase:** Always uses the Task tool on primary regardless of `impl_model`.
 > *QA validates against the Plan's contract; consistency stays on primary per Epic E94 D-2.*
 
-The routing decision is evaluated **exactly once** at Implementation phase entry. Mid-phase changes to env vars or the backlog entry do NOT re-trigger evaluation.
+The routing decision is evaluated inside `runImpl()` — a deterministic pure function (`resolveMode()`) within `nested-claude-spawn.js`. The workflow invokes the module via its CLI; **no routing logic lives here**.
 
-> **🔒 Mode invariance (NON-NEGOTIABLE — applies to ALL Implementation Agents):**
-> The decision to invoke `nested-claude-spawn.js` is based EXCLUSIVELY on the conditions in the decision matrix below (per DEC-72, amends E94 D-0):
-> (a) `impl_model != "primary"` in the backlog entry (i.e., `secondary` OR absent), AND
-> (b) all three `GAAI_IMPL_*` environment variables are present and non-empty.
->
-> **No other factor influences this decision.** In particular:
-> - Whether the delivery was launched by the daemon, by `/gaai-deliver` manually, or in any other context is **IRRELEVANT**. `nested-claude-spawn.js` is a standalone Node.js module callable from ANY bash context — it does not require, detect, or care about "daemon mode".
-> - Whether the current session feels "interactive" or "non-interactive" is **IRRELEVANT**. The wrapper spawns a `claude -p` subprocess regardless.
-> - The agent's subjective judgment about whether the story "really needs" secondary routing is **IRRELEVANT**. If the two conditions are met, the wrapper MUST be invoked. There is no "prefer primary because simpler" escape hatch.
->
-> **If you (the agent) find yourself reasoning "I'll use primary because X":** STOP. X is invalid unless X is literally one of the two matrix conditions. Route to nested wrapper per the matrix.
->
-> **Rationale:** Epic E94 D-0's OSS non-regression intent is preserved by condition (b) — users without `GAAI_IMPL_*` env vars configured see zero behavioral change. DEC-72 (2026-04-20) amends the post-E94S10 default: when env vars are configured, secondary is used by default (tag absent → secondary). `impl_model: primary` is the explicit opt-out for stories that must run on primary (complex reasoning, frontend/UX judgment, security-critical). Agents second-guessing the matrix defeat the entire Epic's purpose (quota savings) and produce misleading `runtime-routing.jsonl` logs.
+**Invoke the module:**
 
-**Decision matrix:**
-
-```
-read impl_model from backlog entry    # canonical runtime source per E94S02 AC6
-
-# Non-behaviors (V1 — explicit):
-#   - No "try with half-quota first" or tiered fallback
-#   - No exponential backoff on endpoint errors
-#   - No retry on the nested subprocess
-#   - No circuit-breaker auto-disable of secondary
-# Fallback is atomic binary: secondary failed → primary runs (or escalates). T-2.
-
-# DEC-72 (2026-04-20): tag absent + env configured routes to secondary by default.
-# tag === 'primary' → explicit opt-out (always primary, regardless of env).
-
-if impl_model == "primary":
-    # Explicit opt-out — always primary, regardless of env
-    node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
-      --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
-      --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
-      --duration-ms 0 --fallback-reason "" --impl-model-tag "primary" 2>/dev/null || true
-    route → Task tool on primary
-
-elif impl_model == "secondary" OR impl_model is absent:
-    # Pre-flight env check (never attempt secondary if env missing)
-    missing = []
-    if not GAAI_IMPL_BASE_URL  (non-empty): missing += ["GAAI_IMPL_BASE_URL"]
-    if not GAAI_IMPL_AUTH_TOKEN(non-empty): missing += ["GAAI_IMPL_AUTH_TOKEN"]
-    if not GAAI_IMPL_MODEL     (non-empty): missing += ["GAAI_IMPL_MODEL"]
-
-    if missing:
-        # Only warn when the user explicitly opted in via tag='secondary'.
-        # When tag is absent and env is missing, silent primary fallback preserves OSS non-regression (E94 D-0 intent, DEC-72).
-        if impl_model == "secondary":
-            warn("IMPL_ROUTING_ENV_MISSING: expected GAAI_IMPL_BASE_URL|AUTH_TOKEN|MODEL, got: " + join(missing, ", "))
-            echo "⚠ impl_model=secondary but GAAI_IMPL_* env vars missing; using primary."
-        node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
-          --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
-          --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
-          --duration-ms 0 --fallback-reason "" --impl-model-tag "secondary_but_env_missing" 2>/dev/null || true
-        route → Task tool on primary
-
-    else:
-        # EXPLICIT BASH INVOCATION (mandatory — do NOT attempt the Task tool here).
-        # The nested-claude-spawn.js module now exposes a CLI (since commit 252f60b7+).
-        # Write the impl prompt to a tempfile and invoke the wrapper via Bash tool:
-        #
-        #   IMPL_PROMPT_FILE="$(mktemp -t gaai-impl-prompt.XXXXXX)"
-        #   printf '%s' "$IMPL_PROMPT" > "$IMPL_PROMPT_FILE"
-        #   result_json=$(node .gaai/core/adapters/claude-code/nested-claude-spawn.js \
-        #     --prompt-file "$IMPL_PROMPT_FILE" \
-        #     --report-path "$IMPL_REPORT_PATH" \
-        #     --log-file "$GAAI_DELIVERY_LOG_FILE")
-        #
-        # Note: --log-file streams the nested claude -p stdout (stream-json events) into the
-        # same per-story delivery log that the outer claude -p writes to via tee. This keeps
-        # daemon-monitor-tail.sh indicators (tool-call count, task_progress, log mtime / health
-        # icon) updating during the Implementation phase. When $GAAI_DELIVERY_LOG_FILE is
-        # empty or unset (e.g., manual invocation without the daemon), the flag is a no-op and
-        # behavior is byte-identical to pre-story operation.
-        #   rm -f "$IMPL_PROMPT_FILE"
-        #   result_trace_id=$(echo "$result_json" | jq -r '.trace_id')
-        #   result_success=$(echo "$result_json" | jq -r '.success')
-        #   result_model_actual=$(echo "$result_json" | jq -r '.model_actual')
-        #   result_error_reason=$(echo "$result_json" | jq -r '.error_reason // empty')
-        #   result_duration=$(echo "$result_json" | jq -r '.duration_ms')
-        #
-        # The CLI exits 0 regardless of business-logic success (distinguish via result_success).
-        # IMPL_PROMPT is the same impl prompt you would pass to an Implementation Sub-Agent
-        # via Task tool — just redirected to the wrapper via CLI.
-        #
-        # After this call, STORY_TRACE_ID is replaced with result_trace_id.
-        STORY_TRACE_ID="$result_trace_id"
-        # Pass result.error_reason as fallback_reason: non-null on failure, null on success.
-        # On success the logger prints "... done"; on failure "... ⚠ Falling back to primary (reason: <CLASS>)".
-        node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
-          --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
-          --provider "secondary" --model "${result.model_actual:-$GAAI_IMPL_MODEL}" \
-          --duration-ms "${result.duration_ms}" --fallback-reason "${result.error_reason:-}" \
-          --impl-model-tag "secondary" 2>/dev/null || true
-        if result.success:
-            proceed to QA (§7)
-        else:
-            # Universal fallback — any error class triggers primary re-invocation (E94S05)
-            fallback_reason = result.error_reason   # exact error class name; passed to E94S06 log
-            # trace_id is already captured from result.trace_id above (shared across both attempts)
-            primary_result = invoke Implementation Sub-Agent via Task tool on primary
-                             with identical implPrompt, implReportPath, story context
-            # Log primary fallback attempt (stdout: "▸ Phase Impl (primary / <model>) ... done|failed")
-            node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
-              --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
-              --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
-              --duration-ms 0 --fallback-reason "" --impl-model-tag "secondary" 2>/dev/null || true
-            if primary_result.success:
-                proceed to QA (§7)
-            else:
-                # Primary also failed — existing escalation path runs unchanged (AC6)
-                ESCALATE via existing daemon behavior (backlog status update + notes)
-                # Note: no retry, no tier-based strategy, no circuit-breaker (AC3, AC18, AC19)
-
-# Note: the 'impl_model is absent' path is now consolidated into the 'secondary OR absent'
-# branch above per DEC-72. The 'primary' branch at the top of this matrix handles the
-# explicit opt-out. There is no separate 'absent → primary' path anymore — absence means
-# "follow env-driven default" which is secondary when env is configured, primary otherwise.
+```bash
+IMPL_PROMPT_FILE="$(mktemp -t gaai-impl-prompt.XXXXXX)"
+printf '%s' "$IMPL_PROMPT" > "$IMPL_PROMPT_FILE"
+result_json=$(node .gaai/core/adapters/claude-code/nested-claude-spawn.js \
+  --prompt-file "$IMPL_PROMPT_FILE" \
+  --report-path "$IMPL_REPORT_PATH" \
+  --story-id "{id}" \
+  [--impl-model-tag primary|secondary|absent] \
+  [--log-file "$GAAI_DELIVERY_LOG_FILE"])
+rm -f "$IMPL_PROMPT_FILE"
 ```
 
-The routing helper is implemented in `.gaai/core/adapters/claude-code/impl-routing.js` (`resolveImplRouting(implModelTag)`) — testable without invoking a real subprocess. Default routing semantics per DEC-72 (2026-04-20).
+The CLI exits 0 in all business-logic outcomes (success, fallback, env-missing). Distinguish via `result.success`.
 
-**Compliance:** no specific provider names appear in this workflow file. Only generic terms: "secondary provider", "nested subprocess", "user-configured endpoint" (AC13).
+**After the call — mandatory STORY_TRACE_ID overwrite:**
+
+```bash
+result_trace_id=$(echo "$result_json" | jq -r '.trace_id')
+STORY_TRACE_ID="$result_trace_id"
+```
+
+`runImpl()` always returns a `trace_id`. Overwriting `STORY_TRACE_ID` here is **unconditional** — it applies whether the delivery ran on primary or secondary.
+
+**Observability:** `runImpl()` emits exactly one `phase: impl` record to `runtime-routing.jsonl` on success; two records when secondary fails and primary fallback is invoked (one per attempt, shared `trace_id`). The operator will see one `phase: impl` entry per resolved delivery attempt in `runtime-routing.jsonl`.
+
+**Non-null `result.error_reason` field:** When the module returns a successful result but with a non-null `error_reason` field (e.g., `secondary_but_env_missing`), the agent emits a one-line warning to stdout before proceeding:
+
+```bash
+result_error_reason=$(echo "$result_json" | jq -r '.error_reason // empty')
+if [ -n "$result_error_reason" ]; then
+  echo "⚠ impl routing: $result_error_reason"
+fi
+```
+
+This matches the `warn() + echo` behaviour of the previous in-workflow matrix.
+
+**When `result.success` is false:** the module has already exhausted its internal fallback chain (per E131S02 AC3 — no in-workflow fallback chain exists here). Escalate via the existing daemon behaviour:
+
+```bash
+result_success=$(echo "$result_json" | jq -r '.success')
+if [ "$result_success" != "true" ]; then
+  # Escalate: update backlog status + notes; do not mark done
+  ESCALATE via existing daemon behaviour
+fi
+```
+
+**Compliance:** no specific provider names appear in this workflow file. Only generic terms: "secondary provider", "nested subprocess", "user-configured endpoint".
 
 Spawn `implementation.sub-agent.md` with Implementation context bundle.
 
