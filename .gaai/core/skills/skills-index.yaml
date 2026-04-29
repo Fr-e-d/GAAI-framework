@@ -2,8 +2,8 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md — core framework skills only
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-04-26
-total: 51
+generated_at: 2026-04-29
+total: 52
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -217,6 +217,15 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/cross/codebase-scan/SKILL.md
+  - id: SKILL-PROJECT-SURFACE-SCAN-001
+    name: project-surface-scan
+    source: core
+    description: "Scan project root for file tree, dominant languages, and LOC estimate. Produces structured baseline context (surface_scan_result) for Stage 2 LLM synthesis during bootstrap. Respects .gitignore and standard exclusions. Outputs per-directory file counts, ranked language list, size class, and observability summary."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, surface-scan, language-detection, loc]
+    updated_at: 2026-04-29
+    path: core/skills/cross/project-surface-scan/SKILL.md
   - id: SKILL-CONSISTENCY-CHECK-001
     name: consistency-check
     source: core
