@@ -3,7 +3,7 @@
 # Regenerate: invoke build-skills-index skill
 
 generated_at: 2026-04-29
-total: 52
+total: 53
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -226,6 +226,15 @@ cross:
     tags: [bootstrap, surface-scan, language-detection, loc]
     updated_at: 2026-04-29
     path: core/skills/cross/project-surface-scan/SKILL.md
+  - id: SKILL-BOOTSTRAP-LLM-SYNTHESIS-001
+    name: bootstrap-llm-synthesis
+    source: core
+    description: "Construct the LLM synthesis prompt from project surface scan + optional tree-sitter context + optional Q&A answers. Call the LLM. Parse and validate the response into 6-8 structured memory entries with clarity tags and source traceability. Used as Stage 3 of the /gaai:bootstrap pipeline."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, llm-synthesis, clarity-tags, memory-entries, parsing]
+    updated_at: 2026-04-29
+    path: core/skills/cross/bootstrap-llm-synthesis/SKILL.md
   - id: SKILL-CONSISTENCY-CHECK-001
     name: consistency-check
     source: core
