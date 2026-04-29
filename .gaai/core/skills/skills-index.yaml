@@ -3,7 +3,7 @@
 # Regenerate: invoke build-skills-index skill
 
 generated_at: 2026-04-29
-total: 57
+total: 56
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -172,24 +172,6 @@ delivery:
     path: core/skills/delivery/remediate-failures/SKILL.md
 
 cross:
-  - id: SKILL-ABORT-SAFE-HANDLER-001
-    name: abort-safe-handler
-    source: core
-    description: "Orchestrator-level Stage 4 entry gate for /gaai:bootstrap. Presents a pre-loop "Skip Q&A entirely" option, delegates to qa-loop-ui when the user proceeds, and returns a unified abort_safe_result with telemetry on every path. Guarantees no partial state on skip or abort."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-04-29
-    path: core/skills/cross/abort-safe-handler/SKILL.md
-  - id: SKILL-AMBIGUITY-DETECTOR-001
-    name: ambiguity-detector
-    source: core
-    description: "Takes surface scan results, optional LLM synthesis open-question entries, and optional tree-sitter AST signals to score project ambiguities (1-10). Outputs structured ambiguity_feed for smart-question-generator. Pure heuristic — no LLM calls. Designed for Stage 3.5 of the /gaai:bootstrap pipeline (between LLM synthesis and Q&A)."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-04-29
-    path: core/skills/cross/ambiguity-detector/SKILL.md
   - id: SKILL-APPROACH-EVALUATION-001
     name: approach-evaluation
     source: core
@@ -208,15 +190,6 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/cross/architecture-extract/SKILL.md
-  - id: SKILL-BOOTSTRAP-LLM-SYNTHESIS-001
-    name: bootstrap-llm-synthesis
-    source: core
-    description: "Construct the LLM synthesis prompt from project surface scan + optional tree-sitter context + optional Q&A answers. Call the LLM. Parse and validate the response into 6-8 structured memory entries with clarity tags and source traceability. Used as Stage 3 of the /gaai:bootstrap pipeline."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-04-29
-    path: core/skills/cross/bootstrap-llm-synthesis/SKILL.md
   - id: SKILL-CRS-018
     name: build-agents-index
     source: core
@@ -244,6 +217,60 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/cross/codebase-scan/SKILL.md
+  - id: SKILL-PROJECT-SURFACE-SCAN-001
+    name: project-surface-scan
+    source: core
+    description: "Scan project root for file tree, dominant languages, and LOC estimate. Produces structured baseline context (surface_scan_result) for Stage 2 LLM synthesis during bootstrap. Respects .gitignore and standard exclusions. Outputs per-directory file counts, ranked language list, size class, and observability summary."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, surface-scan, language-detection, loc]
+    updated_at: 2026-04-29
+    path: core/skills/cross/project-surface-scan/SKILL.md
+  - id: SKILL-BOOTSTRAP-LLM-SYNTHESIS-001
+    name: bootstrap-llm-synthesis
+    source: core
+    description: "Construct the LLM synthesis prompt from project surface scan + optional tree-sitter context + optional Q&A answers. Call the LLM. Parse and validate the response into 6-8 structured memory entries with clarity tags and source traceability. Used as Stage 3 of the /gaai:bootstrap pipeline."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, llm-synthesis, clarity-tags, memory-entries, parsing]
+    updated_at: 2026-04-29
+    path: core/skills/cross/bootstrap-llm-synthesis/SKILL.md
+  - id: SKILL-AMBIGUITY-DETECTOR-001
+    name: ambiguity-detector
+    source: core
+    description: "Scores project ambiguities (1-10) from surface scan language distribution, framework conflict detection via ext_counts, optional tree-sitter AST signals (import pattern conflicts, directory structure conflicts), and optional LLM synthesis open-question entries. Outputs structured ambiguity_feed for smart-question-generator. Pure heuristic — no LLM calls. Stage 3.5 of the /gaai:bootstrap pipeline."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, ambiguity, heuristic, severity-scoring, ast-signals, surface-scan]
+    updated_at: 2026-04-29
+    path: core/skills/cross/ambiguity-detector/SKILL.md
+  - id: SKILL-SMART-QUESTION-GENERATOR-001
+    name: smart-question-generator
+    source: core
+    description: "Takes aggregated ambiguity insights from the LLM synthesis stage and produces ≤5 ranked questions to surface to the user during bootstrap Q&A. Two-layer anti-fabrication filter (pre-LLM exclusion + post-LLM structural strip) ensures only genuine ambiguities (score>=3) reach the user. Failure semantics distinguish legitimate-empty from LLM-failure to allow orchestrator degraded-mode fallback."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, qa-loop, smart-questions, anti-fabrication, ambiguity]
+    updated_at: 2026-04-29
+    path: core/skills/cross/smart-question-generator/SKILL.md
+  - id: SKILL-QA-LOOP-UI-001
+    name: qa-loop-ui
+    source: core
+    description: "Presents up to 5 questions from smart-question-generator one at a time, records answers with per-question skip and skip-all support, captures per-question response time, and preserves partial answers on abort. Used as the interaction layer of Stage 4 of the /gaai:bootstrap pipeline."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, qa-loop, interaction, sequential, answer-recording]
+    updated_at: 2026-04-29
+    path: core/skills/cross/qa-loop-ui/SKILL.md
+  - id: SKILL-ABORT-SAFE-HANDLER-001
+    name: abort-safe-handler
+    source: core
+    description: "Orchestrator-level Stage 4 entry gate for /gaai:bootstrap. Presents the pre-loop Skip Q&A entirely option, delegates to qa-loop-ui when the user proceeds, and returns a unified abort_safe_result with per-workspace telemetry on every path. Guarantees no partial state on skip or abort."
+    category: cross
+    track: cross-cutting
+    tags: [bootstrap, stage-4, abort-safe, skip-qa, telemetry, entry-gate]
+    updated_at: 2026-04-29
+    path: core/skills/cross/abort-safe-handler/SKILL.md
   - id: SKILL-CONSISTENCY-CHECK-001
     name: consistency-check
     source: core
@@ -433,24 +460,6 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/cross/post-mortem-learning/SKILL.md
-  - id: SKILL-PROJECT-SURFACE-SCAN-001
-    name: project-surface-scan
-    source: core
-    description: "Scan project root for file tree, dominant languages, and LOC estimate. Produces structured baseline context for Stage 2 LLM synthesis during bootstrap. Respects .gitignore and standard exclusions. Outputs per-directory file counts, ranked language list, size class, and observability summary."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-04-29
-    path: core/skills/cross/project-surface-scan/SKILL.md
-  - id: SKILL-QA-LOOP-UI-001
-    name: qa-loop-ui
-    source: core
-    description: "Presents up to 5 questions from smart-question-generator one at a time, records answers, handles per-question skip and skip-all, captures per-question response time and total session duration. Renders a streaming progress header with question count and time estimate. Used as the interaction layer of Stage 4 of the /gaai:bootstrap pipeline."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-04-29
-    path: core/skills/cross/qa-loop-ui/SKILL.md
   - id: SKILL-RISK-ANALYSIS-001
     name: risk-analysis
     source: core
@@ -496,15 +505,6 @@ cross:
     tags: []
     updated_at: 2026-03-21
     path: core/skills/cross/skill-usage-audit/SKILL.md
-  - id: SKILL-SMART-QUESTION-GENERATOR-001
-    name: smart-question-generator
-    source: core
-    description: "Takes aggregated ambiguity insights from the LLM synthesis stage and produces ≤5 ranked questions to surface to the user. Applies a two-layer anti-fabrication filter (pre-LLM exclusion of score<3 insights + post-LLM structural strip) so that Q&A surfaces only genuine ambiguities. Used as Stage 4 of the /gaai:bootstrap pipeline."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-04-29
-    path: core/skills/cross/smart-question-generator/SKILL.md
   - id: SKILL-SUCCESS-METRICS-EVALUATION-001
     name: success-metrics-evaluation
     source: core
