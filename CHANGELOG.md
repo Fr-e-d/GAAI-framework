@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(monitor): sub-agent / spawned model wins in display
 - fix(workflow): remove --log-file flag from nested-claude-spawn invocation
 
 ## [2.22.0] - 2026-04-30

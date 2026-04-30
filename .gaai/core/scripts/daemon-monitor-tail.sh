@@ -136,6 +136,54 @@ parse_log() {
     last_text=$(printf   '%s' "$last_event" | awk -F'\t' '{print $2}')
     last_model=$(printf  '%s' "$last_event" | awk -F'\t' '{print $3}')
 
+    # ── Daemon-log fallback for nested-spawn events ──
+    # When the orchestrator passed `--log-file <daemon log>` to nested-claude-spawn
+    # (observed empirically — orchestrator substitutes $GAAI_DELIVERY_LOG_FILE for
+    # daemon log path), the GLM/secondary subprocess writes its stream-json events
+    # to the daemon log instead of the per-story log. The per-story panel here
+    # would display stale orchestrator model unless we also peek at the daemon log.
+    # Rule per founder 2026-04-30 19:08 BEL : sub-agent / spawned model always wins
+    # over orchestrator in the display.
+    local daemon_log="$PROJECT_DIR/.gaai/project/contexts/backlog/.delivery-daemon.log"
+    if [[ -f "$daemon_log" ]]; then
+      local daemon_event
+      daemon_event=$(tail -400 "$daemon_log" 2>/dev/null \
+        | grep '^{"type":"assistant"' 2>/dev/null \
+        | jq -r '
+            def clean: tostring | gsub("\n"; " ") | gsub("  +"; " ");
+            def arg:
+              if .name == "Bash" then (.input.command // "" | clean)
+              elif .name == "Grep" then (.input.pattern // "" | clean)
+              elif (.name == "Read" or .name == "Edit" or .name == "Write") then ((.input.file_path // "" | clean) | split("/") | .[-1] // "")
+              elif .name == "Task" then (.input.description // "" | clean)
+              elif .name == "TodoWrite" then "(todos updated)"
+              else ((.input.description // .input.file_path // .input.command // "") | clean) end;
+            . as $m |
+            (($m.message.model // "") | tostring) as $model |
+            $m.message.content[]? | select(.type=="tool_use") | "SUB" + "\t" + .name + " " + arg + "\t" + $model
+          ' 2>/dev/null | tail -1 || true)
+      local daemon_model
+      daemon_model=$(printf '%s' "$daemon_event" | awk -F'\t' '{print $3}')
+      # Override main display when daemon log's most recent event is from a
+      # different (non-orchestrator) model AND the daemon log was touched more
+      # recently than the per-story log. Sub-agent / spawned model wins.
+      if [[ -n "$daemon_model" ]] && [[ "$daemon_model" != "$last_model" ]]; then
+        local daemon_mtime story_mtime
+        if [[ "$(uname)" == "Darwin" ]]; then
+          daemon_mtime=$(stat -f %m "$daemon_log" 2>/dev/null || echo 0)
+          story_mtime=$(stat -f %m "$log_file" 2>/dev/null || echo 0)
+        else
+          daemon_mtime=$(stat -c %Y "$daemon_log" 2>/dev/null || echo 0)
+          story_mtime=$(stat -c %Y "$log_file" 2>/dev/null || echo 0)
+        fi
+        if [[ "$daemon_mtime" -ge "$story_mtime" ]]; then
+          last_origin="SUB"
+          last_text=$(printf '%s' "$daemon_event" | awk -F'\t' '{print $2}')
+          last_model="$daemon_model"
+        fi
+      fi
+    fi
+
     # ── Phase detection ──
     # Walk recent events, classify each Bash command / Write target into a phase tag,
     # keep the LAST non-empty classification — that's the current phase.
