@@ -101,7 +101,7 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 
    **A story that exists only as an artefact file but is not in the backlog is invisible to Delivery and will never be executed.** This step is non-negotiable.
 
-   **Rationale (2026-04-30):** E134S03 + E134S04 had to be rolled back from `in_progress` (with abandoned worktree containing cycle-0 CRITICAL-error spec) because Discovery registered them as `refined` while still iterating Reviewer cycle-1 corrections. The daemon picked up the un-reviewed drafts and started implementing architecturally wrong code (proposed a redundant CLI surface that already existed, referenced a non-existent artefact name). See commit `4f99ad40` for incident audit trail. The fix is strict adherence to the `draft → refined` lifecycle defined in `base.rules.md` § Backlog State Lifecycle — this clause makes the timing explicit at skill level.
+   **Rationale:** A prior Discovery batch had stories rolled back from `in_progress` because they were registered as `refined` while Discovery was still iterating Reviewer cycle-1 corrections. The daemon picked up the un-reviewed drafts and began implementing architecturally wrong code based on factual errors that the Reviewer would have caught. The fix is strict adherence to the `draft → refined` lifecycle defined in `base.rules.md` § Backlog State Lifecycle — this clause makes the timing explicit at skill level.
 
    **CRITICAL — Backlog YAML write safety (MUST follow):**
    - **Match native indentation.** Before appending, check the existing format: `grep -m1 "^- id:" <backlog>`. Use the same indent level (typically 0-space: `- id:` with 2-space properties).
