@@ -7,10 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.22.0] - 2026-04-30
 
 ### Changed
+- chore: reconcile stale in_progress + add GLM baseline analyzer
 - fix(delivery-loop): preamble fires on env-driven default secondary routing
+- chore: bump local VERSION to v2.23.0 [sync]
+- feat(scripts): observe-secondary.sh — live R1-R5 compliance + outcomes
+- fix(daemon-monitor): cap activity line at 280 chars to prevent heredoc flooding
+- chore: bump local VERSION to v2.22.0 [sync]
+- feat(delivery-loop): NOTES.md self-bootstrapping + artefact-first-class path
+- chore: bump local VERSION to v2.26.0 [sync]
+- feat(delivery-loop): upgrade GLM context-discipline preamble per Anthropic guidance
+- chore: bump local VERSION to v2.25.0 [sync]
+- feat(delivery-loop): GLM context-discipline preamble for secondary routing
+- fix(analyzer): surface stdout terminal_reason + jq capture no-match handling
+- chore: bump local VERSION to v2.24.0 [sync]
+- fix(scripts): clean routing summary in fail-debug analyzer
+- feat(E107bS04): severity-weighted tie-breaker — top 5 by severity (#582)
+- chore: bump local VERSION to v2.28.0 [sync]
+- feat(scripts): minimal fail-debug analyzer
+- chore: bump local VERSION to v2.27.0 [sync]
+- feat(nested-claude-spawn): forensic dump on EXIT_CODE_NON_ZERO catch-all
+- fix(daemon-monitor): persist max-rank phase across tail-window refreshes
+- fix(scheduler): make YAML parser indent-aware
+- feat(daemon): add --exit-when-idle auto-stop when backlog drained
+- feat(E107bS08): User-skip telemetry — count + skip reason (#557)
+- fix(workflow): restore secondary path — strengthen CLI invocation mandate + remove orphan Task spawn instruction
+- fix(impl-routing): apply Claude Code proxy / gateway compat flags for secondary path
+- fix(impl-routing): add Haiku model mapping for secondary path Task sub-agents
+- fix(impl-routing): apply Z.AI-recommended CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000
+- fix(impl-routing): apply Z.AI-recommended API_TIMEOUT_MS=3000000 for secondary path
+- feat(E107bS09): streaming progress UX during Q&A (#543)
+- fix(monitor): monotone phase state machine + tighten nested regex + (sub) model annotation
+- feat(monitor): add WORKING fallback phase for active coding without specific marker
+- fix(monitor): render model id as-is instead of short-label formatting
+- feat(monitor): show active model on Phase line + double-space emoji gap
+- feat(E107bS05): abort-safe handler — Stage 4 pre-loop skip option (#518)
+- feat(E107bS03): ambiguity detector — heuristic + AST signal severity scoring (#516)
+- feat(E107bS02): qa-loop-ui skill — sequential Q&A loop with skip, skip-all, partial-answer preservation (#514)
+- feat(E107bS01): smart-question-generator skill — ranked questions from ambiguity feed (#500)
+- chore(daemon): add agent_exit phase logging for DEC-72 wrapper audit trail
+
 
 ## [2.23.0] - 2026-04-30
 
