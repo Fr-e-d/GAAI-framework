@@ -238,6 +238,7 @@ The routing decision is evaluated inside `runImpl()` — a deterministic pure fu
 # in nested-fail-debug.jsonl 2026-04-30 ; 3 behaviors lacking : (1) re-Read post-compact,
 # (2) no self-summarization, (3) full-file Read defaults instead of offset/limit.
 if [ "$impl_model_tag" = "secondary" ]; then
+  NOTES_PATH="${WORKTREE_PATH}/.gaai/project/contexts/artefacts/notes/{id}.notes.md"
   IMPL_PROMPT="$(cat <<PREAMBLE
 === CONTEXT DISCIPLINE (MANDATORY for this delivery) ===
 
@@ -249,64 +250,140 @@ empirically at 43% fail rate on this routing path.
 These rules are derived from Anthropic's "Effective Context Engineering for
 AI Agents" guidance. They apply throughout this session.
 
-## R1 — Persistent NOTES.md (MOST IMPORTANT)
+## R1 — Persistent notes file (MOST IMPORTANT)
 
-Maintain a file at \${WORKTREE_PATH}/NOTES.md as your durable working memory.
-This file survives autocompaction. After any compact, your first action MUST
-be to re-read NOTES.md to recover state.
+Maintain a working-memory file at this exact path :
+${NOTES_PATH}
 
-Required NOTES.md structure (update continuously as you work):
+This file is filesystem-persistent and survives autocompaction. It is your
+SINGLE SOURCE OF TRUTH for state recovery. The file is committed as a
+delivery artefact alongside execution-plan, impl-report, and qa-report.
+
+### Initial creation (on your very first action)
+
+If the file does not yet exist, create it with the EXACT bootstrap template
+below. Then proceed with the actual work.
 
 \`\`\`markdown
-## Current step
-<one sentence: what you are doing right now>
+# Working Memory — {id}
 
-## Files read (don't re-read these)
-- path/to/file.ts: <one-line summary of what it contains and the lines that matter>
+## ⚠ RULES (re-read these every time you read this file)
+
+R1 : Append updates to this file after every meaningful tool result.
+     Never overwrite — append/update sections in place.
+R2 : Never re-read a file listed under "Files read" — the summary is canonical.
+R3 : After every tool result, write 1 structured sentence summary in your reply.
+R4 : Read files in chunks ≤200 lines (offset/limit). Bash verbose → tail -100.
+R5 : Work on ONE acceptance criterion at a time. Commit before next AC.
+R6 : If your context feels gappy (autocompact occurred), re-read THIS file +
+     the execution-plan.md FIRST. Do NOT re-execute steps already marked done.
+
+## Current step
+
+<one sentence — update continuously>
+
+## Files read (canonical — do NOT re-read)
+
+- path/to/file.ts (lines X-Y) : <one-line summary of what matters>
 - ...
 
 ## Decisions made
+
 - <decision + brief rationale>
 
 ## Acceptance criteria status
-- AC1: <pending|done|blocked>
-- ...
+
+- AC1 : <pending|in-progress|done|blocked>
+- AC2 : ...
 
 ## Open questions / blockers
+
 - <if any>
+
+## Tool calls made (running log — append-only)
+
+- T1 : Read auth.ts L23-67 → exports validateSession(token), HMAC-SHA256
+- T2 : Edit membership.ts L102 → added workspace_id field
+- ...
 \`\`\`
 
-Update NOTES.md after every meaningful tool result. Write durable structured
-facts, not narration.
+### Re-entry pattern (post-autocompact recovery)
+
+Whenever you suspect autocompaction just occurred (sudden gap in context),
+your FIRST action MUST be:
+
+1. Read ${NOTES_PATH}
+2. Read \${WORKTREE_PATH}/.gaai/project/contexts/artefacts/plans/{id}.execution-plan.md
+3. Resume from "Current step" without re-executing prior tool calls
+
+### Append-only retry semantics
+
+If this delivery is a retry (e.g., second nested-claude-spawn for {id} after
+a prior failure), the existing notes file represents your prior attempt's
+findings. PRESERVE all "Files read" and "Decisions made" entries — they
+remain valid. Only update "Current step", AC status, and append new tool
+calls. Append-tolerant by design.
 
 ## R2 — Never re-read
 
-Never re-read a file you've already read in this session (your NOTES.md is
-the source of truth for what you've seen). If you suspect autocompaction
-just occurred (sudden gap in your context), Read NOTES.md and the
-execution-plan.md FIRST before any other action.
+Never re-read a file already listed under "Files read" in your notes file.
+The summary IS canonical. If you doubt the summary, re-read the file ONLY
+WITH a tighter offset/limit on the specific lines you need (not the whole
+file again).
 
 ## R3 — Self-summarize after every tool result
 
-After each Read / Bash / Glob / Grep, write ONE structured sentence
-summarizing the key fact learned, then continue. Example:
-"auth.ts exports validateSession(token), uses HMAC-SHA256 over headers
-(lines 23-67). Now editing membership.ts to add workspace_id field."
+After each Read / Bash / Glob / Grep, write ONE structured sentence in your
+reply BEFORE the next tool call. Format:
 
-## R4 — Just-in-time chunked retrieval (don't load upfront)
+"<file/result> contains <fact>. Now <next intended action>."
+
+Example :
+"auth.ts L23-67 exports validateSession(token), HMAC-SHA256 over headers,
+no rate limiting. Now editing membership.ts to call it from hasAccess()."
+
+## R4 — Just-in-time chunked retrieval
 
 - Read files in chunks ≤200 lines using offset/limit. Use Glob/Grep
   first to locate exact line ranges. Never Read a file >300 lines
   without offset/limit.
-- For Bash with verbose output (tests, builds, logs), always pipe
-  through head/tail: \`pnpm test 2>&1 | tail -100\`
+- For Bash with verbose output (tests, builds, logs), always pipe through
+  head/tail to bound output : \`pnpm test 2>&1 | tail -100\`
 - Prefer file paths and grep patterns over loading full content.
 
 ## R5 — Single-feature focus
 
-Per Anthropic's harness guidance: work on one acceptance criterion at a
-time, commit when complete, then advance. Do not parallelize ACs across
-multiple files in flight — context bloat is fatal here.
+Per Anthropic's harness guidance : work on ONE acceptance criterion at a
+time, commit before advancing. Do not parallelize ACs across multiple
+files in flight — context bloat is fatal here.
+
+## Few-shot example — good cycle
+
+You are about to fix a bug in membership validation. Below is the PATTERN
+to follow (one example turn) :
+
+> [agent thinks] "Need to understand current validation. Let me check
+> if I've already seen this file in my notes."
+>
+> Read ${NOTES_PATH}
+> [observes : "Files read: empty" — first turn]
+>
+> Glob "**/membership*.ts" → 2 hits
+> [agent reply : "Found 2 membership files : api/membership.ts and
+> shared/membership-types.ts. Reading the api one first L1-100 to see
+> the validation entry point."]
+>
+> Read api/membership.ts L1-100 → finds validateMembership() at L34
+> [agent reply : "validateMembership() at L34 calls hasAccess() which is
+> imported from auth.ts. Edit notes file to record this, then read auth.ts
+> at the import line."]
+>
+> Edit ${NOTES_PATH} → append to "Files read" : "api/membership.ts L1-100
+> : validateMembership at L34, calls hasAccess from auth.ts"
+> Edit ${NOTES_PATH} → update "Current step" : "Reading auth.ts hasAccess()"
+
+Notice the discipline : every tool result triggers (a) one structured
+summary in the reply, (b) a notes file update.
 
 === END CONTEXT DISCIPLINE ===
 
