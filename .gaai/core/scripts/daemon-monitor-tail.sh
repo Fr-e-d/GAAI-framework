@@ -318,7 +318,14 @@ parse_log() {
 
   # Single activity line — prefix switches based on origin (main delivery vs nested sub-agent).
   # printf %s keeps literal "\n" in Bash commands literal (echo -e would interpret them).
+  # Cap at ~280 chars: typical multi-flag commands fit, but pathological heredocs
+  # (cat <<EOF with multi-paragraph payload) no longer flood the monitor and push
+  # other active stories off-screen. Truncation indicator is "…" suffix.
   if [[ -n "$last_text" ]]; then
+    local activity_max=280
+    if [[ ${#last_text} -gt $activity_max ]]; then
+      last_text="${last_text:0:$activity_max}…"
+    fi
     if [[ "$last_origin" == "SUB" ]]; then
       printf '  %b↳ %s%b\n' "$DIM" "$last_text" "$NC"
     else
