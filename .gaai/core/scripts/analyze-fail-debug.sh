@@ -19,13 +19,27 @@ echo "═══ Secondary-provider failures (last $N of $TOTAL) ═══"
 echo
 
 tail -n "$N" "$FAIL_LOG" | jq -r '
+  # Extract from stdout_tail the most diagnostic fields of the stream-json
+  # `result` event when present. Claude Code emits its session-terminating
+  # reason there (rapid_refill_breaker, completed, max_turns, etc.) — that
+  # field is the actual root cause indicator, not stderr.
+  # capture() emits no output (not null) on no-match — must wrap with `// {}`
+  # so the pipeline yields a value and `.v // default` works for all records.
+  ((.stdout_tail // "") | (capture("\"terminal_reason\":\"(?<v>[^\"]+)\"") // {}) | (.v // "?")) as $term |
+  ((.stdout_tail // "") | (capture("\"num_turns\":(?<v>[0-9]+)") // {}) | (.v // "?")) as $turns |
+  ((.stdout_tail // "") | (capture("\"total_cost_usd\":(?<v>[0-9.]+)") // {}) | (.v // "?")) as $cost |
+  # When a fatal API error is the trigger, Claude Code embeds it in result.result
+  # as "API Error: {...}". Surface the first 200 chars when present.
+  ((.stdout_tail // "") | (capture("\"result\":\"(?<v>API Error[^\"]{0,200})") // {}) | (.v // "")) as $apierr |
+  ((.stderr_tail // "") | split("\n") | map("    " + .) | .[-6:] | join("\n")) as $stderr_block |
   "── \(.ts) ──",
   "  trace_id:        \(.trace_id)",
   "  model_requested: \(.model_requested)  →  model_actual: \(.model_actual // "n/a")",
-  "  exit_code:       \(.exit_code)   duration: \(.duration_ms)ms",
+  "  exit_code:       \(.exit_code)   duration: \(.duration_ms)ms   turns: \($turns)   cost: $\($cost)",
+  "  terminal_reason: \($term)",
   "  base_url:        \(.base_url // "n/a")",
-  "  stderr (tail):",
-  ((.stderr_tail // "") | split("\n") | map("    " + .) | .[-8:] | join("\n")),
+  ("  api_error:       " + (if ($apierr | length) > 0 then "\($apierr)…" else "(none)" end)),
+  ("  stderr_tail:     " + (if (.stderr_tail // "" | length) > 0 then "\n\($stderr_block)" else "(empty)" end)),
   ""
 '
 
