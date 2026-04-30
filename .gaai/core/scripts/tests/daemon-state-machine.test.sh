@@ -93,7 +93,7 @@ else
 fi
 
 # ── Setup for T4-T8: handle_plan_phase requires GAAI_WORKTREE_PATH + claude shim ──
-# handle_plan_phase is now the real spawn (E134S03), not a stub.
+# handle_plan_phase is now the real spawn, not a stub.
 # T4-T8 need a worktree fixture + success claude shim so plan phase can advance.
 DISPATCH_FIXTURE_DIR="/tmp/gaai-dispatch-tests-$$"
 mkdir -p "$DISPATCH_FIXTURE_DIR/.gaai/project/contexts/artefacts/stories"
@@ -544,7 +544,7 @@ cat > "$IMPL_STORY_PATH" << 'IMPL_STORY_EOF'
 type: artefact
 artefact_type: story
 id: TST-IMPL-01
-related_decs: [DEC-88]
+related_decs: []
 ---
 ## Acceptance Criteria
 - [ ] AC1: test impl phase
@@ -739,8 +739,8 @@ else
   fail "T19b: expected [ERROR] line in output — got: $(echo "$T19_OUTPUT" | head -3)"
 fi
 
-# ── T20: DEC-72 primary routing confirmed via impl-spawn-stub (AC6.d) ──
-echo "T20: DEC-72 primary routing — impl-spawn-stub with primary tag outputs success"
+# ── T20: primary routing confirmed via impl-spawn-stub ──
+echo "T20: primary routing — impl-spawn-stub with primary tag outputs success"
 make_impl_node_shim_success
 STUB_PROMPT_FILE_T20=$(mktemp /tmp/gaai-test-prompt-XXXXXX.md)
 printf '=== STORY: TST-IMPL-01 ===\nTest.\n=== EXECUTION PLAN ===\nStep 1.\n' > "$STUB_PROMPT_FILE_T20"
@@ -775,14 +775,14 @@ print(d.get('success', False) if d is not None else False)
 " 2>/dev/null || echo "False")
 
 if [[ "$T20_SUCCESS" == "True" ]]; then
-  pass "T20: DEC-72 primary routing — runImpl(primary) reports success:true"
+  pass "T20: primary routing — runImpl(primary) reports success:true"
 else
-  fail "T20: expected success:true for primary routing, got: $(printf '%s\n' "$T20_RESULT" | tail -3)"
+  fail "T20: expected success:true (primary routing), got: $(printf '%s\n' "$T20_RESULT" | tail -3)"
 fi
 
 # ── T21: daemon-prompt-construct.sh preamble when SECONDARY_ROUTE=true (AC6.b) ──
 echo "T21: daemon-prompt-construct.sh — SECONDARY_ROUTE=true emits R1-R6 preamble"
-GOLDEN_FIXTURE="$SCRIPT_DIR/fixtures/E134S04-prompt-preamble.golden.md"
+GOLDEN_FIXTURE="$SCRIPT_DIR/fixtures/impl-phase-prompt-preamble.golden.md"
 if [[ ! -f "$GOLDEN_FIXTURE" ]]; then
   fail "T21: golden fixture missing at $GOLDEN_FIXTURE"
 else
