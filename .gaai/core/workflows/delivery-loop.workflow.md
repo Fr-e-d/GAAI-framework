@@ -230,7 +230,43 @@ The routing decision is evaluated inside `runImpl()` — a deterministic pure fu
 
 **Invoke the module (this is the only impl spawn — no Task tool sub-agent for impl) :**
 
+> **Secondary-routing context discipline preamble :** when `impl_model_tag == secondary`, prepend the context-discipline preamble below to `IMPL_PROMPT`. Mitigates Claude Code `rapid_refill_breaker` (autocompact thrashing) observed empirically at 43% fail rate on secondary providers (e.g., GLM 5.1). Skip when routing primary — Sonnet already follows these implicitly.
+
 ```bash
+# When secondary-routed, prepend context discipline preamble (rapid_refill_breaker mitigation).
+# Source : observed 5/6 GLM 5.1 fails ($1.97-6.11 each) terminated with rapid_refill_breaker
+# in nested-fail-debug.jsonl 2026-04-30 ; 3 behaviors lacking : (1) re-Read post-compact,
+# (2) no self-summarization, (3) full-file Read defaults instead of offset/limit.
+if [ "$impl_model_tag" = "secondary" ]; then
+  IMPL_PROMPT="$(cat <<'PREAMBLE'
+=== CONTEXT DISCIPLINE (MANDATORY for this delivery) ===
+
+You operate in a long-running agentic session with a 200K context window
+and aggressive autocompaction. Failure to follow these rules causes session
+termination via rapid_refill_breaker (Claude Code internal safety).
+
+1. NEVER re-read a file you have already read in this session.
+   If recalling content is needed, reference your prior summary instead.
+
+2. After every tool result, write ONE sentence summarizing key facts learned
+   before your next action. Example: "auth.ts exports validateSession(token).
+   It uses HMAC-SHA256 over headers. Now editing membership.ts."
+
+3. Read files in chunks ≤200 lines using offset/limit params.
+   Use Glob/Grep to locate exact line ranges before Read when possible.
+   Never Read a full file >300 lines without offset/limit.
+
+4. For Bash with verbose output (test runs, builds), always pipe through
+   head/tail to limit output: `pnpm test 2>&1 | tail -100`
+
+5. Track files-already-read in your responses. Format: "Read: [file1, file2]"
+
+=== END CONTEXT DISCIPLINE ===
+
+PREAMBLE
+)$IMPL_PROMPT"
+fi
+
 IMPL_PROMPT_FILE="$(mktemp -t gaai-impl-prompt.XXXXXX)"
 printf '%s' "$IMPL_PROMPT" > "$IMPL_PROMPT_FILE"
 result_json=$(node .gaai/core/adapters/claude-code/nested-claude-spawn.js \
