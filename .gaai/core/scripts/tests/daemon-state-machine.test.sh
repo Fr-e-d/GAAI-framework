@@ -47,6 +47,26 @@ cat > "$FIXTURE" << 'YAML_EOF'
   status: refined
   phase_status: bogus_invalid_state
   delivery_pipeline: 3phase
+- id: TST-QA-PASS
+  status: in_progress
+  phase_status: implemented
+  delivery_pipeline: 3phase
+  impl_model: primary
+- id: TST-QA-FAIL
+  status: in_progress
+  phase_status: implemented
+  delivery_pipeline: 3phase
+  impl_model: primary
+- id: TST-QA-ESCALATE
+  status: in_progress
+  phase_status: implemented
+  delivery_pipeline: 3phase
+  impl_model: primary
+- id: TST-QA-SPAWN-ERR
+  status: in_progress
+  phase_status: implemented
+  delivery_pipeline: 3phase
+  impl_model: primary
 YAML_EOF
 
 # Truncate routing log before tests
@@ -114,8 +134,10 @@ DISPATCH_SHIM_DIR="$DISPATCH_FIXTURE_DIR/shims"
 mkdir -p "$DISPATCH_SHIM_DIR"
 cat > "$DISPATCH_SHIM_DIR/claude" << 'DISPATCH_SHIM_EOF'
 #!/usr/bin/env bash
-if [[ -n "${GAAI_PLAN_PATH:-}" ]]; then
-  printf '## Implementation Sequence\nStep 1.\n' > "$GAAI_PLAN_PATH"
+if [[ -n "${GAAI_QA_REPORT_PATH:-}" ]]; then
+  printf '## AC1\npass\n\n## Verdict: PASS\n' > "${GAAI_QA_REPORT_PATH}"
+elif [[ -n "${GAAI_PLAN_PATH:-}" ]]; then
+  printf '## Implementation Sequence\nStep 1.\n' > "${GAAI_PLAN_PATH}"
 fi
 exit 0
 DISPATCH_SHIM_EOF
@@ -817,6 +839,313 @@ unset GAAI_WORKTREES_BASE IMPL_OLD_PATH IMPL_REAL_NODE IMPL_SPAWN_STUB
 unset IMPL_STORY_ID IMPL_WORKTREE IMPL_STORY_PATH IMPL_PLAN_PATH IMPL_REPORT_PATH
 unset IMPL_FIXTURE_DIR IMPL_SHIM_DIR
 rm -rf "/tmp/gaai-impl-phase-tests-$$"
+
+# ── T22-T29: handle_qa_phase real spawn tests ─────────────────
+# These tests exercise handle_qa_phase directly using a claude shim that
+# writes various QA report verdicts to GAAI_QA_REPORT_PATH.
+
+QA_FIXTURE_DIR="/tmp/gaai-qa-phase-tests-$$"
+rm -rf "$QA_FIXTURE_DIR"
+mkdir -p "$QA_FIXTURE_DIR"
+
+# QA phase uses GAAI_WORKTREES_BASE/${story_id}-workspace layout
+export GAAI_WORKTREES_BASE="$QA_FIXTURE_DIR"
+export CLAUDE_MODEL_PRIMARY="claude-sonnet-4-6"
+export GAAI_WORKSPACE_ID="test-workspace"
+export GAAI_ORG_ID="test-org"
+
+# Helper: create worktree fixture for a QA story ID
+make_qa_worktree() {
+  local sid="$1"
+  local wt="$QA_FIXTURE_DIR/${sid}-workspace"
+  mkdir -p "$wt/.gaai/project/contexts/artefacts/stories"
+  mkdir -p "$wt/.gaai/project/contexts/artefacts/plans"
+  mkdir -p "$wt/.gaai/project/contexts/artefacts/impl-reports"
+  mkdir -p "$wt/.gaai/project/contexts/artefacts/qa-reports"
+  mkdir -p "$wt/.gaai/project/contexts/artefacts/memory-deltas"
+  mkdir -p "$wt/.delivery-logs"
+  cat > "$wt/.gaai/project/contexts/artefacts/stories/${sid}.story.md" << QASTORY_EOF
+---
+type: artefact
+artefact_type: story
+id: ${sid}
+related_decs: []
+---
+## Acceptance Criteria
+- [ ] AC1: test qa phase
+QASTORY_EOF
+  printf '## Implementation Sequence\nStep 1: test.\n' \
+    > "$wt/.gaai/project/contexts/artefacts/plans/${sid}.execution-plan.md"
+  printf -- '---\nartefact_type: impl-report\nid: %s\n---\n## Summary\nImpl done.\n' "$sid" \
+    > "$wt/.gaai/project/contexts/artefacts/impl-reports/${sid}.impl-report.md"
+}
+
+# claude shim dir for QA tests
+QA_SHIM_DIR="$QA_FIXTURE_DIR/shims"
+mkdir -p "$QA_SHIM_DIR"
+
+# Helper: write claude shim that emits a specific verdict
+make_qa_claude_shim() {
+  local verdict="$1"
+  cat > "$QA_SHIM_DIR/claude" << QASHIM_EOF
+#!/usr/bin/env bash
+if [[ -n "\${GAAI_QA_REPORT_PATH:-}" ]]; then
+  printf '## AC1\npass\n\n## Verdict: %s\n' "$verdict" > "\$GAAI_QA_REPORT_PATH"
+fi
+exit 0
+QASHIM_EOF
+  chmod +x "$QA_SHIM_DIR/claude"
+}
+
+# claude shim that exits non-zero (spawn error)
+make_qa_claude_fail_shim() {
+  cat > "$QA_SHIM_DIR/claude" << 'QAFAIL_EOF'
+#!/usr/bin/env bash
+exit 1
+QAFAIL_EOF
+  chmod +x "$QA_SHIM_DIR/claude"
+}
+
+# claude shim that exits 0 but writes nothing (artefact missing)
+make_qa_claude_noartefact_shim() {
+  cat > "$QA_SHIM_DIR/claude" << 'QANO_EOF'
+#!/usr/bin/env bash
+exit 0
+QANO_EOF
+  chmod +x "$QA_SHIM_DIR/claude"
+}
+
+# claude shim that exits 0 but writes a report without a verdict marker
+make_qa_claude_badverdict_shim() {
+  cat > "$QA_SHIM_DIR/claude" << 'QABADVERDICT_EOF'
+#!/usr/bin/env bash
+if [[ -n "${GAAI_QA_REPORT_PATH:-}" ]]; then
+  printf '## AC1\npass\n\nNo verdict marker here.\n' > "${GAAI_QA_REPORT_PATH}"
+fi
+exit 0
+QABADVERDICT_EOF
+  chmod +x "$QA_SHIM_DIR/claude"
+}
+
+QA_OLD_PATH="$PATH"
+export PATH="$QA_SHIM_DIR:$PATH"
+export PROJECT_DIR_QA_ORIG="$PROJECT_DIR"
+export PROJECT_DIR="$SCRIPT_DIR/../../../.."
+
+# Create worktrees for all QA story IDs
+for _qsid in TST-QA-PASS TST-QA-FAIL TST-QA-ESCALATE TST-QA-SPAWN-ERR; do
+  make_qa_worktree "$_qsid"
+done
+unset _qsid
+
+# ── T22: QA PASS verdict → qa_passed ─────────────────────────
+echo "T22: handle_qa_phase — PASS verdict → qa_passed"
+make_qa_claude_shim "PASS"
+"$SCHEDULER" --set-phase-status "TST-QA-PASS" implemented "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-022"
+
+if handle_qa_phase "TST-QA-PASS" "$TRACE" 2>/dev/null; then
+  new_ps=$(get_phase_status "TST-QA-PASS")
+  if [[ "$new_ps" == "qa_passed" ]]; then
+    pass "T22a: phase_status advanced to 'qa_passed' on PASS verdict"
+  else
+    fail "T22a: expected 'qa_passed', got '$new_ps'"
+  fi
+  if grep -q '"phase":"qa"' "$ROUTING_LOG" 2>/dev/null && \
+     grep -q '"provider":"primary"' "$ROUTING_LOG" 2>/dev/null && \
+     grep -q '"pipeline":"3phase"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T22b: routing.jsonl has qa+primary+pipeline:3phase record"
+  else
+    fail "T22b: routing.jsonl missing expected fields — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+else
+  fail "T22a: handle_qa_phase returned non-zero for PASS verdict"
+  fail "T22b: (skipped — T22a failed)"
+fi
+
+# ── T23: QA FAIL verdict → qa_failed ─────────────────────────
+echo "T23: handle_qa_phase — FAIL verdict → qa_failed"
+make_qa_claude_shim "FAIL"
+"$SCHEDULER" --set-phase-status "TST-QA-FAIL" implemented "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-023"
+
+if handle_qa_phase "TST-QA-FAIL" "$TRACE" 2>/dev/null; then
+  fail "T23a: expected non-zero return for FAIL verdict, got 0"
+  fail "T23b: (skipped)"
+else
+  new_ps=$(get_phase_status "TST-QA-FAIL")
+  if [[ "$new_ps" == "qa_failed" ]]; then
+    pass "T23a: phase_status advanced to 'qa_failed' on FAIL verdict"
+  else
+    fail "T23a: expected 'qa_failed', got '$new_ps'"
+  fi
+  if grep -q '"fallback_reason":"QA_VERDICT:FAIL"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T23b: routing.jsonl has QA_VERDICT:FAIL fallback_reason"
+  else
+    fail "T23b: routing.jsonl missing QA_VERDICT:FAIL — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+fi
+
+# ── T24: QA ESCALATE verdict → qa_escalated ──────────────────
+echo "T24: handle_qa_phase — ESCALATE verdict → qa_escalated"
+make_qa_claude_shim "ESCALATE"
+"$SCHEDULER" --set-phase-status "TST-QA-ESCALATE" implemented "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-024"
+
+if handle_qa_phase "TST-QA-ESCALATE" "$TRACE" 2>/dev/null; then
+  fail "T24a: expected non-zero return for ESCALATE verdict, got 0"
+  fail "T24b: (skipped)"
+else
+  new_ps=$(get_phase_status "TST-QA-ESCALATE")
+  if [[ "$new_ps" == "qa_escalated" ]]; then
+    pass "T24a: phase_status advanced to 'qa_escalated' on ESCALATE verdict"
+  else
+    fail "T24a: expected 'qa_escalated', got '$new_ps'"
+  fi
+  if grep -q '"fallback_reason":"QA_VERDICT:ESCALATE"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T24b: routing.jsonl has QA_VERDICT:ESCALATE fallback_reason"
+  else
+    fail "T24b: routing.jsonl missing QA_VERDICT:ESCALATE — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+fi
+
+# ── T25: spawn error (claude exits 1) → return 1, no phase advance ──
+echo "T25: handle_qa_phase — spawn error → no phase advance (AC5a)"
+make_qa_claude_fail_shim
+"$SCHEDULER" --set-phase-status "TST-QA-SPAWN-ERR" implemented "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-025"
+
+if handle_qa_phase "TST-QA-SPAWN-ERR" "$TRACE" 2>/dev/null; then
+  fail "T25a: expected non-zero return for spawn error, got 0"
+  fail "T25b: (skipped)"
+else
+  new_ps=$(get_phase_status "TST-QA-SPAWN-ERR")
+  if [[ "$new_ps" == "implemented" ]]; then
+    pass "T25a: phase_status unchanged (implemented) after spawn error"
+  else
+    fail "T25a: expected 'implemented', got '$new_ps'"
+  fi
+  if grep -q '"fallback_reason":"QA_SPAWN_FAILED"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T25b: routing.jsonl has QA_SPAWN_FAILED fallback_reason"
+  else
+    fail "T25b: routing.jsonl missing QA_SPAWN_FAILED — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+fi
+
+# ── T26: artefact missing (exit 0, no report) → return 1, no phase advance (AC5b) ──
+echo "T26: handle_qa_phase — artefact missing → no phase advance (AC5b)"
+make_qa_claude_noartefact_shim
+"$SCHEDULER" --set-phase-status "TST-QA-SPAWN-ERR" implemented "$FIXTURE" 2>/dev/null || true
+# Remove qa-report if it exists from prior test
+rm -f "$QA_FIXTURE_DIR/TST-QA-SPAWN-ERR-workspace/.gaai/project/contexts/artefacts/qa-reports/TST-QA-SPAWN-ERR.qa-report.md"
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-026"
+
+if handle_qa_phase "TST-QA-SPAWN-ERR" "$TRACE" 2>/dev/null; then
+  fail "T26a: expected non-zero when artefact missing, got 0"
+  fail "T26b: (skipped)"
+else
+  new_ps=$(get_phase_status "TST-QA-SPAWN-ERR")
+  if [[ "$new_ps" == "implemented" ]]; then
+    pass "T26a: phase_status unchanged (implemented) when artefact missing"
+  else
+    fail "T26a: expected 'implemented', got '$new_ps'"
+  fi
+  if grep -q '"fallback_reason":"QA_NO_ARTEFACT"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T26b: routing.jsonl has QA_NO_ARTEFACT fallback_reason"
+  else
+    fail "T26b: routing.jsonl missing QA_NO_ARTEFACT — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+fi
+
+# ── T27: verdict parse error → immediate failed, no retry (AC5c) ──
+echo "T27: handle_qa_phase — verdict parse error → story marked 'failed' immediately (AC5c)"
+make_qa_claude_badverdict_shim
+"$SCHEDULER" --set-phase-status "TST-QA-SPAWN-ERR" implemented "$FIXTURE" 2>/dev/null || true
+rm -f "$QA_FIXTURE_DIR/TST-QA-SPAWN-ERR-workspace/.gaai/project/contexts/artefacts/qa-reports/TST-QA-SPAWN-ERR.qa-report.md"
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-027"
+
+if handle_qa_phase "TST-QA-SPAWN-ERR" "$TRACE" 2>/dev/null; then
+  fail "T27a: expected non-zero for verdict parse error, got 0"
+  fail "T27b: (skipped)"
+else
+  new_ps=$(get_phase_status "TST-QA-SPAWN-ERR")
+  if [[ "$new_ps" == "failed" ]]; then
+    pass "T27a: story immediately marked 'failed' on verdict parse error (AC5c)"
+  else
+    fail "T27a: expected 'failed' after verdict parse error, got '$new_ps'"
+  fi
+  if grep -q '"fallback_reason":"QA_VERDICT_PARSE_ERROR"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T27b: routing.jsonl has QA_VERDICT_PARSE_ERROR fallback_reason"
+  else
+    fail "T27b: routing.jsonl missing QA_VERDICT_PARSE_ERROR — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+fi
+
+# ── T28: scheduler VALID set includes qa_failed + qa_escalated ──
+echo "T28: backlog-scheduler.sh VALID set includes qa_failed + qa_escalated"
+# Add a scratch story to fixture YAML
+cat >> "$FIXTURE" << 'YAML_SCHED'
+- id: TST-SCHED-VALID
+  status: in_progress
+  phase_status: implemented
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_SCHED
+
+T28_FAIL=0
+if "$SCHEDULER" --set-phase-status "TST-SCHED-VALID" qa_failed "$FIXTURE" 2>/dev/null; then
+  new_ps=$(get_phase_status "TST-SCHED-VALID")
+  if [[ "$new_ps" == "qa_failed" ]]; then
+    pass "T28a: scheduler accepts and persists qa_failed"
+  else
+    fail "T28a: scheduler accepted qa_failed but phase_status='$new_ps'"
+    T28_FAIL=1
+  fi
+else
+  fail "T28a: scheduler rejected qa_failed — not in VALID set"
+  T28_FAIL=1
+fi
+
+if "$SCHEDULER" --set-phase-status "TST-SCHED-VALID" qa_escalated "$FIXTURE" 2>/dev/null; then
+  new_ps=$(get_phase_status "TST-SCHED-VALID")
+  if [[ "$new_ps" == "qa_escalated" ]]; then
+    pass "T28b: scheduler accepts and persists qa_escalated"
+  else
+    fail "T28b: scheduler accepted qa_escalated but phase_status='$new_ps'"
+  fi
+else
+  fail "T28b: scheduler rejected qa_escalated — not in VALID set"
+fi
+
+# ── T29: dispatch on qa_failed/qa_escalated returns 0 (terminal states) ──
+echo "T29: dispatch_3phase_story — qa_failed/qa_escalated are terminal (return 0)"
+# TST-QA-FAIL is now qa_failed, TST-QA-ESCALATE is now qa_escalated
+TRACE="test-trace-$(date +%s)-029"
+
+if dispatch_3phase_story "TST-QA-FAIL" "$TRACE" 2>/dev/null; then
+  pass "T29a: dispatch returns 0 for qa_failed terminal state"
+else
+  fail "T29a: dispatch returned non-zero for qa_failed — should be terminal"
+fi
+
+if dispatch_3phase_story "TST-QA-ESCALATE" "$TRACE" 2>/dev/null; then
+  pass "T29b: dispatch returns 0 for qa_escalated terminal state"
+else
+  fail "T29b: dispatch returned non-zero for qa_escalated — should be terminal"
+fi
+
+# Cleanup QA phase test fixtures
+export PATH="$QA_OLD_PATH"
+export PROJECT_DIR="$PROJECT_DIR_QA_ORIG"
+unset GAAI_WORKTREES_BASE CLAUDE_MODEL_PRIMARY GAAI_WORKSPACE_ID GAAI_ORG_ID
+unset QA_OLD_PATH QA_FIXTURE_DIR QA_SHIM_DIR PROJECT_DIR_QA_ORIG
+rm -rf "/tmp/gaai-qa-phase-tests-$$"
 
 # ── Summary ───────────────────────────────────────────────────
 echo ""
