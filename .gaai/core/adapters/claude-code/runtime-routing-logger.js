@@ -100,7 +100,7 @@ export function logPhase(params) {
   };
 
   // Append optional secondary-mode telemetry fields when present (integers/boolean, DEC-65)
-  const TELEMETRY_FIELDS = ['context_size_at_spawn', 'compact_events_count', 'retry_429_count', 'nested_session_completed', 'pipeline'];
+  const TELEMETRY_FIELDS = ['context_size_at_spawn', 'compact_events_count', 'retry_429_count', 'nested_session_completed'];
   for (const f of TELEMETRY_FIELDS) {
     if (f in params) entry[f] = params[f];
   }
@@ -134,7 +134,6 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const durationRaw   = argValue('--duration-ms');
   const fallbackRaw   = argValue('--fallback-reason');
   const implModelTag  = argValue('--impl-model-tag');
-  const pipelineArg   = argValue('--pipeline');
   const logPathArg    = argValue('--log-path');
 
   // --log-path overrides default log path (useful for testing without internal _setLogPath)
@@ -144,7 +143,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const fallbackReason = (fallbackRaw === '' || fallbackRaw === 'null') ? null : fallbackRaw;
 
   try {
-    const phaseParams = {
+    logPhase({
       trace_id:       traceId,
       story_id:       storyId,
       phase,
@@ -153,9 +152,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
       duration_ms:    Number(durationRaw),
       fallback_reason: fallbackReason,
       impl_model_tag:  implModelTag,
-    };
-    if (pipelineArg !== undefined) phaseParams.pipeline = pipelineArg;
-    logPhase(phaseParams);
+    });
     process.stdout.write(formatPhaseStdout(phase, provider, model, fallbackReason));
   } catch (err) {
     process.stderr.write(`runtime-routing-logger: ${err.message}\n`);
