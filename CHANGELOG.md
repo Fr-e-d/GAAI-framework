@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.25.0] - 2026-04-30
 
 ### Changed
+- feat(delivery-loop): GLM context-discipline preamble for secondary routing
 - fix(analyzer): surface stdout terminal_reason + jq capture no-match handling
+
 
 ## [2.24.0] - 2026-04-30
 
