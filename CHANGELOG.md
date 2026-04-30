@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.27.0] - 2026-04-30
 
 ### Changed
+- feat(nested-claude-spawn): forensic dump on EXIT_CODE_NON_ZERO catch-all
 - fix(daemon-monitor): persist max-rank phase across tail-window refreshes
 - fix(scheduler): make YAML parser indent-aware
+
 
 ## [2.26.0] - 2026-04-30
 
