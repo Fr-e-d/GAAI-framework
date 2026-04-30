@@ -409,10 +409,19 @@ result_json=$(node .gaai/core/adapters/claude-code/nested-claude-spawn.js \
   --prompt-file "$IMPL_PROMPT_FILE" \
   --report-path "$IMPL_REPORT_PATH" \
   --story-id "{id}" \
-  [--impl-model-tag primary|secondary|absent] \
-  [--log-file "$GAAI_DELIVERY_LOG_FILE"])
+  [--impl-model-tag primary|secondary|absent])
 rm -f "$IMPL_PROMPT_FILE"
 ```
+
+> **DO NOT pass `--log-file` to `nested-claude-spawn.js`.** The wrapper auto-uses
+> the per-story log path from `GAAI_DELIVERY_LOG_FILE` env (set by the daemon
+> wrapper to `.delivery-logs/{id}.log`). Passing this flag explicitly with the
+> daemon log path (`.delivery-daemon.log`) — observed empirically when orchestrators
+> substitute the env-var name with what they think is the "delivery log" — pollutes
+> the daemon log with NDJSON, breaks the top monitor banner readability, and makes
+> the per-story panel blind to GLM secondary events (model field freezes on Sonnet
+> orchestrator). Omit the flag entirely; the env fallback at nested-claude-spawn.js
+> line 960-962 handles it correctly.
 
 The CLI exits 0 in all business-logic outcomes (success, fallback, env-missing). Distinguish via `result.success`.
 
