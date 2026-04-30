@@ -7,4 +7,3 @@
 ## R5 — Single-feature focus
 === STORY:
 === EXECUTION PLAN ===
-=== MANDATORY DEC READS ===

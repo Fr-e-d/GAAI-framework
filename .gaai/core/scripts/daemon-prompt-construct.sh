@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# daemon-prompt-construct.sh — Canonical impl prompt construction helper (E134S04)
+# daemon-prompt-construct.sh — Canonical impl prompt construction helper
 #
 # Outputs the impl prompt to stdout.
 # Caller captures with: PROMPT_CONTENT=$(bash daemon-prompt-construct.sh)
 #
 # Required env vars:
-#   GAAI_STORY_ID        — story identifier (e.g. E134S04)
+#   GAAI_STORY_ID        — story identifier (e.g. E001S01)
 #   GAAI_STORY_PATH      — absolute path to {id}.story.md
 #   GAAI_PLAN_PATH       — absolute path to {id}.execution-plan.md
 #   GAAI_EPIC_PATH       — absolute path to {epic_id}.epic.md (may be empty)
@@ -205,11 +205,11 @@ fi
 
 # ── Section 5: DEC reads instruction ─────────────────────────────────────
 # Parse related_decs from story YAML frontmatter (--- block).
-# Format in frontmatter: related_decs: [DEC-88, DEC-86, DEC-72, DEC-69]
+# Format in frontmatter: related_decs: [DEC-NN, DEC-MM, ...]
 # or:
 # related_decs:
-#   - DEC-88
-#   - DEC-86
+#   - DEC-NN
+#   - DEC-MM
 _related_decs=""
 _in_frontmatter=0
 _frontmatter_done=0
@@ -226,7 +226,7 @@ while IFS= read -r _line; do
     break
   fi
   if [[ $_in_frontmatter -eq 1 ]]; then
-    # Inline list form: related_decs: [DEC-88, DEC-86, ...]
+    # Inline list form: related_decs: [DEC-NN, DEC-MM, ...]
     if echo "$_line" | grep -qE '^related_decs:[[:space:]]*\['; then
       _related_decs=$(echo "$_line" | sed 's/related_decs:[[:space:]]*//' | tr -d '[]' | tr ',' '\n' | tr -d ' ' | grep -v '^$' || true)
     # Multiline list form: - DEC-XX (after related_decs: line)

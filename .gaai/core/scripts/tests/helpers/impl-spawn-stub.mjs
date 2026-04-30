@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * impl-spawn-stub.mjs — Test helper for E134S04 (AC6.a)
+ * impl-spawn-stub.mjs — Test helper for handle_impl_phase real runImpl routing
  *
  * Invokes nested-claude-spawn.js runImpl() with a controlled _setSpawnFn stub
  * so that tests can exercise real routing logic without spawning an actual
