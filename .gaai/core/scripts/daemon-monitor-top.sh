@@ -54,7 +54,10 @@ while true; do
     term_lines=$(tput lines 2>/dev/null || echo 24)
     log_lines=$(( term_lines - 12 ))
     [[ $log_lines -lt 5 ]] && log_lines=5
-    tail -n "$log_lines" "$LOG_FILE"
+    # Filter raw NDJSON lines that nested-claude-spawn writes via --log-file when
+    # orchestrators pass the daemon log path (instead of per-story). Keeps the top
+    # banner human-readable without changing the underlying log pollution.
+    tail -n $(( log_lines * 4 )) "$LOG_FILE" | grep -v '^{' | tail -n "$log_lines"
   else
     echo -e "  ${DIM}(waiting for daemon log...)${NC}"
   fi
