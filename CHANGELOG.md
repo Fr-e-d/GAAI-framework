@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- fix(delivery-loop): preamble fires on env-driven default secondary routing
+
 ## [2.23.0] - 2026-04-30
 
 ### Changed

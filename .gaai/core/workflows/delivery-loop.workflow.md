@@ -230,14 +230,26 @@ The routing decision is evaluated inside `runImpl()` — a deterministic pure fu
 
 **Invoke the module (this is the only impl spawn — no Task tool sub-agent for impl) :**
 
-> **Secondary-routing context discipline preamble :** when `impl_model_tag == secondary`, prepend the context-discipline preamble below to `IMPL_PROMPT`. Mitigates Claude Code `rapid_refill_breaker` (autocompact thrashing) observed empirically at 43% fail rate on secondary providers (e.g., GLM 5.1). Skip when routing primary — Sonnet already follows these implicitly.
+> **Secondary-routing context discipline preamble :** when the resolved routing decision is `secondary` (per DEC-72 matrix : either `impl_model_tag == secondary` explicit OR `impl_model_tag == absent` + env configured), prepend the context-discipline preamble below to `IMPL_PROMPT`. Mitigates Claude Code `rapid_refill_breaker` (autocompact thrashing) observed empirically at 43% fail rate on secondary providers (e.g., GLM 5.1). Skip when routing primary — Sonnet already follows these implicitly.
 
 ```bash
-# When secondary-routed, prepend context discipline preamble (rapid_refill_breaker mitigation).
+# Routing predicate — must mirror nested-claude-spawn.js resolveMode() exactly :
+#   - explicit 'secondary' tag → secondary (Row 2)
+#   - 'absent' tag + env configured → secondary (Row 4, env-driven default DEC-72)
+#   - anything else → primary
 # Source : observed 5/6 GLM 5.1 fails ($1.97-6.11 each) terminated with rapid_refill_breaker
 # in nested-fail-debug.jsonl 2026-04-30 ; 3 behaviors lacking : (1) re-Read post-compact,
 # (2) no self-summarization, (3) full-file Read defaults instead of offset/limit.
+secondary_route=false
 if [ "$impl_model_tag" = "secondary" ]; then
+  secondary_route=true
+elif [ "$impl_model_tag" = "absent" ] \
+  && [ -n "${GAAI_IMPL_BASE_URL:-}" ] \
+  && [ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ] \
+  && [ -n "${GAAI_IMPL_MODEL:-}" ]; then
+  secondary_route=true
+fi
+if [ "$secondary_route" = "true" ]; then
   NOTES_PATH="${WORKTREE_PATH}/.gaai/project/contexts/artefacts/notes/{id}.notes.md"
   IMPL_PROMPT="$(cat <<PREAMBLE
 === CONTEXT DISCIPLINE (MANDATORY for this delivery) ===
