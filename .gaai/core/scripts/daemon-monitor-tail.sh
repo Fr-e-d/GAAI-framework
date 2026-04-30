@@ -48,6 +48,8 @@ format_model() {
   esac
 }
 
+PHASE_CACHE_DIR="${PROJECT_DIR}/.gaai/project/contexts/backlog/.delivery-locks/.phase-cache"
+
 parse_log() {
   local log_file="$1"
   local story_id="$2"
@@ -208,6 +210,48 @@ parse_log() {
     phase_label=$(printf  '%s' "$phase_event" | awk -F'\t' '{print $2}')
     phase_origin=$(printf '%s' "$phase_event" | awk -F'\t' '{print $3}')
     [[ "$phase_label" == "$phase_origin" ]] && phase_origin=""
+
+    # ── Phase cache: persist the highest rank seen so far across tail-window refreshes ──
+    # Prevents regression when early-session phase markers (PLAN/IMPL writes) scroll past
+    # the tail-1500 window in long-running stories. One file per story; invalidated when
+    # the log file is newer than the cache (i.e., story was re-delivered and log recreated).
+    local cache_file="${PHASE_CACHE_DIR}/${story_id}"
+    mkdir -p "$PHASE_CACHE_DIR" 2>/dev/null || true
+    local cached_rank=0 cached_label="" cached_origin=""
+    if [[ -f "$cache_file" ]]; then
+      # Cache stale when log was recreated after cache was written (new delivery run)
+      local cache_mtime log_mtime
+      if [[ "$(uname)" == "Darwin" ]]; then
+        cache_mtime=$(stat -f %m "$cache_file" 2>/dev/null || echo 0)
+        log_mtime=$(stat -f %m "$log_file" 2>/dev/null || echo 0)
+      else
+        cache_mtime=$(stat -c %Y "$cache_file" 2>/dev/null || echo 0)
+        log_mtime=$(stat -c %Y "$log_file" 2>/dev/null || echo 0)
+      fi
+      # Allow a 10s grace window so a cache written during a previous refresh
+      # of the same log is not immediately discarded if timestamps are close.
+      if [[ $(( log_mtime - cache_mtime )) -gt 10 ]] && [[ "$log_mtime" -gt "$cache_mtime" ]]; then
+        rm -f "$cache_file" 2>/dev/null || true
+      else
+        local cached_event
+        cached_event=$(cat "$cache_file" 2>/dev/null || true)
+        cached_rank=$(printf '%s' "$cached_event" | awk -F'\t' '{print $1}')
+        cached_label=$(printf '%s' "$cached_event" | awk -F'\t' '{print $2}')
+        cached_origin=$(printf '%s' "$cached_event" | awk -F'\t' '{print $3}')
+        cached_rank="${cached_rank:-0}"
+      fi
+    fi
+    local cur_rank
+    cur_rank=$(printf '%s' "$phase_event" | awk -F'\t' '{print $1}')
+    cur_rank="${cur_rank:-0}"
+    if [[ -n "$cached_label" ]] && [[ "$cached_rank" -gt "$cur_rank" ]]; then
+      # Cache wins: a higher-rank phase was seen in an earlier tail window
+      phase_label="$cached_label"
+      phase_origin="$cached_origin"
+    elif [[ -n "$phase_label" ]] && [[ "$cur_rank" -gt "$cached_rank" ]]; then
+      # Current window advanced: write updated winner back to cache
+      printf '%s\t%s\t%s\n' "$cur_rank" "$phase_label" "$phase_origin" > "$cache_file" 2>/dev/null || true
+    fi
   else
     last_text=$(tail -200 "$log_file" 2>/dev/null \
       | grep -o '"type":"tool_use"[^}]*"name":"[^"]*"' \
