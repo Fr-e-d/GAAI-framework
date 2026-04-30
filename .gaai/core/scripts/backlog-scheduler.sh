@@ -201,8 +201,8 @@ if [[ "$MODE" == "set-phase-status" ]]; then
   python3 -c "
 import sys, re
 
-VALID = {'not_started','planned','implemented','qa_passed','done',
-         'failed','escalated','deferred','cancelled','superseded'}
+VALID = {'not_started','planned','implemented','qa_passed','qa_failed','qa_escalated',
+         'done','failed','escalated','deferred','cancelled','superseded'}
 
 file_path, target_id, new_value = sys.argv[1], sys.argv[2], sys.argv[3]
 

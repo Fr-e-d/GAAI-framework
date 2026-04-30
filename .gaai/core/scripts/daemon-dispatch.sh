@@ -113,6 +113,33 @@ _emit_plan_routing_record() {
     2>/dev/null || true
 }
 
+# ── QA-phase routing record (adds --pipeline, real model, real duration, verdict) ──
+# Arguments: story_id trace_id provider fallback_reason duration_ms
+_emit_qa_routing_record() {
+  local story_id="$1" trace_id="$2" provider="$3" fallback_reason="$4" duration_ms="$5"
+  local impl_tag model_val
+  impl_tag=$(get_impl_model_tag "$story_id")
+  model_val="${CLAUDE_MODEL_PRIMARY:-claude-sonnet-4-6}"
+
+  local log_path_args=()
+  if [[ -n "${ROUTING_LOG_PATH:-}" ]]; then
+    log_path_args=(--log-path "$ROUTING_LOG_PATH")
+  fi
+
+  node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \
+    --trace-id        "$trace_id" \
+    --story-id        "$story_id" \
+    --phase           "qa" \
+    --provider        "$provider" \
+    --model           "$model_val" \
+    --duration-ms     "$duration_ms" \
+    --fallback-reason "$fallback_reason" \
+    --impl-model-tag  "$impl_tag" \
+    --pipeline        "3phase" \
+    "${log_path_args[@]}" \
+    2>/dev/null || true
+}
+
 # ── Phase handlers ────────────────────────────────────────────────────────
 
 handle_plan_phase() {
@@ -375,22 +402,182 @@ if d is not None:
 
 handle_qa_phase() {
   local story_id="$1" trace_id="$2"
-  local ts
+  local ts t_start_ms t_end_ms duration_ms
   ts=$(date '+%H:%M:%S')
-  echo "[${ts}] ${story_id} phase=qa dispatched (stub)"
+  echo "[${ts}] ${story_id} phase=qa starting"
 
-  # Emit routing record (AC4)
-  _emit_routing_record "$story_id" "$trace_id" "qa" "stub" ""
+  # ── Resolve worktree path ─────────────────────────────────────────────────
+  local worktree_path
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    worktree_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
+  else
+    local repo_name
+    repo_name=$(basename "$PROJECT_DIR")
+    worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
+  fi
 
-  # Advance phase_status: implemented → qa_passed (AC3)
-  if ! "$SCHEDULER" --set-phase-status "$story_id" qa_passed "$BACKLOG_FILE" 2>/dev/null; then
-    echo "[ERROR] ${story_id} handle_qa_phase: --set-phase-status qa_passed failed"
-    _emit_routing_record "$story_id" "$trace_id" "qa" "error" "set-phase-status-failed"
+  # ── Resolve artefact paths (AC2) ──────────────────────────────────────────
+  local story_path plan_path impl_report_path qa_report_path memory_delta_path log_path
+  story_path="${worktree_path}/.gaai/project/contexts/artefacts/stories/${story_id}.story.md"
+  plan_path="${worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
+  impl_report_path="${worktree_path}/.gaai/project/contexts/artefacts/impl-reports/${story_id}.impl-report.md"
+  qa_report_path="${worktree_path}/.gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-report.md"
+  memory_delta_path="${worktree_path}/.gaai/project/contexts/artefacts/memory-deltas/${story_id}.memory-delta.md"
+  log_path="${worktree_path}/.delivery-logs/${story_id}.qa.log"
+
+  # Resolve epic_id from story frontmatter
+  local epic_id epic_path
+  epic_id=$(grep -m1 '^epic:' "$story_path" 2>/dev/null | sed 's/^epic:[[:space:]]*//' | tr -d '"' || true)
+  if [[ -n "$epic_id" ]]; then
+    epic_path="${worktree_path}/.gaai/project/contexts/artefacts/epics/${epic_id}.epic.md"
+  else
+    epic_path=""
+  fi
+
+  # Resolve base ref for git diff (AC2: GAAI_BASE_REF)
+  local base_ref
+  base_ref="${GAAI_BASE_REF:-main}"
+
+  # ── Validate required input files ────────────────────────────────────────
+  if [[ ! -f "$story_path" ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: story file not found: $story_path"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "0"
+    return 1
+  fi
+  if [[ ! -f "$plan_path" ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: plan file not found: $plan_path"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "0"
+    return 1
+  fi
+  if [[ ! -f "$impl_report_path" ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: impl-report not found: $impl_report_path"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "0"
     return 1
   fi
 
-  sleep "${GAAI_STUB_DELAY_S:-0}"
-  return 0
+  # ── Ensure output directories exist ──────────────────────────────────────
+  mkdir -p "$(dirname "$qa_report_path")"
+  mkdir -p "$(dirname "$memory_delta_path")"
+  mkdir -p "$(dirname "$log_path")"
+
+  # ── Build prompt from qa.daemon-prompt.md (AC1) ───────────────────────────
+  local agent_prompt_src
+  agent_prompt_src="${PROJECT_DIR}/.gaai/core/agents/sub-agents/qa.daemon-prompt.md"
+
+  if [[ ! -f "$agent_prompt_src" ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: qa.daemon-prompt.md not found at $agent_prompt_src"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "0"
+    return 1
+  fi
+
+  local prompt_file
+  prompt_file=$(mktemp "/tmp/gaai-qa-prompt-${story_id}-XXXXXX.md")
+  cat "$agent_prompt_src" > "$prompt_file"
+
+  # ── Duration measurement ──────────────────────────────────────────────────
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    t_start_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+  else
+    t_start_ms=$(( $(date +%s) * 1000 ))
+  fi
+
+  # ── Spawn claude -p (AC1 — child bash subshell, NOT nested-claude-spawn.js) ──
+  local claude_exit
+  set -o pipefail
+  GAAI_STORY_ID="$story_id" \
+  GAAI_WORKTREE_PATH="$worktree_path" \
+  GAAI_STORY_PATH="$story_path" \
+  GAAI_PLAN_PATH="$plan_path" \
+  GAAI_IMPL_REPORT_PATH="$impl_report_path" \
+  GAAI_QA_REPORT_PATH="$qa_report_path" \
+  GAAI_EPIC_PATH="$epic_path" \
+  GAAI_BASE_REF="$base_ref" \
+  GAAI_DELIVERY_LOG_FILE="$log_path" \
+  GAAI_MEMORY_DELTA_PATH="$memory_delta_path" \
+  GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-}" \
+  GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
+    claude -p \
+      --model sonnet \
+      --max-turns 30 \
+      --output-format stream-json \
+      --verbose \
+      < "$prompt_file" 2>&1 | tee -a "$log_path"
+  claude_exit=${PIPESTATUS[0]}
+  set +o pipefail
+
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+  else
+    t_end_ms=$(( $(date +%s) * 1000 ))
+  fi
+  duration_ms=$(( t_end_ms - t_start_ms ))
+
+  rm -f "$prompt_file"
+
+  # ── AC5(a): spawn-error — claude -p exit non-zero ─────────────────────────
+  if [[ "$claude_exit" -ne 0 ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: claude -p exited ${claude_exit} [class=QA_SPAWN_FAILED]"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "$duration_ms"
+    return 1
+  fi
+
+  # ── AC5(b): artefact missing despite exit 0 ───────────────────────────────
+  if [[ ! -s "$qa_report_path" ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: qa-report missing or empty at $qa_report_path [class=QA_NO_ARTEFACT]"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_NO_ARTEFACT" "$duration_ms"
+    return 1
+  fi
+
+  # ── AC4: parse 3-way verdict ──────────────────────────────────────────────
+  local verdict
+  verdict=$(grep -E '^## Verdict: (PASS|FAIL|ESCALATE)$' "$qa_report_path" | tail -1 | sed 's/^## Verdict: //')
+
+  # ── AC5(c): verdict marker absent / unparseable ───────────────────────────
+  if [[ -z "$verdict" ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: verdict marker absent in qa-report [class=QA_VERDICT_PARSE_ERROR]"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_VERDICT_PARSE_ERROR" "$duration_ms"
+    # NO retry — immediate failed per AC5(c)
+    if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
+      echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_VERDICT_PARSE_ERROR"
+    fi
+    return 1
+  fi
+
+  # ── AC4: verdict-driven phase advancement ─────────────────────────────────
+  case "$verdict" in
+    PASS)
+      # AC5(d): scheduler failure → return 1 without phase advance, daemon retries
+      if ! "$SCHEDULER" --set-phase-status "$story_id" qa_passed "$BACKLOG_FILE" 2>/dev/null; then
+        echo "[ERROR] ${story_id} handle_qa_phase: --set-phase-status qa_passed failed [class=QA_SCHEDULER_FAILURE]"
+        _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SCHEDULER_FAILURE" "$duration_ms"
+        return 1
+      fi
+      _emit_qa_routing_record "$story_id" "$trace_id" "primary" "null" "$duration_ms"
+      ts=$(date '+%H:%M:%S')
+      echo "[${ts}] ${story_id} phase=qa PASS (${duration_ms}ms)"
+      return 0
+      ;;
+    FAIL)
+      echo "[ERROR] ${story_id} handle_qa_phase: QA verdict=FAIL [class=QA_VERDICT:FAIL]"
+      if ! "$SCHEDULER" --set-phase-status "$story_id" qa_failed "$BACKLOG_FILE" 2>/dev/null; then
+        echo "[ERROR] ${story_id} handle_qa_phase: --set-phase-status qa_failed failed [class=QA_SCHEDULER_FAILURE]"
+        _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SCHEDULER_FAILURE" "$duration_ms"
+        return 1
+      fi
+      _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_VERDICT:FAIL" "$duration_ms"
+      return 1
+      ;;
+    ESCALATE)
+      echo "[ERROR] ${story_id} handle_qa_phase: QA verdict=ESCALATE [class=QA_VERDICT:ESCALATE]"
+      if ! "$SCHEDULER" --set-phase-status "$story_id" qa_escalated "$BACKLOG_FILE" 2>/dev/null; then
+        echo "[ERROR] ${story_id} handle_qa_phase: --set-phase-status qa_escalated failed [class=QA_SCHEDULER_FAILURE]"
+        _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SCHEDULER_FAILURE" "$duration_ms"
+        return 1
+      fi
+      _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_VERDICT:ESCALATE" "$duration_ms"
+      return 1
+      ;;
+  esac
 }
 
 handle_commit_phase() {
@@ -451,13 +638,13 @@ dispatch_3phase_story() {
     qa_passed)
       handle_commit_phase "$story_id" "$trace_id" || return 1
       ;;
-    done|failed|escalated)
+    done|failed|escalated|qa_failed|qa_escalated)
       # Terminal states — caller loop should stop. Not an error.
       return 0
       ;;
     *)
       # AC6(i)(ii)(iii)(iv): invalid phase_status
-      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed done failed escalated"
+      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated done failed escalated"
       _emit_routing_record "$story_id" "$trace_id" "plan" "error" "invalid_phase_status:${ps}"
       return 1
       ;;
