@@ -238,33 +238,80 @@ The routing decision is evaluated inside `runImpl()` — a deterministic pure fu
 # in nested-fail-debug.jsonl 2026-04-30 ; 3 behaviors lacking : (1) re-Read post-compact,
 # (2) no self-summarization, (3) full-file Read defaults instead of offset/limit.
 if [ "$impl_model_tag" = "secondary" ]; then
-  IMPL_PROMPT="$(cat <<'PREAMBLE'
+  IMPL_PROMPT="$(cat <<PREAMBLE
 === CONTEXT DISCIPLINE (MANDATORY for this delivery) ===
 
 You operate in a long-running agentic session with a 200K context window
 and aggressive autocompaction. Failure to follow these rules causes session
-termination via rapid_refill_breaker (Claude Code internal safety).
+termination via rapid_refill_breaker (Claude Code internal safety) — observed
+empirically at 43% fail rate on this routing path.
 
-1. NEVER re-read a file you have already read in this session.
-   If recalling content is needed, reference your prior summary instead.
+These rules are derived from Anthropic's "Effective Context Engineering for
+AI Agents" guidance. They apply throughout this session.
 
-2. After every tool result, write ONE sentence summarizing key facts learned
-   before your next action. Example: "auth.ts exports validateSession(token).
-   It uses HMAC-SHA256 over headers. Now editing membership.ts."
+## R1 — Persistent NOTES.md (MOST IMPORTANT)
 
-3. Read files in chunks ≤200 lines using offset/limit params.
-   Use Glob/Grep to locate exact line ranges before Read when possible.
-   Never Read a full file >300 lines without offset/limit.
+Maintain a file at \${WORKTREE_PATH}/NOTES.md as your durable working memory.
+This file survives autocompaction. After any compact, your first action MUST
+be to re-read NOTES.md to recover state.
 
-4. For Bash with verbose output (test runs, builds), always pipe through
-   head/tail to limit output: `pnpm test 2>&1 | tail -100`
+Required NOTES.md structure (update continuously as you work):
 
-5. Track files-already-read in your responses. Format: "Read: [file1, file2]"
+\`\`\`markdown
+## Current step
+<one sentence: what you are doing right now>
+
+## Files read (don't re-read these)
+- path/to/file.ts: <one-line summary of what it contains and the lines that matter>
+- ...
+
+## Decisions made
+- <decision + brief rationale>
+
+## Acceptance criteria status
+- AC1: <pending|done|blocked>
+- ...
+
+## Open questions / blockers
+- <if any>
+\`\`\`
+
+Update NOTES.md after every meaningful tool result. Write durable structured
+facts, not narration.
+
+## R2 — Never re-read
+
+Never re-read a file you've already read in this session (your NOTES.md is
+the source of truth for what you've seen). If you suspect autocompaction
+just occurred (sudden gap in your context), Read NOTES.md and the
+execution-plan.md FIRST before any other action.
+
+## R3 — Self-summarize after every tool result
+
+After each Read / Bash / Glob / Grep, write ONE structured sentence
+summarizing the key fact learned, then continue. Example:
+"auth.ts exports validateSession(token), uses HMAC-SHA256 over headers
+(lines 23-67). Now editing membership.ts to add workspace_id field."
+
+## R4 — Just-in-time chunked retrieval (don't load upfront)
+
+- Read files in chunks ≤200 lines using offset/limit. Use Glob/Grep
+  first to locate exact line ranges. Never Read a file >300 lines
+  without offset/limit.
+- For Bash with verbose output (tests, builds, logs), always pipe
+  through head/tail: \`pnpm test 2>&1 | tail -100\`
+- Prefer file paths and grep patterns over loading full content.
+
+## R5 — Single-feature focus
+
+Per Anthropic's harness guidance: work on one acceptance criterion at a
+time, commit when complete, then advance. Do not parallelize ACs across
+multiple files in flight — context bloat is fatal here.
 
 === END CONTEXT DISCIPLINE ===
 
 PREAMBLE
-)$IMPL_PROMPT"
+)\$IMPL_PROMPT"
 fi
 
 IMPL_PROMPT_FILE="$(mktemp -t gaai-impl-prompt.XXXXXX)"

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.26.0] - 2026-04-30
+
+### Changed
+- feat(delivery-loop): upgrade GLM context-discipline preamble per Anthropic guidance
+- chore: bump local VERSION to v2.25.0 [sync]
+
+
 ## [2.25.0] - 2026-04-30
 
 ### Changed
