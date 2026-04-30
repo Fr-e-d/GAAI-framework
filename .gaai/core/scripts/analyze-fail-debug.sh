@@ -30,10 +30,37 @@ tail -n "$N" "$FAIL_LOG" | jq -r '
 '
 
 if [[ -f "$ROUTE_LOG" ]]; then
-  echo "═══ Routing summary (last 24h, phase=impl) ═══"
+  echo "═══ Routing summary (last 24h, phase=impl, real spawns only) ═══"
   CUTOFF=$(date -u -v-24H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
-  jq -r --arg cutoff "$CUTOFF" '
-    select(.phase == "impl" and .timestamp > $cutoff) |
-    "\(.provider)\t\(.model)\t\(.fallback_reason // "ok")"
-  ' "$ROUTE_LOG" | sort | uniq -c | sort -rn
+  # Filter:
+  # - duration_ms == 0   → pre-spawn bookkeeping records (manual logger calls in
+  #                        the workflow before the actual spawn). Not real spawns.
+  # - duration_ms == null → broken logger calls (missing --duration-ms flag).
+  # Dedup: same (story_id, provider, duration_ms) → orchestrator double-logged
+  #        the same spawn (e.g. runImpl internal + manual post-call). Keep one.
+  # Field semantics reminder:
+  #   fallback_reason on a `primary` record  = WHY the secondary spawn failed
+  #                                            (not whether the primary itself
+  #                                            succeeded). A primary record
+  #                                            with fallback_reason="X" means
+  #                                            "this primary attempt was a
+  #                                            fallback triggered by secondary
+  #                                            failure X" — the primary may
+  #                                            still have succeeded.
+  #   fallback_reason on a `secondary` record = the secondary's own failure
+  #                                            reason if it failed.
+  jq -c --arg cutoff "$CUTOFF" '
+    select(.phase == "impl"
+           and .timestamp > $cutoff
+           and (.duration_ms // 0) > 0)
+  ' "$ROUTE_LOG" \
+    | jq -r '"\(.story_id)\t\(.provider)\t\(.duration_ms)\t\(.model)\t\(.fallback_reason // "direct")"' \
+    | sort -u \
+    | awk -F'\t' '{
+        prov=$2; model=$4; reason=$5;
+        if (prov == "secondary")   { tag = (reason == "direct" ? "success" : "fail:"reason) }
+        else                       { tag = (reason == "direct" ? "direct"  : "fallback-from:"reason) }
+        print prov"\t"model"\t"tag
+      }' \
+    | sort | uniq -c | sort -rn
 fi
