@@ -36,10 +36,14 @@
  */
 
 import { spawn as _childSpawn } from 'node:child_process';
-import { existsSync, appendFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, appendFileSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { logPhase, formatPhaseStdout } from './runtime-routing-logger.js';
+
+const _NESTED_REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+const _FAIL_DEBUG_PATH  = join(_NESTED_REPO_ROOT, '.gaai', 'project', 'contexts', 'logs', 'nested-fail-debug.jsonl');
 
 // ---------------------------------------------------------------------------
 // Spawn injection seam (for tests only)
@@ -558,6 +562,28 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
         errorReason = classifyError(code, stderr, stdout, presetReason, implReportPath);
       }
 
+      // Forensic dump on EXIT_CODE_NON_ZERO catch-all — stderr/stdout aren't
+      // otherwise persisted. Without this, diagnosing why GLM (or any secondary
+      // provider) crashed requires re-running. File is gitignored (.gaai/project/contexts/logs/).
+      if (errorReason === 'EXIT_CODE_NON_ZERO') {
+        try {
+          mkdirSync(dirname(_FAIL_DEBUG_PATH), { recursive: true });
+          appendFileSync(_FAIL_DEBUG_PATH, JSON.stringify({
+            ts: new Date().toISOString(),
+            trace_id: traceId,
+            exit_code: code,
+            duration_ms: duration,
+            model_requested: modelReq,
+            model_actual: modelActual,
+            base_url: baseUrl,
+            stderr_tail: stderr.slice(-4000),
+            stdout_tail: stdout.slice(-4000),
+          }) + '\n', 'utf8');
+        } catch (e) {
+          process.stderr.write(`[nested-claude-spawn] WARNING: fail-debug dump failed: ${e.message}\n`);
+        }
+      }
+
       const modelFallbackTriggered = !!(modelActual && modelActual !== modelReq);
 
       // Collect secondary-mode telemetry when requested (primary path: no-op, AC5)
@@ -896,7 +922,6 @@ export async function _spawnWithTimerOverride(prompt, implReportPath, extraArgs,
 // AC12: audit log emission uses logPhase() library (imported above), not a separate CLI spawn.
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 async function _cli() {
   const args = process.argv.slice(2);
