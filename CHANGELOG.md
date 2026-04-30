@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.23.0] - 2026-04-30
+
+### Changed
+- feat(scripts): observe-secondary.sh — live R1-R5 compliance + outcomes
+
+
 ## [2.22.0] - 2026-04-30
 
 ### Changed
