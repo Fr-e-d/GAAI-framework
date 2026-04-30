@@ -89,19 +89,13 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 
 12. **MANDATORY — Register in backlog.** After writing all story files, add each story to `contexts/backlog/active.backlog.yaml` with:
    - `id`, `epic`, `title` (from story frontmatter)
-   - **`status` per gate state — STRICT**:
-     - `status: draft` if EITHER `validate-artefacts` OR Reviewer Tier 2 has not yet returned PASS (cycle 1 or 2) for this specific story. This is the default for any story registered before its own gates have completed.
-     - `status: refined` ONLY after BOTH gates have returned PASS. Promote `draft → refined` as a separate backlog write (not bundled with the initial registration).
-     - **Never register as `refined` "for now" while still iterating** — the delivery daemon polls `active.backlog.yaml` for `refined` items and dispatches them immediately, snapshotting whatever is in the worktree at dispatch time. Refined-while-iterating creates a race condition where un-reviewed cycle-0 drafts (with potentially CRITICAL-severity factual errors) can be picked up before cycle-1 corrections land.
-     - **For batch Discovery (multiple stories drafted together):** register all as `draft` initially. Run gates per story (the sequencing rule of step 10 still applies). Promote each to `refined` individually once its own cycle ends in PASS. Never bulk-promote at the end of a batch.
+   - `status: refined` (if validated) or `status: draft` (if pending validation)
    - `priority` (derived from Epic priority or explicit input)
    - `artefact` path pointing to the story file
    - `dependencies` (from story frontmatter `depends_on` or Epic execution order)
-   - `notes` (source context — e.g., Discovery session date, governing DEC ; include gate trail once available)
+   - `notes` (source context — e.g., Discovery session date, governing DEC)
 
    **A story that exists only as an artefact file but is not in the backlog is invisible to Delivery and will never be executed.** This step is non-negotiable.
-
-   **Rationale:** A prior Discovery batch had stories rolled back from `in_progress` because they were registered as `refined` while Discovery was still iterating Reviewer cycle-1 corrections. The daemon picked up the un-reviewed drafts and began implementing architecturally wrong code based on factual errors that the Reviewer would have caught. The fix is strict adherence to the `draft → refined` lifecycle defined in `base.rules.md` § Backlog State Lifecycle — this clause makes the timing explicit at skill level.
 
    **CRITICAL — Backlog YAML write safety (MUST follow):**
    - **Match native indentation.** Before appending, check the existing format: `grep -m1 "^- id:" <backlog>`. Use the same indent level (typically 0-space: `- id:` with 2-space properties).

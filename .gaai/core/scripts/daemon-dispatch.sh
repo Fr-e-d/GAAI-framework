@@ -86,25 +86,147 @@ _emit_routing_record() {
     2>/dev/null || true
 }
 
-# ── Stub phase handlers (AC3 + AC4) ──────────────────────────────────────
+# ── Plan-phase routing record (adds --pipeline, real model, real duration) ──
+# Arguments: story_id trace_id provider fallback_reason duration_ms
+_emit_plan_routing_record() {
+  local story_id="$1" trace_id="$2" provider="$3" fallback_reason="$4" duration_ms="$5"
+  local impl_tag model_val
+  impl_tag=$(get_impl_model_tag "$story_id")
+  model_val="${CLAUDE_MODEL_PRIMARY:-claude-sonnet-4-6}"
+
+  local log_path_args=()
+  if [[ -n "${ROUTING_LOG_PATH:-}" ]]; then
+    log_path_args=(--log-path "$ROUTING_LOG_PATH")
+  fi
+
+  node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \
+    --trace-id        "$trace_id" \
+    --story-id        "$story_id" \
+    --phase           "plan" \
+    --provider        "$provider" \
+    --model           "$model_val" \
+    --duration-ms     "$duration_ms" \
+    --fallback-reason "$fallback_reason" \
+    --impl-model-tag  "$impl_tag" \
+    --pipeline        "3phase" \
+    "${log_path_args[@]}" \
+    2>/dev/null || true
+}
+
+# ── Phase handlers ────────────────────────────────────────────────────────
 
 handle_plan_phase() {
   local story_id="$1" trace_id="$2"
-  local ts
+  local ts t_start_ms t_end_ms duration_ms
   ts=$(date '+%H:%M:%S')
-  echo "[${ts}] ${story_id} phase=plan dispatched (stub)"
+  echo "[${ts}] ${story_id} phase=plan starting"
 
-  # Emit routing record (AC4)
-  _emit_routing_record "$story_id" "$trace_id" "plan" "stub" ""
-
-  # Advance phase_status: not_started → planned (AC3)
-  if ! "$SCHEDULER" --set-phase-status "$story_id" planned "$BACKLOG_FILE" 2>/dev/null; then
-    echo "[ERROR] ${story_id} handle_plan_phase: --set-phase-status planned failed"
-    _emit_routing_record "$story_id" "$trace_id" "plan" "error" "set-phase-status-failed"
+  # ── Resolve env vars for context bundle (AC2) ─────────────────────────────
+  local worktree_path story_path plan_path epic_path log_path
+  worktree_path="${GAAI_WORKTREE_PATH:-}"
+  if [[ -z "$worktree_path" ]]; then
+    echo "[ERROR] ${story_id} handle_plan_phase: GAAI_WORKTREE_PATH not set"
+    _emit_plan_routing_record "$story_id" "$trace_id" "error" "PLAN_PHASE_FAILED" "0"
     return 1
   fi
 
-  sleep "${GAAI_STUB_DELAY_S:-0}"
+  story_path="${worktree_path}/.gaai/project/contexts/artefacts/stories/${story_id}.story.md"
+  plan_path="${worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
+  log_path="${worktree_path}/.delivery-logs/${story_id}.plan.log"
+
+  # Resolve epic_id from story frontmatter; empty string if missing
+  local epic_id
+  epic_id=$(grep -m1 '^epic:' "$story_path" 2>/dev/null | sed 's/^epic:[[:space:]]*//' | tr -d '"' || true)
+  if [[ -n "$epic_id" ]]; then
+    epic_path="${worktree_path}/.gaai/project/contexts/artefacts/epics/${epic_id}.epic.md"
+  else
+    epic_path=""
+  fi
+
+  # Ensure output directories exist
+  mkdir -p "$(dirname "$log_path")"
+  mkdir -p "$(dirname "$plan_path")"
+
+  # ── Build prompt from planning.daemon-prompt.md (AC1) ─────────────────────
+  local prompt_file agent_prompt_src
+  agent_prompt_src="${PROJECT_DIR}/.gaai/core/agents/sub-agents/planning.daemon-prompt.md"
+
+  if [[ ! -f "$agent_prompt_src" ]]; then
+    echo "[ERROR] ${story_id} handle_plan_phase: planning.daemon-prompt.md not found at $agent_prompt_src"
+    _emit_plan_routing_record "$story_id" "$trace_id" "error" "PLAN_PHASE_FAILED" "0"
+    return 1
+  fi
+
+  prompt_file=$(mktemp "/tmp/gaai-plan-prompt-${story_id}-XXXXXX.md")
+  cat "$agent_prompt_src" > "$prompt_file"
+
+  # ── Spawn claude -p (AC1) ─────────────────────────────────────────────────
+  # Duration measurement (AC4) — bash 5+ EPOCHREALTIME (microseconds); fallback date +%s
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    t_start_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+  else
+    t_start_ms=$(( $(date +%s) * 1000 ))
+  fi
+
+  local claude_exit
+  set -o pipefail
+  GAAI_STORY_ID="$story_id" \
+  GAAI_WORKTREE_PATH="$worktree_path" \
+  GAAI_STORY_PATH="$story_path" \
+  GAAI_PLAN_PATH="$plan_path" \
+  GAAI_EPIC_PATH="$epic_path" \
+  GAAI_DELIVERY_LOG_FILE="$log_path" \
+  GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-}" \
+  GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
+    claude -p \
+      --model sonnet \
+      --max-turns 20 \
+      --output-format stream-json \
+      --verbose \
+      < "$prompt_file" 2>&1 | tee -a "$log_path"
+  claude_exit=${PIPESTATUS[0]}
+  set +o pipefail
+
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+  else
+    t_end_ms=$(( $(date +%s) * 1000 ))
+  fi
+  duration_ms=$(( t_end_ms - t_start_ms ))
+
+  rm -f "$prompt_file"
+
+  # ── Validate output (AC4 guard) ───────────────────────────────────────────
+  if [[ "$claude_exit" -ne 0 ]]; then
+    echo "[ERROR] ${story_id} handle_plan_phase: claude -p exited $claude_exit"
+    _emit_plan_routing_record "$story_id" "$trace_id" "error" "PLAN_PHASE_FAILED" "$duration_ms"
+    return 1
+  fi
+
+  if [[ ! -s "$plan_path" ]]; then
+    echo "[ERROR] ${story_id} handle_plan_phase: plan file missing or empty at $plan_path"
+    _emit_plan_routing_record "$story_id" "$trace_id" "error" "NO_ARTEFACT" "$duration_ms"
+    return 1
+  fi
+
+  if ! grep -q '^## ' "$plan_path"; then
+    echo "[ERROR] ${story_id} handle_plan_phase: plan file has no '## ' heading"
+    _emit_plan_routing_record "$story_id" "$trace_id" "error" "PARSE_ERROR" "$duration_ms"
+    return 1
+  fi
+
+  # ── Advance phase_status: not_started → planned (AC4) ────────────────────
+  if ! "$SCHEDULER" --set-phase-status "$story_id" planned "$BACKLOG_FILE" 2>/dev/null; then
+    echo "[ERROR] ${story_id} handle_plan_phase: --set-phase-status planned failed"
+    _emit_plan_routing_record "$story_id" "$trace_id" "error" "SCHEDULER_FAILURE" "$duration_ms"
+    return 1
+  fi
+
+  # ── Emit success routing record (AC4) ────────────────────────────────────
+  _emit_plan_routing_record "$story_id" "$trace_id" "primary" "null" "$duration_ms"
+
+  ts=$(date '+%H:%M:%S')
+  echo "[${ts}] ${story_id} phase=plan DONE (${duration_ms}ms)"
   return 0
 }
 
