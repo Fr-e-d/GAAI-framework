@@ -130,6 +130,7 @@ STATUS_MODE=false
 
 BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
 BACKLOG="$PROJECT_DIR/$BACKLOG_REL"
+BACKLOG_FILE="$BACKLOG"   # alias for daemon-dispatch.sh library (E134S02)
 SCHEDULER="$SCRIPT_DIR/backlog-scheduler.sh"
 LOCK_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-locks"
 LOG_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-logs"
@@ -2276,6 +2277,10 @@ if (( EXIT_WHEN_IDLE_THRESHOLD > 0 )); then
   log "${BLUE}Auto-stop enabled — daemon will exit after $EXIT_WHEN_IDLE_THRESHOLD consecutive idle polls (no ready stories + zero in-flight)${NC}"
 fi
 
+# ── Load 3-phase dispatch library (E134S02) ──────────────────────────────
+# shellcheck disable=SC1090
+source "$(dirname "$0")/daemon-dispatch.sh"
+
 # ── Main loop ─────────────────────────────────────────────────────────────
 # Counter for consecutive polls where active=0 AND no ready stories. Resets to
 # 0 whenever a delivery launches OR an in-flight delivery is observed. When it
@@ -2377,7 +2382,25 @@ while true; do
     fi
 
     increment_retry "$story_id"
-    launch_delivery "$story_id"
+
+    # ── Route: 3phase dispatch OR legacy wrapper (E134S02) ────────────────
+    _dp=$(get_delivery_pipeline "$story_id")
+    if [[ "$_dp" == "3phase" ]]; then
+      _trace_id=$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \
+        || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
+        || echo "$(date +%s)-$$-$RANDOM")
+      while true; do
+        if ! dispatch_3phase_story "$story_id" "$_trace_id"; then
+          _ps=$(get_phase_status "$story_id")
+          log "${RED}$story_id — 3phase dispatch error at phase_status='${_ps}' — story left in place for retry${NC}"
+          break
+        fi
+        _ps=$(get_phase_status "$story_id")
+        [[ "$_ps" == "done" || "$_ps" == "failed" || "$_ps" == "escalated" ]] && break
+      done
+    else
+      launch_delivery "$story_id"
+    fi
     ((launched++))
 
   done <<< "$ready_stories"
