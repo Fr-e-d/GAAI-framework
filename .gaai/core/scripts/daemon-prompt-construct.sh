@@ -5,7 +5,7 @@
 # Caller captures with: PROMPT_CONTENT=$(bash daemon-prompt-construct.sh)
 #
 # Required env vars:
-#   GAAI_STORY_ID        — story identifier (e.g. E001S01)
+#   GAAI_STORY_ID        — story identifier
 #   GAAI_STORY_PATH      — absolute path to {id}.story.md
 #   GAAI_PLAN_PATH       — absolute path to {id}.execution-plan.md
 #   GAAI_EPIC_PATH       — absolute path to {epic_id}.epic.md (may be empty)

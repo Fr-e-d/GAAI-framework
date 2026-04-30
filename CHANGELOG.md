@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(OSS): remove example story ID from daemon-prompt-construct.sh comment
 - fix(skill): remove private project refs from generate-stories §12 rationale
 
 ## [2.22.0] - 2026-05-01
