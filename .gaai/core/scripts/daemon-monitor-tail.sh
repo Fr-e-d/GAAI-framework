@@ -80,7 +80,7 @@ parse_log() {
 
   # ── Duration (time since delivery started) ──
   local started_at duration_label=""
-  started_at=$(grep -A 5 "id: $story_id" "$BACKLOG" 2>/dev/null | grep 'started_at:' | head -1 | sed 's/.*started_at: *"//;s/".*//' || true)
+  started_at=$(grep -A 15 "id: $story_id" "$BACKLOG" 2>/dev/null | grep 'started_at:' | head -1 | sed 's/.*started_at: *"//;s/".*//' || true)
   if [[ -n "$started_at" ]]; then
     local start_epoch
     if [[ "$(uname)" == "Darwin" ]]; then

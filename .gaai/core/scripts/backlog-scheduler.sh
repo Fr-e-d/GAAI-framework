@@ -57,6 +57,10 @@ SET_STATUS_VAL=""
 SET_FIELD_ID=""
 SET_FIELD_NAME=""
 SET_FIELD_VAL=""
+SET_PHASE_STATUS_ID=""
+SET_PHASE_STATUS_VAL=""
+SET_PIPELINE_ID=""
+SET_PIPELINE_VAL=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -88,10 +92,32 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 4
       ;;
+    --set-phase-status)
+      MODE="set-phase-status"
+      SET_PHASE_STATUS_ID="${2:-}"
+      SET_PHASE_STATUS_VAL="${3:-}"
+      if [[ -z "$SET_PHASE_STATUS_ID" || -z "$SET_PHASE_STATUS_VAL" ]]; then
+        >&2 echo "Error: --set-phase-status requires <id> and <phase_status_value>"
+        >&2 echo "Usage: $0 --set-phase-status <id> <phase_status_value> <backlog-active-yaml>"
+        exit 1
+      fi
+      shift 3
+      ;;
+    --set-pipeline)
+      MODE="set-pipeline"
+      SET_PIPELINE_ID="${2:-}"
+      SET_PIPELINE_VAL="${3:-}"
+      if [[ -z "$SET_PIPELINE_ID" || -z "$SET_PIPELINE_VAL" ]]; then
+        >&2 echo "Error: --set-pipeline requires <id> and <legacy|3phase>"
+        >&2 echo "Usage: $0 --set-pipeline <id> <legacy|3phase> <backlog-active-yaml>"
+        exit 1
+      fi
+      shift 3
+      ;;
     --stdin)      FROM_STDIN=true;   shift ;;
     -*)
       >&2 echo "Unknown option: $1"
-      >&2 echo "Usage: $0 [--next|--list|--ready-ids|--graph|--conflicts|--set-status <id> <status>|--set-field <id> <field> <value>] [--stdin] [<backlog-active-yaml>]"
+      >&2 echo "Usage: $0 [--next|--list|--ready-ids|--graph|--conflicts|--set-status <id> <status>|--set-field <id> <field> <value>|--set-phase-status <id> <phase_status_value>|--set-pipeline <id> <legacy|3phase>] [--stdin] [<backlog-active-yaml>]"
       exit 1
       ;;
     *)
@@ -102,8 +128,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validate inputs ──────────────────────────────────────────
-if [[ "$MODE" == "set-status" || "$MODE" == "set-field" ]]; then
-  # set-status/set-field always operate on a file (not stdin)
+if [[ "$MODE" == "set-status" || "$MODE" == "set-field" || \
+      "$MODE" == "set-phase-status" || "$MODE" == "set-pipeline" ]]; then
+  # These modes always operate on a file (not stdin)
   if [[ -z "$BACKLOG_FILE" ]]; then
     >&2 echo "Error: --$MODE requires a backlog file path"
     >&2 echo "Usage: $0 --$MODE ... <backlog-active-yaml>"
@@ -166,6 +193,119 @@ with open(file_path, 'w') as f:
 
 print(f'{target_id} -> {new_status}')
 " "$BACKLOG_FILE" "$SET_STATUS_ID" "$SET_STATUS_VAL"
+  exit $?
+fi
+
+# ── set-phase-status mode ────────────────────────────────────
+if [[ "$MODE" == "set-phase-status" ]]; then
+  python3 -c "
+import sys, re
+
+VALID = {'not_started','planned','implemented','qa_passed','done',
+         'failed','escalated','deferred','cancelled','superseded'}
+
+file_path, target_id, new_value = sys.argv[1], sys.argv[2], sys.argv[3]
+
+if new_value not in VALID:
+    print(f'Error: invalid phase_status value: {new_value}', file=sys.stderr)
+    print(f'Valid values: {sorted(VALID)}', file=sys.stderr)
+    sys.exit(1)
+
+with open(file_path, 'r') as f:
+    lines = f.readlines()
+
+in_target = False
+modified = False
+
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    if re.match(r'-\s+id:\s+' + re.escape(target_id) + r'\s*$', stripped):
+        in_target = True
+        continue
+    if in_target:
+        if re.match(r'-\s+id:\s+', stripped):
+            break
+        m = re.match(r'^(\s+phase_status:\s+)\S+', line)
+        if m:
+            lines[i] = m.group(1) + new_value + '\n'
+            modified = True
+            break
+
+if not modified:
+    print(f'Error: phase_status field not found for {target_id}', file=sys.stderr)
+    sys.exit(1)
+
+with open(file_path, 'w') as f:
+    f.writelines(lines)
+
+# Validate YAML after write
+try:
+    import yaml as _yaml
+    with open(file_path) as _f:
+        _yaml.safe_load(_f)
+except ImportError:
+    pass  # pyyaml not available — skip inline validation
+except Exception as e:
+    print(f'Warning: YAML validation after write: {e}', file=sys.stderr)
+
+print(f'{target_id} phase_status -> {new_value}')
+" "$BACKLOG_FILE" "$SET_PHASE_STATUS_ID" "$SET_PHASE_STATUS_VAL"
+  exit $?
+fi
+
+# ── set-pipeline mode ─────────────────────────────────────────
+if [[ "$MODE" == "set-pipeline" ]]; then
+  python3 -c "
+import sys, re
+
+VALID = {'legacy', '3phase'}
+
+file_path, target_id, new_value = sys.argv[1], sys.argv[2], sys.argv[3]
+
+if new_value not in VALID:
+    print(f'Error: invalid delivery_pipeline value: {new_value}', file=sys.stderr)
+    print(f'Valid values: {sorted(VALID)}', file=sys.stderr)
+    sys.exit(1)
+
+with open(file_path, 'r') as f:
+    lines = f.readlines()
+
+in_target = False
+modified = False
+
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    if re.match(r'-\s+id:\s+' + re.escape(target_id) + r'\s*$', stripped):
+        in_target = True
+        continue
+    if in_target:
+        if re.match(r'-\s+id:\s+', stripped):
+            break
+        m = re.match(r'^(\s+delivery_pipeline:\s+)\S+', line)
+        if m:
+            lines[i] = m.group(1) + new_value + '\n'
+            modified = True
+            break
+
+if not modified:
+    print(f'Error: delivery_pipeline field not found for {target_id}', file=sys.stderr)
+    sys.exit(1)
+
+with open(file_path, 'w') as f:
+    f.writelines(lines)
+
+# Validate YAML after write
+try:
+    import yaml as _yaml
+    with open(file_path) as _f:
+        _yaml.safe_load(_f)
+except ImportError:
+    pass  # pyyaml not available — skip inline validation
+except Exception as e:
+    print(f'Warning: YAML validation after write: {e}', file=sys.stderr)
+
+print(f'{target_id} pipeline -> {new_value}')
+" "$BACKLOG_FILE" "$SET_PIPELINE_ID" "$SET_PIPELINE_VAL"
   exit $?
 fi
 
