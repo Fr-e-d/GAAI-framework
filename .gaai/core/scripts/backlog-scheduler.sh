@@ -310,15 +310,27 @@ mode = sys.argv[1]
 archived_done_ids_raw = sys.argv[2] if len(sys.argv) > 2 else ""
 content = sys.stdin.read()
 
-# -- YAML block parser --
+# -- YAML block parser (indent-aware) --
+# Item starts: "- id:" at the top-level item indent (locked from the first item seen).
+# Item fields: keys at exactly item_indent + 2. Anything deeper (nested objects like
+# `supersession_analysis: { ... status: ... }`) is ignored — without this guard,
+# nested `status:`/`title:`/`priority:` keys silently overwrite the parent item's fields.
 items = []
-current = {}
+current = None
+item_indent = -1
+field_indent = -1
 in_depends = False
 
+def _line_indent(s):
+    return len(s) - len(s.lstrip(' '))
+
 for line in content.splitlines():
+    if not line.strip() or line.lstrip().startswith("#"):
+        continue
+    indent = _line_indent(line)
     stripped = line.strip()
 
-    if stripped.startswith("- id:"):
+    if stripped.startswith("- id:") and (item_indent == -1 or indent == item_indent):
         if current:
             items.append(current)
         current = {
@@ -329,37 +341,47 @@ for line in content.splitlines():
             "complexity": 1,
             "depends_on": [],
         }
+        item_indent = indent
+        field_indent = indent + 2
         in_depends = False
+        continue
 
-    elif current:
-        if stripped.startswith("title:"):
-            current["title"] = stripped.split(":", 1)[1].strip().strip("\"'")
-        elif stripped.startswith("status:"):
-            current["status"] = stripped.split(":", 1)[1].strip().strip('"\'')
+    if current is None or indent != field_indent:
+        # Either before the first item, or nested deeper than item fields.
+        # Reset depends-list mode so nested "- " entries don't leak into depends_on.
+        if indent < field_indent:
             in_depends = False
-        elif stripped.startswith("priority:"):
-            current["priority"] = stripped.split(":", 1)[1].strip()
+        continue
+
+    if stripped.startswith("title:"):
+        current["title"] = stripped.split(":", 1)[1].strip().strip("\"'")
+        in_depends = False
+    elif stripped.startswith("status:"):
+        current["status"] = stripped.split(":", 1)[1].strip().strip('"\'')
+        in_depends = False
+    elif stripped.startswith("priority:"):
+        current["priority"] = stripped.split(":", 1)[1].strip()
+        in_depends = False
+    elif stripped.startswith("complexity:"):
+        try:
+            current["complexity"] = int(stripped.split(":", 1)[1].strip())
+        except ValueError:
+            pass
+        in_depends = False
+    elif stripped.startswith("depends_on:") or stripped.startswith("dependencies:"):
+        val = stripped.split(":", 1)[1].strip()
+        if val and val not in ("[]", ""):
+            ids = re.findall(r"[\w-]+", val)
+            current["depends_on"].extend(ids)
             in_depends = False
-        elif stripped.startswith("complexity:"):
-            try:
-                current["complexity"] = int(stripped.split(":", 1)[1].strip())
-            except ValueError:
-                pass
-            in_depends = False
-        elif stripped.startswith("depends_on:") or stripped.startswith("dependencies:"):
-            val = stripped.split(":", 1)[1].strip()
-            if val and val not in ("[]", ""):
-                ids = re.findall(r"[\w-]+", val)
-                current["depends_on"].extend(ids)
-                in_depends = False
-            else:
-                in_depends = True
-        elif in_depends and stripped.startswith("- "):
-            dep = stripped[2:].strip()
-            if dep:
-                current["depends_on"].append(dep)
-        elif stripped and not stripped.startswith("#") and not stripped.startswith("- "):
-            in_depends = False
+        else:
+            in_depends = True
+    elif in_depends and stripped.startswith("- "):
+        dep = stripped[2:].strip()
+        if dep:
+            current["depends_on"].append(dep)
+    elif not stripped.startswith("- "):
+        in_depends = False
 
 if current:
     items.append(current)
