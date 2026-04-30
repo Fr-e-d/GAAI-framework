@@ -201,7 +201,22 @@ filtered_questions = valid_questions.filter(q => {
   return true
 })
 
-# Enforce ≤5 cap (AC4, AC2)
+# E107bS04: Sort by severity desc → topic_importance desc → topic alphabetical asc
+# BEFORE applying the cap, so the top-5 are deterministic.
+TOPIC_IMPORTANCE_ORDER = {project_type: 3, architecture: 2, naming: 1}  # others: 0
+
+has_tie = any two questions share the same severity
+filtered_questions = filtered_questions.sort((a, b) => {
+  severity_diff = b.severity - a.severity
+  if severity_diff != 0: return severity_diff
+  importance_diff = (TOPIC_IMPORTANCE_ORDER[b.topic] ?? 0) - (TOPIC_IMPORTANCE_ORDER[a.topic] ?? 0)
+  if importance_diff != 0: return importance_diff
+  return a.topic.localeCompare(b.topic)
+})
+if has_tie:
+  log: "[smart-question-generator] severity tie-break applied: topic_importance (project_type>architecture>naming>others) then alphabetical"
+
+# Enforce ≤5 cap (AC4, AC2) — applied after sort so top-5 are highest-severity
 if filtered_questions.length > 5:
   log: "[smart-question-generator] WARNING: LLM returned {valid_questions.length} questions — capped at 5"
   filtered_questions = filtered_questions[0:5]
