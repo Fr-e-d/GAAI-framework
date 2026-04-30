@@ -234,20 +234,143 @@ handle_impl_phase() {
   local story_id="$1" trace_id="$2"
   local ts
   ts=$(date '+%H:%M:%S')
-  echo "[${ts}] ${story_id} phase=impl dispatched (stub)"
+  echo "[${ts}] ${story_id} phase=impl starting"
 
-  # Emit routing record (AC4)
-  _emit_routing_record "$story_id" "$trace_id" "impl" "stub" ""
+  # ── Resolve worktree path (GAAI_WORKTREES_BASE override or default formula) ──
+  local worktree_path
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    worktree_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
+  else
+    local repo_name
+    repo_name=$(basename "$PROJECT_DIR")
+    worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
+  fi
 
-  # Advance phase_status: planned → implemented (AC3)
-  if ! "$SCHEDULER" --set-phase-status "$story_id" implemented "$BACKLOG_FILE" 2>/dev/null; then
-    echo "[ERROR] ${story_id} handle_impl_phase: --set-phase-status implemented failed"
-    _emit_routing_record "$story_id" "$trace_id" "impl" "error" "set-phase-status-failed"
+  # ── Resolve artefact paths ────────────────────────────────────────────────
+  local story_path plan_path impl_report_path log_path
+  story_path="${worktree_path}/.gaai/project/contexts/artefacts/stories/${story_id}.story.md"
+  plan_path="${worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
+  impl_report_path="${worktree_path}/.gaai/project/contexts/artefacts/impl-reports/${story_id}.impl-report.md"
+  log_path="${worktree_path}/.delivery-logs/${story_id}.impl.log"
+
+  # ── Validate required files ───────────────────────────────────────────────
+  if [[ ! -f "$story_path" ]]; then
+    echo "[ERROR] ${story_id} handle_impl_phase: story file not found: $story_path"
+    return 1
+  fi
+  if [[ ! -f "$plan_path" ]]; then
+    echo "[ERROR] ${story_id} handle_impl_phase: plan file not found: $plan_path"
     return 1
   fi
 
-  sleep "${GAAI_STUB_DELAY_S:-0}"
-  return 0
+  # ── Build impl prompt via daemon-prompt-construct.sh ─────────────────────
+  local prompt_construct_script
+  prompt_construct_script="${PROJECT_DIR}/.gaai/core/scripts/daemon-prompt-construct.sh"
+  if [[ ! -f "$prompt_construct_script" ]]; then
+    echo "[ERROR] ${story_id} handle_impl_phase: daemon-prompt-construct.sh not found"
+    return 1
+  fi
+
+  local epic_id epic_path
+  epic_id=$(grep -m1 '^epic:' "$story_path" 2>/dev/null | sed 's/^epic:[[:space:]]*//' | tr -d '"' || true)
+  if [[ -n "$epic_id" ]]; then
+    epic_path="${worktree_path}/.gaai/project/contexts/artefacts/epics/${epic_id}.epic.md"
+  else
+    epic_path=""
+  fi
+
+  local prompt_content
+  if ! prompt_content=$(
+    GAAI_STORY_ID="$story_id" \
+    GAAI_STORY_PATH="$story_path" \
+    GAAI_PLAN_PATH="$plan_path" \
+    GAAI_EPIC_PATH="${epic_path:-}" \
+    GAAI_WORKSPACE_PATH="$worktree_path" \
+    SECONDARY_ROUTE="${SECONDARY_ROUTE:-false}" \
+    PROJECT_DIR="$PROJECT_DIR" \
+    bash "$prompt_construct_script" 2>/dev/null
+  ); then
+    echo "[ERROR] ${story_id} handle_impl_phase: daemon-prompt-construct.sh failed"
+    return 1
+  fi
+
+  # ── Ensure output dirs exist ──────────────────────────────────────────────
+  mkdir -p "$(dirname "$impl_report_path")"
+  mkdir -p "$(dirname "$log_path")"
+
+  # ── Write prompt to temp file ─────────────────────────────────────────────
+  local prompt_file
+  prompt_file=$(mktemp "/tmp/gaai-impl-prompt-${story_id}-XXXXXX.md")
+  printf '%s' "$prompt_content" > "$prompt_file"
+
+  # ── Get impl_model_tag from backlog ───────────────────────────────────────
+  local impl_tag
+  impl_tag=$(get_impl_model_tag "$story_id")
+
+  # ── Invoke nested-claude-spawn.js flag-CLI (AC1 — always exits 0) ────────
+  local spawn_script
+  spawn_script="${PROJECT_DIR}/.gaai/core/adapters/claude-code/nested-claude-spawn.js"
+
+  local spawn_output
+  spawn_output=$(
+    GAAI_STORY_ID="$story_id" \
+    GAAI_WORKTREE_PATH="$worktree_path" \
+    GAAI_EPIC_PATH="${epic_path:-}" \
+    GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-}" \
+    GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
+      node "$spawn_script" \
+        --story-id       "$story_id" \
+        --report-path    "$impl_report_path" \
+        --prompt-file    "$prompt_file" \
+        --impl-model-tag "$impl_tag" \
+        --log-file       "$log_path" \
+        2>>"$log_path" || true
+  )
+
+  rm -f "$prompt_file"
+
+  # ── Parse JSON result — nested-claude-spawn.js emits log lines then multi-line JSON ──
+  local parsed_json
+  parsed_json=$(printf '%s\n' "$spawn_output" | python3 -c "
+import sys, json
+data = sys.stdin.read()
+d = None
+# Primary: find last JSON block starting on its own line (JSON.stringify output)
+idx = data.rfind('\n{')
+if idx >= 0:
+    try: d = json.loads(data[idx + 1:])
+    except Exception: pass
+# Fallback: single-line JSON (legacy compact format)
+if d is None:
+    for l in reversed(data.splitlines()):
+        l = l.strip()
+        if not l: continue
+        try: d = json.loads(l); break
+        except Exception: continue
+if d is not None:
+    print(str(d.get('success', False)) + '|' + str(d.get('error_reason') or 'null'))
+" 2>/dev/null || echo "False|PARSE_ERROR")
+
+  local result_success="${parsed_json%%|*}"
+  local result_error="${parsed_json#*|}"
+
+  # ── JSON-driven outcome dispatch (AC4 — daemon does NOT duplicate-emit routing record) ──
+  if [[ "$result_success" == "True" ]] && [[ -s "$impl_report_path" ]]; then
+    if ! "$SCHEDULER" --set-phase-status "$story_id" implemented "$BACKLOG_FILE" 2>/dev/null; then
+      echo "[ERROR] ${story_id} handle_impl_phase: --set-phase-status implemented failed"
+      return 1
+    fi
+    ts=$(date '+%H:%M:%S')
+    echo "[${ts}] ${story_id} phase=impl DONE"
+    return 0
+  else
+    if [[ "$result_success" != "True" ]]; then
+      echo "[ERROR] ${story_id} handle_impl_phase: impl failed: ${result_error}"
+    else
+      echo "[ERROR] ${story_id} handle_impl_phase: impl-report.md missing or empty at $impl_report_path"
+    fi
+    return 1
+  fi
 }
 
 handle_qa_phase() {

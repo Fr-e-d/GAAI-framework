@@ -120,6 +120,47 @@ fi
 exit 0
 DISPATCH_SHIM_EOF
 chmod +x "$DISPATCH_SHIM_DIR/claude"
+
+# ── Impl-phase fixture worktrees for T5 and T7 ───────────────────────────────
+# handle_impl_phase resolves worktrees as: $GAAI_WORKTREES_BASE/{story_id}-workspace
+export GAAI_WORKTREES_BASE="$DISPATCH_FIXTURE_DIR"
+
+for _impl_id in E134S01 TST-3PHASE-PLANNED; do
+  _wt="$DISPATCH_FIXTURE_DIR/${_impl_id}-workspace"
+  mkdir -p "$_wt/.gaai/project/contexts/artefacts/stories"
+  mkdir -p "$_wt/.gaai/project/contexts/artefacts/plans"
+  mkdir -p "$_wt/.gaai/project/contexts/artefacts/impl-reports"
+  mkdir -p "$_wt/.delivery-logs"
+  cat > "$_wt/.gaai/project/contexts/artefacts/stories/${_impl_id}.story.md" << IMPL_STORY_EOF
+---
+type: artefact
+artefact_type: story
+id: ${_impl_id}
+related_decs: []
+---
+## Acceptance Criteria
+- [ ] AC1: test
+IMPL_STORY_EOF
+  printf '## Implementation Sequence\nStep 1.\n' \
+    > "$_wt/.gaai/project/contexts/artefacts/plans/${_impl_id}.execution-plan.md"
+done
+unset _impl_id _wt
+
+# ── node shim: redirects nested-claude-spawn.js to impl-spawn-stub.mjs ──────
+# This exercises the real runImpl() routing via _setSpawnFn (AC6.a requirement).
+DISPATCH_REAL_NODE="$(command -v node)"
+IMPL_SPAWN_STUB_PATH="$SCRIPT_DIR/helpers/impl-spawn-stub.mjs"
+export DISPATCH_REAL_NODE IMPL_SPAWN_STUB_PATH
+
+cat > "$DISPATCH_SHIM_DIR/node" << 'NODE_SHIM_EOF'
+#!/usr/bin/env bash
+if [[ "$1" == *nested-claude-spawn.js* ]]; then
+  exec "$DISPATCH_REAL_NODE" "$IMPL_SPAWN_STUB_PATH" "${@:2}" --stub-success true
+fi
+exec "$DISPATCH_REAL_NODE" "$@"
+NODE_SHIM_EOF
+chmod +x "$DISPATCH_SHIM_DIR/node"
+
 export GAAI_WORKTREE_PATH="$DISPATCH_FIXTURE_DIR"
 export CLAUDE_MODEL_PRIMARY="claude-sonnet-4-6"
 DISPATCH_OLD_PATH="$PATH"
@@ -157,12 +198,15 @@ if dispatch_3phase_story "TST-3PHASE-PLANNED" "$TRACE"; then
   else
     fail "T5a: expected 'implemented', got '$new_ps'"
   fi
-  if grep -q '"phase":"impl"' "$ROUTING_LOG" 2>/dev/null && \
-     grep -q '"provider":"stub"' "$ROUTING_LOG" 2>/dev/null; then
-    pass "T5b: routing.jsonl has impl+stub record"
+  # Routing record for impl is emitted internally by runImpl (AC4 — no daemon duplicate-emit).
+  # Verify the impl-report.md was written at the canonical worktree path instead.
+  _t5_report="$DISPATCH_FIXTURE_DIR/TST-3PHASE-PLANNED-workspace/.gaai/project/contexts/artefacts/impl-reports/TST-3PHASE-PLANNED.impl-report.md"
+  if [[ -f "$_t5_report" ]]; then
+    pass "T5b: impl-report.md written at canonical worktree path"
   else
-    fail "T5b: routing.jsonl missing expected impl+stub fields"
+    fail "T5b: impl-report.md missing at $_t5_report"
   fi
+  unset _t5_report
 else
   fail "T5: dispatch_3phase_story returned non-zero for planned story"
 fi
@@ -206,13 +250,16 @@ dispatch_3phase_story "E134S01" "$TRACE" 2>/dev/null || true
 ps=$(get_phase_status "E134S01")
 [[ "$ps" == "done" ]] && pass "T7c: qa_passed→done" || fail "T7c: expected done, got '$ps'"
 
-record_count=$(grep -c '"provider":"stub"' "$ROUTING_LOG" 2>/dev/null || true)
-record_count=${record_count:-0}
-if [[ "$record_count" -ge 3 ]]; then
-  pass "T7d: routing.jsonl has $record_count stub records (>=3 expected — impl+qa+commit)"
+# impl routing record is emitted internally by runImpl to DEFAULT_LOG_PATH (AC4 — no daemon dup).
+# qa and commit stubs emit to ROUTING_LOG via _emit_routing_record.
+_t7_qa=$(grep -c '"phase":"qa"' "$ROUTING_LOG" 2>/dev/null || true)
+_t7_commit=$(grep -c '"phase":"commit"' "$ROUTING_LOG" 2>/dev/null || true)
+if [[ "${_t7_qa:-0}" -ge 1 && "${_t7_commit:-0}" -ge 1 ]]; then
+  pass "T7d: routing.jsonl has qa+commit phase records (impl recorded internally by runImpl)"
 else
-  fail "T7d: expected >=3 stub records, found $record_count"
+  fail "T7d: expected qa+commit records, got qa=${_t7_qa:-0} commit=${_t7_commit:-0}"
 fi
+unset _t7_qa _t7_commit
 
 # ── T8: dispatch on terminal state (done) returns 0 without crashing ──────
 echo "T8: dispatch on done state returns 0"
@@ -225,7 +272,8 @@ fi
 
 # Cleanup T4-T8 dispatch fixtures
 export PATH="$DISPATCH_OLD_PATH"
-unset GAAI_WORKTREE_PATH CLAUDE_MODEL_PRIMARY DISPATCH_FIXTURE_DIR DISPATCH_SHIM_DIR DISPATCH_OLD_PATH
+unset GAAI_WORKTREE_PATH CLAUDE_MODEL_PRIMARY GAAI_WORKTREES_BASE
+unset DISPATCH_REAL_NODE IMPL_SPAWN_STUB_PATH DISPATCH_FIXTURE_DIR DISPATCH_SHIM_DIR DISPATCH_OLD_PATH
 rm -rf "/tmp/gaai-dispatch-tests-$$"
 
 # ── T9-T14: handle_plan_phase real spawn tests ────────────────
@@ -470,6 +518,305 @@ export PROJECT_DIR="$PROJECT_DIR_ORIG"
 
 # Cleanup plan phase test fixtures
 rm -rf "$PLAN_FIXTURE_DIR"
+
+# ── T15-T21: handle_impl_phase real spawn tests ───────────────
+# These tests exercise handle_impl_phase directly using a node shim that
+# redirects nested-claude-spawn.js to impl-spawn-stub.mjs (_setSpawnFn seam),
+# exercising the real runImpl() routing logic per AC6.a.
+
+IMPL_FIXTURE_DIR="/tmp/gaai-impl-phase-tests-$$"
+rm -rf "$IMPL_FIXTURE_DIR"
+mkdir -p "$IMPL_FIXTURE_DIR"
+
+IMPL_STORY_ID="TST-IMPL-01"
+IMPL_WORKTREE="$IMPL_FIXTURE_DIR/${IMPL_STORY_ID}-workspace"
+mkdir -p "$IMPL_WORKTREE/.gaai/project/contexts/artefacts/stories"
+mkdir -p "$IMPL_WORKTREE/.gaai/project/contexts/artefacts/plans"
+mkdir -p "$IMPL_WORKTREE/.gaai/project/contexts/artefacts/impl-reports"
+mkdir -p "$IMPL_WORKTREE/.delivery-logs"
+
+IMPL_STORY_PATH="$IMPL_WORKTREE/.gaai/project/contexts/artefacts/stories/${IMPL_STORY_ID}.story.md"
+IMPL_PLAN_PATH="$IMPL_WORKTREE/.gaai/project/contexts/artefacts/plans/${IMPL_STORY_ID}.execution-plan.md"
+IMPL_REPORT_PATH="$IMPL_WORKTREE/.gaai/project/contexts/artefacts/impl-reports/${IMPL_STORY_ID}.impl-report.md"
+
+cat > "$IMPL_STORY_PATH" << 'IMPL_STORY_EOF'
+---
+type: artefact
+artefact_type: story
+id: TST-IMPL-01
+related_decs: [DEC-88]
+---
+## Acceptance Criteria
+- [ ] AC1: test impl phase
+IMPL_STORY_EOF
+
+printf '## Implementation Sequence\nStep 1: do the thing.\n' > "$IMPL_PLAN_PATH"
+
+# Add TST-IMPL-01 to fixture YAML with phase_status: planned
+cat >> "$FIXTURE" << 'YAML_IMPL'
+- id: TST-IMPL-01
+  status: in_progress
+  phase_status: planned
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_IMPL
+
+# node shim dir for T15-T21 (separate from T4-T8 shim)
+IMPL_SHIM_DIR="$IMPL_FIXTURE_DIR/shims"
+mkdir -p "$IMPL_SHIM_DIR"
+
+IMPL_REAL_NODE="$(command -v node)"
+IMPL_SPAWN_STUB="$SCRIPT_DIR/helpers/impl-spawn-stub.mjs"
+export IMPL_REAL_NODE IMPL_SPAWN_STUB
+
+# claude stub: findCLI() inside nested-claude-spawn.js must find a 'claude' binary.
+# _setSpawnFn intercepts the actual spawn so this stub is never really executed.
+cat > "$IMPL_SHIM_DIR/claude" << 'IMPL_CLAUDE_STUB'
+#!/usr/bin/env bash
+exit 1
+IMPL_CLAUDE_STUB
+chmod +x "$IMPL_SHIM_DIR/claude"
+
+make_impl_node_shim_success() {
+  cat > "$IMPL_SHIM_DIR/node" << 'IMPL_NODE_SUCCESS_EOF'
+#!/usr/bin/env bash
+if [[ "$1" == *nested-claude-spawn.js* ]]; then
+  exec "$IMPL_REAL_NODE" "$IMPL_SPAWN_STUB" "${@:2}" --stub-success true
+fi
+exec "$IMPL_REAL_NODE" "$@"
+IMPL_NODE_SUCCESS_EOF
+  chmod +x "$IMPL_SHIM_DIR/node"
+}
+
+make_impl_node_shim_failure() {
+  cat > "$IMPL_SHIM_DIR/node" << 'IMPL_NODE_FAIL_EOF'
+#!/usr/bin/env bash
+if [[ "$1" == *nested-claude-spawn.js* ]]; then
+  exec "$IMPL_REAL_NODE" "$IMPL_SPAWN_STUB" "${@:2}" --stub-success false --stub-error-reason FALLBACK_EXHAUSTED
+fi
+exec "$IMPL_REAL_NODE" "$@"
+IMPL_NODE_FAIL_EOF
+  chmod +x "$IMPL_SHIM_DIR/node"
+}
+
+IMPL_OLD_PATH="$PATH"
+export PATH="$IMPL_SHIM_DIR:$PATH"
+export GAAI_WORKTREES_BASE="$IMPL_FIXTURE_DIR"
+export PROJECT_DIR_IMPL_ORIG="$PROJECT_DIR"
+
+# ── T15: handle_impl_phase success path ──────────────────────
+echo "T15: handle_impl_phase — success path (real runImpl via _setSpawnFn)"
+make_impl_node_shim_success
+"$SCHEDULER" --set-phase-status "$IMPL_STORY_ID" planned "$FIXTURE" 2>/dev/null || true
+rm -f "$IMPL_REPORT_PATH"
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-015"
+
+if handle_impl_phase "$IMPL_STORY_ID" "$TRACE" 2>/dev/null; then
+  pass "T15a: handle_impl_phase returns 0 on success"
+  new_ps=$(get_phase_status "$IMPL_STORY_ID")
+  if [[ "$new_ps" == "implemented" ]]; then
+    pass "T15b: phase_status advanced to 'implemented'"
+  else
+    fail "T15b: expected 'implemented', got '$new_ps'"
+  fi
+  if [[ -f "$IMPL_REPORT_PATH" ]]; then
+    pass "T15c: impl-report.md written at canonical path"
+  else
+    fail "T15c: impl-report.md missing at $IMPL_REPORT_PATH"
+  fi
+else
+  fail "T15a: handle_impl_phase returned non-zero"
+  fail "T15b: (skipped — T15a failed)"
+  fail "T15c: (skipped — T15a failed)"
+fi
+
+# ── T16: impl-spawn-stub.mjs exercises real runImpl routing (AC6.a) ──
+echo "T16: impl-spawn-stub.mjs — real runImpl routing with _setSpawnFn (primary path)"
+IMPL_STUB_REPORT="$IMPL_FIXTURE_DIR/stub-direct-report.md"
+rm -f "$IMPL_STUB_REPORT"
+STUB_PROMPT_FILE=$(mktemp /tmp/gaai-test-prompt-XXXXXX.md)
+printf '=== STORY: TST-IMPL-01 ===\nTest story content.\n=== EXECUTION PLAN ===\nStep 1.\n' > "$STUB_PROMPT_FILE"
+
+STUB_RESULT=$(
+  "$IMPL_REAL_NODE" "$IMPL_SPAWN_STUB" \
+    --story-id "$IMPL_STORY_ID" \
+    --report-path "$IMPL_STUB_REPORT" \
+    --prompt-file "$STUB_PROMPT_FILE" \
+    --impl-model-tag primary \
+    --stub-success true \
+    2>/dev/null || echo '{"success":false}'
+)
+rm -f "$STUB_PROMPT_FILE"
+
+STUB_SUCCESS=$(printf '%s\n' "$STUB_RESULT" | python3 -c "
+import sys, json
+data = sys.stdin.read()
+d = None
+idx = data.rfind('\n{')
+if idx >= 0:
+    try: d = json.loads(data[idx + 1:])
+    except Exception: pass
+if d is None:
+    for l in reversed(data.splitlines()):
+        l = l.strip()
+        if not l: continue
+        try: d = json.loads(l); break
+        except Exception: continue
+print(d.get('success', False) if d is not None else False)
+" 2>/dev/null || echo "False")
+
+if [[ "$STUB_SUCCESS" == "True" ]]; then
+  pass "T16a: impl-spawn-stub.mjs reports success:true (runImpl primary path)"
+else
+  fail "T16a: impl-spawn-stub.mjs did not report success:true — result: $(printf '%s\n' "$STUB_RESULT" | tail -5)"
+fi
+if [[ -f "$IMPL_STUB_REPORT" ]]; then
+  pass "T16b: impl-spawn-stub.mjs wrote impl-report.md"
+else
+  fail "T16b: impl-report.md not written by stub at $IMPL_STUB_REPORT"
+fi
+rm -f "$IMPL_STUB_REPORT"
+
+# ── T17: story file missing → error path ─────────────────────
+echo "T17: handle_impl_phase — story file missing → non-zero, no phase advance"
+"$SCHEDULER" --set-phase-status "$IMPL_STORY_ID" planned "$FIXTURE" 2>/dev/null || true
+mv "$IMPL_STORY_PATH" "${IMPL_STORY_PATH}.bak"
+TRACE="test-trace-$(date +%s)-017"
+
+if handle_impl_phase "$IMPL_STORY_ID" "$TRACE" 2>/dev/null; then
+  fail "T17a: expected non-zero when story file missing, got 0"
+  fail "T17b: (skipped)"
+else
+  pass "T17a: handle_impl_phase returns non-zero when story file missing"
+  new_ps=$(get_phase_status "$IMPL_STORY_ID")
+  if [[ "$new_ps" == "planned" ]]; then
+    pass "T17b: phase_status unchanged (planned) after missing-story error"
+  else
+    fail "T17b: expected 'planned', got '$new_ps'"
+  fi
+fi
+mv "${IMPL_STORY_PATH}.bak" "$IMPL_STORY_PATH"
+
+# ── T18: plan file missing → error path ──────────────────────
+echo "T18: handle_impl_phase — plan file missing → non-zero, no phase advance"
+"$SCHEDULER" --set-phase-status "$IMPL_STORY_ID" planned "$FIXTURE" 2>/dev/null || true
+mv "$IMPL_PLAN_PATH" "${IMPL_PLAN_PATH}.bak"
+TRACE="test-trace-$(date +%s)-018"
+
+if handle_impl_phase "$IMPL_STORY_ID" "$TRACE" 2>/dev/null; then
+  fail "T18a: expected non-zero when plan file missing, got 0"
+  fail "T18b: (skipped)"
+else
+  pass "T18a: handle_impl_phase returns non-zero when plan file missing"
+  new_ps=$(get_phase_status "$IMPL_STORY_ID")
+  if [[ "$new_ps" == "planned" ]]; then
+    pass "T18b: phase_status unchanged (planned) after missing-plan error"
+  else
+    fail "T18b: expected 'planned', got '$new_ps'"
+  fi
+fi
+mv "${IMPL_PLAN_PATH}.bak" "$IMPL_PLAN_PATH"
+
+# ── T19: stub returns failure JSON → no phase advance (AC6.e) ──
+echo "T19: handle_impl_phase — stub returns success:false → no advance, error logged"
+make_impl_node_shim_failure
+"$SCHEDULER" --set-phase-status "$IMPL_STORY_ID" planned "$FIXTURE" 2>/dev/null || true
+rm -f "$IMPL_REPORT_PATH"
+TRACE="test-trace-$(date +%s)-019"
+
+T19_OUTPUT=$(handle_impl_phase "$IMPL_STORY_ID" "$TRACE" 2>&1 || true)
+
+new_ps=$(get_phase_status "$IMPL_STORY_ID")
+if [[ "$new_ps" == "planned" ]]; then
+  pass "T19a: phase_status unchanged (planned) when impl fails"
+else
+  fail "T19a: expected 'planned', got '$new_ps'"
+fi
+if echo "$T19_OUTPUT" | grep -q '\[ERROR\]'; then
+  pass "T19b: [ERROR] line logged on impl failure"
+else
+  fail "T19b: expected [ERROR] line in output — got: $(echo "$T19_OUTPUT" | head -3)"
+fi
+
+# ── T20: DEC-72 primary routing confirmed via impl-spawn-stub (AC6.d) ──
+echo "T20: DEC-72 primary routing — impl-spawn-stub with primary tag outputs success"
+make_impl_node_shim_success
+STUB_PROMPT_FILE_T20=$(mktemp /tmp/gaai-test-prompt-XXXXXX.md)
+printf '=== STORY: TST-IMPL-01 ===\nTest.\n=== EXECUTION PLAN ===\nStep 1.\n' > "$STUB_PROMPT_FILE_T20"
+STUB_REPORT_T20="$IMPL_FIXTURE_DIR/t20-report.md"
+
+T20_RESULT=$(
+  "$IMPL_REAL_NODE" "$IMPL_SPAWN_STUB" \
+    --story-id "$IMPL_STORY_ID" \
+    --report-path "$STUB_REPORT_T20" \
+    --prompt-file "$STUB_PROMPT_FILE_T20" \
+    --impl-model-tag primary \
+    --stub-success true \
+    2>/dev/null || echo '{"success":false}'
+)
+rm -f "$STUB_PROMPT_FILE_T20" "$STUB_REPORT_T20"
+
+T20_SUCCESS=$(printf '%s\n' "$T20_RESULT" | python3 -c "
+import sys, json
+data = sys.stdin.read()
+d = None
+idx = data.rfind('\n{')
+if idx >= 0:
+    try: d = json.loads(data[idx + 1:])
+    except Exception: pass
+if d is None:
+    for l in reversed(data.splitlines()):
+        l = l.strip()
+        if not l: continue
+        try: d = json.loads(l); break
+        except Exception: continue
+print(d.get('success', False) if d is not None else False)
+" 2>/dev/null || echo "False")
+
+if [[ "$T20_SUCCESS" == "True" ]]; then
+  pass "T20: DEC-72 primary routing — runImpl(primary) reports success:true"
+else
+  fail "T20: expected success:true for primary routing, got: $(printf '%s\n' "$T20_RESULT" | tail -3)"
+fi
+
+# ── T21: daemon-prompt-construct.sh preamble when SECONDARY_ROUTE=true (AC6.b) ──
+echo "T21: daemon-prompt-construct.sh — SECONDARY_ROUTE=true emits R1-R6 preamble"
+GOLDEN_FIXTURE="$SCRIPT_DIR/fixtures/E134S04-prompt-preamble.golden.md"
+if [[ ! -f "$GOLDEN_FIXTURE" ]]; then
+  fail "T21: golden fixture missing at $GOLDEN_FIXTURE"
+else
+  PROMPT_CONSTRUCT="$SCRIPT_DIR/../daemon-prompt-construct.sh"
+  T21_OUTPUT=$(
+    GAAI_STORY_ID="$IMPL_STORY_ID" \
+    GAAI_STORY_PATH="$IMPL_STORY_PATH" \
+    GAAI_PLAN_PATH="$IMPL_PLAN_PATH" \
+    GAAI_EPIC_PATH="" \
+    GAAI_WORKSPACE_PATH="$IMPL_WORKTREE" \
+    SECONDARY_ROUTE="true" \
+    PROJECT_DIR="$PROJECT_DIR" \
+    bash "$PROMPT_CONSTRUCT" 2>/dev/null || echo ""
+  )
+  T21_FAIL=0
+  while IFS= read -r _marker; do
+    [[ -z "$_marker" ]] && continue
+    if ! printf '%s\n' "$T21_OUTPUT" | grep -qF "$_marker"; then
+      fail "T21: preamble marker missing: '$_marker'"
+      T21_FAIL=1
+    fi
+  done < "$GOLDEN_FIXTURE"
+  if [[ "$T21_FAIL" -eq 0 ]]; then
+    pass "T21: daemon-prompt-construct.sh output contains all R1-R6 preamble markers"
+  fi
+  unset _marker
+fi
+
+# Cleanup impl phase test fixtures
+export PATH="$IMPL_OLD_PATH"
+unset GAAI_WORKTREES_BASE IMPL_OLD_PATH IMPL_REAL_NODE IMPL_SPAWN_STUB
+unset IMPL_STORY_ID IMPL_WORKTREE IMPL_STORY_PATH IMPL_PLAN_PATH IMPL_REPORT_PATH
+unset IMPL_FIXTURE_DIR IMPL_SHIM_DIR
+rm -rf "/tmp/gaai-impl-phase-tests-$$"
 
 # ── Summary ───────────────────────────────────────────────────
 echo ""
