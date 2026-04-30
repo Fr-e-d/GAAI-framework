@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.24.0] - 2026-04-30
 
 ### Changed
+- fix(scripts): clean routing summary in fail-debug analyzer
+- feat(E107bS04): severity-weighted tie-breaker — top 5 by severity (#582)
 - docs(E107bS04): delivery artefacts — micro-delivery-report
+
 
 ## [2.23.0] - 2026-04-30
 
