@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.29.0] - 2026-04-30
+
+### Changed
+- chore: bump local VERSION to v2.28.0 [sync]
+- feat(scripts): minimal fail-debug analyzer
+
+
 ## [2.28.0] - 2026-04-30
 
 ### Changed
