@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # validate-cohort.test.sh — Test harness for validate-cohort.sh
 #
-# Tests all DEC-88 §validation-gates acceptance criteria (AC1-AC6)
+# Tests all §validation-gates acceptance criteria (AC1-AC6)
 #
 # Usage: bash .gaai/core/scripts/tests/validate-cohort.test.sh
 # Exit 0 = all pass. Exit 1 = at least one failure.
