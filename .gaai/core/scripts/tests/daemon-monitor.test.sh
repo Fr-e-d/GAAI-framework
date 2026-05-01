@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# daemon-monitor.test.sh — E134S08 test harness
+# daemon-monitor.test.sh — monitor phase-awareness test harness
 #
 # Tests phase detection, log path resolution, metrics aggregation, and error
-# handling for monitor scripts refactored in E134S08.
+# handling for the phase-aware monitor scripts (3-phase pipeline support).
 #
 # Usage: bash .gaai/core/scripts/tests/daemon-monitor.test.sh
 
