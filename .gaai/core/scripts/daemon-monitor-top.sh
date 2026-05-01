@@ -4,13 +4,6 @@
 CONFIG_FILE="${1:-.gaai/project/contexts/backlog/.delivery-locks/.daemon-config}"
 LOG_FILE="${2:-.gaai/project/contexts/backlog/.delivery-daemon.log}"
 
-PROJECT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
-HAS_JQ=false
-command -v jq &>/dev/null && HAS_JQ=true
-LOCK_DIR="${PROJECT_DIR}/.gaai/project/contexts/backlog/.delivery-locks"
-BACKLOG="${PROJECT_DIR}/.gaai/project/contexts/backlog/active.backlog.yaml"
-ROUTING_LOG="${PROJECT_DIR}/.gaai/project/contexts/logs/runtime-routing.jsonl"
-
 # Colors
 CYAN='\033[0;36m'
 BOLD='\033[1m'
@@ -52,128 +45,9 @@ render_banner() {
   echo ""
 }
 
-render_phase_metrics() {
-  # Bail gracefully if routing log absent (AC5)
-  if [[ ! -f "$ROUTING_LOG" ]]; then
-    echo -e "  ${DIM}(no routing log yet)${NC}"
-    return
-  fi
-
-  # Bounded read — never full scan (AC3)
-  local raw
-  raw=$(tail -n 500 "$ROUTING_LOG" 2>/dev/null || true)
-  [[ -z "$raw" ]] && return
-
-  # Extract in_progress story IDs from backlog
-  local in_progress_ids
-  in_progress_ids=$(awk '
-    /^[[:space:]]+status:[[:space:]]*in_progress/ { if (current_id != "") print current_id }
-    /^- id:/ { gsub(/^- id:[[:space:]]*/, ""); current_id=$0 }
-  ' "$BACKLOG" 2>/dev/null || true)
-
-  [[ -z "$in_progress_ids" ]] && return
-
-  echo -e "${BOLD}Per-phase metrics (in_progress):${NC}"
-
-  while IFS= read -r story_id; do
-    [[ -z "$story_id" ]] && continue
-
-    local plan_dur plan_ok impl_dur impl_model impl_ok qa_dur qa_ok
-    plan_dur="" plan_ok="" impl_dur="" impl_model="" impl_ok="" qa_dur="" qa_ok=""
-
-    while IFS= read -r rec; do
-      local phase prov dur model
-      if $HAS_JQ; then
-        phase=$(printf '%s' "$rec" | jq -r '.phase // empty' 2>/dev/null || true)
-        prov=$(printf '%s'  "$rec" | jq -r '.provider // empty' 2>/dev/null || true)
-        dur=$(printf '%s'   "$rec" | jq -r '.duration_ms // 0' 2>/dev/null || true)
-        model=$(printf '%s' "$rec" | jq -r '.model // empty' 2>/dev/null || true)
-      else
-        phase=$(printf '%s' "$rec" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('phase',''))" 2>/dev/null || true)
-        prov=$(printf '%s'  "$rec" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('provider',''))" 2>/dev/null || true)
-        dur=$(printf '%s'   "$rec" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('duration_ms',0))" 2>/dev/null || true)
-        model=$(printf '%s' "$rec" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('model',''))" 2>/dev/null || true)
-      fi
-
-      local dur_s=""
-      if [[ "$dur" =~ ^[0-9]+$ ]] && [[ "$dur" -gt 0 ]]; then
-        dur_s=$(awk "BEGIN { printf \"%.1f\", $dur/1000 }")
-      fi
-
-      case "$phase" in
-        plan)
-          plan_dur="${dur_s:-?}"
-          [[ "$prov" == "primary" ]] && plan_ok="✓" || plan_ok="✗"
-          ;;
-        impl)
-          impl_dur="${dur_s:-?}"
-          impl_model="${model:-?}"
-          [[ "$prov" == "primary" || "$prov" == "secondary" ]] && impl_ok="✓" || impl_ok="✗"
-          ;;
-        qa)
-          qa_dur="${dur_s:-?}"
-          [[ "$prov" == "primary" ]] && qa_ok="✓" || qa_ok="✗"
-          ;;
-      esac
-    done < <(printf '%s\n' "$raw" | grep "\"story_id\":\"${story_id}\"" 2>/dev/null || true)
-
-    # Check for in-progress phase (running duration from active marker mtime)
-    local running_phase="" running_dur=""
-    for _ph in plan impl qa commit; do
-      if [[ -f "${LOCK_DIR}/${story_id}.${_ph}.active" ]]; then
-        running_phase="$_ph"
-        if [[ "$(uname)" == "Darwin" ]]; then
-          _mtime=$(stat -f %m "${LOCK_DIR}/${story_id}.${_ph}.active" 2>/dev/null || echo 0)
-        else
-          _mtime=$(stat -c %Y "${LOCK_DIR}/${story_id}.${_ph}.active" 2>/dev/null || echo 0)
-        fi
-        local _now
-        _now=$(date +%s)
-        running_dur=$(awk "BEGIN { printf \"%.1f\", $((_now - _mtime)) }")
-        break
-      fi
-    done
-
-    local parts=()
-    if [[ -n "$plan_dur" ]]; then
-      [[ "$running_phase" == "plan" ]] && plan_dur="${running_dur}s…"
-      parts+=("PLAN ${plan_dur}s ${plan_ok}")
-    elif [[ "$running_phase" == "plan" ]]; then
-      parts+=("PLAN ${running_dur}s…")
-    fi
-    if [[ -n "$impl_dur" ]]; then
-      [[ "$running_phase" == "impl" ]] && impl_dur="${running_dur}s…"
-      local impl_part="IMPL ${impl_dur}s"
-      [[ -n "$impl_model" && "$impl_model" != "?" ]] && impl_part="${impl_part} ${impl_model}"
-      impl_part="${impl_part} ${impl_ok}"
-      parts+=("$impl_part")
-    elif [[ "$running_phase" == "impl" ]]; then
-      parts+=("IMPL ${running_dur}s…")
-    fi
-    if [[ -n "$qa_dur" ]]; then
-      [[ "$running_phase" == "qa" ]] && qa_dur="${running_dur}s…"
-      parts+=("QA ${qa_dur}s ${qa_ok}")
-    elif [[ "$running_phase" == "qa" ]]; then
-      parts+=("QA ${running_dur}s…")
-    fi
-
-    local metric_line
-    if [[ ${#parts[@]} -gt 0 ]]; then
-      metric_line=$(printf ' | %s' "${parts[@]}")
-      metric_line="${metric_line:3}"  # strip leading ' | '
-      echo -e "  ${CYAN}${story_id}${NC} ${DIM}[${metric_line}]${NC}"
-    else
-      echo -e "  ${CYAN}${story_id}${NC} ${DIM}[no phase records yet]${NC}"
-    fi
-
-  done <<< "$in_progress_ids"
-  echo ""
-}
-
 while true; do
   clear
   render_banner
-  render_phase_metrics   # AC3: per-phase metrics summary
 
   if [[ -f "$LOG_FILE" ]]; then
     # Calculate available lines for logs (banner takes ~11 lines)

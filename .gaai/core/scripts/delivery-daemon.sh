@@ -2409,25 +2409,5 @@ while true; do
     log "${BLUE}All ready stories already in progress. Waiting...${NC}"
   fi
 
-  # ── Stale active-spawn marker cleanup (AC1) ──────────────────────────────
-  # Markers left behind by SIGKILL / daemon crash. A marker is stale when no
-  # in_progress story has that phase_status and the file is older than 10 min.
-  if [[ -d "$LOCK_DIR" ]]; then
-    _stale_now=$(date +%s)
-    for _stale_marker in "$LOCK_DIR"/*.plan.active "$LOCK_DIR"/*.impl.active \
-                         "$LOCK_DIR"/*.qa.active   "$LOCK_DIR"/*.commit.active; do
-      [[ -f "$_stale_marker" ]] || continue
-      # mtime check: remove if older than 600s
-      if [[ "$(uname)" == "Darwin" ]]; then
-        _stale_mtime=$(stat -f %m "$_stale_marker" 2>/dev/null || echo 0)
-      else
-        _stale_mtime=$(stat -c %Y "$_stale_marker" 2>/dev/null || echo 0)
-      fi
-      if [[ $(( _stale_now - _stale_mtime )) -gt 600 ]]; then
-        rm -f "$_stale_marker" 2>/dev/null || true
-      fi
-    done
-  fi
-
   sleep "$POLL_INTERVAL"
 done

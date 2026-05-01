@@ -5,8 +5,6 @@
 LOG_DIR="${1:-.gaai/project/contexts/backlog/.delivery-logs}"
 PROJECT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
 BACKLOG="$PROJECT_DIR/.gaai/project/contexts/backlog/active.backlog.yaml"
-LOCK_DIR="${PROJECT_DIR}/.gaai/project/contexts/backlog/.delivery-locks"
-WORKTREE_BASE="${PROJECT_DIR}/../.gaai-worktrees/$(basename "$PROJECT_DIR")"
 
 HAS_JQ=false
 command -v jq &>/dev/null && HAS_JQ=true
@@ -52,157 +50,9 @@ format_model() {
 
 PHASE_CACHE_DIR="${PROJECT_DIR}/.gaai/project/contexts/backlog/.delivery-locks/.phase-cache"
 
-# Returns story IDs — one per line — for all currently active deliveries.
-# For legacy pipeline: active tmux sessions named gaai-deliver-{id}.
-# For 3phase pipeline: .lock files in LOCK_DIR where backlog status=in_progress.
-detect_active_stories() {
-  local seen=()
-
-  # Legacy: tmux sessions
-  local tmux_ids
-  tmux_ids=$(tmux list-sessions -F '#{session_name}' 2>/dev/null \
-    | grep '^gaai-deliver-' \
-    | sed 's/gaai-deliver-//' || true)
-  for _id in $tmux_ids; do
-    local _dp
-    _dp=$(awk -v id="$_id" '
-      $0 == "- id: " id { found=1; next }
-      found && /^- id:/ { exit }
-      found && /^[[:space:]]+delivery_pipeline:/ {
-        gsub(/^[[:space:]]+delivery_pipeline:[[:space:]]*/, "")
-        gsub(/[[:space:]]*/, ""); print; exit
-      }
-    ' "$BACKLOG" 2>/dev/null || true)
-    [[ "$_dp" != "3phase" ]] && echo "$_id"
-    seen+=("$_id")
-  done
-
-  # 3phase: .lock files with in_progress status
-  if [[ -d "$LOCK_DIR" ]]; then
-    for _lf in "$LOCK_DIR"/*.lock; do
-      [[ -f "$_lf" ]] || continue
-      local _sid
-      _sid=$(basename "$_lf" .lock)
-      # Skip if already emitted via tmux path
-      local _dup=0
-      for _s in "${seen[@]:-}"; do [[ "$_s" == "$_sid" ]] && _dup=1 && break; done
-      [[ $_dup -eq 1 ]] && continue
-      local _status _dp2
-      _status=$(awk -v id="$_sid" '
-        $0 == "- id: " id { found=1; next }
-        found && /^- id:/ { exit }
-        found && /^[[:space:]]+status:/ {
-          gsub(/^[[:space:]]+status:[[:space:]]*/, "")
-          gsub(/[[:space:]]*/, ""); print; exit
-        }
-      ' "$BACKLOG" 2>/dev/null || true)
-      _dp2=$(awk -v id="$_sid" '
-        $0 == "- id: " id { found=1; next }
-        found && /^- id:/ { exit }
-        found && /^[[:space:]]+delivery_pipeline:/ {
-          gsub(/^[[:space:]]+delivery_pipeline:[[:space:]]*/, "")
-          gsub(/[[:space:]]*/, ""); print; exit
-        }
-      ' "$BACKLOG" 2>/dev/null || true)
-      [[ "$_status" == "in_progress" && "$_dp2" == "3phase" ]] && echo "$_sid"
-    done
-  fi
-}
-
-# Returns the canonical log path for the current active phase of a 3phase story.
-# AC2: per-phase log at {worktree}/.delivery-logs/{id}.{phase}.log
-# Falls back to [no log yet] sentinel string when log does not exist.
-resolve_3phase_log() {
-  local story_id="$1"
-  local worktree="${WORKTREE_BASE}/${story_id}-workspace"
-
-  # Determine active phase from markers (AC1 priority order)
-  local active_phase=""
-  for _ph in plan impl qa commit; do
-    if [[ -f "${LOCK_DIR}/${story_id}.${_ph}.active" ]]; then
-      active_phase="$_ph"
-      break
-    fi
-  done
-
-  if [[ -z "$active_phase" ]]; then
-    # No active marker: derive last relevant phase from phase_status
-    local ps
-    ps=$(awk -v id="$story_id" '
-      $0 == "- id: " id { found=1; next }
-      found && /^- id:/ { exit }
-      found && /^[[:space:]]+phase_status:/ {
-        gsub(/^[[:space:]]+phase_status:[[:space:]]*/, "")
-        gsub(/[[:space:]]*/, ""); print; exit
-      }
-    ' "$BACKLOG" 2>/dev/null || true)
-    case "$ps" in
-      not_started)            active_phase="plan"   ;;
-      planned)                active_phase="plan"   ;;
-      implemented)            active_phase="impl"   ;;
-      qa_passed)              active_phase="qa"     ;;
-      done)                   active_phase="commit" ;;
-      qa_failed|qa_escalated) active_phase="qa"     ;;
-      failed|escalated)       active_phase="impl"   ;;
-      "")                     echo "[?]"; return    ;;
-      *)                      echo "[?]"; return    ;;
-    esac
-  fi
-
-  local log_path="${worktree}/.delivery-logs/${story_id}.${active_phase}.log"
-  if [[ -f "$log_path" ]]; then
-    echo "$log_path"
-  else
-    echo "[no log yet]"
-  fi
-}
-
-# Returns the display phase label for a 3phase story using authoritative markers.
-# AC1: markers take priority over phase_status for in-progress display.
-detect_phase_3phase() {
-  local story_id="$1"
-
-  # Active marker check (highest priority)
-  for _ph in plan impl qa commit; do
-    if [[ -f "${LOCK_DIR}/${story_id}.${_ph}.active" ]]; then
-      case "$_ph" in
-        plan)   echo "PLAN"   ;;
-        impl)   echo "IMPL"   ;;
-        qa)     echo "QA"     ;;
-        commit) echo "COMMIT" ;;
-      esac
-      return
-    fi
-  done
-
-  # No active marker: read phase_status for terminal / idle display
-  local ps
-  ps=$(awk -v id="$story_id" '
-    $0 == "- id: " id { found=1; next }
-    found && /^- id:/ { exit }
-    found && /^[[:space:]]+phase_status:/ {
-      gsub(/^[[:space:]]+phase_status:[[:space:]]*/, "")
-      gsub(/[[:space:]]*/, ""); print; exit
-    }
-  ' "$BACKLOG" 2>/dev/null || true)
-
-  case "$ps" in
-    done)                   echo "DONE"              ;;
-    failed|escalated)       echo "FAILED"            ;;
-    qa_failed)              echo "QA_FAILED"         ;;
-    qa_escalated)           echo "QA_ESCALATED"      ;;
-    not_started|planned|implemented|qa_passed)
-                            echo "IDLE @ ${ps}"      ;;
-    "")                     echo "[?]"               ;;
-    *)                      echo "[?]"               ;;
-  esac
-}
-
 parse_log() {
   local log_file="$1"
   local story_id="$2"
-  local pipeline="${3:-legacy}"       # "3phase" or "legacy"
-  local phase_override="${4:-}"       # pre-computed phase label (3phase only)
 
   if [[ ! -f "$log_file" ]]; then
     echo -e "  ${DIM}(log not yet created)${NC}"
@@ -335,12 +185,6 @@ parse_log() {
     fi
 
     # ── Phase detection ──
-    if [[ "$pipeline" == "3phase" && -n "$phase_override" ]]; then
-      # 3phase: use authoritative marker-derived label (AC1)
-      phase_label="$phase_override"
-      phase_origin=""
-    else
-    # Legacy pipeline: existing log-content heuristic (unchanged)
     # Walk recent events, classify each Bash command / Write target into a phase tag,
     # keep the LAST non-empty classification — that's the current phase.
     # Origin is captured from the same event so we can show e.g. "IMPL (sub)" when
@@ -456,7 +300,6 @@ parse_log() {
       # Current window advanced: write updated winner back to cache
       printf '%s\t%s\t%s\n' "$cur_rank" "$phase_label" "$phase_origin" > "$cache_file" 2>/dev/null || true
     fi
-    fi  # close: if [[ 3phase ]] ... else (legacy heuristic) ... fi
   else
     last_text=$(tail -200 "$log_file" 2>/dev/null \
       | grep -o '"type":"tool_use"[^}]*"name":"[^"]*"' \
@@ -539,7 +382,6 @@ parse_log() {
   fi
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 while true; do
   clear
   # In tmux: clear scrollback left by `clear` so prior refresh doesn't ghost below
@@ -547,51 +389,23 @@ while true; do
   echo "═══ Active Deliveries (refreshes every 5s) ═══"
   echo ""
 
-  # Read active stories (3phase from locks + legacy from tmux)
-  active_ids=()
-  while IFS= read -r _id; do
-    [[ -n "$_id" ]] && active_ids+=("$_id")
-  done < <(detect_active_stories)
+  # Find active tmux delivery sessions
+  active_sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null \
+    | grep '^gaai-deliver-' \
+    | sed 's/gaai-deliver-//' || true)
 
-  if [[ ${#active_ids[@]} -eq 0 ]]; then
+  if [[ -z "$active_sessions" ]]; then
     echo -e "  ${DIM}No active deliveries. Use /gaai-discover to create stories for the backlog.${NC}"
     sleep 5
     continue
   fi
 
-  for story_id in "${active_ids[@]}"; do
-    # Determine pipeline
-    pipeline=$(awk -v id="$story_id" '
-      $0 == "- id: " id { found=1; next }
-      found && /^- id:/ { exit }
-      found && /^[[:space:]]+delivery_pipeline:/ {
-        gsub(/^[[:space:]]+delivery_pipeline:[[:space:]]*/, "")
-        gsub(/[[:space:]]*/, ""); print; exit
-      }
-    ' "$BACKLOG" 2>/dev/null || true)
-
-    if [[ "$pipeline" == "3phase" ]]; then
-      # AC1: marker-based phase detection
-      phase_label=$(detect_phase_3phase "$story_id")
-      # AC2: per-phase log path resolution
-      log_path=$(resolve_3phase_log "$story_id")
-      if [[ "$log_path" == "[no log yet]" || "$log_path" == "[?]" ]]; then
-        echo "── $story_id ── [${phase_label}]"
-        echo -e "  ${DIM}${log_path}${NC}"
-        echo ""
-        continue
-      fi
-      echo "── $story_id ── [${phase_label}]"
-      parse_log "$log_path" "$story_id" "3phase" "$phase_label"
-    else
-      # Legacy: unchanged path
-      log_path="$LOG_DIR/${story_id}.log"
-      echo "── $story_id ──"
-      parse_log "$log_path" "$story_id" "legacy" ""
-    fi
+  for story_id in $active_sessions; do
+    log_file="$LOG_DIR/${story_id}.log"
+    echo "── $story_id ──"
+    parse_log "$log_file" "$story_id"
     echo ""
   done
 
   sleep 5
 done
-fi
