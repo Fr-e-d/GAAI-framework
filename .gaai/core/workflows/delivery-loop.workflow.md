@@ -9,7 +9,7 @@ updated_at: 2026-05-01
 
 > **Branch model:** The delivery workflow targets the `staging` branch. AI never interacts with `production`. Promotion staging → production is a human action via GitHub PR.
 
-Each Story is delivered by the daemon spawning three independent `claude -p` processes (Plan → Impl → QA), followed by deterministic bash commit operations. There is no orchestrator agent — the daemon bash state machine is the sole coordinator (DEC-88).
+Each Story is delivered by the daemon spawning three independent `claude -p` processes (Plan → Impl → QA), followed by deterministic bash commit operations. There is no orchestrator agent — the daemon bash state machine is the sole coordinator.
 
 ---
 
@@ -25,7 +25,7 @@ Daemon (bash)
   └─ Commit phase  → deterministic bash (git + gh)            → PR merged          → phase_status: done
 ```
 
-Each phase has an isolated context window: cumulative-context risk is bounded per phase, not accumulated across the full story lifecycle (DEC-88 §Architectural invariants).
+Each phase has an isolated context window: cumulative-context risk is bounded per phase, not accumulated across the full story lifecycle.
 
 For daemon state machine internals, see `daemon-dispatch.sh`.
 
@@ -92,9 +92,8 @@ Env vars consumed by `daemon-prompt-construct.sh` + `nested-claude-spawn.js`:
 
 <!-- BEGIN R1-R6-CANONICAL-REF -->
 The R1-R6 context discipline preamble and NOTES.md bootstrap template live in
-`daemon-prompt-construct.sh` (per E134S04 AC2). This helper is the single source of
-truth for impl prompt construction, used by both the legacy orchestrator path and the
-3-phase daemon path.
+`daemon-prompt-construct.sh`. This helper is the single source of truth for impl prompt
+construction, used by both the legacy orchestrator path and the 3-phase daemon path.
 
 **Edits to R1-R6 or the NOTES.md template MUST be made in `daemon-prompt-construct.sh`,
 NOT here.** Any copy of R1-R6 text in this workflow file is a drift hazard.
@@ -106,7 +105,7 @@ To understand the full impl prompt: read `.gaai/core/scripts/daemon-prompt-const
 
 Impl phase invokes `nested-claude-spawn.js runImpl()` via CLI. Routing is resolved by `resolveMode()` (deterministic pure function inside the module). Modes: `primary` (explicit tag or absent-with-no-env) or `secondary` (explicit tag or absent-with-env-configured). `SECONDARY_ROUTE=true` causes `daemon-prompt-construct.sh` to prepend the R1-R6 context discipline preamble.
 
-For routing matrix, see DEC-72 and `contexts/memory/architecture/impl-phase-spawn-pattern.md`.
+For routing matrix, see `contexts/memory/architecture/impl-phase-spawn-pattern.md`.
 
 ### Mandatory CLI pattern
 
@@ -191,7 +190,7 @@ model=$CLAUDE_MODEL_PRIMARY, duration_ms, fallback_reason, impl_model_tag, pipel
 
 ## Commit Phase
 
-Deterministic bash only — no `claude -p` invocation. Implemented in `handle_commit_phase()` in `daemon-dispatch.sh` (per E134S06).
+Deterministic bash only — no `claude -p` invocation. Implemented in `handle_commit_phase()` in `daemon-dispatch.sh`.
 
 **Sequence:**
 
@@ -224,10 +223,12 @@ QA cycles count toward impl retries: if QA returns `qa_failed`, impl is re-spawn
 
 Canonical failure mode enums are defined in `daemon-dispatch.sh`. Refer to:
 
-- **Plan phase:** `PLAN_PHASE_FAILED`, `NO_ARTEFACT`, `PARSE_ERROR`, `SCHEDULER_FAILURE` (defined by E134S03)
-- **Impl phase:** `PARSE_ERROR` (JSON parse on spawn output), `False|<error_reason>` from `nested-claude-spawn.js` (defined by E134S04)
-- **QA phase:** `QA_SPAWN_FAILED`, `QA_NO_ARTEFACT`, `QA_VERDICT_PARSE_ERROR`, `QA_VERDICT:FAIL`, `QA_VERDICT:ESCALATE`, `QA_SCHEDULER_FAILURE` (defined by E134S05)
-- **Commit phase:** `COMMIT_FAILED`, `PUSH_FAILED`, `PR_CREATE_FAILED`, `AUTO_MERGE_FAILED`, `GH_AUTH_MISSING`, `SCHEDULER_FAILURE` (defined by E134S06)
+- **Plan phase:** `PLAN_PHASE_FAILED`, `NO_ARTEFACT`, `PARSE_ERROR`, `SCHEDULER_FAILURE`
+- **Impl phase:** `PARSE_ERROR` (JSON parse on spawn output), `False|<error_reason>` from `nested-claude-spawn.js`
+- **QA phase:** `QA_SPAWN_FAILED`, `QA_NO_ARTEFACT`, `QA_VERDICT_PARSE_ERROR`, `QA_VERDICT:FAIL`, `QA_VERDICT:ESCALATE`, `QA_SCHEDULER_FAILURE`
+- **Commit phase:** `COMMIT_FAILED`, `PUSH_FAILED`, `PR_CREATE_FAILED`, `AUTO_MERGE_FAILED`, `GH_AUTH_MISSING`, `SCHEDULER_FAILURE`
+
+All constants are defined in `daemon-dispatch.sh`.
 
 ### Terminal failure semantics
 
@@ -241,14 +242,14 @@ When a story enters `failed` state:
 2. Identify the failure mode from the `fallback_reason` field
 3. Fix the root cause (AC gap, dependency missing, etc.)
 4. During hybrid period: re-trigger via `/gaai:deliver {id}` (legacy orchestrator path)
-5. After E134S09 cutover: re-trigger via `backlog-scheduler.sh --set-status {id} refined`
+5. After 3phase-default cutover: re-trigger via `backlog-scheduler.sh --set-status {id} refined`
 
 ---
 
-## Legacy Pipeline (DEPRECATED — to be removed by E134S11)
+## Legacy Pipeline (DEPRECATED — to be removed when legacy pipeline is retired)
 
-- **(a)** The legacy orchestrator-coordinated workflow is preserved during the E134 hybrid period. Stories with `delivery_pipeline: legacy` (or in-progress at cutover) complete via the orchestrator agent in `agents/delivery.agent.md`.
-- **(b)** Retirement PR: `(see PR for E134S11)` — placeholder, no SHA yet.
+- **(a)** The legacy orchestrator-coordinated workflow is preserved during the hybrid transition period. Stories with `delivery_pipeline: legacy` (or in-progress at cutover) complete via the orchestrator agent in `agents/delivery.agent.md`.
+- **(b)** Retirement: when the feature flag backlog story sets `delivery_pipeline: 3phase` as default, the legacy path can be retired.
 - **(c)** Routing table:
 
 | `delivery_pipeline` value | Execution path |
@@ -256,4 +257,4 @@ When a story enters `failed` state:
 | `legacy` | Orchestrator agent (`agents/delivery.agent.md`) coordinates via Task tool sub-agents |
 | `3phase` | Daemon bash directly spawns Plan / Impl / QA as standalone `claude -p` processes (this document) |
 
-- **(d)** Cutover ETA: E134S09 (feature flag `delivery_pipeline` default switches from `legacy` to `3phase`). Removal ETA: E134S11 (legacy path code + this section deleted).
+- **(d)** Cutover: a dedicated cutover story switches `delivery_pipeline` default from `legacy` to `3phase`. Removal: a subsequent cleanup story removes this section and the legacy code path.

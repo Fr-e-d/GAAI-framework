@@ -100,7 +100,11 @@ export function logPhase(params) {
   };
 
   // Append optional secondary-mode telemetry fields when present (integers/boolean, DEC-65)
-  const TELEMETRY_FIELDS = ['context_size_at_spawn', 'compact_events_count', 'retry_429_count', 'nested_session_completed', 'pipeline', 'pr_url', 'auto_merge_applied'];
+  const TELEMETRY_FIELDS = [
+    'context_size_at_spawn', 'compact_events_count', 'retry_429_count',
+    'nested_session_completed', 'pipeline', 'pr_url', 'auto_merge_applied',
+    'cutover_from', 'cutover_to', 'forced', 'operator_id', 'pre_flip_in_progress_count',
+  ];
   for (const f of TELEMETRY_FIELDS) {
     if (f in params) entry[f] = params[f];
   }
@@ -138,6 +142,11 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const logPathArg    = argValue('--log-path');
   const prUrlArg         = argValue('--pr-url');
   const autoMergeApplied = argValue('--auto-merge-applied');
+  const cutoverFromArg    = argValue('--cutover-from');
+  const cutoverToArg      = argValue('--cutover-to');
+  const forcedArg         = argValue('--forced');
+  const operatorIdArg     = argValue('--operator-id');
+  const preFlipCountArg   = argValue('--pre-flip-in-progress-count');
 
   // --log-path overrides default log path (useful for testing without internal _setLogPath)
   if (logPathArg) _setLogPath(logPathArg);
@@ -159,6 +168,11 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     if (pipelineArg !== undefined) phaseParams.pipeline = pipelineArg;
     if (prUrlArg !== undefined && prUrlArg !== '') phaseParams.pr_url = prUrlArg;
     if (autoMergeApplied !== undefined) phaseParams.auto_merge_applied = autoMergeApplied === 'true';
+    if (cutoverFromArg !== undefined)  phaseParams.cutover_from = cutoverFromArg;
+    if (cutoverToArg !== undefined)    phaseParams.cutover_to = cutoverToArg;
+    if (forcedArg !== undefined)       phaseParams.forced = forcedArg === 'true';
+    if (operatorIdArg !== undefined)   phaseParams.operator_id = operatorIdArg;
+    if (preFlipCountArg !== undefined) phaseParams.pre_flip_in_progress_count = Number(preFlipCountArg);
     logPhase(phaseParams);
     process.stdout.write(formatPhaseStdout(phase, provider, model, fallbackReason));
   } catch (err) {

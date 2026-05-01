@@ -2383,8 +2383,13 @@ while true; do
 
     increment_retry "$story_id"
 
-    # ── Route: 3phase dispatch OR legacy wrapper (E134S02) ────────────────
+    # ── Route: 3phase dispatch OR legacy wrapper (E134S02 + E134S09) ───────
+    # Per-story delivery_pipeline takes precedence over cutover default.
+    # Cutover default is re-read at every poll (no caching — AC4 E134S09).
     _dp=$(get_delivery_pipeline "$story_id")
+    if [[ -z "$_dp" ]]; then
+      _dp=$(get_cutover_default_pipeline)
+    fi
     if [[ "$_dp" == "3phase" ]]; then
       _trace_id=$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \
         || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
