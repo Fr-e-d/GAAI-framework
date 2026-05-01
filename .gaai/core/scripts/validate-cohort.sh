@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# validate-cohort.sh — DEC-88 §validation-gates cohort evaluation harness
+# validate-cohort.sh — 3-phase pipeline cohort evaluation harness
 #
 # Usage:
 #   validate-cohort.sh --window <Nd|Nh>     (evaluate records in last N days|hours)
@@ -148,14 +148,14 @@ write_verdict_and_exit() {
     echo ""
     case "$verdict" in
       ROLLBACK_TO_LEGACY)
-        echo "> One or more gates FAILED. The 3phase pipeline does not meet DEC-88 validation thresholds."
+        echo "> One or more gates FAILED. The 3phase pipeline does not meet the configured validation thresholds."
         echo "> Operator should evaluate failed gates and consider rollback via \`gaai-cutover.sh --to legacy\`."
         ;;
       INCONCLUSIVE_INSUFFICIENT_DATA)
         echo "> Insufficient data to render a verdict. Gather more stories and re-run."
         ;;
       REMAIN_ON_3PHASE)
-        echo "> All gates PASS or SKIP. The 3phase pipeline meets DEC-88 validation thresholds."
+        echo "> All gates PASS or SKIP. The 3phase pipeline meets the configured validation thresholds."
         ;;
     esac
     echo ""
