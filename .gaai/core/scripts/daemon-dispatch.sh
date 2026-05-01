@@ -137,7 +137,7 @@ _emit_routing_record() {
     --duration-ms 0 \
     --fallback-reason "$fallback_reason" \
     --impl-model-tag  "$impl_tag" \
-    "${log_path_args[@]}" \
+    ${log_path_args[@]+"${log_path_args[@]}"} \
     2>/dev/null || true
 }
 
@@ -164,7 +164,7 @@ _emit_plan_routing_record() {
     --fallback-reason "$fallback_reason" \
     --impl-model-tag  "$impl_tag" \
     --pipeline        "3phase" \
-    "${log_path_args[@]}" \
+    ${log_path_args[@]+"${log_path_args[@]}"} \
     2>/dev/null || true
 }
 
@@ -191,7 +191,7 @@ _emit_qa_routing_record() {
     --fallback-reason "$fallback_reason" \
     --impl-model-tag  "$impl_tag" \
     --pipeline        "3phase" \
-    "${log_path_args[@]}" \
+    ${log_path_args[@]+"${log_path_args[@]}"} \
     2>/dev/null || true
 }
 
@@ -220,7 +220,7 @@ _emit_commit_routing_record() {
     --pipeline           "3phase" \
     --pr-url             "$pr_url" \
     --auto-merge-applied "$auto_merge_applied" \
-    "${log_path_args[@]}" \
+    ${log_path_args[@]+"${log_path_args[@]}"} \
     2>/dev/null || true
 }
 
@@ -273,7 +273,7 @@ _emit_cutover_routing_record() {
     --forced                      "$forced" \
     --operator-id                 "$operator_id" \
     --pre-flip-in-progress-count  "$pre_flip_count" \
-    "${log_path_args[@]}" \
+    ${log_path_args[@]+"${log_path_args[@]}"} \
     2>/dev/null || true
 }
 
