@@ -2,714 +2,258 @@
 type: workflow
 id: WORKFLOW-DELIVERY-LOOP-001
 track: delivery
-updated_at: 2026-04-29
+updated_at: 2026-05-01
 ---
 
 # Delivery Loop Workflow
 
 > **Branch model:** The delivery workflow targets the `staging` branch. AI never interacts with `production`. Promotion staging → production is a human action via GitHub PR.
 
-## Purpose
-
-Transform validated Stories into working, tested, governed software through coordinated sub-agent execution.
-
-The Delivery Agent acts as orchestrator. It spawns specialized sub-agents, collects their handoff artefacts, and coordinates phase transitions until every Story either PASSes QA or ESCALATEs to the human.
+Each Story is delivered by the daemon spawning three independent `claude -p` processes (Plan → Impl → QA), followed by deterministic bash commit operations. There is no orchestrator agent — the daemon bash state machine is the sole coordinator (DEC-88).
 
 ---
 
-## When to Use
+## Overview
 
-- When Stories are validated and acceptance criteria are complete
-- As the primary execution loop for all delivery work
-- Invoked per Story or per batch from the active backlog
+The daemon (`delivery-daemon.sh`) directly spawns three standalone `claude -p` processes per story. Each phase agent spawns, executes autonomously, writes its artefact to a known path, then dies. The daemon reads the artefact and advances `phase_status`.
+
+```
+Daemon (bash)
+  ├─ Phase 1 Plan  → claude -p (planning.daemon-prompt.md)  → execution-plan.md  → phase_status: planned
+  ├─ Phase 2 Impl  → nested-claude-spawn.js runImpl()        → impl-report.md     → phase_status: implemented
+  ├─ Phase 3 QA    → claude -p (qa.daemon-prompt.md)         → qa-report.md       → phase_status: qa_passed
+  └─ Commit phase  → deterministic bash (git + gh)            → PR merged          → phase_status: done
+```
+
+Each phase has an isolated context window: cumulative-context risk is bounded per phase, not accumulated across the full story lifecycle (DEC-88 §Architectural invariants).
+
+For daemon state machine internals, see `daemon-dispatch.sh`.
 
 ---
 
-## Agent
+## Phase 1 Plan
 
-**Delivery Agent / Orchestrator** (`agents/delivery.agent.md`)
+### Input contract
 
-Sub-agents spawned during execution:
-- `agents/sub-agents/micro-delivery.sub-agent.md` (Tier 1)
-- `agents/sub-agents/planning.sub-agent.md` (Tier 2/3)
-- `agents/sub-agents/implementation.sub-agent.md` (Tier 2/3)
-- `agents/sub-agents/qa.sub-agent.md` (Tier 2/3)
-- Specialists per `agents/specialists.registry.yaml` (Tier 3 only)
+Env vars set by `handle_plan_phase()` in `daemon-dispatch.sh`:
+
+| Variable | Purpose |
+|---|---|
+| `$GAAI_STORY_ID` | Story identifier |
+| `$GAAI_WORKTREE_PATH` | Absolute worktree root |
+| `$GAAI_STORY_PATH` | Path to `{id}.story.md` |
+| `$GAAI_PLAN_PATH` | Output path for `execution-plan.md` |
+| `$GAAI_EPIC_PATH` | Path to `{epic}.epic.md` |
+| `$GAAI_DELIVERY_LOG_FILE` | Per-story log path |
+| `$GAAI_WORKSPACE_ID` | Workspace UUID |
+| `$GAAI_ORG_ID` | Org UUID |
+
+### Prompt source
+
+Daemon reads `.gaai/core/agents/sub-agents/planning.daemon-prompt.md` and passes it as the `claude -p` system prompt. Story file content at `$GAAI_STORY_PATH` is included in the prompt body.
+
+### Output contract
+
+- Writes: `$GAAI_PLAN_PATH` (`.gaai/project/contexts/artefacts/plans/{id}.execution-plan.md`)
+- Phase transition: `phase_status: not_started → planned` (via `backlog-scheduler.sh --set-phase-status`)
+- Daemon verifies file exists before advancing `phase_status`.
+
+### Audit emit
+
+`_emit_plan_routing_record` writes one record to `runtime-routing.jsonl`:
+
+```
+trace_id, story_id, phase=plan, provider=primary,
+model=$CLAUDE_MODEL_PRIMARY, duration_ms, fallback_reason, impl_model_tag, pipeline=3phase
+```
 
 ---
 
-## Prerequisites
+## Phase 2 Impl
 
-Before starting the loop:
-- ✅ Stories are validated (`validate-artefacts` has PASSED)
-- ✅ Acceptance criteria are present and testable
-- ✅ Backlog item status is `refined`
-- ✅ `agents/specialists.registry.yaml` is present
+### Input contract
 
----
+Env vars consumed by `daemon-prompt-construct.sh` + `nested-claude-spawn.js`:
 
-## Workflow Steps
+| Variable | Purpose |
+|---|---|
+| `$GAAI_STORY_ID` | Story identifier |
+| `$GAAI_STORY_PATH` | Path to `{id}.story.md` |
+| `$GAAI_PLAN_PATH` | Path to `{id}.execution-plan.md` |
+| `$GAAI_EPIC_PATH` | Path to `{epic}.epic.md` |
+| `$GAAI_WORKSPACE_PATH` | Worktree root (alias for `$GAAI_WORKTREE_PATH` in impl context) |
+| `$GAAI_WORKTREE_PATH` | Absolute worktree root |
+| `$GAAI_WORKSPACE_ID` | Workspace UUID |
+| `$GAAI_ORG_ID` | Org UUID |
+| `$SECONDARY_ROUTE` | `"true"|"false"` (routing decision set by `daemon-dispatch.sh`) |
+| `$PROJECT_DIR` | Repository root |
 
-### 0. Git Setup (before any execution)
+### Prompt construction
 
-**CRITICAL INVARIANT: The main working tree stays on `staging` at ALL times.** The daemon polls in the main working tree. Deliveries work in worktrees. All staging operations (pull, merge, push) are serialized via `flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock`.
+<!-- BEGIN R1-R6-CANONICAL-REF -->
+The R1-R6 context discipline preamble and NOTES.md bootstrap template live in
+`daemon-prompt-construct.sh` (per E134S04 AC2). This helper is the single source of
+truth for impl prompt construction, used by both the legacy orchestrator path and the
+3-phase daemon path.
 
-### Staging Push Retry Pattern
+**Edits to R1-R6 or the NOTES.md template MUST be made in `daemon-prompt-construct.sh`,
+NOT here.** Any copy of R1-R6 text in this workflow file is a drift hazard.
 
-With `--max-concurrent > 1`, concurrent `git push origin staging` can fail (non-fast-forward). All staging push operations use a retry-with-rebase pattern:
+To understand the full impl prompt: read `.gaai/core/scripts/daemon-prompt-construct.sh`.
+<!-- END R1-R6-CANONICAL-REF -->
 
-```bash
-# Retry pattern: pull --rebase + push, 3 attempts, exponential backoff
-for attempt in 1 2 3; do
-  git pull --rebase origin staging && git push origin staging && break
-  [ $attempt -lt 3 ] && sleep $((attempt * 2))  # backoff: 2s, 4s, 6s
-done || { echo "ESCALATE: staging push failed after 3 attempts"; exit 1; }
-```
+### Routing
 
-- **3 attempts**, backoff 2s / 4s / 6s
-- On exhaustion: **ESCALATE** (do not mark done, do not lose work)
-- `flock` serialization still applies (prevents local contention on multi-worktree macOS setups)
+Impl phase invokes `nested-claude-spawn.js runImpl()` via CLI. Routing is resolved by `resolveMode()` (deterministic pure function inside the module). Modes: `primary` (explicit tag or absent-with-no-env) or `secondary` (explicit tag or absent-with-env-configured). `SECONDARY_ROUTE=true` causes `daemon-prompt-construct.sh` to prepend the R1-R6 context discipline preamble.
 
-For every Story, before any implementation begins:
+For routing matrix, see DEC-72 and `contexts/memory/architecture/impl-phase-spawn-pattern.md`.
 
-```bash
-# Step 0 — Prerequisites
-# Verify remote exists (GAAI requires a configured remote for PR-based delivery)
-git remote get-url origin 2>/dev/null || {
-  echo "FATAL: no 'origin' remote configured. GAAI requires a remote repository for PR-based delivery."
-  echo "Run: git remote add origin <url>"
-  exit 1
-}
-
-# Resolve worktree path ONCE as absolute — all subsequent operations use $WORKTREE_PATH
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-REPO_NAME="$(basename "$REPO_ROOT")"
-WORKTREE_PATH="${GAAI_WORKTREE_BASE:-${REPO_ROOT}/../.gaai-worktrees/${REPO_NAME}}/${id}-workspace"
-mkdir -p "$(dirname "$WORKTREE_PATH")"
-
-# Step 0a: Sync with latest staging (under flock if concurrent)
-flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
-  git pull origin staging
-'
-
-# Step 0b: Mark in_progress + push with retry (cross-device coordination)
-# If daemon-launched: already done by the daemon. Skip if status is already in_progress.
-# If manual launch: the delivery agent does this itself.
-flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
-  .gaai/core/scripts/backlog-scheduler.sh --set-status {id} in_progress .gaai/project/contexts/backlog/active.backlog.yaml
-  git add .gaai/project/contexts/backlog/active.backlog.yaml
-  git commit -m "chore({id}): in_progress [delivery]"
-  for attempt in 1 2 3; do
-    git pull --rebase origin staging && git push origin staging && break
-    [ $attempt -lt 3 ] && sleep $((attempt * 2))
-  done || { echo "ESCALATE: staging push failed after 3 attempts"; exit 1; }
-'
-
-# Step 0c: Create branch WITHOUT switching (main stays on staging)
-git branch story/{id} staging
-git worktree add "$WORKTREE_PATH" story/{id}
-
-# Step 0d: Validate worktree exists (mandatory gate — do NOT skip)
-if [ ! -e "$WORKTREE_PATH/.git" ]; then
-  echo "FATAL: worktree not found at $WORKTREE_PATH — cannot proceed with delivery"
-  exit 1
-fi
-```
-
-All sub-agents operate exclusively inside `$WORKTREE_PATH`. The main working directory stays on `staging` and is never switched. If two Stories run in parallel, each has its own worktree — zero filesystem conflicts. Worktree isolation is **unconditional** regardless of story tier.
-
-Default worktree location is `<parent-of-repo>/.gaai-worktrees/<repo-name>/<story-id>-workspace` — this groups all GAAI worktrees under a single dedicated folder at the parent level, avoiding pollution of the parent directory when multiple projects share it. The `.gaai-worktrees/` name avoids collision with the in-project `.gaai/` folder. Override by setting `GAAI_WORKTREE_BASE` (e.g., `export GAAI_WORKTREE_BASE=/tmp/gaai-worktrees` for cloud-synced repos).
-
-### 1. Select Next Story
-
-**Do NOT `Read` the full backlog file** — it routinely exceeds Claude's 25k-token single-Read limit and will error out mid-delivery. Use the scheduler script to pick the next ready story:
+### Mandatory CLI pattern
 
 ```bash
-STORY_ID=$(.gaai/core/scripts/backlog-scheduler.sh --next .gaai/project/contexts/backlog/active.backlog.yaml)
-```
-
-The scheduler returns the highest-priority Story with `status: refined` and all dependencies satisfied. If a specific Story was requested by the user (e.g. `/gaai-deliver E19S01`), use `--ready-ids` to verify it's schedulable, or inspect a single entry with `grep -A 20 "^- id: $STORY_ID$" .gaai/project/contexts/backlog/active.backlog.yaml` — never load the whole file.
-
-### 2. Evaluate Story
-
-Invoke `evaluate-story` → returns tier (1/2/3), specialists_triggered, risk_analysis_required.
-
-### 2b. Persist Tier Assignment
-
-After evaluate-story completes and **before spawning any sub-agent**, persist the tier on the backlog entry:
-
-```bash
-.gaai/core/scripts/backlog-scheduler.sh --set-field {id} tier {1|2|3} \
-  .gaai/project/contexts/backlog/active.backlog.yaml
-```
-
-The `tier` value is the integer (1, 2, or 3) returned by evaluate-story. This enables delivery telemetry segmentation (cost, duration, retry rate by tier) and future threshold calibration.
-
-### 3. Compose Team
-
-Invoke `compose-team` → assembles context bundles for each sub-agent in the selected tier.
-
-If `risk_analysis_required: true` → invoke `risk-analysis` and add output to Planning Sub-Agent context bundle.
-
-#### Per-story trace_id
-
-Before spawning any sub-agent, generate a trace_id that will flow through Plan, Impl, and QA logging calls:
-
-```bash
-STORY_TRACE_ID="$(node -e 'import("node:crypto").then(m=>process.stdout.write(m.randomUUID()))')"
-```
-
-After the Implementation phase call returns, `STORY_TRACE_ID` **must** be overwritten with `result.trace_id` (see §6a). `runImpl()` always returns a `trace_id` — whether the delivery ran on primary or secondary. The same `STORY_TRACE_ID` is then passed to the QA phase observability hook (E94S06 defines the call; reserved here).
-
-### 4. Execute — Tier 1 (MicroDelivery)
-
-> **Scope note — `impl_model` is IGNORED for Tier 1 (V1 design):**
-> MicroDelivery runs Plan+Impl+QA in a single sub-agent context. This is incompatible with isolated-Impl-phase routing to a secondary provider. For a true Tier 1 story (≤ 2 complexity, ≤ 3 ACs, minimal files), the overhead of splitting into Plan/Impl/QA sub-agents to enable secondary routing would COST MORE (3× context loading, 3× rules/memory retrieval) than the savings on a ≤10 LoC Impl phase.
->
-> **Behavior:** if `impl_model: secondary` is set on a Tier 1 story, the tag is ignored with a log warning. Delivery proceeds as standard MicroDelivery on primary.
->
-> **Log the ignored tag** at MicroDelivery entry:
-> ```bash
-> if [ "$impl_model" = "secondary" ]; then
->   echo "⚠ impl_model=secondary ignored for Tier 1 (MicroDelivery design). Running on primary."
->   node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
->     --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "impl" \
->     --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
->     --duration-ms 0 --fallback-reason "" --impl-model-tag "secondary_ignored_tier1" 2>/dev/null || true
-> fi
-> ```
->
-> **Rationale:** Epic E94 D-0 non-regression and D-2 (Plan/QA primary) both hold; stories that want secondary routing should be Tier 2+ at discovery-time. If a Tier 1 story truly benefits from secondary, revisit its tiering at Discovery.
-
-Spawn `micro-delivery.sub-agent.md` with minimal context bundle.
-
-Collect `{id}.micro-delivery-report.md`.
-
-Invoke `coordinate-handoffs`:
-- PASS → proceed to step 8
-- FAIL (recoverable: test failure, logic bug) → retry once; if second attempt fails → complexity-escalation to Tier 2
-- FAIL (structural: AC ambiguous, context gap, rule conflict) → ESCALATE immediately, no retry
-- ESCALATE → stop, surface to human + invoke `post-mortem-learning`
-- complexity-escalation → re-evaluate as Tier 2, proceed to step 5
-
-### 5. Execute — Tier 2/3: Planning Phase
-
-> **Provider:** Task tool on primary (regardless of `impl_model`). *Plan phase authors the contract; reasoning stays on primary per Epic E94 D-2.*
-
-Spawn `planning.sub-agent.md` with Planning context bundle.
-
-Collect `{id}.execution-plan.md`.
-
-Invoke `coordinate-handoffs` → validate artefact → PROCEED or RE-SPAWN or ESCALATE.
-
-**After PROCEED — log Plan phase:**
-```bash
-node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
-  --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "plan" \
-  --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
-  --duration-ms 0 --fallback-reason "" --impl-model-tag "${impl_model_tag:-absent}" 2>/dev/null || true
-```
-
-### 6. Execute — Tier 2/3: Implementation Phase
-
-#### 6a. Implementation Phase Routing
-
-> **Plan phase:** Always uses the Task tool on primary regardless of `impl_model`.
-> *Plan phase authors the contract; reasoning stays on primary per Epic E94 D-2.*
-
-> **QA phase:** Always uses the Task tool on primary regardless of `impl_model`.
-> *QA validates against the Plan's contract; consistency stays on primary per Epic E94 D-2.*
-
-The routing decision is evaluated inside `runImpl()` — a deterministic pure function (`resolveMode()`) within `nested-claude-spawn.js`. The workflow invokes the module via its CLI; **no routing logic lives here**.
-
-> **Rationale and deeper context:** see `contexts/memory/architecture/impl-phase-spawn-pattern.md` for the operational summary (why always-subprocess, the mode resolution table, the forbidden anti-pattern). For the formal decision record, see DEC-86 (amends DEC-72).
-
-> **🔒 MANDATORY — NON-NEGOTIABLE :** the Implementation phase MUST be executed by invoking the CLI block below. Do **NOT** spawn `implementation.sub-agent.md` via the Task tool. Do **NOT** perform implementation work inline in the orchestrator session via Read/Edit/Write/Bash. The CLI is the **only** path. Skipping it produces a delivery that bypasses routing, audit logging, and the universal fallback — exactly the failure mode E131 was created to eliminate.
->
-> The CLI invocation is **mandatory regardless of impl_model tag value** : even when the resolved mode is primary, the spawn happens through this CLI (the module routes primary internally for architectural consistency).
-
-**Invoke the module (this is the only impl spawn — no Task tool sub-agent for impl) :**
-
-> **Secondary-routing context discipline preamble :** when the resolved routing decision is `secondary` (per DEC-72 matrix : either `impl_model_tag == secondary` explicit OR `impl_model_tag == absent` + env configured), prepend the context-discipline preamble below to `IMPL_PROMPT`. Mitigates Claude Code `rapid_refill_breaker` (autocompact thrashing) observed empirically at 43% fail rate on secondary providers (e.g., GLM 5.1). Skip when routing primary — Sonnet already follows these implicitly.
-
-```bash
-# Routing predicate — must mirror nested-claude-spawn.js resolveMode() exactly :
-#   - explicit 'secondary' tag → secondary (Row 2)
-#   - 'absent' tag + env configured → secondary (Row 4, env-driven default DEC-72)
-#   - anything else → primary
-# Source : observed 5/6 GLM 5.1 fails ($1.97-6.11 each) terminated with rapid_refill_breaker
-# in nested-fail-debug.jsonl 2026-04-30 ; 3 behaviors lacking : (1) re-Read post-compact,
-# (2) no self-summarization, (3) full-file Read defaults instead of offset/limit.
-secondary_route=false
-if [ "$impl_model_tag" = "secondary" ]; then
-  secondary_route=true
-elif [ "$impl_model_tag" = "absent" ] \
-  && [ -n "${GAAI_IMPL_BASE_URL:-}" ] \
-  && [ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ] \
-  && [ -n "${GAAI_IMPL_MODEL:-}" ]; then
-  secondary_route=true
-fi
-if [ "$secondary_route" = "true" ]; then
-  NOTES_PATH="${WORKTREE_PATH}/.gaai/project/contexts/artefacts/notes/{id}.notes.md"
-  IMPL_PROMPT="$(cat <<PREAMBLE
-=== CONTEXT DISCIPLINE (MANDATORY for this delivery) ===
-
-You operate in a long-running agentic session with a 200K context window
-and aggressive autocompaction. Failure to follow these rules causes session
-termination via rapid_refill_breaker (Claude Code internal safety) — observed
-empirically at 43% fail rate on this routing path.
-
-These rules are derived from Anthropic's "Effective Context Engineering for
-AI Agents" guidance. They apply throughout this session.
-
-## R1 — Persistent notes file (MOST IMPORTANT)
-
-Maintain a working-memory file at this exact path :
-${NOTES_PATH}
-
-This file is filesystem-persistent and survives autocompaction. It is your
-SINGLE SOURCE OF TRUTH for state recovery. The file is committed as a
-delivery artefact alongside execution-plan, impl-report, and qa-report.
-
-### Initial creation (on your very first action)
-
-If the file does not yet exist, create it with the EXACT bootstrap template
-below. Then proceed with the actual work.
-
-\`\`\`markdown
-# Working Memory — {id}
-
-## ⚠ RULES (re-read these every time you read this file)
-
-R1 : Append updates to this file after every meaningful tool result.
-     Never overwrite — append/update sections in place.
-R2 : Never re-read a file listed under "Files read" — the summary is canonical.
-R3 : After every tool result, write 1 structured sentence summary in your reply.
-R4 : Read files in chunks ≤200 lines (offset/limit). Bash verbose → tail -100.
-R5 : Work on ONE acceptance criterion at a time. Commit before next AC.
-R6 : If your context feels gappy (autocompact occurred), re-read THIS file +
-     the execution-plan.md FIRST. Do NOT re-execute steps already marked done.
-
-## Current step
-
-<one sentence — update continuously>
-
-## Files read (canonical — do NOT re-read)
-
-- path/to/file.ts (lines X-Y) : <one-line summary of what matters>
-- ...
-
-## Decisions made
-
-- <decision + brief rationale>
-
-## Acceptance criteria status
-
-- AC1 : <pending|in-progress|done|blocked>
-- AC2 : ...
-
-## Open questions / blockers
-
-- <if any>
-
-## Tool calls made (running log — append-only)
-
-- T1 : Read auth.ts L23-67 → exports validateSession(token), HMAC-SHA256
-- T2 : Edit membership.ts L102 → added workspace_id field
-- ...
-\`\`\`
-
-### Re-entry pattern (post-autocompact recovery)
-
-Whenever you suspect autocompaction just occurred (sudden gap in context),
-your FIRST action MUST be:
-
-1. Read ${NOTES_PATH}
-2. Read \${WORKTREE_PATH}/.gaai/project/contexts/artefacts/plans/{id}.execution-plan.md
-3. Resume from "Current step" without re-executing prior tool calls
-
-### Append-only retry semantics
-
-If this delivery is a retry (e.g., second nested-claude-spawn for {id} after
-a prior failure), the existing notes file represents your prior attempt's
-findings. PRESERVE all "Files read" and "Decisions made" entries — they
-remain valid. Only update "Current step", AC status, and append new tool
-calls. Append-tolerant by design.
-
-## R2 — Never re-read
-
-Never re-read a file already listed under "Files read" in your notes file.
-The summary IS canonical. If you doubt the summary, re-read the file ONLY
-WITH a tighter offset/limit on the specific lines you need (not the whole
-file again).
-
-## R3 — Self-summarize after every tool result
-
-After each Read / Bash / Glob / Grep, write ONE structured sentence in your
-reply BEFORE the next tool call. Format:
-
-"<file/result> contains <fact>. Now <next intended action>."
-
-Example :
-"auth.ts L23-67 exports validateSession(token), HMAC-SHA256 over headers,
-no rate limiting. Now editing membership.ts to call it from hasAccess()."
-
-## R4 — Just-in-time chunked retrieval
-
-- Read files in chunks ≤200 lines using offset/limit. Use Glob/Grep
-  first to locate exact line ranges. Never Read a file >300 lines
-  without offset/limit.
-- For Bash with verbose output (tests, builds, logs), always pipe through
-  head/tail to bound output : \`pnpm test 2>&1 | tail -100\`
-- Prefer file paths and grep patterns over loading full content.
-
-## R5 — Single-feature focus
-
-Per Anthropic's harness guidance : work on ONE acceptance criterion at a
-time, commit before advancing. Do not parallelize ACs across multiple
-files in flight — context bloat is fatal here.
-
-## Few-shot example — good cycle
-
-You are about to fix a bug in membership validation. Below is the PATTERN
-to follow (one example turn) :
-
-> [agent thinks] "Need to understand current validation. Let me check
-> if I've already seen this file in my notes."
->
-> Read ${NOTES_PATH}
-> [observes : "Files read: empty" — first turn]
->
-> Glob "**/membership*.ts" → 2 hits
-> [agent reply : "Found 2 membership files : api/membership.ts and
-> shared/membership-types.ts. Reading the api one first L1-100 to see
-> the validation entry point."]
->
-> Read api/membership.ts L1-100 → finds validateMembership() at L34
-> [agent reply : "validateMembership() at L34 calls hasAccess() which is
-> imported from auth.ts. Edit notes file to record this, then read auth.ts
-> at the import line."]
->
-> Edit ${NOTES_PATH} → append to "Files read" : "api/membership.ts L1-100
-> : validateMembership at L34, calls hasAccess from auth.ts"
-> Edit ${NOTES_PATH} → update "Current step" : "Reading auth.ts hasAccess()"
-
-Notice the discipline : every tool result triggers (a) one structured
-summary in the reply, (b) a notes file update.
-
-=== END CONTEXT DISCIPLINE ===
-
-PREAMBLE
-)\$IMPL_PROMPT"
-fi
-
-IMPL_PROMPT_FILE="$(mktemp -t gaai-impl-prompt.XXXXXX)"
-printf '%s' "$IMPL_PROMPT" > "$IMPL_PROMPT_FILE"
 result_json=$(node .gaai/core/adapters/claude-code/nested-claude-spawn.js \
   --prompt-file "$IMPL_PROMPT_FILE" \
   --report-path "$IMPL_REPORT_PATH" \
-  --story-id "{id}" \
+  --story-id "$GAAI_STORY_ID" \
   [--impl-model-tag primary|secondary|absent])
-rm -f "$IMPL_PROMPT_FILE"
 ```
 
-> **DO NOT pass `--log-file` to `nested-claude-spawn.js`.** The wrapper auto-uses
-> the per-story log path from `GAAI_DELIVERY_LOG_FILE` env (set by the daemon
-> wrapper to `.delivery-logs/{id}.log`). Passing this flag explicitly with the
-> daemon log path (`.delivery-daemon.log`) — observed empirically when orchestrators
-> substitute the env-var name with what they think is the "delivery log" — pollutes
-> the daemon log with NDJSON, breaks the top monitor banner readability, and makes
-> the per-story panel blind to GLM secondary events (model field freezes on Sonnet
-> orchestrator). Omit the flag entirely; the env fallback at nested-claude-spawn.js
-> line 960-962 handles it correctly.
+`--log-file` is NOT passed; the module reads `$GAAI_DELIVERY_LOG_FILE` from env.
 
-The CLI exits 0 in all business-logic outcomes (success, fallback, env-missing). Distinguish via `result.success`.
+### Output contract
 
-**After the call — mandatory STORY_TRACE_ID overwrite:**
+- Writes: `$IMPL_REPORT_PATH` (`.gaai/project/contexts/artefacts/impl-reports/{id}.impl-report.md`)
+- Phase transition: `phase_status: planned → implemented`
+- `nested-claude-spawn.js` always exits 0; outcome determined by `result.success` in returned JSON.
 
-```bash
-result_trace_id=$(echo "$result_json" | jq -r '.trace_id')
-STORY_TRACE_ID="$result_trace_id"
-```
+### Audit emit
 
-`runImpl()` always returns a `trace_id`. Overwriting `STORY_TRACE_ID` here is **unconditional** — it applies whether the delivery ran on primary or secondary.
-
-**Observability:** `runImpl()` emits exactly one `phase: impl` record to `runtime-routing.jsonl` on success; two records when secondary fails and primary fallback is invoked (one per attempt, shared `trace_id`). The operator will see one `phase: impl` entry per resolved delivery attempt in `runtime-routing.jsonl`.
-
-**Non-null `result.error_reason` field:** When the module returns a successful result but with a non-null `error_reason` field (e.g., `secondary_but_env_missing`), the agent emits a one-line warning to stdout before proceeding:
-
-```bash
-result_error_reason=$(echo "$result_json" | jq -r '.error_reason // empty')
-if [ -n "$result_error_reason" ]; then
-  echo "⚠ impl routing: $result_error_reason"
-fi
-```
-
-This matches the `warn() + echo` behaviour of the previous in-workflow matrix.
-
-**When `result.success` is false:** the module has already exhausted its internal fallback chain (per E131S02 AC3 — no in-workflow fallback chain exists here). Escalate via the existing daemon behaviour:
-
-```bash
-result_success=$(echo "$result_json" | jq -r '.success')
-if [ "$result_success" != "true" ]; then
-  # Escalate: update backlog status + notes; do not mark done
-  ESCALATE via existing daemon behaviour
-fi
-```
-
-**Compliance:** no specific provider names appear in this workflow file. Only generic terms: "secondary provider", "nested subprocess", "user-configured endpoint".
-
-**Implementation context bundle :** the `IMPL_PROMPT` written to `IMPL_PROMPT_FILE` is the bundle. It contains the same content the legacy `implementation.sub-agent.md` Task spawn used to receive — story context, AC list, plan output, codebase pointers. The CLI passes the file content as the spawned `claude -p` prompt ; the spawned subprocess reads it and performs the implementation work end-to-end inside its own session.
-
-**Tier 3 specialists :** the spawned subprocess invokes Specialists via Task tool from inside its own session per `agents/specialists.registry.yaml`. The orchestrator does **not** spawn Specialists directly ; specialist coordination lives inside the impl subprocess so it shares the impl model + isolated context.
-
-Collect `{id}.impl-report.md`.
-
-Invoke `coordinate-handoffs` → validate artefact → PROCEED or RE-SPAWN or ESCALATE.
-
-**After PROCEED — atomic commit:**
-```bash
-git -C "$WORKTREE_PATH" add .
-git -C "$WORKTREE_PATH" commit -m "feat({id}): {Story title summary}
-
-Implements: {AC list e.g. AC1–AC9}
-Story: contexts/artefacts/stories/{id}.story.md
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
-```
-
-### 7. Execute — Tier 2/3: QA Phase
-
-> **Provider:** Task tool on primary (regardless of `impl_model`). *QA validates against the Plan's contract; consistency stays on primary per Epic E94 D-2.*
-
-Spawn `qa.sub-agent.md` with QA context bundle.
-
-Collect `{id}.qa-report.md`.
-
-Invoke `coordinate-handoffs`:
-- PASS → proceed to step 8
-- FAIL → re-spawn Implementation Sub-Agent with qa-report, then re-spawn QA Sub-Agent (max 3 cycles — see `qa.sub-agent.md`)
-- ESCALATE → stop, surface to human
-
-**After PASS — log QA phase and print consistency-check summary:**
-```bash
-node .gaai/core/adapters/claude-code/runtime-routing-logger.js \
-  --trace-id "$STORY_TRACE_ID" --story-id "{id}" --phase "qa" \
-  --provider "primary" --model "${CLAUDE_MODEL:-claude-sonnet-4-6}" \
-  --duration-ms 0 --fallback-reason "" --impl-model-tag "${impl_model_tag:-absent}" 2>/dev/null || true
-echo "✓ Plan adherence check: passed"
-```
-
-### 7b. Commit Delivery Artefacts to Story Branch
-
-After QA PASS, commit all delivery artefacts (execution-plan, impl-report, qa-report, memory-delta) to the story branch in the worktree. This ensures artefacts flow to staging via the PR merge — never pushed directly to staging.
-
-```bash
-# Step 7b: Commit delivery artefacts to story branch (in worktree)
-git -C "$WORKTREE_PATH" add .gaai/project/contexts/artefacts/
-git -C "$WORKTREE_PATH" commit -m "docs({id}): delivery artefacts — plan, impl-report, qa-report, memory-delta"
-```
-
-### 7c. Diff-Scope Sanity Check (MANDATORY)
-
-**Before pushing, verify the diff is consistent with the Story scope.** This is a safety heuristic to catch corrupted trees, accidental `git add .` on wrong directories, or GIT_DIR contamination from hooks. It is NOT a hard limit on story size.
-
-```bash
-# Count files changed vs staging baseline
-DIFF_STAT=$(git -C "$WORKTREE_PATH" diff --stat staging..HEAD)
-CHANGED_FILES=$(git -C "$WORKTREE_PATH" diff --name-only staging..HEAD)
-CHANGED_COUNT=$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')
-DELETED_COUNT=$(git -C "$WORKTREE_PATH" diff --diff-filter=D --name-only staging..HEAD | wc -l)
-
-echo "Diff-scope check: $CHANGED_COUNT files changed, $DELETED_COUNT deleted"
-
-NON_GAAI_DELETIONS=$(git -C "$WORKTREE_PATH" diff --diff-filter=D --name-only staging..HEAD \
-  | grep -vcE '^\.gaai/' || true)
-```
-
-#### Diff-consistency check — sub-agent reviewer decides
-
-Two diff signals trigger the consistency check:
-- `NON_GAAI_DELETIONS > 0` — any non-`.gaai/` file deleted (possible tree corruption OR legitimate story-scoped removal).
-- `CHANGED_COUNT > 30` — diff exceeds the soft threshold (possible scope drift OR legitimate wide-touch story like test rewrites).
-
-In both cases, the Delivery Agent MUST NOT decide alone whether to proceed. **Spawn a sub-agent reviewer** to evaluate whether the diff is consistent with the Story scope. The Delivery Agent is the generator — it cannot be the sole evaluator of its own output (base.rules.md Rule 5).
+`nested-claude-spawn.js _emitLog()` writes one (or two on fallback) records to `runtime-routing.jsonl`:
 
 ```
-Reviewer input:
-  - Story title + Acceptance Criteria (from the story artefact)
-  - CHANGED_FILES list (full paths, one per line)
-  - DELETED_FILES list (non-.gaai deletions specifically, if any)
-  - CHANGED_COUNT, NON_GAAI_DELETIONS
-
-Reviewer task:
-  "This delivery triggered a diff-consistency check ({CHANGED_COUNT} files changed,
-   {NON_GAAI_DELETIONS} non-.gaai deletions). Determine whether ALL changed and
-   deleted files are traceable to the Story's scope.
-
-   Story: {title}
-   ACs: {acceptance criteria}
-
-   Changed files:
-   {CHANGED_FILES}
-
-   Non-.gaai deletions (if any):
-   {DELETED_FILES}
-
-   Answer with a structured verdict:
-   - PROCEED: every file is within the Story's domain — the count is high or
-     the deletion is explainable (e.g., test-rewrite story, refactor removing
-     a generated/dead file declared in an AC).
-   - ESCALATE: one or more files are outside the Story's expected scope, OR
-     the changes span unrelated modules, OR a deletion has no trace to any AC,
-     OR you cannot confidently trace all files to the ACs.
-
-   Be conservative: when in doubt, ESCALATE."
+trace_id, story_id, phase=impl, provider=primary|secondary,
+model=$CLAUDE_MODEL_*, duration_ms, fallback_reason, pipeline=3phase
 ```
 
-**Decision flow:**
-
-```
-NON_GAAI_DELETIONS > 0  OR  CHANGED_COUNT > 30
-  → spawn sub-agent reviewer (isolated context, no conversation history)
-    → reviewer says PROCEED → continue to Step 8 (push + PR + merge)
-    → reviewer says ESCALATE → push story branch to preserve work, then exit 1
-```
-
-**Important:** The reviewer runs in an **isolated context window** — it receives only the Story ACs and the file list, NOT the Delivery Agent's self-assessment or conversation history. This prevents confirmation bias (base.rules.md Rule 5).
-
-If the reviewer is unavailable (sub-agent spawn fails), treat as ESCALATE — fail safe.
-
-### 8. Create PR & Complete Story
-
-**8a. Push story branch and create PR to staging:**
-
-```bash
-# Push story branch to origin
-git -C "$WORKTREE_PATH" push origin story/{id}
-
-# Create PR targeting staging
-gh pr create --base staging --head story/{id} \
-  --title "feat({id}): {Story title}" \
-  --body "$(cat <<'EOF'
-## Summary
-{1-3 bullet points from impl-report}
-
-## Test Results
-- Tests: {X}/{X} pass
-- TSC: clean
-- QA Verdict: PASS
-
-## Changes Delivered
-| File | Purpose |
-|------|---------|
-{table from impl-report}
-
-## Story
-- ID: {id}
-- Artefact: .gaai/project/contexts/artefacts/stories/{id}.story.md
-
-🤖 Generated with [GAAI Delivery Agent](https://github.com/Fr-e-d/GAAI-framework)
-EOF
-)"
-
-# CI Watch — invoke ci-watch-and-fix skill
-# Returns: CI PASS | CI PASS (advisory) | CI FAIL
-# CI PASS (advisory) = CI failed but no branch protection → merge anyway
-# CI FAIL = branch protection active AND CI cannot pass → ESCALATE
-ci_result = invoke ci-watch-and-fix(pr_number, story_id, story_branch, repo, worktree_path, log_dir)
-
-if ci_result == CI FAIL:
-    # Branch protection prevents merge — escalate to human
-    exit 1  # on_exit trap marks story failed
-
-# CI PASS or CI PASS (advisory) — proceed to merge
-gh pr merge --squash --delete-branch
-```
-
-> **CI advisory mode:** When no branch protection exists on the target branch, CI failures caused by infrastructure issues (billing, quotas) do not block merge. The `ci-watch-and-fix` skill checks branch protection status before deciding whether to block or proceed. See `ci-watch-and-fix/SKILL.md` Step 0.
->
-> **Staging self-merge: PERMITTED** after diff-sanity check passes (if any non-.gaai deletion OR > 30 files, sub-agent reviewer must verdict PROCEED — see §7c). If the check fails → ESCALATE, do NOT merge.
->
-> **Production/main merge: FORBIDDEN.** The AI MUST NEVER run `gh pr merge` targeting `main` or `production`. The human reviews and merges to production. This is a non-negotiable safety boundary.
-
-**8b. Delivery artefacts:** Delivery artefacts are committed to the story branch before PR creation (step 7b) and merge to staging via the PR. No separate staging push needed.
-
-**8c. Mark Story done + cleanup worktree:**
-
-```bash
-# Remove worktree (but keep story branch — needed for the PR)
-git worktree remove "$WORKTREE_PATH"
-
-# Update backlog (push with retry-rebase pattern)
-flock .gaai/project/contexts/backlog/.delivery-locks/.staging.lock bash -c '
-  git pull origin staging
-  .gaai/core/scripts/backlog-scheduler.sh --set-status {id} done .gaai/project/contexts/backlog/active.backlog.yaml
-  git add .gaai/project/contexts/backlog/active.backlog.yaml
-  git commit -m "chore({id}): done [delivery]"
-  for attempt in 1 2 3; do
-    git pull --rebase origin staging && git push origin staging && break
-    [ $attempt -lt 3 ] && sleep $((attempt * 2))
-  done || { echo "ESCALATE: staging push failed after 3 attempts"; exit 1; }
-'
-```
-
-> **Note:** The story branch is NOT deleted. It stays on origin for the PR. GitHub can auto-delete branches after PR merge (configure in repo Settings → General → "Automatically delete head branches").
-
-Move completed Story to `contexts/backlog/done/{YYYY-MM}.done.yaml`.
-
-Invoke `decision-extraction` if notable architectural or governance decisions emerged.
-
-Flag any new patterns worth persisting as a memory-delta artefact (`memory-deltas/{id}.memory-delta.md`) for Discovery to review and ingest in the next session. Delivery does not invoke `memory-ingest` directly — see `orchestration.rules.md` §Memory Ingestion.
-
-**If the Story required human intervention or reached 3 QA cycles:** invoke `post-mortem-learning`. Record the friction signal (domain, root cause hypothesis, AC gap if applicable) as a `[FRICTION]` entry in `contexts/memory/decisions.memory.md`. This informs future Discovery refinement.
-
-**STOP — report to human:**
-
-```
-✅ PR created for review: {PR_URL}
-
-Story: {id} — {Story title}
-QA: PASS ({X}/{X} tests, tsc clean)
-
-Next: review and merge the PR on GitHub.
-```
-
-**8d. On PR creation failure:**
-
-If `gh pr create` fails (e.g., branch conflict, auth issue):
-- Log the error
-- Do NOT update backlog to done
-- ESCALATE to human with the error details
+After the call, `STORY_TRACE_ID` is overwritten with `result.trace_id` unconditionally.
 
 ---
 
-## Sub-Agent Lifecycle (Invariant)
+## Phase 3 QA
 
-Every sub-agent follows: `SPAWN (with context bundle) → EXECUTE (autonomous) → HANDOFF (artefact to known path) → DIE (context released)`. The Orchestrator only acts after a sub-agent has terminated and its artefact has been collected.
+### Input contract
+
+Env vars set by `handle_qa_phase()` in `daemon-dispatch.sh`:
+
+| Variable | Purpose |
+|---|---|
+| `$GAAI_STORY_ID` | Story identifier |
+| `$GAAI_WORKTREE_PATH` | Absolute worktree root |
+| `$GAAI_STORY_PATH` | Path to `{id}.story.md` |
+| `$GAAI_PLAN_PATH` | Path to `{id}.execution-plan.md` |
+| `$GAAI_IMPL_REPORT_PATH` | Path to `{id}.impl-report.md` |
+| `$GAAI_QA_REPORT_PATH` | Output path for `qa-report.md` |
+| `$GAAI_EPIC_PATH` | Path to `{epic}.epic.md` |
+| `$GAAI_BASE_REF` | Git ref for diff comparison |
+| `$GAAI_DELIVERY_LOG_FILE` | Per-story log path |
+| `$GAAI_MEMORY_DELTA_PATH` | Output path for memory-delta (optional) |
+| `$GAAI_WORKSPACE_ID` | Workspace UUID |
+| `$GAAI_ORG_ID` | Org UUID |
+
+### Prompt source
+
+Daemon reads `.gaai/core/agents/sub-agents/qa.daemon-prompt.md` and passes it as the `claude -p` system prompt. Story, execution-plan, and impl-report are included in the prompt body.
+
+### Verdict format
+
+QA agent writes `phase_status:` as the first YAML frontmatter field in `$GAAI_QA_REPORT_PATH`. Daemon reads this field to determine disposition:
+
+- `qa_passed` → advance to commit phase
+- `qa_failed` → retry impl (up to `MAX_RETRIES=3` total cycles); if exhausted → `failed`
+- `qa_escalated` → mark `escalated`, surface to human
+
+### Output contract
+
+- Writes: `$GAAI_QA_REPORT_PATH` (`.gaai/project/contexts/artefacts/qa-reports/{id}.qa-report.md`)
+- Optional: `$GAAI_MEMORY_DELTA_PATH` if QA agent identifies memory-worthy decisions
+- Phase transition: `phase_status: implemented → qa_passed | qa_failed | qa_escalated`
+
+### Audit emit
+
+`_emit_qa_routing_record` writes one record to `runtime-routing.jsonl`:
+
+```
+trace_id, story_id, phase=qa, provider=primary,
+model=$CLAUDE_MODEL_PRIMARY, duration_ms, fallback_reason, impl_model_tag, pipeline=3phase
+```
 
 ---
 
-## Stop Conditions
+## Commit Phase
 
-**Recoverable failures** — retry is authorized (up to the cycle limits above):
-- Test failure with a clear root cause
-- Logic bug with a deterministic fix
-- Missing file or dependency that can be created within Story scope
+Deterministic bash only — no `claude -p` invocation. Implemented in `handle_commit_phase()` in `daemon-dispatch.sh` (per E134S06).
 
-**Structural failures** — ESCALATE immediately, no retry:
-- Acceptance criteria are ambiguous or contradictory
-- A fix would require changing product scope or intent
-- A rule violation has no compliant resolution path
-- Missing context that cannot be inferred from the Story or memory
-- The same failure pattern recurs across retry cycles (loop detected)
+**Sequence:**
 
-The Delivery Orchestrator MUST escalate on any structural failure regardless of remaining retry budget.
+1. Git add + commit delivery artefacts to story branch
+2. Push story branch with retry-rebase pattern (3 attempts, backoff 2s / 4s / 6s)
+3. `gh pr create --base staging --head story/{id}`
+4. CI watch (advisory mode if no branch protection)
+5. `gh pr merge --squash --delete-branch`
+6. Backlog status → `done` (flock-serialized push to staging)
+7. Worktree removal
+
+**Safety boundary:** `gh pr merge` targeting `main` or `production` is FORBIDDEN. Self-merge to `staging` is permitted after diff-sanity passes.
+
+**Diff-sanity check:** Spawn sub-agent reviewer when `NON_GAAI_DELETIONS > 0` OR `CHANGED_COUNT > 30`. Reviewer verdicts PROCEED or ESCALATE (base.rules.md Rule 5). Reviewer runs in an isolated context window — it receives only Story ACs and the file list, not the daemon's self-assessment.
+
+**Audit emit:** `_emit_commit_routing_record` writes to `runtime-routing.jsonl`:
+`trace_id, story_id, phase=commit, pr_url, auto_merge_applied, pipeline=3phase`.
 
 ---
 
-## Automation
+## Error Semantics
 
-Shell automation available at `.gaai/core/scripts/backlog-scheduler.sh` (selects next Story).
+### Phase-level retry policy
 
-See `scripts/README.scripts.md` for usage.
+`MAX_RETRIES=3` applies per phase cycle independently (defined as a constant in `daemon-dispatch.sh`; cross-reference there for current value).
+
+QA cycles count toward impl retries: if QA returns `qa_failed`, impl is re-spawned and the counter increments. After 3 `qa_failed` / impl-retry cycles, story transitions to `failed`.
+
+### Failure mode taxonomy
+
+Canonical failure mode enums are defined in `daemon-dispatch.sh`. Refer to:
+
+- **Plan phase:** `PLAN_PHASE_FAILED`, `NO_ARTEFACT`, `PARSE_ERROR`, `SCHEDULER_FAILURE` (defined by E134S03)
+- **Impl phase:** `PARSE_ERROR` (JSON parse on spawn output), `False|<error_reason>` from `nested-claude-spawn.js` (defined by E134S04)
+- **QA phase:** `QA_SPAWN_FAILED`, `QA_NO_ARTEFACT`, `QA_VERDICT_PARSE_ERROR`, `QA_VERDICT:FAIL`, `QA_VERDICT:ESCALATE`, `QA_SCHEDULER_FAILURE` (defined by E134S05)
+- **Commit phase:** `COMMIT_FAILED`, `PUSH_FAILED`, `PR_CREATE_FAILED`, `AUTO_MERGE_FAILED`, `GH_AUTH_MISSING`, `SCHEDULER_FAILURE` (defined by E134S06)
+
+### Terminal failure semantics
+
+After `MAX_RETRIES` exhausted at any phase: story transitions to `phase_status: failed`, `status: failed` in backlog. Daemon main loop continues — other ready stories are unaffected. The `failed` state is terminal: no automatic retry. Human intervention required.
+
+### Operator runbook
+
+When a story enters `failed` state:
+
+1. Read `.gaai/project/contexts/backlog/.delivery-logs/{id}.fail-debug.jsonl` (last `phase_status`, error code, stdout/stderr tail)
+2. Identify the failure mode from the `fallback_reason` field
+3. Fix the root cause (AC gap, dependency missing, etc.)
+4. During hybrid period: re-trigger via `/gaai:deliver {id}` (legacy orchestrator path)
+5. After E134S09 cutover: re-trigger via `backlog-scheduler.sh --set-status {id} refined`
+
+---
+
+## Legacy Pipeline (DEPRECATED — to be removed by E134S11)
+
+- **(a)** The legacy orchestrator-coordinated workflow is preserved during the E134 hybrid period. Stories with `delivery_pipeline: legacy` (or in-progress at cutover) complete via the orchestrator agent in `agents/delivery.agent.md`.
+- **(b)** Retirement PR: `(see PR for E134S11)` — placeholder, no SHA yet.
+- **(c)** Routing table:
+
+| `delivery_pipeline` value | Execution path |
+|---|---|
+| `legacy` | Orchestrator agent (`agents/delivery.agent.md`) coordinates via Task tool sub-agents |
+| `3phase` | Daemon bash directly spawns Plan / Impl / QA as standalone `claude -p` processes (this document) |
+
+- **(d)** Cutover ETA: E134S09 (feature flag `delivery_pipeline` default switches from `legacy` to `3phase`). Removal ETA: E134S11 (legacy path code + this section deleted).
