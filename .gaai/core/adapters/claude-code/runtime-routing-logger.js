@@ -100,7 +100,7 @@ export function logPhase(params) {
   };
 
   // Append optional secondary-mode telemetry fields when present (integers/boolean, DEC-65)
-  const TELEMETRY_FIELDS = ['context_size_at_spawn', 'compact_events_count', 'retry_429_count', 'nested_session_completed', 'pipeline'];
+  const TELEMETRY_FIELDS = ['context_size_at_spawn', 'compact_events_count', 'retry_429_count', 'nested_session_completed', 'pipeline', 'pr_url', 'auto_merge_applied'];
   for (const f of TELEMETRY_FIELDS) {
     if (f in params) entry[f] = params[f];
   }
@@ -136,6 +136,8 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const implModelTag  = argValue('--impl-model-tag');
   const pipelineArg   = argValue('--pipeline');
   const logPathArg    = argValue('--log-path');
+  const prUrlArg         = argValue('--pr-url');
+  const autoMergeApplied = argValue('--auto-merge-applied');
 
   // --log-path overrides default log path (useful for testing without internal _setLogPath)
   if (logPathArg) _setLogPath(logPathArg);
@@ -155,6 +157,8 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
       impl_model_tag:  implModelTag,
     };
     if (pipelineArg !== undefined) phaseParams.pipeline = pipelineArg;
+    if (prUrlArg !== undefined && prUrlArg !== '') phaseParams.pr_url = prUrlArg;
+    if (autoMergeApplied !== undefined) phaseParams.auto_merge_applied = autoMergeApplied === 'true';
     logPhase(phaseParams);
     process.stdout.write(formatPhaseStdout(phase, provider, model, fallbackReason));
   } catch (err) {

@@ -10,28 +10,6 @@
 #   GAAI_STUB_DELAY_S — seconds to sleep between stubs (default: 0)
 #   ROUTING_LOG_PATH  — test-only override for --log-path (default: empty, uses logger default)
 
-# ── Active-spawn marker directory (AC1) ──────────────────────────────────
-# LOCK_DIR is set by delivery-daemon.sh before sourcing this library.
-# Provide a fallback so this library is usable in tests without the full daemon env.
-_marker_dir() {
-  echo "${LOCK_DIR:-${PROJECT_DIR}/.gaai/project/contexts/backlog/.delivery-locks}"
-}
-
-_write_active_marker() {
-  local story_id="$1" phase="$2"
-  local mdir
-  mdir=$(_marker_dir)
-  mkdir -p "$mdir" 2>/dev/null || true
-  touch "${mdir}/${story_id}.${phase}.active" 2>/dev/null || true
-}
-
-_remove_active_marker() {
-  local story_id="$1" phase="$2"
-  local mdir
-  mdir=$(_marker_dir)
-  rm -f "${mdir}/${story_id}.${phase}.active" 2>/dev/null || true
-}
-
 # ── Field extractors (AC1 — verbatim per story AC1 specification) ─────────
 
 get_phase_status() {
@@ -80,6 +58,39 @@ get_impl_model_tag() {
     }
   ' "$BACKLOG_FILE" 2>/dev/null || true)
   echo "${val:-absent}"
+}
+
+# Helper: read story title from backlog YAML (returns "" if absent)
+get_story_title() {
+  local id="$1"
+  awk -v id="$id" '
+    $0 == "- id: " id { found=1; next }
+    found && /^- id:/ { exit }
+    found && /^[[:space:]]+title:/ {
+      gsub(/^[[:space:]]+title:[[:space:]]*/, "")
+      gsub(/[[:space:]]*$/, "")
+      gsub(/^"|"$/, "")
+      print
+      exit
+    }
+  ' "$BACKLOG_FILE"
+}
+
+# Helper: read related_decs from backlog YAML (returns space-sep list, "" if absent/empty)
+get_related_decs() {
+  local id="$1"
+  awk -v id="$id" '
+    $0 == "- id: " id { found=1; next }
+    found && /^- id:/ { exit }
+    found && /^[[:space:]]+related_decs:/ {
+      gsub(/^[[:space:]]+related_decs:[[:space:]]*/, "")
+      gsub(/[[:space:]]*$/, "")
+      # Strip YAML list brackets and commas
+      gsub(/^\[/, ""); gsub(/\]$/, ""); gsub(/,/, "")
+      print
+      exit
+    }
+  ' "$BACKLOG_FILE"
 }
 
 # ── Routing record helper ─────────────────────────────────────────────────
@@ -158,6 +169,35 @@ _emit_qa_routing_record() {
     --fallback-reason "$fallback_reason" \
     --impl-model-tag  "$impl_tag" \
     --pipeline        "3phase" \
+    "${log_path_args[@]}" \
+    2>/dev/null || true
+}
+
+# ── Commit-phase routing record (adds --pipeline, --pr-url, --auto-merge-applied) ──
+# Arguments: story_id trace_id provider fallback_reason duration_ms pr_url auto_merge_applied
+_emit_commit_routing_record() {
+  local story_id="$1" trace_id="$2" provider="$3" fallback_reason="$4" duration_ms="$5"
+  local pr_url="${6:-}" auto_merge_applied="${7:-false}"
+  local impl_tag
+  impl_tag=$(get_impl_model_tag "$story_id")
+
+  local log_path_args=()
+  if [[ -n "${ROUTING_LOG_PATH:-}" ]]; then
+    log_path_args=(--log-path "$ROUTING_LOG_PATH")
+  fi
+
+  node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \
+    --trace-id           "$trace_id" \
+    --story-id           "$story_id" \
+    --phase              "commit" \
+    --provider           "$provider" \
+    --model              "n/a" \
+    --duration-ms        "$duration_ms" \
+    --fallback-reason    "$fallback_reason" \
+    --impl-model-tag     "$impl_tag" \
+    --pipeline           "3phase" \
+    --pr-url             "$pr_url" \
+    --auto-merge-applied "$auto_merge_applied" \
     "${log_path_args[@]}" \
     2>/dev/null || true
 }
@@ -604,21 +644,314 @@ handle_qa_phase() {
 
 handle_commit_phase() {
   local story_id="$1" trace_id="$2"
-  local ts
+  local ts t_start_ms t_end_ms duration_ms
   ts=$(date '+%H:%M:%S')
-  echo "[${ts}] ${story_id} phase=commit dispatched (stub)"
+  echo "[${ts}] ${story_id} phase=commit starting"
 
-  # Emit routing record (AC4)
-  _emit_routing_record "$story_id" "$trace_id" "commit" "stub" ""
+  # ── Idempotency guard: if already done, return 0 (no duplicate record) ────
+  local current_ps
+  current_ps=$(get_phase_status "$story_id")
+  if [[ "$current_ps" == "done" ]]; then
+    ts=$(date '+%H:%M:%S')
+    echo "[${ts}] ${story_id} phase=commit already done — skipping (idempotent)"
+    return 0
+  fi
 
-  # Advance phase_status: qa_passed → done (stub — real commit/PR/merge is E134S06)
-  if ! "$SCHEDULER" --set-phase-status "$story_id" done "$BACKLOG_FILE" 2>/dev/null; then
-    echo "[ERROR] ${story_id} handle_commit_phase: --set-phase-status done failed"
-    _emit_routing_record "$story_id" "$trace_id" "commit" "error" "set-phase-status-failed"
+  # ── Duration measurement ──────────────────────────────────────────────────
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    t_start_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+  else
+    t_start_ms=$(( $(date +%s) * 1000 ))
+  fi
+
+  # ── Resolve worktree path (same pattern as handle_impl_phase/handle_qa_phase) ──
+  local worktree_path
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    worktree_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
+  else
+    local repo_name
+    repo_name=$(basename "$PROJECT_DIR")
+    worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
+  fi
+
+  # ── Resolve artefact paths ────────────────────────────────────────────────
+  local story_path qa_report_path
+  story_path="${worktree_path}/.gaai/project/contexts/artefacts/stories/${story_id}.story.md"
+  qa_report_path="${worktree_path}/.gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-report.md"
+
+  # ── Field extraction from backlog YAML (AC1-i) ────────────────────────────
+  local raw_title story_title
+  raw_title=$(get_story_title "$story_id")
+  if [[ ${#raw_title} -gt 60 ]]; then
+    story_title="${raw_title:0:60}"
+    story_title="${story_title% *}"
+  else
+    story_title="$raw_title"
+  fi
+  [[ -z "$story_title" ]] && story_title="$story_id"
+
+  local related_decs_raw related_decs_line
+  related_decs_raw=$(get_related_decs "$story_id")
+  if [[ -n "$related_decs_raw" ]]; then
+    related_decs_line="Related DECs: ${related_decs_raw}"
+  else
+    related_decs_line=""
+  fi
+
+  # ── Resolve branch name in worktree ──────────────────────────────────────
+  local branch
+  branch=$(git -C "$worktree_path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  if [[ -z "$branch" ]] || [[ "$branch" == "HEAD" ]]; then
+    echo "[ERROR] ${story_id} handle_commit_phase: cannot resolve branch in $worktree_path (got '${branch}') [class=COMMIT_FAILED]"
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "COMMIT_FAILED" "0" "" "false"
     return 1
   fi
 
-  sleep "${GAAI_STUB_DELAY_S:-0}"
+  # ── Per-story auto_merge frontmatter (AC3-ii — awk fence-counter) ─────────
+  local story_auto_merge="inherit"
+  if [[ -f "$story_path" ]]; then
+    local _sam
+    _sam=$(awk '
+      /^---$/ { fence++; next }
+      fence == 1 && /^auto_merge:/ {
+        gsub(/^auto_merge:[[:space:]]*/, "")
+        gsub(/[[:space:]]*$/, "")
+        print; exit
+      }
+      fence >= 2 { exit }
+    ' "$story_path" 2>/dev/null || true)
+    case "${_sam:-inherit}" in
+      true|false|inherit) story_auto_merge="${_sam:-inherit}" ;;
+    esac
+  fi
+
+  # ── Trailer: [skip-auto-merge] when env or story says false (AC3-i setup) ──
+  local add_skip_trailer=false
+  if [[ "${GAAI_SKIP_AUTO_MERGE:-0}" == "1" ]] || [[ "$story_auto_merge" == "false" ]]; then
+    add_skip_trailer=true
+  fi
+
+  # ── QA-report snippet (last 5 lines, AC1-ii) ─────────────────────────────
+  local qa_snippet=""
+  if [[ -f "$qa_report_path" ]]; then
+    qa_snippet=$(tail -5 "$qa_report_path" 2>/dev/null || true)
+  fi
+
+  # ── Commit message assembly (AC1-ii — bash array, no eval) ───────────────
+  local commit_subject commit_body trailer_block
+  commit_subject="chore(${story_id}): ${story_title}"
+  commit_body="${related_decs_line}"
+  if [[ -n "$qa_snippet" ]]; then
+    if [[ -n "$commit_body" ]]; then
+      commit_body="${commit_body}
+
+QA summary:
+${qa_snippet}"
+    else
+      commit_body="QA summary:
+${qa_snippet}"
+    fi
+  fi
+  trailer_block="Co-Authored-By: Claude <noreply@anthropic.com>"
+  if [[ "$add_skip_trailer" == "true" ]]; then
+    trailer_block="${trailer_block}
+[skip-auto-merge]"
+  fi
+
+  # ── git add -A (AC1-iii) ─────────────────────────────────────────────────
+  if ! git -C "$worktree_path" add -A 2>/dev/null; then
+    echo "[ERROR] ${story_id} handle_commit_phase: git add -A failed [class=COMMIT_FAILED]"
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "COMMIT_FAILED" "0" "" "false"
+    return 1
+  fi
+
+  # ── git commit via bash array (AC1-ii — no eval, shell-injection-safe) ───
+  local msg_args=("-m" "$commit_subject" "-m" "$commit_body" "-m" "$trailer_block")
+  local commit_stderr commit_exit
+  commit_stderr=$(git -C "$worktree_path" commit "${msg_args[@]}" 2>&1)
+  commit_exit=$?
+  if [[ "$commit_exit" -ne 0 ]]; then
+    if printf '%s\n' "$commit_stderr" | grep -qi "nothing to commit"; then
+      echo "[INFO] ${story_id} handle_commit_phase: nothing to commit — idempotent, continuing"
+    else
+      echo "[ERROR] ${story_id} handle_commit_phase: git commit failed (exit ${commit_exit}): ${commit_stderr: -200} [class=COMMIT_FAILED]"
+      _emit_commit_routing_record "$story_id" "$trace_id" "error" "COMMIT_FAILED" "0" "" "false"
+      return 1
+    fi
+  fi
+
+  # ── git push with retry-backoff (AC1-iii + AC5-a) ────────────────────────
+  local push_exit=1 push_attempt=0 push_max=3
+  while [[ $push_attempt -lt $push_max ]]; do
+    push_attempt=$(( push_attempt + 1 ))
+    if git -C "$worktree_path" push origin "$branch" 2>/dev/null; then
+      push_exit=0; break
+    fi
+    echo "[WARN] ${story_id} handle_commit_phase: git push attempt ${push_attempt}/${push_max} failed"
+    [[ $push_attempt -lt $push_max ]] && sleep $((push_attempt * 2))
+  done
+  if [[ "$push_exit" -ne 0 ]]; then
+    echo "[ERROR] ${story_id} handle_commit_phase: git push failed after ${push_max} attempts [class=PUSH_FAILED]"
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "PUSH_FAILED" "0" "" "false"
+    return 1
+  fi
+
+  # ── PR title (AC2 — truncated at 100 chars word-boundary) ────────────────
+  local raw_pr_title="${story_id}: ${story_title}" pr_title
+  if [[ ${#raw_pr_title} -gt 100 ]]; then
+    pr_title="${raw_pr_title:0:100}"; pr_title="${pr_title% *}"
+  else
+    pr_title="$raw_pr_title"
+  fi
+
+  # ── PR body (AC2) ─────────────────────────────────────────────────────────
+  local pr_body="Story: ${story_id}"
+  [[ -n "$related_decs_line" ]] && pr_body="${pr_body}
+${related_decs_line}"
+  [[ -n "$qa_snippet" ]] && pr_body="${pr_body}
+
+## QA Verdict
+${qa_snippet}"
+
+  # ── gh pr create with retry (AC2 + AC5-b/c/d) ────────────────────────────
+  local pr_url="" pr_exit=1 pr_attempt=0 pr_max=3 pr_output
+  while [[ $pr_attempt -lt $pr_max ]]; do
+    pr_attempt=$(( pr_attempt + 1 ))
+    pr_output=$(gh pr create \
+      --title "$pr_title" \
+      --body  "$pr_body" \
+      --base  "staging" \
+      --head  "$branch" 2>&1)
+    pr_exit=$?
+
+    if [[ "$pr_exit" -eq 0 ]]; then
+      pr_url=$(printf '%s\n' "$pr_output" | grep -E '^https://' | tail -1 || true)
+      break
+    fi
+
+    # AC5-b: auth missing → immediate failed, no retry
+    if printf '%s\n' "$pr_output" | grep -qiE 'GH_TOKEN|authentication|gh auth login|not logged in'; then
+      local _stderr_tail="${pr_output: -200}"
+      echo "[ERROR] ${story_id} handle_commit_phase: GH auth missing — run 'gh auth login' or set GH_TOKEN. detail: ${_stderr_tail} [class=GH_AUTH_MISSING]"
+      _emit_commit_routing_record "$story_id" "$trace_id" "error" "GH_AUTH_MISSING" "0" "" "false"
+      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      return 1
+    fi
+
+    # AC5-c: already exists → fallback to gh pr view
+    if printf '%s\n' "$pr_output" | grep -qi "already exists"; then
+      pr_url=$(gh pr view "$branch" --json url --jq .url 2>/dev/null || true)
+      if [[ -n "$pr_url" ]]; then
+        echo "[INFO] ${story_id} handle_commit_phase: PR already exists, using existing URL: $pr_url"
+        pr_exit=0; break
+      fi
+    fi
+
+    echo "[WARN] ${story_id} handle_commit_phase: gh pr create attempt ${pr_attempt}/${pr_max} failed: ${pr_output: -200}"
+    [[ $pr_attempt -lt $pr_max ]] && sleep 3
+  done
+
+  if [[ "$pr_exit" -ne 0 ]]; then
+    echo "[ERROR] ${story_id} handle_commit_phase: gh pr create failed after ${pr_max} attempts [class=PR_CREATE_FAILED]"
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "PR_CREATE_FAILED" "0" "" "false"
+    return 1
+  fi
+
+  # ── Persist pr_url + pr_number (AC2) ─────────────────────────────────────
+  if [[ -n "$pr_url" ]]; then
+    "$SCHEDULER" --set-field "$story_id" pr_url "$pr_url" "$BACKLOG_FILE" 2>/dev/null || true
+    local pr_number
+    pr_number=$(gh pr view "$branch" --json number --jq .number 2>/dev/null || true)
+    [[ -n "$pr_number" ]] && "$SCHEDULER" --set-field "$story_id" pr_number "$pr_number" "$BACKLOG_FILE" 2>/dev/null || true
+  fi
+
+  # ── Trailer killswitch verification (AC3-i) ───────────────────────────────
+  local trailer_killswitch=false
+  if git -C "$worktree_path" log -1 --format=%B HEAD 2>/dev/null | grep -qE '^\[skip-auto-merge\]$'; then
+    trailer_killswitch=true
+  fi
+
+  # ── Auto-merge policy resolution (AC3) ───────────────────────────────────
+  local auto_merge_applied=false auto_merge_skipped_reason="policy_off"
+
+  if [[ "$trailer_killswitch" == "true" ]]; then
+    auto_merge_skipped_reason="trailer_override"
+  elif [[ "$story_auto_merge" == "true" ]]; then
+    auto_merge_applied=true; auto_merge_skipped_reason="null"
+  elif [[ "$story_auto_merge" == "false" ]]; then
+    auto_merge_skipped_reason="story_override"
+  else
+    # inherit → workspace toggle (D1 stub: env var fallback per V1 design)
+    local workspace_policy="${GAAI_AUTO_MERGE_POLICY:-off}"
+    if [[ "$workspace_policy" == "on" ]]; then
+      auto_merge_applied=true; auto_merge_skipped_reason="null"
+    elif [[ "$workspace_policy" == "staging_only" ]]; then
+      if [[ "$branch" == "staging" ]]; then
+        auto_merge_applied=true; auto_merge_skipped_reason="null"
+      else
+        auto_merge_skipped_reason="branch_excluded"
+      fi
+    else
+      auto_merge_skipped_reason="policy_off"
+    fi
+  fi
+
+  # ── Apply auto-merge if resolved (AC3) ───────────────────────────────────
+  if [[ "$auto_merge_applied" == "true" ]] && [[ -n "$pr_url" ]]; then
+    local merge_exit=1 merge_attempt=0 merge_max=3 merge_stderr
+    while [[ $merge_attempt -lt $merge_max ]]; do
+      merge_attempt=$(( merge_attempt + 1 ))
+      merge_stderr=$(gh pr merge --auto --squash "$pr_url" 2>&1)
+      merge_exit=$?
+      if [[ "$merge_exit" -eq 0 ]]; then
+        # AC5-e: verify autoMergeRequest actually queued
+        local merge_check
+        merge_check=$(gh pr view "$pr_url" --json autoMergeRequest --jq .autoMergeRequest 2>/dev/null || echo "null")
+        if [[ "$merge_check" == "null" ]]; then
+          echo "[WARN] ${story_id} handle_commit_phase: auto-merge requested but branch protection not configured — PR remains manual [auto_merge_skipped_reason=branch_protection_missing]"
+          auto_merge_applied=false; auto_merge_skipped_reason="branch_protection_missing"
+        fi
+        break
+      fi
+      # AC5-g: "already enabled" is idempotent success
+      if printf '%s\n' "$merge_stderr" | grep -qi "already enabled\|already queued"; then
+        merge_exit=0; break
+      fi
+      echo "[WARN] ${story_id} handle_commit_phase: gh pr merge --auto attempt ${merge_attempt}/${merge_max} failed: ${merge_stderr: -200}"
+      [[ $merge_attempt -lt $merge_max ]] && sleep 3
+    done
+    if [[ "$merge_exit" -ne 0 ]]; then
+      echo "[ERROR] ${story_id} handle_commit_phase: gh pr merge --auto failed after ${merge_max} attempts [class=AUTO_MERGE_FAILED]"
+      _emit_commit_routing_record "$story_id" "$trace_id" "error" "AUTO_MERGE_FAILED" "0" "$pr_url" "false"
+      return 1
+    fi
+  fi
+
+  # ── Persist pr_status (AC3) ───────────────────────────────────────────────
+  local pr_status_val
+  [[ "$auto_merge_applied" == "true" ]] && pr_status_val="merged" || pr_status_val="pending_review"
+  "$SCHEDULER" --set-field "$story_id" pr_status "$pr_status_val" "$BACKLOG_FILE" 2>/dev/null || true
+
+  # ── DEC-27 gate: advance phase_status qa_passed → done (AC4) ─────────────
+  if ! "$SCHEDULER" --set-phase-status "$story_id" done "$BACKLOG_FILE" 2>/dev/null; then
+    echo "[ERROR] ${story_id} handle_commit_phase: --set-phase-status done failed [class=SCHEDULER_FAILURE]"
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "SCHEDULER_FAILURE" "0" "$pr_url" "$auto_merge_applied"
+    return 1
+  fi
+
+  # ── Duration end ─────────────────────────────────────────────────────────
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+  else
+    t_end_ms=$(( $(date +%s) * 1000 ))
+  fi
+  duration_ms=$(( t_end_ms - t_start_ms ))
+
+  # ── Emit success routing record (AC4 — DEC-65 audit) ─────────────────────
+  _emit_commit_routing_record "$story_id" "$trace_id" "daemon-bash" "null" "$duration_ms" "$pr_url" "$auto_merge_applied"
+
+  ts=$(date '+%H:%M:%S')
+  echo "[${ts}] ${story_id} phase=commit DONE (${duration_ms}ms) pr=${pr_url:-none} auto_merge=${auto_merge_applied}"
   return 0
 }
 
@@ -649,37 +982,23 @@ dispatch_3phase_story() {
 
   case "$ps" in
     not_started)
-      _write_active_marker "$story_id" "plan"
-      handle_plan_phase "$story_id" "$trace_id"
-      local _plan_rc=$?
-      _remove_active_marker "$story_id" "plan"
-      [[ $_plan_rc -ne 0 ]] && return 1
+      handle_plan_phase   "$story_id" "$trace_id" || return 1
       ;;
     planned)
-      _write_active_marker "$story_id" "impl"
-      handle_impl_phase "$story_id" "$trace_id"
-      local _impl_rc=$?
-      _remove_active_marker "$story_id" "impl"
-      [[ $_impl_rc -ne 0 ]] && return 1
+      handle_impl_phase   "$story_id" "$trace_id" || return 1
       ;;
     implemented)
-      _write_active_marker "$story_id" "qa"
-      handle_qa_phase "$story_id" "$trace_id"
-      local _qa_rc=$?
-      _remove_active_marker "$story_id" "qa"
-      [[ $_qa_rc -ne 0 ]] && return 1
+      handle_qa_phase     "$story_id" "$trace_id" || return 1
       ;;
     qa_passed)
-      _write_active_marker "$story_id" "commit"
-      handle_commit_phase "$story_id" "$trace_id"
-      local _commit_rc=$?
-      _remove_active_marker "$story_id" "commit"
-      [[ $_commit_rc -ne 0 ]] && return 1
+      handle_commit_phase "$story_id" "$trace_id" || return 1
       ;;
     done|failed|escalated|qa_failed|qa_escalated)
+      # Terminal states — caller loop should stop. Not an error.
       return 0
       ;;
     *)
+      # AC6(i)(ii)(iii)(iv): invalid phase_status
       echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated done failed escalated"
       _emit_routing_record "$story_id" "$trace_id" "plan" "error" "invalid_phase_status:${ps}"
       return 1

@@ -34,24 +34,6 @@ case "${1:-}" in
   --story)  SINGLE_STORY="${2:-}" ;;
 esac
 
-# Resolve the impl log path for a story.
-# AC4: 3phase stories use per-phase impl.log at worktree path.
-# Fallback to legacy single-log if per-phase absent.
-_impl_log_path() {
-  local story_id="$1"
-  local worktree_log="${WORKTREE_BASE}/${story_id}-workspace/.delivery-logs/${story_id}.impl.log"
-  local legacy_log="${LOGS_DIR}/${story_id}.log"
-
-  if [[ -f "$worktree_log" ]]; then
-    echo "$worktree_log"
-  elif [[ -f "$legacy_log" ]]; then
-    echo "$legacy_log"
-  else
-    # Neither exists — return the per-phase path as the canonical expectation
-    echo "$worktree_log"
-  fi
-}
-
 # Active secondary stories : look at the routing log for impl_model_tag=secondary
 # preflight events whose story isn't yet `done` in routing log.
 list_secondary_stories() {
@@ -64,9 +46,8 @@ list_secondary_stories() {
     | grep '^gaai-deliver-' \
     | sed 's/gaai-deliver-//' \
     | while read -r s; do
-        local _log
-        _log=$(_impl_log_path "$s")
-        if [[ -f "$_log" ]] && grep -q '"impl-model-tag" "secondary"\|"impl_model_tag":"secondary"\|--impl-model-tag "secondary"' "$_log" 2>/dev/null; then
+        # Only stories tagged secondary
+        if [[ -f "$LOGS_DIR/$s.log" ]] && grep -q '"impl-model-tag" "secondary"\|"impl_model_tag":"secondary"\|--impl-model-tag "secondary"' "$LOGS_DIR/$s.log" 2>/dev/null; then
           echo "$s"
         fi
       done
@@ -95,8 +76,7 @@ notes_status() {
 # Returns space-separated: REREAD_VIOLATIONS BASH_NO_TAIL_COUNT NOTES_WRITES
 compliance_counts() {
   local story_id="$1"
-  local log
-  log=$(_impl_log_path "$story_id")   # AC4: per-phase impl.log, fallback legacy
+  local log="$LOGS_DIR/$story_id.log"
   [[ ! -f "$log" ]] && { echo "0 0 0"; return; }
 
   # Reads of the same file_path more than once = R2 violations
@@ -192,12 +172,10 @@ render_story() {
     echo -e "  Impl: ${DIM}no impl record yet (still in plan/preflight)${NC}"
   fi
 
-  # Recent activity from per-phase impl log (AC4)
-  local _story_log
-  _story_log=$(_impl_log_path "$story_id")
+  # Recent activity from per-story log
   local last_event
-  if [[ -f "$_story_log" ]] && command -v jq &>/dev/null; then
-    last_event=$(tail -200 "$_story_log" 2>/dev/null \
+  if [[ -f "$LOGS_DIR/$story_id.log" ]] && command -v jq &>/dev/null; then
+    last_event=$(tail -200 "$LOGS_DIR/$story_id.log" 2>/dev/null \
       | jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") |
                if .name == "Bash" then ("Bash " + (.input.command // "" | tostring | .[0:80]))
                elif .name == "Read" then ("Read " + (.input.file_path // "" | split("/") | .[-1]))

@@ -143,6 +143,36 @@ exit 0
 DISPATCH_SHIM_EOF
 chmod +x "$DISPATCH_SHIM_DIR/claude"
 
+# git shim for commit phase (T7c): intercept push → exit 0, delegate rest to real git
+DISPATCH_REAL_GIT_BIN="$(command -v git)"
+export DISPATCH_REAL_GIT_BIN
+cat > "$DISPATCH_SHIM_DIR/git" << 'DISPATCH_GIT_SHIM_EOF'
+#!/usr/bin/env bash
+_i=0; _args=("$@")
+while [[ $_i -lt ${#_args[@]} ]]; do
+  [[ "${_args[$_i]}" == "-C" ]] && { _i=$(( _i + 2 )); continue; }
+  break
+done
+[[ "${_args[$_i]:-}" == "push" ]] && exit 0
+exec "$DISPATCH_REAL_GIT_BIN" "$@"
+DISPATCH_GIT_SHIM_EOF
+chmod +x "$DISPATCH_SHIM_DIR/git"
+
+# gh shim for commit phase (T7c): returns fake PR URL
+cat > "$DISPATCH_SHIM_DIR/gh" << 'DISPATCH_GH_SHIM_EOF'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+  "pr create") echo "https://github.com/test/repo/pull/999"; exit 0 ;;
+  "pr view")
+    [[ "$*" == *"--json url"* ]] && { echo "https://github.com/test/repo/pull/999"; exit 0; }
+    [[ "$*" == *"--json number"* ]] && { echo "999"; exit 0; }
+    [[ "$*" == *"--json autoMergeRequest"* ]] && { echo '{"mergeMethod":"squash"}'; exit 0; }
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+DISPATCH_GH_SHIM_EOF
+chmod +x "$DISPATCH_SHIM_DIR/gh"
+
 # ── Impl-phase fixture worktrees for T5 and T7 ───────────────────────────────
 # handle_impl_phase resolves worktrees as: $GAAI_WORKTREES_BASE/{story_id}-workspace
 export GAAI_WORKTREES_BASE="$DISPATCH_FIXTURE_DIR"
@@ -167,6 +197,15 @@ IMPL_STORY_EOF
     > "$_wt/.gaai/project/contexts/artefacts/plans/${_impl_id}.execution-plan.md"
 done
 unset _impl_id _wt
+
+# git init E134S01-workspace so handle_commit_phase can run in T7c
+_e134_wt="$DISPATCH_FIXTURE_DIR/E134S01-workspace"
+git -C "$_e134_wt" init -q
+git -C "$_e134_wt" config user.email "test@example.com"
+git -C "$_e134_wt" config user.name "Test"
+git -C "$_e134_wt" commit --allow-empty -m "init" --quiet
+git -C "$_e134_wt" checkout -B "story/E134S01" -q
+unset _e134_wt
 
 # ── node shim: redirects nested-claude-spawn.js to impl-spawn-stub.mjs ──────
 # This exercises the real runImpl() routing via _setSpawnFn (AC6.a requirement).
@@ -1146,6 +1185,497 @@ export PROJECT_DIR="$PROJECT_DIR_QA_ORIG"
 unset GAAI_WORKTREES_BASE CLAUDE_MODEL_PRIMARY GAAI_WORKSPACE_ID GAAI_ORG_ID
 unset QA_OLD_PATH QA_FIXTURE_DIR QA_SHIM_DIR PROJECT_DIR_QA_ORIG
 rm -rf "/tmp/gaai-qa-phase-tests-$$"
+
+# ── T30-T44: handle_commit_phase tests ────────────────────────
+# Tests for the real commit phase implementation (E134S06):
+# git commit, push, gh pr create, auto-merge policy, routing record.
+
+COMMIT_FIXTURE_DIR="/tmp/gaai-commit-phase-tests-$$"
+rm -rf "$COMMIT_FIXTURE_DIR"
+mkdir -p "$COMMIT_FIXTURE_DIR"
+
+export GAAI_WORKTREES_BASE="$COMMIT_FIXTURE_DIR"
+
+# Add commit-phase story IDs to fixture YAML
+cat >> "$FIXTURE" << 'YAML_COMMIT'
+- id: TST-COMMIT-01
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase
+  title: "Implement commit phase handler"
+  impl_model: primary
+- id: TST-COMMIT-NOTITLE
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase
+  impl_model: primary
+- id: TST-COMMIT-AUTOMERGE
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase
+  title: "Auto-merge story"
+  impl_model: primary
+- id: TST-COMMIT-SKIPMERGE
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase
+  title: "Skip auto-merge story"
+  impl_model: primary
+- id: TST-COMMIT-PUSHFAIL
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase
+  title: "Push fail story"
+  impl_model: primary
+- id: TST-COMMIT-ALREADY-DONE
+  status: in_progress
+  phase_status: done
+  delivery_pipeline: 3phase
+  title: "Already done story"
+  impl_model: primary
+YAML_COMMIT
+
+# Helper: create a real git worktree with optional story auto_merge frontmatter
+make_commit_worktree() {
+  local sid="$1" auto_merge_val="${2:-}"
+  local wt="$COMMIT_FIXTURE_DIR/${sid}-workspace"
+  mkdir -p "$wt/.gaai/project/contexts/artefacts/stories"
+  mkdir -p "$wt/.gaai/project/contexts/artefacts/qa-reports"
+  {
+    echo "---"
+    echo "type: artefact"
+    echo "artefact_type: story"
+    echo "id: ${sid}"
+    [[ -n "$auto_merge_val" ]] && echo "auto_merge: ${auto_merge_val}"
+    echo "related_decs: []"
+    echo "---"
+    echo "## Acceptance Criteria"
+    echo "- [ ] AC1: test"
+  } > "$wt/.gaai/project/contexts/artefacts/stories/${sid}.story.md"
+  printf '## AC1\npass\n\n## Verdict: PASS\n' \
+    > "$wt/.gaai/project/contexts/artefacts/qa-reports/${sid}.qa-report.md"
+  git -C "$wt" init -q
+  git -C "$wt" config user.email "test@example.com"
+  git -C "$wt" config user.name "Test"
+  git -C "$wt" commit --allow-empty -m "init" --quiet
+  git -C "$wt" checkout -B "story/${sid}" -q
+}
+
+# Create worktrees for all commit test stories (TST-COMMIT-SKIPMERGE created separately below)
+for _csid in TST-COMMIT-01 TST-COMMIT-NOTITLE TST-COMMIT-AUTOMERGE TST-COMMIT-PUSHFAIL TST-COMMIT-ALREADY-DONE; do
+  make_commit_worktree "$_csid"
+done
+# TST-COMMIT-SKIPMERGE gets auto_merge: false frontmatter
+make_commit_worktree "TST-COMMIT-SKIPMERGE" "false"
+unset _csid
+
+# ── Shim directory for commit tests ──────────────────────────
+COMMIT_SHIM_DIR="$COMMIT_FIXTURE_DIR/shims"
+mkdir -p "$COMMIT_SHIM_DIR"
+
+# git shim: intercepts 'push', delegates everything else to real git
+COMMIT_REAL_GIT="$(command -v git)"
+export COMMIT_REAL_GIT GAAI_SHIM_PUSH_FAIL GAAI_SHIM_GH_AUTH_FAIL GAAI_SHIM_GH_PR_EXISTS
+export GAAI_SHIM_AUTOMERGE_NULL GAAI_SHIM_AUTOMERGE_FAIL
+GAAI_SHIM_PUSH_FAIL=0
+GAAI_SHIM_GH_AUTH_FAIL=0
+GAAI_SHIM_GH_PR_EXISTS=0
+GAAI_SHIM_AUTOMERGE_NULL=0
+GAAI_SHIM_AUTOMERGE_FAIL=0
+
+cat > "$COMMIT_SHIM_DIR/git" << 'GIT_SHIM_EOF'
+#!/usr/bin/env bash
+# Intercept push; delegate everything else to real git binary
+_args=("$@")
+# Strip -C <path> from front if present, to get the subcommand
+_i=0
+while [[ $_i -lt ${#_args[@]} ]]; do
+  if [[ "${_args[$_i]}" == "-C" ]]; then
+    _i=$(( _i + 2 ))
+    continue
+  fi
+  break
+done
+_subcmd="${_args[$_i]:-}"
+if [[ "$_subcmd" == "push" ]]; then
+  if [[ "${GAAI_SHIM_PUSH_FAIL:-0}" == "1" ]]; then
+    echo "error: remote push failed" >&2; exit 1
+  fi
+  exit 0
+fi
+exec "$COMMIT_REAL_GIT" "$@"
+GIT_SHIM_EOF
+chmod +x "$COMMIT_SHIM_DIR/git"
+
+COMMIT_CALL_LOG="$COMMIT_FIXTURE_DIR/gh-calls.log"
+
+cat > "$COMMIT_SHIM_DIR/gh" << 'GH_SHIM_EOF'
+#!/usr/bin/env bash
+# gh shim — configurable mock for PR operations
+PR_CREATE_CALLED_FILE="${GAAI_COMMIT_CALL_LOG:-/tmp/gaai-gh-calls.log}"
+
+_args=("$@")
+_cmd="${_args[0]:-} ${_args[1]:-}"
+
+case "$_cmd" in
+  "pr create")
+    echo "$@" >> "$PR_CREATE_CALLED_FILE"
+    if [[ "${GAAI_SHIM_GH_AUTH_FAIL:-0}" == "1" ]]; then
+      echo "GH_TOKEN not set" >&2; exit 1
+    fi
+    if [[ "${GAAI_SHIM_GH_PR_EXISTS:-0}" == "1" ]]; then
+      echo "already exists" >&2; exit 1
+    fi
+    echo "https://github.com/test/repo/pull/999"
+    exit 0 ;;
+  "pr view")
+    if [[ "$*" == *"--json url"* ]]; then
+      echo "https://github.com/test/repo/pull/999"
+      exit 0
+    fi
+    if [[ "$*" == *"--json number"* ]]; then
+      echo "999"
+      exit 0
+    fi
+    if [[ "$*" == *"--json autoMergeRequest"* ]]; then
+      if [[ "${GAAI_SHIM_AUTOMERGE_NULL:-0}" == "1" ]]; then
+        echo "null"; exit 0
+      fi
+      echo '{"mergeMethod":"squash"}'; exit 0
+    fi
+    exit 0 ;;
+  "pr merge")
+    if [[ "${GAAI_SHIM_AUTOMERGE_FAIL:-0}" == "1" ]]; then
+      echo "merge failed" >&2; exit 1
+    fi
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+GH_SHIM_EOF
+chmod +x "$COMMIT_SHIM_DIR/gh"
+
+COMMIT_OLD_PATH="$PATH"
+export PATH="$COMMIT_SHIM_DIR:$PATH"
+export GAAI_COMMIT_CALL_LOG="$COMMIT_CALL_LOG"
+
+# ── T30: get_story_title helper returns correct title ──────────
+echo "T30: get_story_title — returns title from backlog YAML"
+_t30_title=$(get_story_title "TST-COMMIT-01")
+if [[ "$_t30_title" == "Implement commit phase handler" ]]; then
+  pass "T30a: get_story_title returns correct title"
+else
+  fail "T30a: expected 'Implement commit phase handler', got '$_t30_title'"
+fi
+_t30_empty=$(get_story_title "TST-COMMIT-NOTITLE")
+if [[ -z "$_t30_empty" ]]; then
+  pass "T30b: get_story_title returns empty string when title absent"
+else
+  fail "T30b: expected empty, got '$_t30_empty'"
+fi
+unset _t30_title _t30_empty
+
+# ── T31: handle_commit_phase success — phase advances to done ──
+echo "T31: handle_commit_phase — success path, phase_status → done"
+> "$ROUTING_LOG"
+> "$COMMIT_CALL_LOG"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-01" qa_passed "$FIXTURE" 2>/dev/null || true
+GAAI_SHIM_PUSH_FAIL=0
+TRACE="test-trace-$(date +%s)-031"
+
+if handle_commit_phase "TST-COMMIT-01" "$TRACE" 2>/dev/null; then
+  new_ps=$(get_phase_status "TST-COMMIT-01")
+  if [[ "$new_ps" == "done" ]]; then
+    pass "T31a: phase_status advanced to 'done'"
+  else
+    fail "T31a: expected 'done', got '$new_ps'"
+  fi
+  if grep -q '"phase":"commit"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T31b: routing.jsonl has commit phase record"
+  else
+    fail "T31b: routing.jsonl missing commit record — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+  if grep -q '"provider":"daemon-bash"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T31c: routing.jsonl has provider:daemon-bash (success path)"
+  else
+    fail "T31c: routing.jsonl missing provider:daemon-bash — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+  if grep -q '"pipeline":"3phase"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T31d: routing.jsonl has pipeline:3phase"
+  else
+    fail "T31d: routing.jsonl missing pipeline:3phase — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+else
+  fail "T31a: handle_commit_phase returned non-zero"
+  fail "T31b: (skipped — T31a failed)"
+  fail "T31c: (skipped — T31a failed)"
+  fail "T31d: (skipped — T31a failed)"
+fi
+
+# ── T32: gh pr create called with --base staging ──────────────
+echo "T32: gh pr create — called with --base staging (DEC-23)"
+if grep -q '\-\-base' "$COMMIT_CALL_LOG" 2>/dev/null && grep -q 'staging' "$COMMIT_CALL_LOG" 2>/dev/null; then
+  pass "T32: gh pr create was called with --base staging"
+else
+  fail "T32: expected --base staging in gh call log — content: $(cat "$COMMIT_CALL_LOG" 2>/dev/null | head -3)"
+fi
+
+# ── T33: routing record has pr_url field ───────────────────────
+echo "T33: routing.jsonl — commit record has pr_url field"
+if grep -q '"pr_url"' "$ROUTING_LOG" 2>/dev/null; then
+  pass "T33a: routing.jsonl commit record has pr_url field"
+else
+  fail "T33a: routing.jsonl missing pr_url — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+fi
+if grep -q '"auto_merge_applied"' "$ROUTING_LOG" 2>/dev/null; then
+  pass "T33b: routing.jsonl commit record has auto_merge_applied field"
+else
+  fail "T33b: routing.jsonl missing auto_merge_applied — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+fi
+
+# ── T34: idempotency — already done → return 0, no duplicate record ──
+echo "T34: handle_commit_phase — already done is idempotent (return 0)"
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-034"
+if handle_commit_phase "TST-COMMIT-ALREADY-DONE" "$TRACE" 2>/dev/null; then
+  pass "T34a: handle_commit_phase returns 0 for already-done story"
+  if [[ ! -s "$ROUTING_LOG" ]]; then
+    pass "T34b: no routing record emitted for already-done story"
+  else
+    fail "T34b: routing record emitted for already-done story — should be idempotent"
+  fi
+else
+  fail "T34a: handle_commit_phase returned non-zero for already-done story"
+  fail "T34b: (skipped — T34a failed)"
+fi
+
+# ── T35: push failure → PUSH_FAILED error record, return 1 ────
+echo "T35: handle_commit_phase — git push fails → PUSH_FAILED, no phase advance"
+GAAI_SHIM_PUSH_FAIL=1
+> "$ROUTING_LOG"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-PUSHFAIL" qa_passed "$FIXTURE" 2>/dev/null || true
+TRACE="test-trace-$(date +%s)-035"
+
+if handle_commit_phase "TST-COMMIT-PUSHFAIL" "$TRACE" 2>/dev/null; then
+  fail "T35a: expected non-zero when push fails, got 0"
+  fail "T35b: (skipped)"
+else
+  new_ps=$(get_phase_status "TST-COMMIT-PUSHFAIL")
+  if [[ "$new_ps" == "qa_passed" ]]; then
+    pass "T35a: phase_status unchanged (qa_passed) after push failure"
+  else
+    fail "T35a: expected 'qa_passed', got '$new_ps'"
+  fi
+  if grep -q '"fallback_reason":"PUSH_FAILED"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T35b: routing.jsonl has PUSH_FAILED fallback_reason"
+  else
+    fail "T35b: routing.jsonl missing PUSH_FAILED — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+fi
+GAAI_SHIM_PUSH_FAIL=0
+
+# ── T36: commit message contains story title (AC1-i) ──────────
+echo "T36: commit message contains story title (AC1-i)"
+_t36_log=$(git -C "$COMMIT_FIXTURE_DIR/TST-COMMIT-01-workspace" log -1 --format="%s" 2>/dev/null || echo "")
+if printf '%s\n' "$_t36_log" | grep -q "TST-COMMIT-01"; then
+  pass "T36a: commit subject contains story ID"
+else
+  fail "T36a: commit subject missing story ID — got: '$_t36_log'"
+fi
+if printf '%s\n' "$_t36_log" | grep -q "Implement commit phase handler"; then
+  pass "T36b: commit subject contains story title"
+else
+  fail "T36b: commit subject missing story title — got: '$_t36_log'"
+fi
+unset _t36_log
+
+# ── T37: story with no title falls back to story_id (AC1-i) ───
+echo "T37: no title → story_id used as fallback in commit subject"
+> "$ROUTING_LOG"
+> "$COMMIT_CALL_LOG"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-NOTITLE" qa_passed "$FIXTURE" 2>/dev/null || true
+TRACE="test-trace-$(date +%s)-037"
+
+if handle_commit_phase "TST-COMMIT-NOTITLE" "$TRACE" 2>/dev/null; then
+  _t37_log=$(git -C "$COMMIT_FIXTURE_DIR/TST-COMMIT-NOTITLE-workspace" log -1 --format="%s" 2>/dev/null || echo "")
+  if printf '%s\n' "$_t37_log" | grep -q "TST-COMMIT-NOTITLE"; then
+    pass "T37: commit subject contains story ID when title absent"
+  else
+    fail "T37: commit subject missing story ID fallback — got: '$_t37_log'"
+  fi
+  unset _t37_log
+else
+  fail "T37: handle_commit_phase returned non-zero for no-title story"
+fi
+
+# ── T38: GAAI_SKIP_AUTO_MERGE=1 → [skip-auto-merge] trailer ──
+echo "T38: GAAI_SKIP_AUTO_MERGE=1 → [skip-auto-merge] trailer in commit"
+> "$ROUTING_LOG"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-AUTOMERGE" qa_passed "$FIXTURE" 2>/dev/null || true
+GAAI_SKIP_AUTO_MERGE=1
+TRACE="test-trace-$(date +%s)-038"
+
+if handle_commit_phase "TST-COMMIT-AUTOMERGE" "$TRACE" 2>/dev/null; then
+  _t38_body=$(git -C "$COMMIT_FIXTURE_DIR/TST-COMMIT-AUTOMERGE-workspace" log -1 --format="%B" 2>/dev/null || echo "")
+  if printf '%s\n' "$_t38_body" | grep -qE '^\[skip-auto-merge\]$'; then
+    pass "T38: [skip-auto-merge] trailer present when GAAI_SKIP_AUTO_MERGE=1"
+  else
+    fail "T38: [skip-auto-merge] trailer missing — commit body: $(printf '%s\n' "$_t38_body" | head -5)"
+  fi
+  unset _t38_body
+else
+  fail "T38: handle_commit_phase returned non-zero"
+fi
+export GAAI_SKIP_AUTO_MERGE=0
+
+# ── T39: story auto_merge: false → [skip-auto-merge] trailer ──
+echo "T39: story auto_merge:false → [skip-auto-merge] trailer in commit"
+> "$ROUTING_LOG"
+# TST-COMMIT-SKIPMERGE was created with auto_merge: false
+"$SCHEDULER" --set-phase-status "TST-COMMIT-SKIPMERGE" qa_passed "$FIXTURE" 2>/dev/null || true
+GAAI_SKIP_AUTO_MERGE=0
+TRACE="test-trace-$(date +%s)-039"
+
+if handle_commit_phase "TST-COMMIT-SKIPMERGE" "$TRACE" 2>/dev/null; then
+  _t39_body=$(git -C "$COMMIT_FIXTURE_DIR/TST-COMMIT-SKIPMERGE-workspace" log -1 --format="%B" 2>/dev/null || echo "")
+  if printf '%s\n' "$_t39_body" | grep -qE '^\[skip-auto-merge\]$'; then
+    pass "T39: [skip-auto-merge] trailer present when story auto_merge:false"
+  else
+    fail "T39: [skip-auto-merge] trailer missing — commit body: $(printf '%s\n' "$_t39_body" | head -5)"
+  fi
+  unset _t39_body
+else
+  fail "T39: handle_commit_phase returned non-zero for skip-merge story"
+fi
+
+# ── T40: GAAI_AUTO_MERGE_POLICY=on → auto_merge_applied=true ─
+echo "T40: GAAI_AUTO_MERGE_POLICY=on → auto_merge_applied:true in routing record"
+> "$ROUTING_LOG"
+# Re-use TST-COMMIT-AUTOMERGE (already done — reset to qa_passed for re-run)
+make_commit_worktree "TST-COMMIT-AUTOMERGE"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-AUTOMERGE" qa_passed "$FIXTURE" 2>/dev/null || true
+GAAI_SKIP_AUTO_MERGE=0
+GAAI_AUTO_MERGE_POLICY=on
+TRACE="test-trace-$(date +%s)-040"
+
+if handle_commit_phase "TST-COMMIT-AUTOMERGE" "$TRACE" 2>/dev/null; then
+  if grep -q '"auto_merge_applied":true' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T40a: auto_merge_applied:true in routing record when policy=on"
+  else
+    fail "T40a: auto_merge_applied:true missing — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+  new_ps=$(get_phase_status "TST-COMMIT-AUTOMERGE")
+  if [[ "$new_ps" == "done" ]]; then
+    pass "T40b: phase_status still advances to done when auto-merge applied"
+  else
+    fail "T40b: expected 'done', got '$new_ps'"
+  fi
+else
+  fail "T40a: handle_commit_phase returned non-zero with GAAI_AUTO_MERGE_POLICY=on"
+  fail "T40b: (skipped)"
+fi
+export GAAI_AUTO_MERGE_POLICY=off
+
+# ── T41: GAAI_AUTO_MERGE_POLICY=off → auto_merge_applied:false ─
+echo "T41: GAAI_AUTO_MERGE_POLICY=off → auto_merge_applied:false in routing record"
+> "$ROUTING_LOG"
+make_commit_worktree "TST-COMMIT-AUTOMERGE"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-AUTOMERGE" qa_passed "$FIXTURE" 2>/dev/null || true
+GAAI_SKIP_AUTO_MERGE=0
+GAAI_AUTO_MERGE_POLICY=off
+TRACE="test-trace-$(date +%s)-041"
+
+if handle_commit_phase "TST-COMMIT-AUTOMERGE" "$TRACE" 2>/dev/null; then
+  if grep -q '"auto_merge_applied":false' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T41: auto_merge_applied:false in routing record when policy=off"
+  else
+    fail "T41: expected auto_merge_applied:false — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+else
+  fail "T41: handle_commit_phase returned non-zero"
+fi
+
+# ── T42: PR already exists → fallback to gh pr view, return 0 ─
+echo "T42: gh pr create returns 'already exists' → fallback to gh pr view, success"
+> "$ROUTING_LOG"
+make_commit_worktree "TST-COMMIT-AUTOMERGE"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-AUTOMERGE" qa_passed "$FIXTURE" 2>/dev/null || true
+GAAI_SHIM_GH_PR_EXISTS=1
+GAAI_SKIP_AUTO_MERGE=0
+GAAI_AUTO_MERGE_POLICY=off
+TRACE="test-trace-$(date +%s)-042"
+
+if handle_commit_phase "TST-COMMIT-AUTOMERGE" "$TRACE" 2>/dev/null; then
+  new_ps=$(get_phase_status "TST-COMMIT-AUTOMERGE")
+  if [[ "$new_ps" == "done" ]]; then
+    pass "T42a: phase_status advanced to done even when PR already existed"
+  else
+    fail "T42a: expected 'done', got '$new_ps'"
+  fi
+  if grep -q '"pr_url":"https://github.com/test/repo/pull/999"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T42b: routing record has the fallback pr_url from gh pr view"
+  else
+    fail "T42b: routing record missing pr_url — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+else
+  fail "T42a: handle_commit_phase returned non-zero even with existing PR fallback"
+  fail "T42b: (skipped)"
+fi
+GAAI_SHIM_GH_PR_EXISTS=0
+
+# ── T43: staging_only policy on non-staging branch → no merge ──
+echo "T43: GAAI_AUTO_MERGE_POLICY=staging_only on non-staging branch → no auto-merge"
+> "$ROUTING_LOG"
+make_commit_worktree "TST-COMMIT-AUTOMERGE"
+# Branch is already story/TST-COMMIT-AUTOMERGE (not staging)
+"$SCHEDULER" --set-phase-status "TST-COMMIT-AUTOMERGE" qa_passed "$FIXTURE" 2>/dev/null || true
+GAAI_SKIP_AUTO_MERGE=0
+GAAI_AUTO_MERGE_POLICY=staging_only
+TRACE="test-trace-$(date +%s)-043"
+
+if handle_commit_phase "TST-COMMIT-AUTOMERGE" "$TRACE" 2>/dev/null; then
+  if grep -q '"auto_merge_applied":false' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T43: auto_merge_applied:false when staging_only + non-staging branch"
+  else
+    fail "T43: expected auto_merge_applied:false — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+else
+  fail "T43: handle_commit_phase returned non-zero"
+fi
+export GAAI_AUTO_MERGE_POLICY=off
+
+# ── T44: dispatch qa_passed → done via full commit phase ───────
+echo "T44: dispatch_3phase_story — qa_passed → done via handle_commit_phase"
+> "$ROUTING_LOG"
+make_commit_worktree "TST-COMMIT-01"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-01" qa_passed "$FIXTURE" 2>/dev/null || true
+GAAI_SHIM_PUSH_FAIL=0
+TRACE="test-trace-$(date +%s)-044"
+
+if dispatch_3phase_story "TST-COMMIT-01" "$TRACE" 2>/dev/null; then
+  new_ps=$(get_phase_status "TST-COMMIT-01")
+  if [[ "$new_ps" == "done" ]]; then
+    pass "T44a: dispatch qa_passed → done via commit phase"
+  else
+    fail "T44a: expected 'done', got '$new_ps'"
+  fi
+  if grep -q '"phase":"commit"' "$ROUTING_LOG" 2>/dev/null && \
+     grep -q '"provider":"daemon-bash"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T44b: routing.jsonl has commit+daemon-bash record from dispatch"
+  else
+    fail "T44b: routing.jsonl missing commit+daemon-bash — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+else
+  fail "T44a: dispatch_3phase_story returned non-zero for qa_passed story"
+  fail "T44b: (skipped)"
+fi
+
+# Cleanup commit phase test fixtures
+export PATH="$COMMIT_OLD_PATH"
+unset GAAI_WORKTREES_BASE GAAI_SKIP_AUTO_MERGE GAAI_AUTO_MERGE_POLICY
+unset GAAI_SHIM_PUSH_FAIL GAAI_SHIM_GH_AUTH_FAIL GAAI_SHIM_GH_PR_EXISTS
+unset GAAI_SHIM_AUTOMERGE_NULL GAAI_SHIM_AUTOMERGE_FAIL GAAI_COMMIT_CALL_LOG
+unset COMMIT_OLD_PATH COMMIT_FIXTURE_DIR COMMIT_SHIM_DIR COMMIT_REAL_GIT COMMIT_CALL_LOG
+rm -rf "/tmp/gaai-commit-phase-tests-$$"
 
 # ── Summary ───────────────────────────────────────────────────
 echo ""
