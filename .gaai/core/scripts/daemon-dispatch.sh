@@ -932,7 +932,7 @@ ${qa_snippet}"
   [[ "$auto_merge_applied" == "true" ]] && pr_status_val="merged" || pr_status_val="pending_review"
   "$SCHEDULER" --set-field "$story_id" pr_status "$pr_status_val" "$BACKLOG_FILE" 2>/dev/null || true
 
-  # ── DEC-27 gate: advance phase_status qa_passed → done (AC4) ─────────────
+  # ── Audit gate: advance phase_status qa_passed → done ────────────────────
   if ! "$SCHEDULER" --set-phase-status "$story_id" done "$BACKLOG_FILE" 2>/dev/null; then
     echo "[ERROR] ${story_id} handle_commit_phase: --set-phase-status done failed [class=SCHEDULER_FAILURE]"
     _emit_commit_routing_record "$story_id" "$trace_id" "error" "SCHEDULER_FAILURE" "0" "$pr_url" "$auto_merge_applied"
@@ -947,7 +947,7 @@ ${qa_snippet}"
   fi
   duration_ms=$(( t_end_ms - t_start_ms ))
 
-  # ── Emit success routing record (AC4 — DEC-65 audit) ─────────────────────
+  # ── Emit success routing record ────────────────────────────────────────────
   _emit_commit_routing_record "$story_id" "$trace_id" "daemon-bash" "null" "$duration_ms" "$pr_url" "$auto_merge_applied"
 
   ts=$(date '+%H:%M:%S')

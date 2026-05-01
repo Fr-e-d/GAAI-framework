@@ -198,14 +198,14 @@ IMPL_STORY_EOF
 done
 unset _impl_id _wt
 
-# git init E134S01-workspace so handle_commit_phase can run in T7c
-_e134_wt="$DISPATCH_FIXTURE_DIR/E134S01-workspace"
-git -C "$_e134_wt" init -q
-git -C "$_e134_wt" config user.email "test@example.com"
-git -C "$_e134_wt" config user.name "Test"
-git -C "$_e134_wt" commit --allow-empty -m "init" --quiet
-git -C "$_e134_wt" checkout -B "story/E134S01" -q
-unset _e134_wt
+# git init dispatch-worktree so handle_commit_phase can run in T7c
+_dispatch_wt="$DISPATCH_FIXTURE_DIR/E134S01-workspace"
+git -C "$_dispatch_wt" init -q
+git -C "$_dispatch_wt" config user.email "test@example.com"
+git -C "$_dispatch_wt" config user.name "Test"
+git -C "$_dispatch_wt" commit --allow-empty -m "init" --quiet
+git -C "$_dispatch_wt" checkout -B "story/dispatch-test" -q
+unset _dispatch_wt
 
 # ── node shim: redirects nested-claude-spawn.js to impl-spawn-stub.mjs ──────
 # This exercises the real runImpl() routing via _setSpawnFn (AC6.a requirement).
@@ -1187,7 +1187,7 @@ unset QA_OLD_PATH QA_FIXTURE_DIR QA_SHIM_DIR PROJECT_DIR_QA_ORIG
 rm -rf "/tmp/gaai-qa-phase-tests-$$"
 
 # ── T30-T44: handle_commit_phase tests ────────────────────────
-# Tests for the real commit phase implementation (E134S06):
+# Tests for the real commit phase implementation:
 # git commit, push, gh pr create, auto-merge policy, routing record.
 
 COMMIT_FIXTURE_DIR="/tmp/gaai-commit-phase-tests-$$"
@@ -1412,7 +1412,7 @@ else
 fi
 
 # ── T32: gh pr create called with --base staging ──────────────
-echo "T32: gh pr create — called with --base staging (DEC-23)"
+echo "T32: gh pr create — called with --base staging"
 if grep -q '\-\-base' "$COMMIT_CALL_LOG" 2>/dev/null && grep -q 'staging' "$COMMIT_CALL_LOG" 2>/dev/null; then
   pass "T32: gh pr create was called with --base staging"
 else
