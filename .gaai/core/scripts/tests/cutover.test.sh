@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cutover.test.sh — E134S09 test harness
+# cutover.test.sh — cutover script test harness
 #
 # Tests gaai-cutover.sh functions and daemon-dispatch.sh get_cutover_default_pipeline()
 # in isolation using fixture YAMLs.
@@ -92,7 +92,7 @@ export ROUTING_LOG_PATH="$ROUTING_LOG"
 # shellcheck disable=SC1090
 source "$DISPATCH_LIB"
 
-echo "E134S09 — cutover tests"
+echo "gaai-cutover — test suite"
 echo ""
 
 # ── T1: get_cutover_default_pipeline reads from cutover_state section ──────

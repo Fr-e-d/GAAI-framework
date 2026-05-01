@@ -227,7 +227,7 @@ _emit_commit_routing_record() {
 # ── Cutover default pipeline reader (AC4) ────────────────────────────────
 # Reads cutover_state.default_pipeline from the top-level section in BACKLOG_FILE.
 # Returns "legacy" if the section is absent (safe default — no-op for existing deploys).
-# Re-reads the file on every call (no caching — AC4 E134S09).
+# Re-reads the file on every call (no caching — flip takes effect on next poll without daemon restart).
 get_cutover_default_pipeline() {
   local val
   val=$(awk '
@@ -248,7 +248,7 @@ get_cutover_default_pipeline() {
 # Emits one JSONL record with phase: cutover + cutover-specific telemetry.
 # Arguments: trace_id cutover_from cutover_to forced operator_id pre_flip_count
 # Best-effort: audit emit failure warns but does NOT abort the flip.
-# Cohort exclusion contract: WHERE phase != 'cutover' in E134S10 statistics.
+# Cohort exclusion contract: WHERE phase != 'cutover' in pipeline cohort statistics.
 _emit_cutover_routing_record() {
   local trace_id="$1" cutover_from="$2" cutover_to="$3" forced="$4"
   local operator_id="$5" pre_flip_count="$6"

@@ -2383,9 +2383,9 @@ while true; do
 
     increment_retry "$story_id"
 
-    # ── Route: 3phase dispatch OR legacy wrapper (E134S02 + E134S09) ───────
+    # ── Route: 3phase dispatch OR legacy wrapper ─────────────────────────────
     # Per-story delivery_pipeline takes precedence over cutover default.
-    # Cutover default is re-read at every poll (no caching — AC4 E134S09).
+    # Cutover default is re-read at every poll (no caching — flip takes effect without restart).
     _dp=$(get_delivery_pipeline "$story_id")
     if [[ -z "$_dp" ]]; then
       _dp=$(get_cutover_default_pipeline)

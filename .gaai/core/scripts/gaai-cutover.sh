@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gaai-cutover.sh — Operator CLI for delivery pipeline cutover (E134S09)
+# gaai-cutover.sh — Operator CLI for delivery pipeline cutover
 #
 # Usage:
 #   gaai-cutover.sh --status
