@@ -7,8 +7,8 @@ track: delivery
 lifecycle: ephemeral
 updated_at: 2026-02-18
 ---
-<!-- FROZEN 2026-05-01: orchestrator-Task-tool path legacy copy.
-     For daemon-direct path see qa.daemon-prompt.md (E134S05). -->
+<!-- FROZEN: orchestrator-Task-tool path legacy copy.
+     For daemon-direct path see qa.daemon-prompt.md. -->
 
 # QA Sub-Agent
 
