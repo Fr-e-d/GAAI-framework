@@ -195,17 +195,14 @@ related_decs: []
 IMPL_STORY_EOF
   printf '## Implementation Sequence\nStep 1.\n' \
     > "$_wt/.gaai/project/contexts/artefacts/plans/${_impl_id}.execution-plan.md"
+  # git-init each worktree so handle_commit_phase can run git operations
+  git -C "$_wt" init -q
+  git -C "$_wt" config user.email "test@example.com"
+  git -C "$_wt" config user.name "Test"
+  git -C "$_wt" commit --allow-empty -m "init" --quiet
+  git -C "$_wt" checkout -B "story/${_impl_id}" -q
 done
 unset _impl_id _wt
-
-# git init dispatch-worktree so handle_commit_phase can run in T7c
-_dispatch_wt="$DISPATCH_FIXTURE_DIR/E134S01-workspace"
-git -C "$_dispatch_wt" init -q
-git -C "$_dispatch_wt" config user.email "test@example.com"
-git -C "$_dispatch_wt" config user.name "Test"
-git -C "$_dispatch_wt" commit --allow-empty -m "init" --quiet
-git -C "$_dispatch_wt" checkout -B "story/dispatch-test" -q
-unset _dispatch_wt
 
 # ── node shim: redirects nested-claude-spawn.js to impl-spawn-stub.mjs ──────
 # This exercises the real runImpl() routing via _setSpawnFn (AC6.a requirement).
