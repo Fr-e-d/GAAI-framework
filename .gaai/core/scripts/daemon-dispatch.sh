@@ -10,6 +10,28 @@
 #   GAAI_STUB_DELAY_S — seconds to sleep between stubs (default: 0)
 #   ROUTING_LOG_PATH  — test-only override for --log-path (default: empty, uses logger default)
 
+# ── Active-spawn marker directory (AC1) ──────────────────────────────────
+# LOCK_DIR is set by delivery-daemon.sh before sourcing this library.
+# Provide a fallback so this library is usable in tests without the full daemon env.
+_marker_dir() {
+  echo "${LOCK_DIR:-${PROJECT_DIR}/.gaai/project/contexts/backlog/.delivery-locks}"
+}
+
+_write_active_marker() {
+  local story_id="$1" phase="$2"
+  local mdir
+  mdir=$(_marker_dir)
+  mkdir -p "$mdir" 2>/dev/null || true
+  touch "${mdir}/${story_id}.${phase}.active" 2>/dev/null || true
+}
+
+_remove_active_marker() {
+  local story_id="$1" phase="$2"
+  local mdir
+  mdir=$(_marker_dir)
+  rm -f "${mdir}/${story_id}.${phase}.active" 2>/dev/null || true
+}
+
 # ── Field extractors (AC1 — verbatim per story AC1 specification) ─────────
 
 get_phase_status() {
@@ -627,23 +649,37 @@ dispatch_3phase_story() {
 
   case "$ps" in
     not_started)
-      handle_plan_phase   "$story_id" "$trace_id" || return 1
+      _write_active_marker "$story_id" "plan"
+      handle_plan_phase "$story_id" "$trace_id"
+      local _plan_rc=$?
+      _remove_active_marker "$story_id" "plan"
+      [[ $_plan_rc -ne 0 ]] && return 1
       ;;
     planned)
-      handle_impl_phase   "$story_id" "$trace_id" || return 1
+      _write_active_marker "$story_id" "impl"
+      handle_impl_phase "$story_id" "$trace_id"
+      local _impl_rc=$?
+      _remove_active_marker "$story_id" "impl"
+      [[ $_impl_rc -ne 0 ]] && return 1
       ;;
     implemented)
-      handle_qa_phase     "$story_id" "$trace_id" || return 1
+      _write_active_marker "$story_id" "qa"
+      handle_qa_phase "$story_id" "$trace_id"
+      local _qa_rc=$?
+      _remove_active_marker "$story_id" "qa"
+      [[ $_qa_rc -ne 0 ]] && return 1
       ;;
     qa_passed)
-      handle_commit_phase "$story_id" "$trace_id" || return 1
+      _write_active_marker "$story_id" "commit"
+      handle_commit_phase "$story_id" "$trace_id"
+      local _commit_rc=$?
+      _remove_active_marker "$story_id" "commit"
+      [[ $_commit_rc -ne 0 ]] && return 1
       ;;
     done|failed|escalated|qa_failed|qa_escalated)
-      # Terminal states — caller loop should stop. Not an error.
       return 0
       ;;
     *)
-      # AC6(i)(ii)(iii)(iv): invalid phase_status
       echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated done failed escalated"
       _emit_routing_record "$story_id" "$trace_id" "plan" "error" "invalid_phase_status:${ps}"
       return 1
