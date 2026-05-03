@@ -43,8 +43,8 @@ _remove_active_marker() {
 # starts. Forensic trail preserved (old log readable as <name>.YYYYMMDDTHHMMSS),
 # new run starts with a fresh empty file.
 #
-# Per Fred 2026-05-03 — flush-before-relaunch is simpler than scoping every
-# parser to "current session only" via init-event offset detection.
+# Flush-before-relaunch is simpler than scoping every parser to "current
+# session only" via init-event offset detection.
 _rotate_phase_log() {
   local log_path="$1"
   if [[ -f "$log_path" && -s "$log_path" ]]; then
