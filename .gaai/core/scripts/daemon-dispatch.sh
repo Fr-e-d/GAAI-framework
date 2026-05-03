@@ -53,6 +53,148 @@ _rotate_phase_log() {
   fi
 }
 
+# ── Tool-result error extractor (loop breaker support) ───────────────────
+# Reads one JSONL line on stdin. If it's a user-message containing a
+# tool_result with is_error:true, prints the first 200 chars of the error
+# content to stdout. Otherwise prints nothing. Any parse failure is silent.
+_extract_tool_error_content() {
+  python3 -c "
+import sys, json
+try:
+    d = json.loads(sys.stdin.read())
+    msg = d.get('message') or {}
+    if isinstance(msg, dict):
+        for c in (msg.get('content') or []):
+            if isinstance(c, dict) and c.get('type') == 'tool_result' and c.get('is_error'):
+                v = c.get('content') or ''
+                if isinstance(v, list):
+                    v = ' '.join(x.get('text','') if isinstance(x, dict) else str(x) for x in v)
+                print(str(v)[:200])
+                break
+except Exception:
+    pass
+" 2>/dev/null
+}
+
+# ── Loop-breaker wrapper around `claude -p` ──────────────────────────────
+# Replaces the synchronous `claude -p ... | tee -a "$log_path"` pattern with
+# a streaming reader that:
+#   1. Tees every JSONL line to $log_path AND stdout (preserves tmux display
+#      and forensic trail unchanged).
+#   2. Watches for consecutive identical `is_error:true` tool_result content.
+#   3. Kills claude -p if N (default 3) consecutive identical errors are seen,
+#      preventing the kind of unbounded retry loop observed on E79S01 plan
+#      phase 2026-05-03 (sandbox blocked bash heredoc → 21-turn / $2.17 burn
+#      with no artefact written; same content every time).
+#
+# Why this exists: the Claude Code Bash sandbox sometimes refuses commands
+# with deterministic, content-based rules (e.g. "Contains simple_expansion",
+# "Contains brace with quote character (expansion obfuscation)"). Once
+# triggered, retrying the same command with the same content always fails
+# the same way. The agent has no way to know its current behavior is
+# structurally blocked, so it loops. This watcher detects that pattern
+# at the daemon level and aborts deterministically.
+#
+# Args (positional):
+#   $1 — story_id     (for log lines)
+#   $2 — phase        (for log lines: plan|qa)
+#   $3 — log_path     (per-phase JSONL log)
+#   $4 — prompt_file  (stdin for claude)
+#   $5+ — extra args passed to claude -p (model, max-turns, etc.)
+#
+# Env (optional):
+#   GAAI_LOOP_BREAKER_THRESHOLD — N consecutive identical errors before kill
+#                                  (default: 3)
+#   GAAI_LOOP_BREAKER_DISABLE   — set to "1" to fully disable the breaker
+#                                  (returns to the legacy `tee -a` pipeline)
+#
+# Returns:
+#   0   — claude exited cleanly
+#   124 — loop breaker triggered (custom exit code, distinct from claude's)
+#   <N> — claude's actual exit code on other failures
+_run_claude_with_loop_breaker() {
+  local story_id="$1" phase="$2" log_path="$3" prompt_file="$4"
+  shift 4
+  local threshold="${GAAI_LOOP_BREAKER_THRESHOLD:-3}"
+  local disabled="${GAAI_LOOP_BREAKER_DISABLE:-0}"
+
+  # Bypass mode — original synchronous pipeline (escape hatch / debugging)
+  if [[ "$disabled" == "1" ]]; then
+    set -o pipefail
+    claude -p "$@" < "$prompt_file" 2>&1 | tee -a "$log_path"
+    local rc=${PIPESTATUS[0]}
+    set +o pipefail
+    return "$rc"
+  fi
+
+  # Named fifo for claude → reader handoff
+  local fifo
+  fifo=$(mktemp -u "/tmp/gaai-claude-fifo-${story_id}-${phase}-XXXXXX")
+  if ! mkfifo "$fifo" 2>/dev/null; then
+    echo "[WARN] ${story_id} _run_claude_with_loop_breaker: mkfifo failed; falling back to plain pipeline"
+    set -o pipefail
+    claude -p "$@" < "$prompt_file" 2>&1 | tee -a "$log_path"
+    local rc=${PIPESTATUS[0]}
+    set +o pipefail
+    return "$rc"
+  fi
+
+  # Spawn claude in background, redirecting stdout+stderr to fifo
+  claude -p "$@" < "$prompt_file" > "$fifo" 2>&1 &
+  local claude_pid=$!
+
+  # Stream reader: tee each line to log + watch for repeated tool errors
+  local last_err="" err_count=0 breaker_triggered=0
+  while IFS= read -r line; do
+    printf '%s\n' "$line"
+    printf '%s\n' "$line" >> "$log_path"
+    if [[ "$line" == *'"is_error":true'* ]]; then
+      local content
+      content=$(printf '%s' "$line" | _extract_tool_error_content)
+      if [[ -n "$content" ]]; then
+        if [[ "$content" == "$last_err" ]]; then
+          err_count=$((err_count + 1))
+        else
+          last_err="$content"
+          err_count=1
+        fi
+        if [[ "$err_count" -ge "$threshold" ]]; then
+          local err_short="${content:0:160}"
+          local breaker_msg
+          breaker_msg="[LOOP-BREAKER] ${story_id} phase=${phase}: killing claude_pid=${claude_pid} after ${err_count} consecutive identical tool errors: ${err_short}"
+          echo "$breaker_msg"
+          # Synthetic JSONL marker so parsers/monitor see the event in-band
+          local err_json
+          err_json=$(printf '%s' "$err_short" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || printf '"%s"' "$err_short")
+          printf '{"type":"system","subtype":"loop_breaker","story_id":"%s","phase":"%s","consecutive_errors":%d,"error_content":%s,"timestamp":"%s"}\n' \
+            "$story_id" "$phase" "$err_count" "$err_json" \
+            "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$log_path"
+          kill -TERM "$claude_pid" 2>/dev/null || true
+          sleep 1
+          kill -KILL "$claude_pid" 2>/dev/null || true
+          breaker_triggered=1
+          # Drain remaining output so fifo writer can close cleanly
+          while IFS= read -r drain; do
+            printf '%s\n' "$drain"
+            printf '%s\n' "$drain" >> "$log_path"
+          done
+          break
+        fi
+      fi
+    fi
+  done < "$fifo"
+
+  wait "$claude_pid" 2>/dev/null
+  local claude_exit=$?
+
+  rm -f "$fifo"
+
+  if [[ "$breaker_triggered" == "1" ]]; then
+    return 124
+  fi
+  return "$claude_exit"
+}
+
 # ── Field extractors (AC1 — verbatim per story AC1 specification) ─────────
 
 get_phase_status() {
@@ -382,7 +524,6 @@ handle_plan_phase() {
   fi
 
   local claude_exit
-  set -o pipefail
   GAAI_STORY_ID="$story_id" \
   GAAI_WORKTREE_PATH="$worktree_path" \
   GAAI_STORY_PATH="$story_path" \
@@ -391,14 +532,13 @@ handle_plan_phase() {
   GAAI_DELIVERY_LOG_FILE="$log_path" \
   GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
-    claude -p \
+    _run_claude_with_loop_breaker \
+      "$story_id" "plan" "$log_path" "$prompt_file" \
       --model sonnet \
       --max-turns 60 \
       --output-format stream-json \
-      --verbose \
-      < "$prompt_file" 2>&1 | tee -a "$log_path"
-  claude_exit=${PIPESTATUS[0]}
-  set +o pipefail
+      --verbose
+  claude_exit=$?
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
     t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
@@ -410,6 +550,11 @@ handle_plan_phase() {
   rm -f "$prompt_file"
 
   # ── Validate output (AC4 guard) ───────────────────────────────────────────
+  if [[ "$claude_exit" -eq 124 ]]; then
+    echo "[ERROR] ${story_id} handle_plan_phase: loop breaker triggered (claude killed after consecutive identical tool errors)"
+    _emit_plan_routing_record "$story_id" "$trace_id" "error" "PLAN_PHASE_LOOP_BREAKER" "$duration_ms"
+    return 1
+  fi
   if [[ "$claude_exit" -ne 0 ]]; then
     echo "[ERROR] ${story_id} handle_plan_phase: claude -p exited $claude_exit"
     _emit_plan_routing_record "$story_id" "$trace_id" "error" "PLAN_PHASE_FAILED" "$duration_ms"
@@ -675,7 +820,6 @@ handle_qa_phase() {
 
   # ── Spawn claude -p (AC1 — child bash subshell, NOT nested-claude-spawn.js) ──
   local claude_exit
-  set -o pipefail
   GAAI_STORY_ID="$story_id" \
   GAAI_WORKTREE_PATH="$worktree_path" \
   GAAI_STORY_PATH="$story_path" \
@@ -688,14 +832,13 @@ handle_qa_phase() {
   GAAI_MEMORY_DELTA_PATH="$memory_delta_path" \
   GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
-    claude -p \
+    _run_claude_with_loop_breaker \
+      "$story_id" "qa" "$log_path" "$prompt_file" \
       --model sonnet \
       --max-turns 30 \
       --output-format stream-json \
-      --verbose \
-      < "$prompt_file" 2>&1 | tee -a "$log_path"
-  claude_exit=${PIPESTATUS[0]}
-  set +o pipefail
+      --verbose
+  claude_exit=$?
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
     t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
@@ -706,6 +849,12 @@ handle_qa_phase() {
 
   rm -f "$prompt_file"
 
+  # ── AC5(a-loop): loop breaker triggered ───────────────────────────────────
+  if [[ "$claude_exit" -eq 124 ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: loop breaker triggered (claude killed after consecutive identical tool errors) [class=QA_LOOP_BREAKER]"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_LOOP_BREAKER" "$duration_ms"
+    return 1
+  fi
   # ── AC5(a): spawn-error — claude -p exit non-zero ─────────────────────────
   if [[ "$claude_exit" -ne 0 ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: claude -p exited ${claude_exit} [class=QA_SPAWN_FAILED]"
