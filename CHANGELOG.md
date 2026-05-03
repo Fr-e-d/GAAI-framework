@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.23.0] - 2026-05-03
 
 ### Changed
+- feat(daemon-monitor): show story title alongside id in active deliveries
 - fix(daemon-dispatch): rotate per-phase log before retry to avoid cumulative metrics
 - chore(daemon): carry forward delivery monitor + dispatch updates
 - fix(daemon-monitor): clean per-phase metrics rendering during active runs
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(daemon-dispatch): set -u safe array expansion in 5 routing record emitters
 - fix(OSS): remove example story ID from daemon-prompt-construct.sh comment
 - fix(skill): remove private project refs from generate-stories §12 rationale
+
 
 ## [2.22.0] - 2026-05-01
 
