@@ -663,6 +663,29 @@ handle_impl_phase() {
     epic_path=""
   fi
 
+  # ── Get impl_model_tag from backlog (needed BEFORE prompt construction
+  #    so SECONDARY_ROUTE can be pre-computed and the R1-R6 context
+  #    discipline preamble injected when the secondary path will be taken) ─
+  local impl_tag
+  impl_tag=$(get_impl_model_tag "$story_id")
+
+  # ── Pre-compute SECONDARY_ROUTE — parity with nested-claude-spawn.js
+  #    resolveMode(). Must be done BEFORE the prompt is built. Without this,
+  #    secondary-route spawns (e.g. GLM) start without the R1-R6 notes-file
+  #    discipline and routinely hit rapid_refill_breaker (Claude Code's
+  #    internal safety brake on ≥3 consecutive autocompactions) before they
+  #    can converge on writing impl-report.md.
+  local _impl_route="primary"
+  if [[ "$impl_tag" != "primary" ]]; then
+    if [[ -n "${GAAI_IMPL_BASE_URL:-}" \
+       && -n "${GAAI_IMPL_AUTH_TOKEN:-}" \
+       && -n "${GAAI_IMPL_MODEL:-}" ]]; then
+      _impl_route="secondary"
+    fi
+  fi
+  local _secondary_route_flag="false"
+  [[ "$_impl_route" == "secondary" ]] && _secondary_route_flag="true"
+
   local prompt_content
   if ! prompt_content=$(
     GAAI_STORY_ID="$story_id" \
@@ -670,7 +693,7 @@ handle_impl_phase() {
     GAAI_PLAN_PATH="$plan_path" \
     GAAI_EPIC_PATH="${epic_path:-}" \
     GAAI_WORKSPACE_PATH="$worktree_path" \
-    SECONDARY_ROUTE="${SECONDARY_ROUTE:-false}" \
+    SECONDARY_ROUTE="$_secondary_route_flag" \
     PROJECT_DIR="$PROJECT_DIR" \
     bash "$prompt_construct_script" 2>/dev/null
   ); then
@@ -686,10 +709,6 @@ handle_impl_phase() {
   local prompt_file
   prompt_file=$(mktemp "/tmp/gaai-impl-prompt-${story_id}-XXXXXX.md")
   printf '%s' "$prompt_content" > "$prompt_file"
-
-  # ── Get impl_model_tag from backlog ───────────────────────────────────────
-  local impl_tag
-  impl_tag=$(get_impl_model_tag "$story_id")
 
   # ── Invoke nested-claude-spawn.js flag-CLI (AC1 — always exits 0) ────────
   local spawn_script
