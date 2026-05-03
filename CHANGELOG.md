@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(daemon-prompt): mandatory HANDOFF section + advance E79S01 to implemented
 - fix(daemon-prompt): route-aware impl prompt — slim path refs for secondary
 - fix(daemon-dispatch): mktemp templates without .md suffix (macOS BSD mktemp)
 - fix(daemon-spawn): pass worktree_path as cwd to all claude -p children

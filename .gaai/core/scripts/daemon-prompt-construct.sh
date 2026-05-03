@@ -290,6 +290,47 @@ if [[ -n "$_related_decs" ]]; then
   echo ""
 fi
 
+# ── Mandatory handoff artefact (impl-report.md) ──────────────────────────
+# The implementation phase MUST end with a written impl-report.md artefact
+# at the path below. Without it, the daemon classifies the phase as
+# NO_ARTEFACT_PRODUCED and triggers a retry / cascade — even if the agent
+# has already committed all the code. Empirically observed once (agent
+# completed ACs and committed work but skipped the report file because the
+# instruction was absent from the impl prompt).
+#
+# The path is derived from the daemon's impl_report_path argument and is
+# always under ${GAAI_WORKSPACE_PATH}/.gaai/project/contexts/artefacts/
+# impl-reports/${GAAI_STORY_ID}.impl-report.md.
+_impl_report_path="${GAAI_WORKSPACE_PATH}/.gaai/project/contexts/artefacts/impl-reports/${GAAI_STORY_ID}.impl-report.md"
+cat <<HANDOFF
+=== MANDATORY HANDOFF — impl-report.md ===
+
+After all acceptance criteria are implemented, tested, and committed, you
+MUST write the implementation report artefact to exactly this path :
+
+  ${_impl_report_path}
+
+The report MUST contain :
+  - YAML frontmatter with artefact_type: impl-report, id: ${GAAI_STORY_ID},
+    skills_invoked, related_decs (mirroring the story).
+  - "## Summary" — 1-3 sentences on what was delivered.
+  - "## Acceptance Criteria" — per-AC delivery summary (file, key change,
+    verification step). One sub-section per AC.
+  - "## Files Changed" — bullet list of paths with one-line rationale.
+  - "## Tests" — counts (passed / failed / skipped) and the command(s) used.
+  - "## Commits" — list of git commit SHAs + subjects authored during
+    this implementation.
+  - "## Open Concerns / Follow-ups" — items intentionally deferred or
+    flagged for QA attention. Empty section is fine if none.
+
+This is the ONLY signal the daemon uses to advance phase_status to
+'implemented'. Skipping it = phase failure regardless of how much code
+you committed. Use the Write tool with the path above as file_path.
+
+=== END HANDOFF ===
+
+HANDOFF
+
 # ── Section 6: Worktree scope (universal soft gate) ──────────────────────
 cat <<WORKTREE_SCOPE
 === WORKTREE SCOPE ===
