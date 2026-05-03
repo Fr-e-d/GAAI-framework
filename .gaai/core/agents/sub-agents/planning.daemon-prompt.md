@@ -130,9 +130,9 @@ Write the execution plan to exactly: `$GAAI_PLAN_PATH`
 
 The plan MUST include:
 - YAML frontmatter with `artefact_type: execution-plan`, `id: $GAAI_STORY_ID`, `skills_invoked`
-- `## Implementation Sequence` — ordered steps. EACH step MUST be authored as a
-  delegation-ready unit (see "Implementation Sequence — delegation-aware structure"
-  below).
+- `## Implementation Sequence` — ordered steps. **EVERY step MUST follow the strict
+  delegation-aware format below — this is NOT optional.** Plans missing the
+  per-step metadata blocks will not pass downstream consistency-check.
 - `## Edge Cases` — per AC
 - `## Test Checkpoints` — what to verify at each step
 - `## Risk Register` — key risks and mitigations
@@ -141,39 +141,80 @@ The plan MUST include:
 The plan MUST contain at least one `## ` level-2 heading.
 The plan file MUST be non-empty.
 
-### Implementation Sequence — delegation-aware structure
+### Implementation Sequence — STRICT delegation-aware format (MANDATORY)
 
-The implementation phase may dispatch each step to an isolated sub-agent
-(via the Task tool) running in a clean context. For this to work mechanically
-without the impl agent re-doing your decomposition work, structure each
-step as :
+The implementation phase dispatches each step to an isolated sub-agent
+(via the Task tool) running in a clean context. **The lead impl agent
+will NOT re-decompose your plan** — it will scan for the strict metadata
+blocks below and dispatch mechanically. If the metadata blocks are
+missing, the impl agent falls back to monolithic execution, which has
+been observed empirically to fail with `rapid_refill_breaker` on Tier 2
+cross-cutting stories. **You are the only authority that produces the
+dispatch graph. Do not skip these blocks.**
+
+**EVERY step MUST start with this exact metadata block, in this exact
+order, before any prose** :
 
 ```
 ### Step N — <short descriptive label>
 
-**ACs addressed** : AC<n>, AC<m>
-**Files modified (scope for this step)** :
-  - `path/to/file1.ts` — <what changes : function added / signature
-    extended / constant defined / line range if narrow>
-  - `path/to/file2.ts` — <idem>
-**Files read for context (do NOT include all repo)** :
-  - `path/to/related.ts` — <why it's needed for this step>
-**Sequential dependency** : depends on Step <K> (or "independent — can run
-  in parallel with steps M, N, O")
-**Verification** : <test command targeted to these files OR specific manual
-  check>
+**ACs addressed** : AC<n>, AC<m>     ← list specific AC numbers, even if "all" or "n/a"
+**Files modified** :                   ← bullet list, ALWAYS present, even if 0 files
+  - `path/to/file1.ts` — <what changes>
+  - `path/to/file2.ts` — <what changes>
+**Files read for context** :           ← bullet list, ALWAYS present (use `none` if 0)
+  - `path/to/related.ts` — <why needed>
+**Sequential dependency** :            ← either "independent" OR "depends on Step K"
+**Verification** : <test command or manual check>
 
-<then the prose : what to do, key edge cases for THIS step, why this approach>
+<then the prose for this step>
 ```
 
-Why this matters : if the lead impl agent must guess file scopes or
-re-decompose your plan, the orchestrator pattern collapses into "single
-agent re-doing all the work" — defeating the purpose. Make the dispatch
-graph mechanical to extract.
+**Few-shot examples** :
 
-For Tier 1 / single-file stories, a single-step plan is fine — the lead
-will execute monolithically (delegation has spawn overhead and pays off
-only at ≥4 steps).
+GOOD (delegation-ready) :
+
+```
+### Step 3 — Add workspace_capacity column + helpers
+
+**ACs addressed** : AC3
+**Files modified** :
+  - `workers/api/migrations/0044_workspace_capacity.sql` — NEW migration, adds
+    `workspace_capacity INTEGER DEFAULT 25` to subscriptions table
+  - `workers/api/src/services/subscription-event.service.ts` — add
+    `extractWorkspaceAddonQuantity()` (after L120) + `hasInvalidAddonQuantity()`
+**Files read for context** :
+  - `workers/api/src/services/subscription-event.service.ts` L1-200 — understand
+    existing handler dispatch pattern
+**Sequential dependency** : independent — can run in parallel with Step 4
+**Verification** : `pnpm test -- subscription-event.service.test.ts`
+
+Implement the helper functions per Paddle webhook payload schema...
+```
+
+BAD (lead cannot orchestrate from this) :
+
+```
+### Step 3 — Workspace capacity
+
+We need to add the workspace_capacity column and a quantity helper.
+The migration goes in migrations/, the helpers in subscription-event.service.ts.
+Tests should pass. This is independent.
+```
+
+The BAD form has the same INFORMATION but in unstructured prose. The lead
+agent cannot mechanically extract file paths or dependencies — it would
+have to re-read the prose, parse intent, and re-decide. That re-decision
+is exactly the cognitive load we're avoiding by delegating.
+
+**Edge cases for the format** :
+- Step modifies 0 files (e.g. "verify in browser") : write `**Files modified** :` then `none`.
+- Step has no scoped reads (relies on prior step's outputs) : write `**Files read for context** :` then `none`.
+- Step is the first/only one : `**Sequential dependency** : independent`.
+
+**Single-step plans** are valid for genuinely single-file Tier 1 stories.
+But the metadata block is still mandatory — even with one step, the lead
+needs the file paths to dispatch (or to confirm "1 file → monolithic OK").
 
 ---
 
