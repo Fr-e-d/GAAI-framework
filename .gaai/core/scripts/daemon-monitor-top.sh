@@ -97,7 +97,7 @@ render_phase_metrics() {
 
       local dur_s=""
       if [[ "$dur" =~ ^[0-9]+$ ]] && [[ "$dur" -gt 0 ]]; then
-        dur_s=$(awk "BEGIN { printf \"%.1f\", $dur/1000 }")
+        dur_s=$(LC_ALL=C awk "BEGIN { printf \"%.1f\", $dur/1000 }")
       fi
 
       case "$phase" in
@@ -129,32 +129,37 @@ render_phase_metrics() {
         fi
         local _now
         _now=$(date +%s)
-        running_dur=$(awk "BEGIN { printf \"%.1f\", $((_now - _mtime)) }")
+        running_dur=$(LC_ALL=C awk "BEGIN { printf \"%.1f\", $((_now - _mtime)) }")
         break
       fi
     done
 
+    # When a phase is currently running, "running" takes priority over any
+    # historical routing record (which may be stale from a prior failed attempt
+    # — e.g., yesterday's PLAN_PHASE_FAILED leaves provider=error in routing.jsonl
+    # while today's fresh attempt is in flight). Render running first, completed
+    # second.
     local parts=()
-    if [[ -n "$plan_dur" ]]; then
-      [[ "$running_phase" == "plan" ]] && plan_dur="${running_dur}s…"
-      parts+=("PLAN ${plan_dur}s ${plan_ok}")
-    elif [[ "$running_phase" == "plan" ]]; then
+    if [[ "$running_phase" == "plan" ]]; then
       parts+=("PLAN ${running_dur}s…")
+    elif [[ -n "$plan_dur" ]]; then
+      parts+=("PLAN ${plan_dur}s ${plan_ok}")
     fi
-    if [[ -n "$impl_dur" ]]; then
-      [[ "$running_phase" == "impl" ]] && impl_dur="${running_dur}s…"
+    if [[ "$running_phase" == "impl" ]]; then
+      parts+=("IMPL ${running_dur}s…")
+    elif [[ -n "$impl_dur" ]]; then
       local impl_part="IMPL ${impl_dur}s"
       [[ -n "$impl_model" && "$impl_model" != "?" ]] && impl_part="${impl_part} ${impl_model}"
       impl_part="${impl_part} ${impl_ok}"
       parts+=("$impl_part")
-    elif [[ "$running_phase" == "impl" ]]; then
-      parts+=("IMPL ${running_dur}s…")
     fi
-    if [[ -n "$qa_dur" ]]; then
-      [[ "$running_phase" == "qa" ]] && qa_dur="${running_dur}s…"
-      parts+=("QA ${qa_dur}s ${qa_ok}")
-    elif [[ "$running_phase" == "qa" ]]; then
+    if [[ "$running_phase" == "qa" ]]; then
       parts+=("QA ${running_dur}s…")
+    elif [[ -n "$qa_dur" ]]; then
+      parts+=("QA ${qa_dur}s ${qa_ok}")
+    fi
+    if [[ "$running_phase" == "commit" ]]; then
+      parts+=("COMMIT ${running_dur}s…")
     fi
 
     local metric_line
