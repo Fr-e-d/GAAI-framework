@@ -538,7 +538,8 @@ handle_plan_phase() {
       --model sonnet \
       --max-turns 60 \
       --output-format stream-json \
-      --verbose
+      --verbose \
+      --dangerously-skip-permissions
   claude_exit=$?
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
@@ -838,7 +839,8 @@ handle_qa_phase() {
       --model sonnet \
       --max-turns 30 \
       --output-format stream-json \
-      --verbose
+      --verbose \
+      --dangerously-skip-permissions
   claude_exit=$?
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
