@@ -130,7 +130,9 @@ Write the execution plan to exactly: `$GAAI_PLAN_PATH`
 
 The plan MUST include:
 - YAML frontmatter with `artefact_type: execution-plan`, `id: $GAAI_STORY_ID`, `skills_invoked`
-- `## Implementation Sequence` — ordered steps with specific file paths, line numbers, checkpoints
+- `## Implementation Sequence` — ordered steps. EACH step MUST be authored as a
+  delegation-ready unit (see "Implementation Sequence — delegation-aware structure"
+  below).
 - `## Edge Cases` — per AC
 - `## Test Checkpoints` — what to verify at each step
 - `## Risk Register` — key risks and mitigations
@@ -138,6 +140,40 @@ The plan MUST include:
 
 The plan MUST contain at least one `## ` level-2 heading.
 The plan file MUST be non-empty.
+
+### Implementation Sequence — delegation-aware structure
+
+The implementation phase may dispatch each step to an isolated sub-agent
+(via the Task tool) running in a clean context. For this to work mechanically
+without the impl agent re-doing your decomposition work, structure each
+step as :
+
+```
+### Step N — <short descriptive label>
+
+**ACs addressed** : AC<n>, AC<m>
+**Files modified (scope for this step)** :
+  - `path/to/file1.ts` — <what changes : function added / signature
+    extended / constant defined / line range if narrow>
+  - `path/to/file2.ts` — <idem>
+**Files read for context (do NOT include all repo)** :
+  - `path/to/related.ts` — <why it's needed for this step>
+**Sequential dependency** : depends on Step <K> (or "independent — can run
+  in parallel with steps M, N, O")
+**Verification** : <test command targeted to these files OR specific manual
+  check>
+
+<then the prose : what to do, key edge cases for THIS step, why this approach>
+```
+
+Why this matters : if the lead impl agent must guess file scopes or
+re-decompose your plan, the orchestrator pattern collapses into "single
+agent re-doing all the work" — defeating the purpose. Make the dispatch
+graph mechanical to extract.
+
+For Tier 1 / single-file stories, a single-step plan is fine — the lead
+will execute monolithically (delegation has spawn overhead and pays off
+only at ≥4 steps).
 
 ---
 

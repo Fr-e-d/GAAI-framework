@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.24.0] - 2026-05-03
 
 ### Changed
+- feat(daemon-prompt): impl orchestrator pattern — Task delegation on long stories
 - fix(daemon-prompt): explicit skill-path resolution to prevent guess-loop
 - fix(daemon-dispatch): QA base_ref defaults to origin/$TARGET_BRANCH not main
 - fix(daemon-prompt): mandatory HANDOFF section + advance E79S01 to implemented
@@ -21,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(daemon-dispatch): pass --dangerously-skip-permissions to plan + qa spawns
 - fix(daemon-dispatch): genericize loop-breaker comment for OSS sync
 - fix(daemon-dispatch): loop breaker + no-heredoc steering across phase prompts
+
 
 ## [2.23.0] - 2026-05-03
 
