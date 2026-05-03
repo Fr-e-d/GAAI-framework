@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(daemon-dispatch): rotate per-phase log before retry to avoid cumulative metrics
 - chore(daemon): carry forward delivery monitor + dispatch updates
 - fix(daemon-monitor): clean per-phase metrics rendering during active runs
 - fix(daemon-monitor): detect 3phase active deliveries via .active markers
