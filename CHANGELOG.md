@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(daemon-spawn): pass worktree_path as cwd to all claude -p children
 - fix(daemon-dispatch): pre-compute SECONDARY_ROUTE before impl prompt build
 - fix(daemon-spawn): correct misdiagnosis + worktree-scope audit
 - fix(daemon-dispatch): pass --dangerously-skip-permissions to plan + qa spawns

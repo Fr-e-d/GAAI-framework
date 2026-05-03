@@ -455,10 +455,12 @@ function _makeLogFlusher(logFile) {
  * @param {string}   [model='opus']                 - --model value passed to claude CLI
  * @param {boolean}  [includeFallbackModel=true]    - include --fallback-model when GAAI_IMPL_MODEL_FALLBACK is set
  * @param {boolean}  [collectTelemetry=false]       - parse stdout for secondary-mode telemetry fields (E131S08)
+ * @param {string}   [cwd='']                       - cwd for child process (worktree path); empty = inherit parent cwd
  * @returns {Promise<SpawnResult>}
  */
 function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeatTimeoutMs, logFile,
-                   envFn = buildChildEnv, model = 'opus', includeFallbackModel = true, collectTelemetry = false) {
+                   envFn = buildChildEnv, model = 'opus', includeFallbackModel = true, collectTelemetry = false,
+                   cwd = '') {
   const traceId   = randomUUID();
   const startMs   = Date.now();
   const modelReq  = process.env.GAAI_IMPL_MODEL   || '';
@@ -491,7 +493,9 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
 
     const args  = buildSpawnArgs(prompt, extraArgs, model, includeFallbackModel);
     const env   = envFn();
-    const child = _spawnFn(claudePath, args, { env, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
+    const spawnOpts = { env, shell: false, stdio: ['ignore', 'pipe', 'pipe'] };
+    if (cwd) spawnOpts.cwd = cwd;
+    const child = _spawnFn(claudePath, args, spawnOpts);
 
     const stdoutChunks = [];
     const stderrChunks = [];
@@ -715,7 +719,7 @@ function _emitLog({ traceId, storyId, provider, modelActual, durationMs, fallbac
  * @returns {Promise<SpawnResult & { log_emit_failed: boolean }>}
  *   log_emit_failed — true if any routing log emit threw (best-effort; never a spawn failure)
  */
-export async function runImpl({ implModelTag, prompt, reportPath, storyId, extraArgs = [], logFile = '' }) {
+export async function runImpl({ implModelTag, prompt, reportPath, storyId, extraArgs = [], logFile = '', worktreePath = '' }) {
   const envState = {
     hasBaseUrl:   !!(process.env.GAAI_IMPL_BASE_URL?.trim()),
     hasAuthToken: !!(process.env.GAAI_IMPL_AUTH_TOKEN?.trim()),
@@ -738,7 +742,8 @@ export async function runImpl({ implModelTag, prompt, reportPath, storyId, extra
     const result = await spawnCore(
       prompt, reportPath, extraArgs,
       GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
-      buildChildEnv, 'opus', /* includeFallbackModel */ true, /* collectTelemetry */ true
+      buildChildEnv, 'opus', /* includeFallbackModel */ true, /* collectTelemetry */ true,
+      worktreePath
     );
 
     const logFailed = _emitLog({
@@ -763,7 +768,8 @@ export async function runImpl({ implModelTag, prompt, reportPath, storyId, extra
       const primaryResult = await spawnCore(
         prompt, reportPath, extraArgs,
         GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
-        buildPrimaryChildEnv, 'sonnet', /* includeFallbackModel */ false
+        buildPrimaryChildEnv, 'sonnet', /* includeFallbackModel */ false,
+        /* collectTelemetry */ false, worktreePath
       );
 
       const primaryLogFailed = _emitLog({
@@ -795,7 +801,8 @@ export async function runImpl({ implModelTag, prompt, reportPath, storyId, extra
   const result = await spawnCore(
     prompt, reportPath, extraArgs,
     GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
-    buildPrimaryChildEnv, 'sonnet', /* includeFallbackModel */ false
+    buildPrimaryChildEnv, 'sonnet', /* includeFallbackModel */ false,
+    /* collectTelemetry */ false, worktreePath
   );
 
   const logFailed = _emitLog({
@@ -831,7 +838,7 @@ export async function runImpl({ implModelTag, prompt, reportPath, storyId, extra
  * @param {string[]} [extraArgs=[]]  - Additional argv to append
  * @returns {Promise<SpawnResult>}
  */
-export async function spawnNestedClaude(prompt, implReportPath, extraArgs = [], logFile = '') {
+export async function spawnNestedClaude(prompt, implReportPath, extraArgs = [], logFile = '', worktreePath = '') {
   // Guard: required env vars
   const missing = [];
   if (!process.env.GAAI_IMPL_BASE_URL)   missing.push('GAAI_IMPL_BASE_URL');
@@ -855,7 +862,8 @@ export async function spawnNestedClaude(prompt, implReportPath, extraArgs = [], 
     };
   }
 
-  return spawnCore(prompt, implReportPath, extraArgs, GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile);
+  return spawnCore(prompt, implReportPath, extraArgs, GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
+    buildChildEnv, 'opus', /* includeFallbackModel */ true, /* collectTelemetry */ false, worktreePath);
 }
 
 // ---------------------------------------------------------------------------
@@ -935,6 +943,7 @@ async function _cli() {
     else if (k === '--log-file') opts.logFile = args[++i];
     else if (k === '--story-id') opts.storyId = args[++i];
     else if (k === '--impl-model-tag') opts.implModelTag = args[++i];
+    else if (k === '--worktree-path') opts.worktreePath = args[++i];
     else if (k === '--help' || k === '-h') {
       process.stdout.write(`Usage: node nested-claude-spawn.js [options]
 
@@ -986,10 +995,11 @@ Output: SpawnResult JSON on stdout. Exit 1 on invocation error.
       storyId:      opts.storyId,
       extraArgs:    opts.extraArgs || [],
       logFile:      opts.logFile || '',
+      worktreePath: opts.worktreePath || '',
     });
   } else {
     // Legacy path: spawnNestedClaude() — backward compat (AC7)
-    result = await spawnNestedClaude(prompt, opts.reportPath, opts.extraArgs || [], opts.logFile || '');
+    result = await spawnNestedClaude(prompt, opts.reportPath, opts.extraArgs || [], opts.logFile || '', opts.worktreePath || '');
   }
 
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');

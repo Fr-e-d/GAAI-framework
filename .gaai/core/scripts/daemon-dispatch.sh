@@ -115,11 +115,12 @@ except Exception:
 # agent self-correction.
 #
 # Args (positional):
-#   $1 — story_id     (for log lines)
-#   $2 — phase        (for log lines: plan|qa)
-#   $3 — log_path     (per-phase JSONL log)
-#   $4 — prompt_file  (stdin for claude)
-#   $5+ — extra args passed to claude -p (model, max-turns, etc.)
+#   $1 — story_id      (for log lines)
+#   $2 — phase         (for log lines: plan|qa)
+#   $3 — log_path      (per-phase JSONL log)
+#   $4 — prompt_file   (stdin for claude)
+#   $5 — worktree_path (cwd for claude — branch/path isolation per story)
+#   $6+ — extra args passed to claude -p (model, max-turns, etc.)
 #
 # Env (optional):
 #   GAAI_LOOP_BREAKER_THRESHOLD — N consecutive identical errors before kill
@@ -129,18 +130,29 @@ except Exception:
 #
 # Returns:
 #   0   — claude exited cleanly
+#   2   — worktree path missing or invalid
 #   124 — loop breaker triggered (custom exit code, distinct from claude's)
 #   <N> — claude's actual exit code on other failures
 _run_claude_with_loop_breaker() {
-  local story_id="$1" phase="$2" log_path="$3" prompt_file="$4"
-  shift 4
+  local story_id="$1" phase="$2" log_path="$3" prompt_file="$4" worktree_path="$5"
+  shift 5
   local threshold="${GAAI_LOOP_BREAKER_THRESHOLD:-3}"
   local disabled="${GAAI_LOOP_BREAKER_DISABLE:-0}"
 
-  # Bypass mode — original synchronous pipeline (escape hatch / debugging)
+  # Worktree must exist — claude is launched with cwd=$worktree_path so all
+  # cwd-relative writes by the agent land in the per-story worktree branch.
+  # Without this, agents writing relative paths pollute the parent repo.
+  if [[ ! -d "$worktree_path" ]]; then
+    echo "[ERROR] ${story_id} _run_claude_with_loop_breaker: worktree path does not exist: $worktree_path" >&2
+    return 2
+  fi
+
+  # Bypass mode — original synchronous pipeline (escape hatch / debugging).
+  # Subshell + exec replaces the subshell process with claude after cd, so
+  # $! reports claude's PID and signals propagate correctly.
   if [[ "$disabled" == "1" ]]; then
     set -o pipefail
-    claude -p "$@" < "$prompt_file" 2>&1 | tee -a "$log_path"
+    ( cd "$worktree_path" && exec claude -p "$@" < "$prompt_file" 2>&1 ) | tee -a "$log_path"
     local rc=${PIPESTATUS[0]}
     set +o pipefail
     return "$rc"
@@ -152,14 +164,16 @@ _run_claude_with_loop_breaker() {
   if ! mkfifo "$fifo" 2>/dev/null; then
     echo "[WARN] ${story_id} _run_claude_with_loop_breaker: mkfifo failed; falling back to plain pipeline"
     set -o pipefail
-    claude -p "$@" < "$prompt_file" 2>&1 | tee -a "$log_path"
+    ( cd "$worktree_path" && exec claude -p "$@" < "$prompt_file" 2>&1 ) | tee -a "$log_path"
     local rc=${PIPESTATUS[0]}
     set +o pipefail
     return "$rc"
   fi
 
-  # Spawn claude in background, redirecting stdout+stderr to fifo
-  claude -p "$@" < "$prompt_file" > "$fifo" 2>&1 &
+  # Spawn claude in background, redirecting stdout+stderr to fifo.
+  # The subshell cd's into the worktree then exec replaces it with claude,
+  # so $! is claude's PID and kill -TERM propagates correctly.
+  ( cd "$worktree_path" && exec claude -p "$@" < "$prompt_file" > "$fifo" 2>&1 ) &
   local claude_pid=$!
 
   # Stream reader: tee each line to log + watch for repeated tool errors
@@ -552,7 +566,7 @@ handle_plan_phase() {
   GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
     _run_claude_with_loop_breaker \
-      "$story_id" "plan" "$log_path" "$prompt_file" \
+      "$story_id" "plan" "$log_path" "$prompt_file" "$worktree_path" \
       --model sonnet \
       --max-turns 60 \
       --output-format stream-json \
@@ -727,6 +741,7 @@ handle_impl_phase() {
         --prompt-file    "$prompt_file" \
         --impl-model-tag "$impl_tag" \
         --log-file       "$log_path" \
+        --worktree-path  "$worktree_path" \
         2>>"$log_path" || true
   )
 
@@ -877,7 +892,7 @@ handle_qa_phase() {
   GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
     _run_claude_with_loop_breaker \
-      "$story_id" "qa" "$log_path" "$prompt_file" \
+      "$story_id" "qa" "$log_path" "$prompt_file" "$worktree_path" \
       --model sonnet \
       --max-turns 30 \
       --output-format stream-json \
