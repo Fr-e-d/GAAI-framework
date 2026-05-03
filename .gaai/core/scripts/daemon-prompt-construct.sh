@@ -277,6 +277,33 @@ while IFS= read -r _line; do
   fi
 done < "$GAAI_STORY_PATH"
 
+# ── Skill path resolution preamble ───────────────────────────────────────
+# Agents (especially Haiku sub-agents spawned via the Task tool) sometimes
+# guess skill file paths from the skill NAME alone and hit File-not-found
+# loops on `.gaai/core/skills/<name>.skill.md` — but the actual layout is
+# `.gaai/core/skills/<track>/<name>/SKILL.md`. Tell every impl agent to
+# resolve via the index file FIRST, not by guessing.
+cat <<SKILL_PATHS
+=== SKILL FILE PATH RESOLUTION ===
+
+Skill files live at exactly :
+  ${GAAI_WORKSPACE_PATH}/.gaai/core/skills/<track>/<skill-name>/SKILL.md
+
+There is ALWAYS a <track> subdirectory (cross / delivery / discovery /
+domain). NEVER read at \`.gaai/core/skills/<name>.skill.md\` — that path
+does not exist.
+
+If you need to resolve a skill name to its file path, Read this index
+first :
+  ${GAAI_WORKSPACE_PATH}/.gaai/core/skills/skills-index.yaml
+
+It maps every skill name to its canonical \`path:\` field. Do NOT guess
+paths from the skill name alone.
+
+=== END SKILL FILE PATH RESOLUTION ===
+
+SKILL_PATHS
+
 if [[ -n "$_related_decs" ]]; then
   echo "=== MANDATORY DEC READS ==="
   echo "Before implementing, read each of the following decision files to understand the constraints:"

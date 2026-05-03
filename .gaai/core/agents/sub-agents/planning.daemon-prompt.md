@@ -65,6 +65,13 @@ Execute these reads in order before any planning work:
 
 ## Skills
 
+Skill files live under `$GAAI_WORKTREE_PATH/.gaai/core/skills/<track>/<skill-name>/SKILL.md`
+(NOT directly under `core/skills/` — there is always a `<track>` subdirectory).
+The authoritative skill path index is
+`$GAAI_WORKTREE_PATH/.gaai/core/skills/skills-index.yaml` — Read it FIRST if you
+need to resolve a skill name to its file path. Do not guess paths from the
+skill name alone.
+
 - `delivery-high-level-plan` — high-level execution plan
 - `approach-evaluation` — when a non-trivial technical or architectural choice exists (see triggers)
 - `consistency-check` — before `prepare-execution-plan` if Story references multiple artefacts
