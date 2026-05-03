@@ -77,15 +77,23 @@ detect_active_stories() {
     seen+=("$_id")
   done
 
-  # 3phase: .lock files with in_progress status
+  # 3phase: per-phase active markers (<story_id>.{plan|impl|qa|commit}.active)
+  # written by _write_active_marker() in daemon-dispatch.sh — replaces the
+  # legacy single .lock file convention which the 3phase pipeline does not use.
   if [[ -d "$LOCK_DIR" ]]; then
-    for _lf in "$LOCK_DIR"/*.lock; do
-      [[ -f "$_lf" ]] || continue
-      local _sid
-      _sid=$(basename "$_lf" .lock)
+    local _emitted_3phase=()
+    for _af in "$LOCK_DIR"/*.active; do
+      [[ -f "$_af" ]] || continue
+      local _basename _sid
+      _basename=$(basename "$_af" .active)
+      # Strip trailing .{phase} : story_id is everything before the last dot
+      _sid="${_basename%.*}"
       # Skip if already emitted via tmux path
       local _dup=0
       for _s in "${seen[@]:-}"; do [[ "$_s" == "$_sid" ]] && _dup=1 && break; done
+      [[ $_dup -eq 1 ]] && continue
+      # Skip if we already emitted this story for another phase marker in the same scan
+      for _s in "${_emitted_3phase[@]:-}"; do [[ "$_s" == "$_sid" ]] && _dup=1 && break; done
       [[ $_dup -eq 1 ]] && continue
       local _status _dp2
       _status=$(awk -v id="$_sid" '
@@ -104,7 +112,10 @@ detect_active_stories() {
           gsub(/[[:space:]]*/, ""); print; exit
         }
       ' "$BACKLOG" 2>/dev/null || true)
-      [[ "$_status" == "in_progress" && "$_dp2" == "3phase" ]] && echo "$_sid"
+      if [[ "$_status" == "in_progress" && "$_dp2" == "3phase" ]]; then
+        echo "$_sid"
+        _emitted_3phase+=("$_sid")
+      fi
     done
   fi
 }
