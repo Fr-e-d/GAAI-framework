@@ -285,15 +285,40 @@ handle_plan_phase() {
   ts=$(date '+%H:%M:%S')
   echo "[${ts}] ${story_id} phase=plan starting"
 
-  # ── Resolve env vars for context bundle (AC2) ─────────────────────────────
-  local worktree_path story_path plan_path epic_path log_path
-  worktree_path="${GAAI_WORKTREE_PATH:-}"
-  if [[ -z "$worktree_path" ]]; then
-    echo "[ERROR] ${story_id} handle_plan_phase: GAAI_WORKTREE_PATH not set"
-    _emit_plan_routing_record "$story_id" "$trace_id" "error" "PLAN_PHASE_FAILED" "0"
-    return 1
+  # ── Resolve worktree path (GAAI_WORKTREES_BASE override or default formula) ──
+  # Aligned with handle_impl_phase + handle_qa_phase canonical formula.
+  local worktree_path
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    worktree_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
+  else
+    local repo_name
+    repo_name=$(basename "$PROJECT_DIR")
+    worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
+  # ── Ensure worktree + story branch exist (idempotent) ─────────────────────
+  # Plan is the first phase — worktree must be created here before plan agent
+  # writes its execution-plan.md inside it. Subsequent phases (impl/qa/commit)
+  # reuse the same worktree.
+  if ! git -C "$PROJECT_DIR" worktree list --porcelain 2>/dev/null | grep -qE "^worktree ${worktree_path}$"; then
+    # Create story branch from staging if it doesn't exist yet (no checkout — main stays on staging per orchestration.rules.md INVARIANT)
+    if ! git -C "$PROJECT_DIR" rev-parse --verify "story/${story_id}" >/dev/null 2>&1; then
+      if ! git -C "$PROJECT_DIR" branch "story/${story_id}" staging 2>/dev/null; then
+        echo "[ERROR] ${story_id} handle_plan_phase: git branch story/${story_id} staging failed"
+        _emit_plan_routing_record "$story_id" "$trace_id" "error" "WORKTREE_BRANCH_FAILED" "0"
+        return 1
+      fi
+    fi
+    mkdir -p "$(dirname "$worktree_path")"
+    if ! git -C "$PROJECT_DIR" worktree add "$worktree_path" "story/${story_id}" 2>/dev/null; then
+      echo "[ERROR] ${story_id} handle_plan_phase: git worktree add failed for $worktree_path"
+      _emit_plan_routing_record "$story_id" "$trace_id" "error" "WORKTREE_CREATE_FAILED" "0"
+      return 1
+    fi
+  fi
+
+  # ── Resolve artefact paths ────────────────────────────────────────────────
+  local story_path plan_path epic_path log_path
   story_path="${worktree_path}/.gaai/project/contexts/artefacts/stories/${story_id}.story.md"
   plan_path="${worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
   log_path="${worktree_path}/.delivery-logs/${story_id}.plan.log"
