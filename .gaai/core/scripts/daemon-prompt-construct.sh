@@ -178,29 +178,63 @@ summary in the reply, (b) a notes file update.
 PREAMBLE
 fi
 
-# ── Section 2: Story content ───────────────────────────────────────────────
+# ── Sections 2-4: input artefact handoff ─────────────────────────────────
+# Two strategies based on route :
+#  - SECONDARY (e.g. GLM with smaller effective context window): emit PATH
+#    references only. Agent reads via Read tool with offset/limit per R4
+#    chunked-retrieval rule. Keeps the upfront prompt minimal so the
+#    autocompact threshold is not consumed before the agent has even acted.
+#    Avoids the "double inlining" trap where the prompt has the full plan
+#    AND the agent re-Reads the same file in chunks (observed empirically).
+#  - PRIMARY (Sonnet): full inline. Sonnet has more context headroom and
+#    benefits from upfront context — matches the prior unconditional
+#    behaviour for backwards compatibility.
 if [[ ! -f "$GAAI_STORY_PATH" ]]; then
   echo "[daemon-prompt-construct] ERROR: story file not found: $GAAI_STORY_PATH" >&2
   exit 1
 fi
-echo "=== STORY: ${GAAI_STORY_ID} ==="
-cat "$GAAI_STORY_PATH"
-echo ""
-
-# ── Section 3: Execution plan content ─────────────────────────────────────
 if [[ ! -f "$GAAI_PLAN_PATH" ]]; then
   echo "[daemon-prompt-construct] ERROR: plan file not found: $GAAI_PLAN_PATH" >&2
   exit 1
 fi
-echo "=== EXECUTION PLAN ==="
-cat "$GAAI_PLAN_PATH"
-echo ""
 
-# ── Section 4: Epic content (optional) ────────────────────────────────────
-if [[ -n "${GAAI_EPIC_PATH:-}" && -f "$GAAI_EPIC_PATH" ]]; then
-  echo "=== EPIC CONTEXT ==="
-  cat "$GAAI_EPIC_PATH"
+if [[ "$SECONDARY_ROUTE" == "true" ]]; then
+  cat <<INPUT_REFS
+=== INPUT ARTEFACTS — READ THESE FIRST (chunked, per R4) ===
+
+Your initial actions, in this order, are :
+
+  1. Read ${GAAI_STORY_PATH}                           — the validated story
+  2. Read ${GAAI_PLAN_PATH}                            — the execution plan from the planning phase
+INPUT_REFS
+  if [[ -n "${GAAI_EPIC_PATH:-}" && -f "$GAAI_EPIC_PATH" ]]; then
+    echo "  3. Read ${GAAI_EPIC_PATH}                            — parent epic (optional context)"
+  fi
+  cat <<INPUT_REFS_TAIL
+
+Read each in chunks of ≤200 lines (offset/limit) per R4. Summarise each
+chunk in your reply BEFORE the next tool call (R3). Append entries to
+your notes file (R1) so you never re-read.
+
+DO NOT expect any of the above artefacts to be inlined in this prompt.
+The path references above ARE your input — read them via the Read tool.
+
+=== END INPUT ARTEFACTS ===
+
+INPUT_REFS_TAIL
+else
+  # Primary route — full inline (legacy behaviour, Sonnet-friendly)
+  echo "=== STORY: ${GAAI_STORY_ID} ==="
+  cat "$GAAI_STORY_PATH"
   echo ""
+  echo "=== EXECUTION PLAN ==="
+  cat "$GAAI_PLAN_PATH"
+  echo ""
+  if [[ -n "${GAAI_EPIC_PATH:-}" && -f "$GAAI_EPIC_PATH" ]]; then
+    echo "=== EPIC CONTEXT ==="
+    cat "$GAAI_EPIC_PATH"
+    echo ""
+  fi
 fi
 
 # ── Section 5: DEC reads instruction ─────────────────────────────────────
