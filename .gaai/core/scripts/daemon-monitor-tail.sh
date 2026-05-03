@@ -491,46 +491,59 @@ parse_log() {
   else health_icon="○"
   fi
 
-  echo -e "  ${color}${health_icon}${NC} ${tool_count} tools | Last update: ${color}${age_label} ago${NC}${duration_label:+ | Running: ${duration_label}}${cost:+ | \$${cost}}"
-
-  # Phase line — coarse-grained pipeline position, derived from log signals.
-  # Tags ending with "→X" mean "phase X just completed, next phase starting".
+  # ── Phase + model resolution (used in combined header line below) ──
+  # Phase tags ending in "→X" mean "phase X just completed, next phase starting".
+  local phase_display="" phase_color="$YELLOW"
   if [[ -n "$phase_label" ]]; then
-    local phase_icon="◆" phase_color="$YELLOW"
     case "$phase_label" in
-      PREFLIGHT)    phase_icon="⚙️" ; phase_color="$DIM"    ;;
-      WORKING)      phase_icon="🚧"; phase_color="$YELLOW" ;;
-      PLAN|PLAN→*)  phase_icon="📋"; phase_color="$YELLOW" ;;
-      IMPL|IMPL→*|"IMPL(nested)") phase_icon="🛠" ; phase_color="$YELLOW" ;;
-      QA|QA→*)      phase_icon="🧪"; phase_color="$YELLOW" ;;
-      PR)           phase_icon="🚀"; phase_color="$GREEN"  ;;
-      CI)           phase_icon="🤖"; phase_color="$GREEN"  ;;
-      DONE)         phase_icon="✅"; phase_color="$GREEN"  ;;
+      PREFLIGHT)    phase_display="Preflight" ; phase_color="$DIM"    ;;
+      WORKING)      phase_display="Working"   ; phase_color="$YELLOW" ;;
+      PLAN|PLAN→*)  phase_display="Plan"      ; phase_color="$YELLOW" ;;
+      IMPL|IMPL→*|"IMPL(nested)") phase_display="Impl" ; phase_color="$YELLOW" ;;
+      QA|QA→*)      phase_display="QA"        ; phase_color="$YELLOW" ;;
+      PR)           phase_display="PR"        ; phase_color="$GREEN"  ;;
+      CI)           phase_display="CI"        ; phase_color="$GREEN"  ;;
+      DONE)         phase_display="Done"      ; phase_color="$GREEN"  ;;
+      *)            phase_display="$phase_label" ;;
     esac
-    # Only annotate when the most-recent phase signal came from a sub-agent /
-    # nested claude session — main is the implicit default and would just add noise.
-    local origin_suffix=""
-    [[ "$phase_origin" == "sub" ]] && origin_suffix=" (sub)"
-    # Append the model from the most recent tool_use event so the operator sees
-    # which provider is doing the work right now (claude-sonnet-4-6, glm-5.1,
-    # claude-haiku-4-5-…, …). When the source event came from a SUB origin —
-    # either a Task tool sub-agent (typically Haiku by Claude Code default) or
-    # a nested-claude-spawn subprocess (typically the routing-secondary provider)
-    # — annotate explicitly so the operator understands why a smaller/different
-    # model may flash by even when the orchestrator itself runs on Sonnet/Opus.
-    local model_label model_suffix=""
-    model_label=$(format_model "$last_model")
-    if [[ -n "$model_label" ]]; then
-      if [[ "$last_origin" == "SUB" ]]; then
-        model_suffix=" | model: ${model_label} (sub)"
-      else
-        model_suffix=" | model: ${model_label}"
-      fi
-    fi
-    # Two spaces between icon and label — many emojis (🛠 in particular) render
-    # as a single column on some terminals and the visual gap looks squished.
-    printf '  %bPhase: %b%s  %s%s%b%b%s%b\n' "$DIM" "$phase_color" "$phase_icon" "$phase_label" "$origin_suffix" "$NC" "$DIM" "$model_suffix" "$NC"
   fi
+  # Append "(sub)" when the most-recent phase signal came from a sub-agent /
+  # nested claude session — main is the implicit default and would just add noise.
+  local origin_suffix=""
+  [[ "$phase_origin" == "sub" ]] && origin_suffix=" (sub)"
+  # Resolve model from the most recent tool_use event (the provider doing the
+  # work right now : claude-sonnet-4-6, glm-5.1, claude-haiku-4-5, …). SUB origin
+  # = Task tool sub-agent (typically Haiku) or nested-claude-spawn subprocess —
+  # annotate explicitly so a smaller/different model flashing by isn't surprising.
+  local model_label model_suffix=""
+  model_label=$(format_model "$last_model")
+  if [[ -n "$model_label" ]]; then
+    if [[ "$last_origin" == "SUB" ]]; then
+      model_suffix=" | Model: ${model_label} (sub)"
+    else
+      model_suffix=" | Model: ${model_label}"
+    fi
+  fi
+
+  # ── Combined header line (single source of truth for story + phase + model) ──
+  # Replaces the legacy two-line ── separator + standalone "Phase:" pair.
+  # Format : "{story_id} | Phase: {phase} | Model: {model}"
+  # "Model:" label rendered in default terminal color (no DIM dimming) —
+  # keeps the data line as a peer to "Phase:" instead of subdued.
+  if [[ -n "$phase_display" ]]; then
+    printf '%b%s%b | Phase: %b%s%b%s%s\n' \
+      "$CYAN" "$story_id" "$NC" \
+      "$phase_color" "$phase_display" "$NC" "$origin_suffix" \
+      "$model_suffix"
+  else
+    # Legacy pipeline (no phase label) : just story_id + model (if known).
+    printf '%b%s%b%s\n' \
+      "$CYAN" "$story_id" "$NC" \
+      "$model_suffix"
+  fi
+
+  # ── Stats line ──
+  echo -e "  ${color}${health_icon}${NC} ${tool_count} tools | Last-update: ${color}${age_label} ago${NC}${duration_label:+ | Running: ${duration_label}}${cost:+ | \$${cost}}"
 
   # Single activity line — prefix switches based on origin (main delivery vs nested sub-agent).
   # printf %s keeps literal "\n" in Bash commands literal (echo -e would interpret them).
@@ -587,17 +600,16 @@ while true; do
       # AC2: per-phase log path resolution
       log_path=$(resolve_3phase_log "$story_id")
       if [[ "$log_path" == "[no log yet]" || "$log_path" == "[?]" ]]; then
-        echo "── $story_id ── [${phase_label}]"
+        # No log yet — render minimal header (parse_log won't run on missing file)
+        printf '%b%s%b | Phase: %b%s%b\n' "$CYAN" "$story_id" "$NC" "$YELLOW" "$phase_label" "$NC"
         echo -e "  ${DIM}${log_path}${NC}"
         echo ""
         continue
       fi
-      echo "── $story_id ── [${phase_label}]"
       parse_log "$log_path" "$story_id" "3phase" "$phase_label"
     else
       # Legacy: unchanged path
       log_path="$LOG_DIR/${story_id}.log"
-      echo "── $story_id ──"
       parse_log "$log_path" "$story_id" "legacy" ""
     fi
     echo ""

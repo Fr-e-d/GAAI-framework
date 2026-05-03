@@ -369,7 +369,7 @@ handle_plan_phase() {
   GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
     claude -p \
       --model sonnet \
-      --max-turns 20 \
+      --max-turns 60 \
       --output-format stream-json \
       --verbose \
       < "$prompt_file" 2>&1 | tee -a "$log_path"
