@@ -53,6 +53,24 @@ _rotate_phase_log() {
   fi
 }
 
+# ── Worktree-scope audit (advisory soft gate) ────────────────────────────
+# Runs daemon-worktree-audit.py against the per-phase JSONL log to detect
+# Write/Edit/Bash tool calls that operate on absolute paths outside the
+# worktree. Writes <log_path>.audit.json with a structured verdict. Advisory
+# only — does NOT block phase completion. Output goes to daemon log via
+# stderr so violations are visible to the operator without parsing JSON.
+_run_worktree_audit() {
+  local story_id="$1" phase="$2" log_path="$3" worktree_path="$4"
+  local audit_script="${PROJECT_DIR}/.gaai/core/scripts/daemon-worktree-audit.py"
+  [[ -f "$audit_script" ]] || return 0
+  [[ -f "$log_path" ]] || return 0
+  python3 "$audit_script" \
+    --story-id "$story_id" \
+    --phase "$phase" \
+    --log-path "$log_path" \
+    --worktree-path "$worktree_path" 2>&1 || true
+}
+
 # ── Tool-result error extractor (loop breaker support) ───────────────────
 # Reads one JSONL line on stdin. If it's a user-message containing a
 # tool_result with is_error:true, prints the first 200 chars of the error
@@ -82,19 +100,19 @@ except Exception:
 #   1. Tees every JSONL line to $log_path AND stdout (preserves tmux display
 #      and forensic trail unchanged).
 #   2. Watches for consecutive identical `is_error:true` tool_result content.
-#   3. Kills claude -p if N (default 3) consecutive identical errors are seen,
-#      preventing unbounded retry loops on content-based sandbox refusals
-#      (e.g. Bash heredocs with shell-expansion patterns) where the agent
-#      retries the same blocked content forever, burning tokens without
-#      producing the expected artefact.
+#   3. Kills claude -p if N (default 3) consecutive identical errors are
+#      seen, preventing unbounded retry loops where the agent retries the
+#      same blocked content forever, burning tokens without producing the
+#      expected artefact.
 #
-# Why this exists: the Claude Code Bash sandbox sometimes refuses commands
-# with deterministic, content-based rules (e.g. "Contains simple_expansion",
-# "Contains brace with quote character (expansion obfuscation)"). Once
-# triggered, retrying the same command with the same content always fails
-# the same way. The agent has no way to know its current behavior is
-# structurally blocked, so it loops. This watcher detects that pattern
-# at the daemon level and aborts deterministically.
+# Why this exists: several upstream layers (Bash sandbox parser, tool
+# permission system, MCP servers, etc.) can return deterministic
+# content-based refusals on a tool call. When that happens, the agent has
+# no signal that its current approach is structurally blocked, and
+# typically retries the same shape — getting the same refusal — until
+# --max-turns runs out. This watcher detects that pattern at the daemon
+# level and aborts deterministically rather than relying on probabilistic
+# agent self-correction.
 #
 # Args (positional):
 #   $1 — story_id     (for log lines)
@@ -585,6 +603,9 @@ handle_plan_phase() {
   # ── Emit success routing record (AC4) ────────────────────────────────────
   _emit_plan_routing_record "$story_id" "$trace_id" "primary" "null" "$duration_ms"
 
+  # ── Worktree-scope audit (advisory) ──────────────────────────────────────
+  _run_worktree_audit "$story_id" "plan" "$log_path" "$worktree_path"
+
   ts=$(date '+%H:%M:%S')
   echo "[${ts}] ${story_id} phase=plan DONE (${duration_ms}ms)"
   return 0
@@ -723,6 +744,8 @@ if d is not None:
       echo "[ERROR] ${story_id} handle_impl_phase: --set-phase-status implemented failed"
       return 1
     fi
+    # Worktree-scope audit (advisory)
+    _run_worktree_audit "$story_id" "impl" "$log_path" "$worktree_path"
     ts=$(date '+%H:%M:%S')
     echo "[${ts}] ${story_id} phase=impl DONE"
     return 0
@@ -897,6 +920,8 @@ handle_qa_phase() {
         return 1
       fi
       _emit_qa_routing_record "$story_id" "$trace_id" "primary" "null" "$duration_ms"
+      # Worktree-scope audit (advisory)
+      _run_worktree_audit "$story_id" "qa" "$log_path" "$worktree_path"
       ts=$(date '+%H:%M:%S')
       echo "[${ts}] ${story_id} phase=qa PASS (${duration_ms}ms)"
       return 0

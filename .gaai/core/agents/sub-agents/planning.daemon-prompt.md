@@ -1,17 +1,19 @@
 ---
-type: sub-agent
-id: SUB-AGENT-PLANNING-DAEMON-001
+type: agent
+id: AGENT-PLANNING-PHASE-001
 role: planning-specialist
-parent: delivery-daemon
+spawned_by: delivery-daemon
 track: delivery
 lifecycle: ephemeral
 context_mode: env-vars-only
-updated_at: 2026-05-01
+updated_at: 2026-05-03
 ---
 
-# Planning Sub-Agent (Daemon-Spawned)
+# Planning Phase Agent (Daemon-Spawned)
 
-Spawned directly by the GAAI delivery daemon as a standalone `claude -p` process.
+Spawned directly by the GAAI delivery daemon as a standalone `claude -p` process —
+not a sub-agent. Each phase (plan/impl/qa) is a top-level agent invocation per the
+3-phase daemon-spawn architecture.
 Produces a complete, file-level execution plan from a validated Story.
 Terminates after writing the plan artefact.
 
@@ -140,27 +142,11 @@ The plan file MUST be non-empty.
 - MUST terminate after writing the handoff artefact
 - MUST write to `$GAAI_PLAN_PATH` (not to any other path)
 
----
+## Worktree scope
 
-## Output Persistence — MANDATORY
-
-To persist the execution plan, use the **`Write` tool** exclusively. **NEVER** use the
-`Bash` tool with heredoc syntax (`cat > file <<EOF ... EOF`, `cat > file <<'EOF' ... EOF`,
-or any `<<` redirection writing the plan content) for persisting artefacts.
-
-**Why this rule is hard:** the Claude Code Bash sandbox statically scans every command
-before execution and refuses any heredoc whose body contains `${...}`, `$VAR`, or quoted
-brace-with-quote patterns (common in shell snippets, smoke tests, env templates, curl
-examples). The refusal is content-based and deterministic — retrying the same heredoc
-content produces the same refusal forever. Errors look like:
-
-- `Contains simple_expansion`
-- `Contains brace with quote character (expansion obfuscation)`
-
-Once you see ONE of these errors, **do not retry the same approach with the same
-content**. The daemon's loop breaker will kill the session after 3 identical
-consecutive tool errors regardless. Use `Write` with the plan content as a string
-argument — no shell parsing, no sandbox surface.
-
-If `Write` rejects the plan for size, split into ≤2 sequential `Write` calls (first
-half then second half via append-style edit) — never fall back to `Bash` heredoc.
+All Write/Edit operations and Bash commands with side effects (file writes,
+deletions, network calls beyond Anthropic API + standard package registries)
+MUST stay within `$GAAI_WORKTREE_PATH`. Reads outside the worktree are allowed
+for repo and framework context. The daemon audits the per-phase log
+post-completion and writes any out-of-worktree paths to `<log>.audit.json`
+(advisory).
