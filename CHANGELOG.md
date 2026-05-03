@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(daemon-dispatch): mktemp templates without .md suffix (macOS BSD mktemp)
 - fix(daemon-spawn): pass worktree_path as cwd to all claude -p children
 - fix(daemon-dispatch): pre-compute SECONDARY_ROUTE before impl prompt build
 - fix(daemon-spawn): correct misdiagnosis + worktree-scope audit
