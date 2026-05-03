@@ -545,7 +545,7 @@ handle_plan_phase() {
     return 1
   fi
 
-  prompt_file=$(mktemp "/tmp/gaai-plan-prompt-${story_id}-XXXXXX.md")
+  prompt_file=$(mktemp "/tmp/gaai-plan-prompt-${story_id}-XXXXXX")
   cat "$agent_prompt_src" > "$prompt_file"
 
   # ── Spawn claude -p (AC1) ─────────────────────────────────────────────────
@@ -721,7 +721,7 @@ handle_impl_phase() {
 
   # ── Write prompt to temp file ─────────────────────────────────────────────
   local prompt_file
-  prompt_file=$(mktemp "/tmp/gaai-impl-prompt-${story_id}-XXXXXX.md")
+  prompt_file=$(mktemp "/tmp/gaai-impl-prompt-${story_id}-XXXXXX")
   printf '%s' "$prompt_content" > "$prompt_file"
 
   # ── Invoke nested-claude-spawn.js flag-CLI (AC1 — always exits 0) ────────
@@ -867,7 +867,7 @@ handle_qa_phase() {
   fi
 
   local prompt_file
-  prompt_file=$(mktemp "/tmp/gaai-qa-prompt-${story_id}-XXXXXX.md")
+  prompt_file=$(mktemp "/tmp/gaai-qa-prompt-${story_id}-XXXXXX")
   cat "$agent_prompt_src" > "$prompt_file"
 
   # ── Duration measurement ──────────────────────────────────────────────────
