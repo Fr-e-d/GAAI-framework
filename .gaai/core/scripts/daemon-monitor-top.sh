@@ -178,7 +178,9 @@ render_phase_metrics() {
 while true; do
   clear
   render_banner
-  render_phase_metrics   # AC3: per-phase metrics summary
+  # Per-phase metrics removed — redundant with the bottom "Active Deliveries"
+  # section which already renders phase + duration + model + activity in a
+  # richer single-source-of-truth format.
 
   if [[ -f "$LOG_FILE" ]]; then
     # Calculate available lines for logs (banner takes ~11 lines)
