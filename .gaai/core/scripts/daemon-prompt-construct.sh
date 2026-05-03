@@ -396,19 +396,33 @@ WORKTREE_SCOPE
 # ≥5 acceptance criteria OR plan content >300 lines). Below threshold,
 # monolithic execution is faster and avoids spawn overhead.
 cat <<DELEGATION
-=== IMPLEMENTATION DELEGATION (CONDITIONAL) ===
+=== IMPLEMENTATION DELEGATION (MANDATORY ABOVE THRESHOLD) ===
 
 You are the LEAD implementation agent. After reading the plan (per the
-INPUT ARTEFACTS section above), DECIDE whether to delegate work to
-sub-agents :
+INPUT ARTEFACTS section above), apply the following decision RULE :
 
-DELEGATE if any of :
-  - Plan's "Implementation Sequence" has ≥4 distinct steps
-  - Story has ≥5 acceptance criteria
-  - Plan content is >300 lines
+**DELEGATION DECISION RULE — count distinct file paths in the plan's
+"Implementation Sequence" \`**Files modified**\` blocks (across all steps,
+deduplicated) :**
 
-Otherwise execute monolithically (faster on small stories, avoids
-spawn overhead).
+| File count       | Decision               |
+|------------------|------------------------|
+| ≥ 6 files        | DELEGATE — MANDATORY   |
+| 3-5 files        | DELEGATE — STRONGLY RECOMMENDED |
+| 1-2 files        | MONOLITHIC OK          |
+| Plan has no per-step \`**Files modified**\` blocks | MONOLITHIC fallback (the plan was malformed — flag in your impl-report) |
+
+This rule is based on empirical observation : Tier 2 cross-cutting stories
+that touched ≥6 files have repeatedly hit \`rapid_refill_breaker\` when
+executed monolithically. Stories that touched ≤2 files converged
+monolithically without compaction issues.
+
+**Do NOT use intuition to decide ("this story looks simple") — apply the
+file-count rule mechanically.** If the rule says DELEGATE, delegate. The
+spawn overhead (~10s per Task call) is negligible against the cost of
+hitting compaction thrash mid-impl.
+
+If MONOLITHIC : execute the plan steps yourself sequentially. Standard flow.
 
 IF DELEGATING — orchestrator workflow :
 
