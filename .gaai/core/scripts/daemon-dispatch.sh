@@ -83,9 +83,10 @@ except Exception:
 #      and forensic trail unchanged).
 #   2. Watches for consecutive identical `is_error:true` tool_result content.
 #   3. Kills claude -p if N (default 3) consecutive identical errors are seen,
-#      preventing the kind of unbounded retry loop observed on E79S01 plan
-#      phase 2026-05-03 (sandbox blocked bash heredoc → 21-turn / $2.17 burn
-#      with no artefact written; same content every time).
+#      preventing unbounded retry loops on content-based sandbox refusals
+#      (e.g. Bash heredocs with shell-expansion patterns) where the agent
+#      retries the same blocked content forever, burning tokens without
+#      producing the expected artefact.
 #
 # Why this exists: the Claude Code Bash sandbox sometimes refuses commands
 # with deterministic, content-based rules (e.g. "Contains simple_expansion",
