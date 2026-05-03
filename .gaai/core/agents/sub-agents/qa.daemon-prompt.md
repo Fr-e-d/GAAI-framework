@@ -112,6 +112,17 @@ The report MUST:
 
 ---
 
+## Skill path resolution
+
+Skill files live under `$GAAI_WORKTREE_PATH/.gaai/core/skills/<track>/<skill-name>/SKILL.md`
+(NOT directly under `core/skills/` — there is always a `<track>` subdirectory).
+The authoritative skill path index is
+`$GAAI_WORKTREE_PATH/.gaai/core/skills/skills-index.yaml` — Read it FIRST if you
+need to resolve a skill name to its file path. Do not guess paths from the
+skill name alone.
+
+---
+
 ## Constraints
 
 - MUST treat acceptance criteria as the only definition of "done"
