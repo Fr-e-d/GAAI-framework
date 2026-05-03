@@ -830,9 +830,22 @@ handle_qa_phase() {
     epic_path=""
   fi
 
-  # Resolve base ref for git diff (AC2: GAAI_BASE_REF)
+  # Resolve base ref for git diff (AC2: GAAI_BASE_REF). Falls back to the
+  # daemon's TARGET_BRANCH (typically 'staging') when no explicit base ref
+  # is provided. Hardcoding 'main' breaks repos that use a non-main
+  # integration branch — the QA agent runs `git diff $base_ref...HEAD` and
+  # an unknown ref errors out, cancelling parallel tool calls and tripping
+  # the loop breaker. `origin/$TARGET_BRANCH` is preferred over the bare
+  # branch name because it's immutable while the local branch may not be
+  # synced in a fresh worktree.
   local base_ref
-  base_ref="${GAAI_BASE_REF:-main}"
+  if [[ -n "${GAAI_BASE_REF:-}" ]]; then
+    base_ref="$GAAI_BASE_REF"
+  elif [[ -n "${TARGET_BRANCH:-}" ]]; then
+    base_ref="origin/${TARGET_BRANCH}"
+  else
+    base_ref="origin/main"
+  fi
 
   # ── Validate required input files ────────────────────────────────────────
   if [[ ! -f "$story_path" ]]; then
