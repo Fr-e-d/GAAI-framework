@@ -255,3 +255,40 @@ if [[ -n "$_related_decs" ]]; then
   echo "These DECs contain binding constraints for this story. Non-compliance = implementation failure."
   echo ""
 fi
+
+# ── Section 6: Output persistence discipline (universal — no-heredoc rule) ──
+cat <<'OUTPUT_PERSISTENCE'
+=== OUTPUT PERSISTENCE — MANDATORY ===
+
+To persist any artefact (impl-report, source code files, configs, migrations,
+test files), use the dedicated tools:
+
+- New files / full rewrites → `Write` tool
+- Edits to existing files → `Edit` tool
+
+NEVER use the `Bash` tool with heredoc syntax (`cat > file <<EOF ... EOF`,
+`cat >> file <<'EOF' ... EOF`, or any `<<` redirection writing artefact
+content) for persisting files.
+
+Why this rule is hard: the Claude Code Bash sandbox statically scans every
+command before execution and refuses any heredoc whose body contains
+`${...}`, `$VAR`, or quoted brace-with-quote patterns (common in shell
+snippets, smoke tests, env templates, code examples). The refusal is
+content-based and deterministic — retrying the same heredoc content produces
+the same refusal forever. Errors look like:
+
+  - "Contains simple_expansion"
+  - "Contains brace with quote character (expansion obfuscation)"
+
+Once you see ONE of these errors, do NOT retry the same approach with the
+same content. The daemon's loop breaker will kill the session after 3
+identical consecutive tool errors regardless. Use Write/Edit with content as
+string arguments — no shell parsing, no sandbox surface.
+
+If a file is too large for a single Write, do an initial Write with the first
+chunk, then use Edit (with append-style replacement at end-of-file) for
+subsequent chunks. NEVER fall back to Bash heredoc.
+
+=== END OUTPUT PERSISTENCE ===
+
+OUTPUT_PERSISTENCE

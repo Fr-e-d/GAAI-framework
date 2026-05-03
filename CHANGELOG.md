@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- fix(daemon-dispatch): loop breaker + no-heredoc steering across phase prompts
+
 ## [2.23.0] - 2026-05-03
 
 ### Changed
