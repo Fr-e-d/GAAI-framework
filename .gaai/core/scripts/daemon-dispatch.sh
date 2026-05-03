@@ -32,6 +32,27 @@ _remove_active_marker() {
   rm -f "${mdir}/${story_id}.${phase}.active" 2>/dev/null || true
 }
 
+# ── Per-phase log rotation ────────────────────────────────────────────────
+# Each phase's claude -p run writes to ${worktree}/.delivery-logs/{id}.{phase}.log
+# via `tee -a`. On retry after a failed attempt (e.g., error_max_turns), the
+# new run would otherwise APPEND to the prior session's log, producing :
+#   - Inflated cumulative tool counts in the monitor (parser sees both runs)
+#   - Confusing "session boundary" detection in forensic analysis
+#
+# Rotate the existing log to a timestamped suffix BEFORE the new claude -p
+# starts. Forensic trail preserved (old log readable as <name>.YYYYMMDDTHHMMSS),
+# new run starts with a fresh empty file.
+#
+# Per Fred 2026-05-03 — flush-before-relaunch is simpler than scoping every
+# parser to "current session only" via init-event offset detection.
+_rotate_phase_log() {
+  local log_path="$1"
+  if [[ -f "$log_path" && -s "$log_path" ]]; then
+    local rotated="${log_path}.$(date '+%Y%m%dT%H%M%S')"
+    mv "$log_path" "$rotated" 2>/dev/null || true
+  fi
+}
+
 # ── Field extractors (AC1 — verbatim per story AC1 specification) ─────────
 
 get_phase_status() {
@@ -323,6 +344,9 @@ handle_plan_phase() {
   plan_path="${worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
   log_path="${worktree_path}/.delivery-logs/${story_id}.plan.log"
 
+  # Rotate prior session's log on retry (preserves forensic trail).
+  _rotate_phase_log "$log_path"
+
   # Resolve epic_id from story frontmatter; empty string if missing
   local epic_id
   epic_id=$(grep -m1 '^epic:' "$story_path" 2>/dev/null | sed 's/^epic:[[:space:]]*//' | tr -d '"' || true)
@@ -441,6 +465,9 @@ handle_impl_phase() {
   plan_path="${worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
   impl_report_path="${worktree_path}/.gaai/project/contexts/artefacts/impl-reports/${story_id}.impl-report.md"
   log_path="${worktree_path}/.delivery-logs/${story_id}.impl.log"
+
+  # Rotate prior session's log on retry (preserves forensic trail).
+  _rotate_phase_log "$log_path"
 
   # ── Validate required files ───────────────────────────────────────────────
   if [[ ! -f "$story_path" ]]; then
@@ -586,6 +613,9 @@ handle_qa_phase() {
   qa_report_path="${worktree_path}/.gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-report.md"
   memory_delta_path="${worktree_path}/.gaai/project/contexts/artefacts/memory-deltas/${story_id}.memory-delta.md"
   log_path="${worktree_path}/.delivery-logs/${story_id}.qa.log"
+
+  # Rotate prior session's log on retry (preserves forensic trail).
+  _rotate_phase_log "$log_path"
 
   # Resolve epic_id from story frontmatter
   local epic_id epic_path
