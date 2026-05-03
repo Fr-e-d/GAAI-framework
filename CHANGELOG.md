@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(daemon-spawn): correct misdiagnosis + worktree-scope audit
 - fix(daemon-dispatch): pass --dangerously-skip-permissions to plan + qa spawns
 - fix(daemon-dispatch): genericize loop-breaker comment for OSS sync
 - fix(daemon-dispatch): loop breaker + no-heredoc steering across phase prompts
