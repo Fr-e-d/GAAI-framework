@@ -525,21 +525,38 @@ parse_log() {
     fi
   fi
 
-  # ── Combined header line (single source of truth for story + phase + model) ──
-  # Replaces the legacy two-line ── separator + standalone "Phase:" pair.
-  # Format : "{story_id} | Phase: {phase} | Model: {model}"
+  # ── Resolve story title from backlog YAML (single canonical source) ──
+  # Adds operator context : "what is this story about ?" without lookup.
+  local story_title
+  story_title=$(awk -v id="$story_id" '
+    $0 == "- id: " id { found=1; next }
+    found && /^- id:/ { exit }
+    found && /^[[:space:]]+title:/ {
+      gsub(/^[[:space:]]+title:[[:space:]]*"?/, "")
+      gsub(/"[[:space:]]*$/, "")
+      gsub(/[[:space:]]*$/, "")
+      print
+      exit
+    }
+  ' "$BACKLOG" 2>/dev/null || true)
+
+  # ── Story header line : "{id} — {title}" ──
+  if [[ -n "$story_title" ]]; then
+    printf '%b%s%b — %s\n' "$CYAN" "$story_id" "$NC" "$story_title"
+  else
+    printf '%b%s%b\n' "$CYAN" "$story_id" "$NC"
+  fi
+
+  # ── Phase + model line ──
   # "Model:" label rendered in default terminal color (no DIM dimming) —
   # keeps the data line as a peer to "Phase:" instead of subdued.
   if [[ -n "$phase_display" ]]; then
-    printf '%b%s%b | Phase: %b%s%b%s%s\n' \
-      "$CYAN" "$story_id" "$NC" \
+    printf '  Phase: %b%s%b%s%s\n' \
       "$phase_color" "$phase_display" "$NC" "$origin_suffix" \
       "$model_suffix"
-  else
-    # Legacy pipeline (no phase label) : just story_id + model (if known).
-    printf '%b%s%b%s\n' \
-      "$CYAN" "$story_id" "$NC" \
-      "$model_suffix"
+  elif [[ -n "$model_suffix" ]]; then
+    # Legacy pipeline (no phase label) : just model line (if known).
+    printf '  %s\n' "${model_suffix# | }"
   fi
 
   # ── Stats line ──
@@ -601,7 +618,23 @@ while true; do
       log_path=$(resolve_3phase_log "$story_id")
       if [[ "$log_path" == "[no log yet]" || "$log_path" == "[?]" ]]; then
         # No log yet — render minimal header (parse_log won't run on missing file)
-        printf '%b%s%b | Phase: %b%s%b\n' "$CYAN" "$story_id" "$NC" "$YELLOW" "$phase_label" "$NC"
+        local _title
+        _title=$(awk -v id="$story_id" '
+          $0 == "- id: " id { found=1; next }
+          found && /^- id:/ { exit }
+          found && /^[[:space:]]+title:/ {
+            gsub(/^[[:space:]]+title:[[:space:]]*"?/, "")
+            gsub(/"[[:space:]]*$/, "")
+            gsub(/[[:space:]]*$/, "")
+            print; exit
+          }
+        ' "$BACKLOG" 2>/dev/null || true)
+        if [[ -n "$_title" ]]; then
+          printf '%b%s%b — %s\n' "$CYAN" "$story_id" "$NC" "$_title"
+        else
+          printf '%b%s%b\n' "$CYAN" "$story_id" "$NC"
+        fi
+        printf '  Phase: %b%s%b\n' "$YELLOW" "$phase_label" "$NC"
         echo -e "  ${DIM}${log_path}${NC}"
         echo ""
         continue
