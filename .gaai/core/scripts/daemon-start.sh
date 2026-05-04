@@ -234,7 +234,15 @@ do_start() {
   if command -v tmux &>/dev/null; then
     # Build tmux command string (args are simple flags, safe to join)
     local daemon_cmd="bash '${DAEMON_SCRIPT}' ${PASSTHROUGH_ARGS[*]+${PASSTHROUGH_ARGS[*]}}"
-    tmux new-session -d -s gaai-daemon "$daemon_cmd"
+    # Forward GAAI_IMPL_* env vars into tmux session (tmux strips parent env by default).
+    # Required for daemon-dispatch.sh resolveMode() to route Impl phase to secondary (GLM).
+    # Plan + QA stay on primary (Sonnet) regardless ; only Impl reads these vars.
+    local tmux_env_args=()
+    [[ -n "${GAAI_IMPL_BASE_URL:-}"   ]] && tmux_env_args+=(-e "GAAI_IMPL_BASE_URL=${GAAI_IMPL_BASE_URL}")
+    [[ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_AUTH_TOKEN=${GAAI_IMPL_AUTH_TOKEN}")
+    [[ -n "${GAAI_IMPL_MODEL:-}"      ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL=${GAAI_IMPL_MODEL}")
+    [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
+    tmux new-session -d -s gaai-daemon "${tmux_env_args[@]}" "$daemon_cmd"
 
     # Give it a moment to start, then grab the PID
     sleep 1
