@@ -544,13 +544,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - feat(governance): SKILL-RIN-001 review-input + anti-girouette research bundle
-- feat(E101S07a): daemon HMAC signing + webhook secret provisioning (#466)
+- feat(E101S07a): daemon HMAC-SHA256 signing of outbound webhook POSTs (X-Hub-Signature-256 + X-Webhook-Source headers, GAAI_DAEMON_WEBHOOK_SECRET env var)
 
 
 ## [2.19.0] - 2026-04-25
 
 ### Changed
-- feat(E101S07a): daemon HMAC signing + webhook secret provisioning endpoint
+- feat(E101S07a): daemon HMAC-SHA256 signing of outbound webhook POSTs (X-Hub-Signature-256 + X-Webhook-Source headers, GAAI_DAEMON_WEBHOOK_SECRET env var)
 - fix(daemon-monitor): classify nested claude -p (Implement Agent) as sub-agent
 - feat(daemon-monitor): surface sub-agent activity + fix "Bash null" rendering
 - fix(framework): use .gaai-worktrees/ naming to avoid in-project .gaai/ collision
