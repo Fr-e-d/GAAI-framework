@@ -513,6 +513,17 @@ handle_plan_phase() {
     fi
   fi
 
+  # ── GAP-004 fix (2026-05-04): propagate project's .mcp.json into worktree ──
+  # The worktree's claude -p subprocess reads .mcp.json at boot to know which
+  # MCP server (and workspace, encoded in URL path per RFC 8707) to connect to.
+  # If the host project's .mcp.json is gitignored (per /gaai:setup guidance), it
+  # won't be in the worktree by default — copy it explicitly so daemon-spawned
+  # claude -p inherits the same workspace binding without an interactive picker.
+  # Idempotent + outside the worktree-create block so resumed worktrees also get it.
+  if [[ -f "${PROJECT_DIR}/.mcp.json" ]]; then
+    cp "${PROJECT_DIR}/.mcp.json" "${worktree_path}/.mcp.json"
+  fi
+
   # ── Resolve artefact paths ────────────────────────────────────────────────
   local story_path plan_path epic_path log_path
   story_path="${worktree_path}/.gaai/project/contexts/artefacts/stories/${story_id}.story.md"
@@ -639,6 +650,12 @@ handle_impl_phase() {
     local repo_name
     repo_name=$(basename "$PROJECT_DIR")
     worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
+  fi
+
+  # GAP-004 fix (2026-05-04): refresh .mcp.json in worktree (idempotent).
+  # Defensive: covers daemon upgrades where plan-phase ran without copying.
+  if [[ -f "${PROJECT_DIR}/.mcp.json" ]]; then
+    cp "${PROJECT_DIR}/.mcp.json" "${worktree_path}/.mcp.json" 2>/dev/null || true
   fi
 
   # ── Resolve artefact paths ────────────────────────────────────────────────
@@ -807,6 +824,11 @@ handle_qa_phase() {
     local repo_name
     repo_name=$(basename "$PROJECT_DIR")
     worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
+  fi
+
+  # GAP-004 fix (2026-05-04): refresh .mcp.json in worktree (idempotent).
+  if [[ -f "${PROJECT_DIR}/.mcp.json" ]]; then
+    cp "${PROJECT_DIR}/.mcp.json" "${worktree_path}/.mcp.json" 2>/dev/null || true
   fi
 
   # ── Resolve artefact paths (AC2) ──────────────────────────────────────────
