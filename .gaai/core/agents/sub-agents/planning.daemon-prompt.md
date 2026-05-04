@@ -130,9 +130,8 @@ Write the execution plan to exactly: `$GAAI_PLAN_PATH`
 
 The plan MUST include:
 - YAML frontmatter with `artefact_type: execution-plan`, `id: $GAAI_STORY_ID`, `skills_invoked`
-- `## Implementation Sequence` — ordered steps. **EVERY step MUST follow the strict
-  delegation-aware format below — this is NOT optional.** Plans missing the
-  per-step metadata blocks will not pass downstream consistency-check.
+- `## Implementation Sequence` — ordered steps with specific file paths,
+  line numbers, and checkpoints
 - `## Edge Cases` — per AC
 - `## Test Checkpoints` — what to verify at each step
 - `## Risk Register` — key risks and mitigations
@@ -141,80 +140,23 @@ The plan MUST include:
 The plan MUST contain at least one `## ` level-2 heading.
 The plan file MUST be non-empty.
 
-### Implementation Sequence — STRICT delegation-aware format (MANDATORY)
+### Scope discipline check (escalation trigger)
 
-The implementation phase dispatches each step to an isolated sub-agent
-(via the Task tool) running in a clean context. **The lead impl agent
-will NOT re-decompose your plan** — it will scan for the strict metadata
-blocks below and dispatch mechanically. If the metadata blocks are
-missing, the impl agent falls back to monolithic execution, which has
-been observed empirically to fail with `rapid_refill_breaker` on Tier 2
-cross-cutting stories. **You are the only authority that produces the
-dispatch graph. Do not skip these blocks.**
+Before finalising the plan, audit its scope. If the plan touches **>5 distinct
+files** OR has **>6 acceptance criteria** OR projects to >300 lines of code
+modification, the story is too large for reliable single-pass implementation
+on the secondary route (GLM 5.1) and at risk of hitting Sonnet's turn budget
+on the primary route.
 
-**EVERY step MUST start with this exact metadata block, in this exact
-order, before any prose** :
+When the scope exceeds those thresholds, write `{id}.plan-blocked.md` at
+`$GAAI_PLAN_PATH` instead of the plan, attach a recommended decomposition
+into 2-3 smaller stories (each ≤5 files / ≤6 ACs), and exit non-zero. The
+Discovery agent will then split the story before re-attempting Plan.
 
-```
-### Step N — <short descriptive label>
-
-**ACs addressed** : AC<n>, AC<m>     ← list specific AC numbers, even if "all" or "n/a"
-**Files modified** :                   ← bullet list, ALWAYS present, even if 0 files
-  - `path/to/file1.ts` — <what changes>
-  - `path/to/file2.ts` — <what changes>
-**Files read for context** :           ← bullet list, ALWAYS present (use `none` if 0)
-  - `path/to/related.ts` — <why needed>
-**Sequential dependency** :            ← either "independent" OR "depends on Step K"
-**Verification** : <test command or manual check>
-
-<then the prose for this step>
-```
-
-**Few-shot examples** :
-
-GOOD (delegation-ready) :
-
-```
-### Step 3 — Add workspace_capacity column + helpers
-
-**ACs addressed** : AC3
-**Files modified** :
-  - `workers/api/migrations/0044_workspace_capacity.sql` — NEW migration, adds
-    `workspace_capacity INTEGER DEFAULT 25` to subscriptions table
-  - `workers/api/src/services/subscription-event.service.ts` — add
-    `extractWorkspaceAddonQuantity()` (after L120) + `hasInvalidAddonQuantity()`
-**Files read for context** :
-  - `workers/api/src/services/subscription-event.service.ts` L1-200 — understand
-    existing handler dispatch pattern
-**Sequential dependency** : independent — can run in parallel with Step 4
-**Verification** : `pnpm test -- subscription-event.service.test.ts`
-
-Implement the helper functions per Paddle webhook payload schema...
-```
-
-BAD (lead cannot orchestrate from this) :
-
-```
-### Step 3 — Workspace capacity
-
-We need to add the workspace_capacity column and a quantity helper.
-The migration goes in migrations/, the helpers in subscription-event.service.ts.
-Tests should pass. This is independent.
-```
-
-The BAD form has the same INFORMATION but in unstructured prose. The lead
-agent cannot mechanically extract file paths or dependencies — it would
-have to re-read the prose, parse intent, and re-decide. That re-decision
-is exactly the cognitive load we're avoiding by delegating.
-
-**Edge cases for the format** :
-- Step modifies 0 files (e.g. "verify in browser") : write `**Files modified** :` then `none`.
-- Step has no scoped reads (relies on prior step's outputs) : write `**Files read for context** :` then `none`.
-- Step is the first/only one : `**Sequential dependency** : independent`.
-
-**Single-step plans** are valid for genuinely single-file Tier 1 stories.
-But the metadata block is still mandatory — even with one step, the lead
-needs the file paths to dispatch (or to confirm "1 file → monolithic OK").
+This is the V1 doctrine : keep stories small enough to fit in a single
+agent's effective coherence window. Architectural orchestrator patterns
+were experimented with and found unreliable across model families ; scope
+discipline upstream is the durable solution.
 
 ---
 
