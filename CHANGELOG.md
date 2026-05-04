@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.25.0] - 2026-05-04
 
 ### Changed
+- fix(daemon-dispatch): drop iso-date refs from .mcp.json comments per oss-refcheck
+- feat(gap-004): workspace-scoped URL + .mcp.json single source of truth
 - fix(daemon-prompt): revert orchestrator pattern + adopt scope discipline doctrine
 - fix(daemon-prompt): tighten orchestrator triggers — empirically derived
+
 
 ## [2.24.0] - 2026-05-03
 
