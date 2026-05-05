@@ -652,12 +652,33 @@ export function resolveMode(implModelTag, envState) {
     return { mode: 'primary', tag_recorded: 'primary' };
   }
 
-  // Row 2 / Row 4: secondary (explicit or env-driven default) + env configured → secondary
-  if (envConfigured) {
+  // Row 2: explicit opt-in to secondary + env configured → secondary
+  // Pre-PMF decision (2026-05-05) — DEC-72 amendment: secondary route is now
+  // OPT-IN at the story level (`impl_model: secondary` in backlog item) rather
+  // than env-driven default. Rationale: Z.AI's Anthropic shim (`/api/anthropic`)
+  // does not honor cache_control nor return cache_read_input_tokens in usage,
+  // causing claude CLI's client-side context tracker to saturate at the
+  // declared window threshold and trigger rapid_refill_breaker on cross-cutting
+  // stories regardless of prompt size. Empirically observed E79S03a Impl phase
+  // 2026-05-05 (266s GLM run, 3 autocompacts, killed). Sonnet primary cascade
+  // succeeded same story 315s. Until Z.AI fixes shim OR a custom Anthropic↔Z.AI
+  // native translator is built (deferred post-PMF per
+  // strategy/anthropic-shim-translator-product-evaluation-2026-05-05.md), the
+  // default route is primary to avoid double-burn (failed GLM attempt + Sonnet
+  // cascade). Stories that opt-in to secondary explicitly accept the rapid_refill
+  // risk and the cascade cost.
+  if (normalized === 'secondary' && envConfigured) {
     return { mode: 'secondary', tag_recorded };
   }
 
-  // Row 3 / Row 5: env missing → primary (caller emits warn for explicit 'secondary' tag)
+  // Row 3: explicit secondary but env missing → primary (caller emits warn)
+  if (normalized === 'secondary' && !envConfigured) {
+    return { mode: 'primary', tag_recorded };
+  }
+
+  // Row 4 / Row 5 (NEW DEFAULT 2026-05-05): no tag → primary always.
+  // Pre-correction this returned 'secondary' when envConfigured. Flipped to
+  // primary per pre-PMF cost-reliability decision above.
   return { mode: 'primary', tag_recorded };
 }
 
