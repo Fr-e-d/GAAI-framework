@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- fix(daemon): reset CLAUDE_CODE_AUTO_COMPACT_WINDOW from 229K to 200K
+
 ## [2.24.0] - 2026-05-06
 
 ### Changed
