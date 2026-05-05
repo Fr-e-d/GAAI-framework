@@ -652,21 +652,16 @@ export function resolveMode(implModelTag, envState) {
     return { mode: 'primary', tag_recorded: 'primary' };
   }
 
-  // Row 2: explicit opt-in to secondary + env configured → secondary
-  // Pre-PMF decision (2026-05-05) — DEC-72 amendment: secondary route is now
-  // OPT-IN at the story level (`impl_model: secondary` in backlog item) rather
-  // than env-driven default. Rationale: Z.AI's Anthropic shim (`/api/anthropic`)
-  // does not honor cache_control nor return cache_read_input_tokens in usage,
-  // causing claude CLI's client-side context tracker to saturate at the
-  // declared window threshold and trigger rapid_refill_breaker on cross-cutting
-  // stories regardless of prompt size. Empirically observed E79S03a Impl phase
-  // 2026-05-05 (266s GLM run, 3 autocompacts, killed). Sonnet primary cascade
-  // succeeded same story 315s. Until Z.AI fixes shim OR a custom Anthropic↔Z.AI
-  // native translator is built (deferred post-PMF per
-  // strategy/anthropic-shim-translator-product-evaluation-2026-05-05.md), the
-  // default route is primary to avoid double-burn (failed GLM attempt + Sonnet
-  // cascade). Stories that opt-in to secondary explicitly accept the rapid_refill
-  // risk and the cascade cost.
+  // Row 2: explicit opt-in to secondary + env configured → secondary.
+  // Secondary route is OPT-IN at the story level (`impl_model: secondary` in
+  // the backlog item) rather than env-driven default. Rationale: third-party
+  // Anthropic-compat shims observed empirically not to honor cache_control nor
+  // return cache_read_input_tokens in usage, causing the client-side context
+  // tracker to saturate at the declared window threshold and trigger
+  // rapid_refill_breaker on cross-cutting stories regardless of prompt size.
+  // Universal fallback (AC3) cascades to primary on secondary failure but
+  // creates double-burn vs direct primary route. Stories that opt-in to
+  // secondary explicitly accept the rapid_refill risk and the cascade cost.
   if (normalized === 'secondary' && envConfigured) {
     return { mode: 'secondary', tag_recorded };
   }
@@ -676,9 +671,9 @@ export function resolveMode(implModelTag, envState) {
     return { mode: 'primary', tag_recorded };
   }
 
-  // Row 4 / Row 5 (NEW DEFAULT 2026-05-05): no tag → primary always.
-  // Pre-correction this returned 'secondary' when envConfigured. Flipped to
-  // primary per pre-PMF cost-reliability decision above.
+  // Row 4 / Row 5 (DEFAULT): no tag → primary always.
+  // Earlier revision returned 'secondary' when envConfigured. Flipped to
+  // primary per the cost-reliability rationale above.
   return { mode: 'primary', tag_recorded };
 }
 
