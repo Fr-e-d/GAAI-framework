@@ -458,11 +458,12 @@ describe('nested-claude-spawn', () => {
     const reportPath = join(tmpdir(), `gaai-test-E131S03-T14-${Date.now()}.md`);
     writeFileSync(reportPath, '## QA\nAll good.\n');
 
-    // implModelTag absent + env configured → secondary (DEC-72 Row 4)
+    // implModelTag 'secondary' + env configured → secondary
+    // (post 2026-05-05 default flip — null tag now defaults to primary, must opt in explicitly)
     _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: '## QA\nAll good.\n' }));
 
     const r = await runImpl({
-      implModelTag: null,
+      implModelTag: 'secondary',
       prompt: 'test-prompt',
       reportPath,
       storyId: 'E131S03-T14',
@@ -473,8 +474,8 @@ describe('nested-claude-spawn', () => {
     const records = readLogLines(tmpLog);
     assert.equal(records.length, 1, 'must have exactly one log record for a successful invocation');
     assert.equal(records[0].phase, 'impl');
-    assert.equal(records[0].provider, 'secondary', 'env configured + absent tag → secondary per DEC-72 Row 4');
-    assert.equal(records[0].impl_model_tag, 'absent', 'tag_recorded must reflect absent sentinel');
+    assert.equal(records[0].provider, 'secondary', 'explicit secondary tag + env configured → secondary');
+    assert.equal(records[0].impl_model_tag, 'secondary', 'tag_recorded reflects explicit opt-in');
     assert.equal(records[0].fallback_reason, null, 'no fallback on success');
   });
 
@@ -599,7 +600,7 @@ describe('nested-claude-spawn', () => {
     _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: streamJson }));
 
     const r = await runImpl({
-      implModelTag: null,  // absent + env configured → secondary (DEC-72 Row 4)
+      implModelTag: 'secondary',  // explicit opt-in (default flipped to primary 2026-05-05)
       prompt: 'test-prompt',
       reportPath,
       storyId: 'E131S08-T17',
@@ -684,7 +685,7 @@ describe('nested-claude-spawn', () => {
     let r;
     try {
       r = await runImpl({
-        implModelTag: null,  // absent + env configured → secondary
+        implModelTag: 'secondary',  // explicit opt-in (default flipped to primary 2026-05-05)
         prompt: 'test-prompt',
         reportPath,
         storyId: 'E131S08-T19',
@@ -787,22 +788,22 @@ describe('resolveMode (DEC-72 five-row matrix)', () => {
     assert.equal(r.tag_recorded, 'secondary');
   });
 
-  // Row 4: absent/null tag + env configured → secondary (DEC-72 new default — was primary in E94 D-0)
-  test('Row 4a: absent sentinel + env configured → mode=secondary, tag_recorded=absent', () => {
+  // Row 4: absent/null tag + env configured → primary (2026-05-05 amendment: pre-PMF cost-reliability decision flipped default ; was secondary per DEC-72 original)
+  test('Row 4a: absent sentinel + env configured → mode=primary, tag_recorded=absent (2026-05-05 default flip)', () => {
     const r = resolveMode('absent', fullEnv);
-    assert.equal(r.mode, 'secondary');
+    assert.equal(r.mode, 'primary');
     assert.equal(r.tag_recorded, 'absent');
   });
 
-  test('Row 4b: null (no backlog tag) + env configured → mode=secondary, tag_recorded=absent', () => {
+  test('Row 4b: null (no backlog tag) + env configured → mode=primary, tag_recorded=absent (2026-05-05 default flip)', () => {
     const r = resolveMode(null, fullEnv);
-    assert.equal(r.mode, 'secondary');
+    assert.equal(r.mode, 'primary');
     assert.equal(r.tag_recorded, 'absent');
   });
 
-  test('Row 4c: undefined (no backlog tag) + env configured → mode=secondary, tag_recorded=absent', () => {
+  test('Row 4c: undefined (no backlog tag) + env configured → mode=primary, tag_recorded=absent (2026-05-05 default flip)', () => {
     const r = resolveMode(undefined, fullEnv);
-    assert.equal(r.mode, 'secondary');
+    assert.equal(r.mode, 'primary');
     assert.equal(r.tag_recorded, 'absent');
   });
 
