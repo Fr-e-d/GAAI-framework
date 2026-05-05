@@ -158,17 +158,21 @@ function buildChildEnv() {
   // we don't touch it. Sources :
   //   - API_TIMEOUT_MS=3000000 (50 min) : Z.AI docs — GLM responses slower
   //     than Anthropic's, default 10 min triggers premature timeouts.
-  //   - CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000 : Z.AI docs — tells Claude
-  //     Code the effective context window is 200K, so auto-compaction triggers
-  //     at the right capacity for GLM rather than assuming a different
-  //     window size. Avoids the auto-compact thrashing observed empirically
-  //     on E112S03 (context refilled to limit within 3 turns of compact, 3
-  //     times in a row).
+  //   - CLAUDE_CODE_AUTO_COMPACT_WINDOW=229000 : intentionally inflated above
+  //     the GLM-class real ceiling (~200K). Claude Code's autocompact threshold
+  //     is internally capped at ~83% of the configured window, so setting 229K
+  //     yields a trigger around 190K — pushing the effective working ceiling
+  //     close to (but not over) the model's hard limit. Empirical baseline
+  //     showed the agent hitting compact at ~167K with WINDOW=200K, defeating
+  //     long agent loops on cross-cutting stories. Trade-off : ~10K headroom
+  //     between the trigger and the model's real ceiling, so a single very
+  //     long response can still overflow. The universal fallback to primary
+  //     handles that case via cascade. Operator override preserved.
   if (!env.API_TIMEOUT_MS) {
     env.API_TIMEOUT_MS = '3000000';
   }
   if (!env.CLAUDE_CODE_AUTO_COMPACT_WINDOW) {
-    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = '200000';
+    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = '229000';
   }
 
   // Claude Code proxy / gateway compat flags (we ARE a gateway here — Z.AI's

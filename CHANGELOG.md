@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.25.0] - 2026-05-05
+
+### Changed
+- feat(routing): bump CLAUDE_CODE_AUTO_COMPACT_WINDOW 200K → 229K + opt-in E79S03a secondary
+- chore: bump local VERSION to v2.24.0 [sync]
+
+
 ## [2.24.0] - 2026-05-05
 
 ### Changed
