@@ -7,11 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.23.0] - 2026-05-06
 
 ### Changed
+- feat(daemon-start): forward GAAI_AUTO_MERGE_POLICY env to tmux session
 - fix(daemon-prompt): strengthen R1 R3 R6 wording + promote R7 Bash bounding
 - fix(daemon-prompt): strengthen R4 chunked retrieval (mandatory wording + workflow)
+- chore: bump local VERSION to v2.23.0 [sync]
+- fix(skill): generate-stories step 12 mandates phase_status + delivery_pipeline fields
+- chore: bump local VERSION to v2.25.0 [sync]
+- feat(routing): bump CLAUDE_CODE_AUTO_COMPACT_WINDOW 200K → 229K + opt-in E79S03a secondary
+- chore: bump local VERSION to v2.24.0 [sync]
+- feat(routing): DEC-93 — flip impl_model default to primary (pre-PMF cost-reliability)
+- fix(daemon-start): forward GAAI_IMPL_* env vars to tmux session
+- fix(daemon-dispatch): drop iso-date refs from .mcp.json comments per oss-refcheck
+- feat(gap-004): workspace-scoped URL + .mcp.json single source of truth
+- fix(daemon-prompt): revert orchestrator pattern + adopt scope discipline doctrine
+- fix(daemon-prompt): tighten orchestrator triggers — empirically derived
+- feat(daemon-prompt): impl orchestrator pattern — Task delegation on long stories
+- fix(daemon-prompt): explicit skill-path resolution to prevent guess-loop
+- fix(daemon-dispatch): QA base_ref defaults to origin/$TARGET_BRANCH not main
+- fix(daemon-prompt): mandatory HANDOFF section + advance E79S01 to implemented
+- fix(daemon-prompt): route-aware impl prompt — slim path refs for secondary
+- fix(daemon-dispatch): mktemp templates without .md suffix (macOS BSD mktemp)
+- fix(daemon-spawn): pass worktree_path as cwd to all claude -p children
+- fix(daemon-dispatch): pre-compute SECONDARY_ROUTE before impl prompt build
+- fix(daemon-spawn): correct misdiagnosis + worktree-scope audit
+- fix(daemon-dispatch): pass --dangerously-skip-permissions to plan + qa spawns
+- fix(daemon-dispatch): genericize loop-breaker comment for OSS sync
+- fix(daemon-dispatch): loop breaker + no-heredoc steering across phase prompts
+- feat(daemon-monitor): show story title alongside id in active deliveries
+- fix(daemon-dispatch): rotate per-phase log before retry to avoid cumulative metrics
+- chore(daemon): carry forward delivery monitor + dispatch updates
+
 
 ## [2.23.0] - 2026-05-05
 

@@ -242,6 +242,8 @@ do_start() {
     [[ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_AUTH_TOKEN=${GAAI_IMPL_AUTH_TOKEN}")
     [[ -n "${GAAI_IMPL_MODEL:-}"      ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL=${GAAI_IMPL_MODEL}")
     [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
+    # Auto-merge policy (DEC-76 v4 §11) — values : on / staging_only / off (default off)
+    [[ -n "${GAAI_AUTO_MERGE_POLICY:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_POLICY=${GAAI_AUTO_MERGE_POLICY}")
     tmux new-session -d -s gaai-daemon "${tmux_env_args[@]}" "$daemon_cmd"
 
     # Give it a moment to start, then grab the PID
