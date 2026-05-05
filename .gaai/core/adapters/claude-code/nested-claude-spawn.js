@@ -675,9 +675,21 @@ export function resolveMode(implModelTag, envState) {
     return { mode: 'primary', tag_recorded };
   }
 
-  // Row 4 / Row 5 (DEFAULT): no tag → primary always.
-  // Earlier revision returned 'secondary' when envConfigured. Flipped to
-  // primary per the cost-reliability rationale above.
+  // Row 4 (DEFAULT, env configured): no tag + secondary env configured → secondary.
+  // Reverses the earlier DEC-93 default-to-primary stance. With the WINDOW=200K
+  // reset (commit e72c7919) giving 33K headroom + R1-R7 directive wording
+  // empirically internalized by GLM (E135S02 pre-tune showed wc -l first +
+  // offset/limit compliance), the cost-reliability balance flips back :
+  // secondary is cheap (~70% cost reduction vs primary) and reliable enough
+  // for Tier 1 stories. Universal fallback (AC3) absorbs failures by cascading
+  // to primary. Default to secondary maximizes cost savings ; stories that
+  // require primary opt-out via explicit `impl_model: primary`.
+  if (normalized === null && envConfigured) {
+    return { mode: 'secondary', tag_recorded };
+  }
+
+  // Row 5 (DEFAULT, env missing): no tag + env not configured → primary.
+  // Cannot route to secondary without GAAI_IMPL_BASE_URL / AUTH_TOKEN / MODEL.
   return { mode: 'primary', tag_recorded };
 }
 

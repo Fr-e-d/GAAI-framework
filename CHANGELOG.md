@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.25.0] - 2026-05-06
 
 ### Changed
+- feat(daemon-routing): default impl_model = secondary (reverses DEC-93)
 - fix(daemon): reset CLAUDE_CODE_AUTO_COMPACT_WINDOW from 229K to 200K
+
 
 ## [2.24.0] - 2026-05-06
 
