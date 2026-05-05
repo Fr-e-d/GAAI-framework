@@ -130,14 +130,37 @@ Example :
 "auth.ts L23-67 exports validateSession(token), HMAC-SHA256 over headers,
 no rate limiting. Now editing membership.ts to call it from hasAccess()."
 
-## R4 — Just-in-time chunked retrieval
+## R4 — Just-in-time chunked retrieval (MANDATORY — most-violated rule)
 
-- Read files in chunks ≤200 lines using offset/limit. Use Glob/Grep
-  first to locate exact line ranges. Never Read a file >300 lines
-  without offset/limit.
-- For Bash with verbose output (tests, builds, logs), always pipe through
-  head/tail to bound output : \`pnpm test 2>&1 | tail -100\`
-- Prefer file paths and grep patterns over loading full content.
+**EMPIRICAL EVIDENCE** : 4 unchunked Reads in a single session inflated
+context from post-compact 4.7K to 180K within 5 turns, triggering the 3rd
+compact and rapid_refill_breaker termination. Single most common cause of
+session death on this routing path.
+
+**HARD RULE — every \`Read\` tool call MUST include both \`offset\` AND
+\`limit\` parameters.** A Read without \`offset\`+\`limit\` is a rule
+violation that will likely terminate this session.
+
+**Required workflow for any file Read :**
+
+1. **Discover size FIRST** via Bash : \`wc -l <file>\`
+   - <100 lines : safe to Read whole (still pass offset=0 limit=N)
+   - 100-300 lines : Read offset=0 limit=200 first, then decide
+   - >300 lines : Grep for the relevant pattern FIRST, then targeted
+     Read offset=<line-of-match> limit=200 around the match
+2. **Summarize each chunk** in NOTES per R3 BEFORE next Read (no rapid
+   sequential Reads)
+3. **NEVER** issue \`Read(file_path)\` with no offset/limit on files >100
+   lines — this floods the context window and is the #1 cause of death
+
+**Bash verbose output** (tests, builds, logs) : ALWAYS pipe through
+\`head -100\` or \`tail -100\` to bound output. \`pnpm test 2>&1 | tail -100\`,
+\`grep -n PATTERN file | head -50\`. Never run a command that may produce
+>200 lines without bounding.
+
+**Prefer Grep over Read** when looking for a pattern across files. Grep
+returns line numbers + matches only — orders of magnitude smaller than
+full file content.
 
 ## R5 — Single-feature focus
 
@@ -161,7 +184,8 @@ to follow (one example turn) :
 > shared/membership-types.ts. Reading the api one first L1-100 to see
 > the validation entry point."]
 >
-> Read api/membership.ts L1-100 → finds validateMembership() at L34
+> Bash \`wc -l api/membership.ts\` → 287 lines (file >100, chunk required)
+> Read api/membership.ts with offset=0 limit=200 → finds validateMembership() at L34
 > [agent reply : "validateMembership() at L34 calls hasAccess() which is
 > imported from auth.ts. Edit notes file to record this, then read auth.ts
 > at the import line."]
