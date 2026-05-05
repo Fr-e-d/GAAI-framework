@@ -38,7 +38,7 @@ empirically at 43% fail rate on this routing path.
 These rules are derived from Anthropic's "Effective Context Engineering for
 AI Agents" guidance. They apply throughout this session.
 
-## R1 — Persistent notes file (MOST IMPORTANT)
+## R1 — Persistent notes file (MOST IMPORTANT — MANDATORY CADENCE)
 
 Maintain a working-memory file at this exact path :
 ${NOTES_PATH}
@@ -46,6 +46,23 @@ ${NOTES_PATH}
 This file is filesystem-persistent and survives autocompaction. It is your
 SINGLE SOURCE OF TRUTH for state recovery. The file is committed as a
 delivery artefact alongside execution-plan, impl-report, and qa-report.
+
+**EMPIRICAL EVIDENCE** : sessions that wrote NOTES only once across 31 tool
+calls hit 3 compacts because there was no canonical state to recover from
+post-compact, forcing re-reads that triggered the next compact.
+
+**HARD RULE — MANDATORY NOTES Write/Edit cadence** :
+- (a) IMMEDIATELY after every \`compact_boundary\` event (you will see it
+  in your context as a recovery prompt) — this is non-negotiable
+- (b) After every 5 tool_use calls (count them — this is enforced)
+- (c) Before any \`Edit\` or \`Write\` to source code
+
+**Size cap** : keep NOTES file ≤2K characters. Rewrite (full overwrite) when
+sections grow stale ; do NOT let it grow unbounded. A 10K NOTES file is
+itself a compact-trigger.
+
+A session ending with <3 NOTES Writes per compact_boundary is a rule
+violation.
 
 ### Initial creation (on your very first action)
 
@@ -57,14 +74,18 @@ below. Then proceed with the actual work.
 
 ## ⚠ RULES (re-read these every time you read this file)
 
-R1 : Append updates to this file after every meaningful tool result.
-     Never overwrite — append/update sections in place.
+R1 : MANDATORY NOTES Write after (a) every compact_boundary,
+     (b) every 5 tool_use calls, (c) before every Edit. Cap ≤2K chars.
 R2 : Never re-read a file listed under "Files read" — the summary is canonical.
-R3 : After every tool result, write 1 structured sentence summary in your reply.
-R4 : Read files in chunks ≤200 lines (offset/limit). Bash verbose → tail -100.
+R3 : HARD RULE — every assistant turn between tool_use blocks MUST contain
+     a one-sentence "<result>...<next-action>" summary. No silent tool→tool.
+R4 : MANDATORY — every Read MUST include offset AND limit. wc -l first.
+     Bash verbose → tail -100 / head -100.
 R5 : Work on ONE acceptance criterion at a time. Commit before next AC.
-R6 : If your context feels gappy (autocompact occurred), re-read THIS file +
-     the execution-plan.md FIRST. Do NOT re-execute steps already marked done.
+R6 : Post-compact recovery sequence is FIXED — Read NOTES first, then
+     execution-plan, then summarise AC state, THEN next action. No deviation.
+R7 : Bash output >50 lines MUST be bounded (tail/head/grep). Unbounded
+     pnpm test / git log / find = #2 cause of compact pressure.
 
 ## Current step
 
@@ -95,14 +116,24 @@ R6 : If your context feels gappy (autocompact occurred), re-read THIS file +
 - ...
 \`\`\`
 
-### Re-entry pattern (post-autocompact recovery)
+### R6 — Post-autocompact recovery sequence (HARD RULE — FIXED ORDER)
 
-Whenever you suspect autocompaction just occurred (sudden gap in context),
-your FIRST action MUST be:
+**EMPIRICAL EVIDENCE** : in 3/3 observed compact recoveries, the agent
+fired Read-Read-Read of source files instead of consulting NOTES first,
+which re-flooded context and triggered the next compact.
 
-1. Read ${NOTES_PATH}
-2. Read ${GAAI_WORKSPACE_PATH}/.gaai/project/contexts/artefacts/plans/${GAAI_STORY_ID}.execution-plan.md
-3. Resume from "Current step" without re-executing prior tool calls
+**Whenever a \`compact_boundary\` event appears in your context, your FIRST
+action MUST be EXACTLY this sequence — no deviation, no shortcut** :
+
+1. \`Read ${NOTES_PATH}\` with offset=0 limit=200
+2. \`Read ${GAAI_WORKSPACE_PATH}/.gaai/project/contexts/artefacts/plans/${GAAI_STORY_ID}.execution-plan.md\` with offset=0 limit=100
+3. Emit ONE assistant text turn summarising current AC state + last completed
+   step + next intended action (R3 format)
+4. ONLY THEN issue the next non-recovery tool call
+
+Any other first-action post-compact (e.g., re-Reading a source file, running
+Bash, calling Grep) is a rule violation that wastes the recovery window and
+will trigger the next compact within 3-5 turns.
 
 ### Append-only retry semantics
 
@@ -119,16 +150,23 @@ The summary IS canonical. If you doubt the summary, re-read the file ONLY
 WITH a tighter offset/limit on the specific lines you need (not the whole
 file again).
 
-## R3 — Self-summarize after every tool result
+## R3 — Self-summarize after every tool result (HARD RULE)
 
-After each Read / Bash / Glob / Grep, write ONE structured sentence in your
-reply BEFORE the next tool call. Format:
+**HARD RULE — every assistant turn between two \`tool_use\` blocks MUST
+contain ONE structured summary sentence.** No silent tool→tool sequences.
 
+Format :
 "<file/result> contains <fact>. Now <next intended action>."
 
 Example :
 "auth.ts L23-67 exports validateSession(token), HMAC-SHA256 over headers,
 no rate limiting. Now editing membership.ts to call it from hasAccess()."
+
+**Why it's enforced** : R3 summaries are what makes R1 NOTES updates possible
+(you cannot summarise NOTES without per-result thinking) AND what prevents
+R6 violations post-compact (the summary IS the recovery state). A turn
+that fires Read → Read → Read with no inter-turn assistant text is a rule
+violation that compounds R1, R2, R6 simultaneously.
 
 ## R4 — Just-in-time chunked retrieval (MANDATORY — most-violated rule)
 
@@ -167,6 +205,33 @@ full file content.
 Per Anthropic's harness guidance : work on ONE acceptance criterion at a
 time, commit before advancing. Do not parallelize ACs across multiple
 files in flight — context bloat is fatal here.
+
+## R7 — Bounded Bash output (MANDATORY)
+
+**EMPIRICAL EVIDENCE** : unbounded Bash output is the #2 cause of compact
+pressure after R4 violations. A single \`pnpm test\` without bounding can
+emit 2-5K lines of TAP output, which alone fills 30-40 % of a 200K context.
+
+**HARD RULE — every Bash command that may produce >50 lines MUST pipe
+through \`tail -100\`, \`head -100\`, or filter via \`grep\`.**
+
+Categories that REQUIRE bounding :
+
+- Test runners : \`pnpm test 2>&1 | tail -100\`, \`vitest run 2>&1 | tail -100\`
+- Builds / installs : \`pnpm install 2>&1 | tail -50\`, \`pnpm build 2>&1 | tail -50\`
+- Git history : \`git log --oneline -20\`, \`git log --format=... -10\`
+- Find / list : \`find . -name '*.ts' | head -50\`, \`ls -la dir | head -30\`
+- Greps : \`grep -rn PATTERN | head -30\` (always cap unless you know hits ≤ 10)
+- Logs : \`cat .delivery-logs/file.log | tail -100\`
+
+**Forbidden patterns** :
+- Running \`pnpm test\` without \`| tail -100\` or \`-- --reporter=basic\`
+- Running \`git log\` without \`-n N\` or count limit
+- Running \`find\` or \`ls -R\` without head/tail piping
+- Reading log files via \`cat\` instead of \`tail\`
+
+If you genuinely need full output (rare), capture to a file and \`grep\`
+specific patterns from it — never let it flow into your context.
 
 ## Few-shot example — good cycle
 
