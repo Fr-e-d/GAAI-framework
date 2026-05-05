@@ -1284,8 +1284,26 @@ ${qa_snippet}"
         local merge_check
         merge_check=$(gh pr view "$pr_url" --json autoMergeRequest --jq .autoMergeRequest 2>/dev/null || echo "null")
         if [[ "$merge_check" == "null" ]]; then
-          echo "[WARN] ${story_id} handle_commit_phase: auto-merge requested but branch protection not configured — PR remains manual [auto_merge_skipped_reason=branch_protection_missing]"
-          auto_merge_applied=false; auto_merge_skipped_reason="branch_protection_missing"
+          # Free-tier fallback (opt-in) : branch protection unavailable → use --admin
+          # GAAI_AUTO_MERGE_ADMIN_FALLBACK=true bypasses GitHub-side checks but
+          # daemon QA phase still validates ACs. Trust-arc opt-in, default off.
+          if [[ "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-false}" == "true" ]]; then
+            echo "[INFO] ${story_id} handle_commit_phase: branch protection unavailable, attempting admin fallback merge"
+            local admin_stderr admin_exit
+            admin_stderr=$(gh pr merge --admin --squash "$pr_url" 2>&1)
+            admin_exit=$?
+            if [[ "$admin_exit" -eq 0 ]]; then
+              echo "[INFO] ${story_id} handle_commit_phase: admin fallback merge succeeded"
+              auto_merge_skipped_reason="null"
+              # auto_merge_applied stays true
+            else
+              echo "[WARN] ${story_id} handle_commit_phase: admin fallback merge failed: ${admin_stderr: -200}"
+              auto_merge_applied=false; auto_merge_skipped_reason="admin_fallback_failed"
+            fi
+          else
+            echo "[WARN] ${story_id} handle_commit_phase: auto-merge requested but branch protection not configured — PR remains manual [auto_merge_skipped_reason=branch_protection_missing]"
+            auto_merge_applied=false; auto_merge_skipped_reason="branch_protection_missing"
+          fi
         fi
         break
       fi

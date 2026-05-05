@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.24.0] - 2026-05-06
+
+### Changed
+- feat(daemon): admin-fallback for auto-merge on free-tier (opt-in)
+
+
 ## [2.23.0] - 2026-05-06
 
 ### Changed
