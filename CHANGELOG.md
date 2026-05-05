@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.24.0] - 2026-05-05
+
+### Changed
+- feat(routing): DEC-93 — flip impl_model default to primary (pre-PMF cost-reliability)
+
+
 ## [2.23.0] - 2026-05-05
 
 ### Changed

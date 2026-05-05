@@ -459,7 +459,7 @@ describe('nested-claude-spawn', () => {
     writeFileSync(reportPath, '## QA\nAll good.\n');
 
     // implModelTag 'secondary' + env configured → secondary
-    // (post 2026-05-05 default flip — null tag now defaults to primary, must opt in explicitly)
+    // (post default flip — null tag now defaults to primary, must opt in explicitly)
     _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: '## QA\nAll good.\n' }));
 
     const r = await runImpl({
@@ -600,7 +600,7 @@ describe('nested-claude-spawn', () => {
     _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: streamJson }));
 
     const r = await runImpl({
-      implModelTag: 'secondary',  // explicit opt-in (default flipped to primary 2026-05-05)
+      implModelTag: 'secondary',  // explicit opt-in (default flipped to primary)
       prompt: 'test-prompt',
       reportPath,
       storyId: 'E131S08-T17',
@@ -685,7 +685,7 @@ describe('nested-claude-spawn', () => {
     let r;
     try {
       r = await runImpl({
-        implModelTag: 'secondary',  // explicit opt-in (default flipped to primary 2026-05-05)
+        implModelTag: 'secondary',  // explicit opt-in (default flipped to primary)
         prompt: 'test-prompt',
         reportPath,
         storyId: 'E131S08-T19',
@@ -788,20 +788,21 @@ describe('resolveMode (DEC-72 five-row matrix)', () => {
     assert.equal(r.tag_recorded, 'secondary');
   });
 
-  // Row 4: absent/null tag + env configured → primary (2026-05-05 amendment: pre-PMF cost-reliability decision flipped default ; was secondary per DEC-72 original)
-  test('Row 4a: absent sentinel + env configured → mode=primary, tag_recorded=absent (2026-05-05 default flip)', () => {
+  // Row 4: absent/null tag + env configured → primary
+  // (default flipped from secondary to primary in a later amendment ; secondary is now opt-in only)
+  test('Row 4a: absent sentinel + env configured → mode=primary, tag_recorded=absent (default flip)', () => {
     const r = resolveMode('absent', fullEnv);
     assert.equal(r.mode, 'primary');
     assert.equal(r.tag_recorded, 'absent');
   });
 
-  test('Row 4b: null (no backlog tag) + env configured → mode=primary, tag_recorded=absent (2026-05-05 default flip)', () => {
+  test('Row 4b: null (no backlog tag) + env configured → mode=primary, tag_recorded=absent (default flip)', () => {
     const r = resolveMode(null, fullEnv);
     assert.equal(r.mode, 'primary');
     assert.equal(r.tag_recorded, 'absent');
   });
 
-  test('Row 4c: undefined (no backlog tag) + env configured → mode=primary, tag_recorded=absent (2026-05-05 default flip)', () => {
+  test('Row 4c: undefined (no backlog tag) + env configured → mode=primary, tag_recorded=absent (default flip)', () => {
     const r = resolveMode(undefined, fullEnv);
     assert.equal(r.mode, 'primary');
     assert.equal(r.tag_recorded, 'absent');
