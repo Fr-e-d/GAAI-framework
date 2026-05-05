@@ -244,6 +244,9 @@ do_start() {
     [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
     # Auto-merge policy (DEC-76 v4 §11) — values : on / staging_only / off (default off)
     [[ -n "${GAAI_AUTO_MERGE_POLICY:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_POLICY=${GAAI_AUTO_MERGE_POLICY}")
+    # Admin fallback (free-tier opt-in) — when --auto fails branch_protection_missing,
+    # fall back to gh pr merge --admin --squash. Trust-arc opt-in, default off.
+    [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
     tmux new-session -d -s gaai-daemon "${tmux_env_args[@]}" "$daemon_cmd"
 
     # Give it a moment to start, then grab the PID
