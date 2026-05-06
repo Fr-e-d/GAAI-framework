@@ -622,10 +622,29 @@ handle_plan_phase() {
     return 1
   fi
 
+  # ── Filename-variation tolerance (LLM compliance defense) ────────────────
+  # The Plan agent prompt instructs the agent to write to $GAAI_PLAN_PATH
+  # (= ${story_id}.execution-plan.md). If the agent writes to a sibling
+  # filename instead (most commonly ${story_id}.plan.md), the file IS valid
+  # but the canonical path is missing. Auto-rename rather than fail — this
+  # converts a probabilistic LLM-compliance failure into a deterministic
+  # rename op + warning.
   if [[ ! -s "$plan_path" ]]; then
-    echo "[ERROR] ${story_id} handle_plan_phase: plan file missing or empty at $plan_path"
-    _emit_plan_routing_record "$story_id" "$trace_id" "error" "NO_ARTEFACT" "$duration_ms"
-    return 1
+    local _plan_dir _alt_plan
+    _plan_dir=$(dirname "$plan_path")
+    _alt_plan="${_plan_dir}/${story_id}.plan.md"
+    if [[ -s "$_alt_plan" ]]; then
+      echo "[WARN] ${story_id} handle_plan_phase: plan written to ${_alt_plan} instead of canonical ${plan_path} — auto-renaming"
+      mv "$_alt_plan" "$plan_path" 2>/dev/null || {
+        echo "[ERROR] ${story_id} handle_plan_phase: rename ${_alt_plan} → ${plan_path} failed"
+        _emit_plan_routing_record "$story_id" "$trace_id" "error" "NO_ARTEFACT" "$duration_ms"
+        return 1
+      }
+    else
+      echo "[ERROR] ${story_id} handle_plan_phase: plan file missing or empty at $plan_path"
+      _emit_plan_routing_record "$story_id" "$trace_id" "error" "NO_ARTEFACT" "$duration_ms"
+      return 1
+    fi
   fi
 
   if ! grep -q '^## ' "$plan_path"; then
