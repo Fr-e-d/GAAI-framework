@@ -192,11 +192,11 @@ if not modified:
     print(f'Error: could not update status for {target_id}', file=sys.stderr)
     sys.exit(1)
 
-# ── DEC-94 hard-gate guard on draft → refined transition ────
+# ── Hard-gate guard on draft → refined transition ──────────
 # Refuse to promote a story to 'refined' if it has an invalid
-# tier × impl_model combination that the Impl-phase daemon
-# (daemon-dispatch.sh:766) would reject. Catches the landmine
-# at promotion time instead of at dispatch time.
+# tier x impl_model combination that the Impl-phase daemon
+# would reject. Catches the landmine at promotion time instead
+# of at dispatch time.
 if new_status == 'refined' and target_block_start is not None:
     end = target_block_end if target_block_end is not None else len(lines)
     block = lines[target_block_start:end]
@@ -214,15 +214,16 @@ if new_status == 'refined' and target_block_start is not None:
                 pass
     if impl_model == 'secondary' and tier is not None and tier >= 2:
         print(
-            f'Error: refusing to promote {target_id} to refined — '
+            f'Error: refusing to promote {target_id} to refined - '
             f'tier {tier} + impl_model: secondary is rejected by the '
-            f'daemon Impl-phase hard gate (DEC-94, daemon-dispatch.sh:766).',
+            f'daemon Impl-phase hard gate.',
             file=sys.stderr)
         print(
             'Fix one of: (a) decompose to Tier 1 sub-stories per '
-            'PAT-STORY-SCOPE-DISCIPLINE-001, (b) remove impl_model: secondary '
-            '(DEC-94 default coercion routes to primary), or (c) set '
-            'impl_model: primary explicitly.', file=sys.stderr)
+            'the story-scope-discipline pattern, (b) remove impl_model: '
+            'secondary (the tier-aware default routes to primary), '
+            'or (c) set impl_model: primary explicitly.',
+            file=sys.stderr)
         sys.exit(2)
 
 with open(file_path, 'w') as f:
