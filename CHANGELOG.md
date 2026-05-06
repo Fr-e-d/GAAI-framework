@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.26.0] - 2026-05-06
+
+### Changed
+- feat(daemon-dispatch): hard-gate Tier 2 stories on secondary route
+- chore: bump local VERSION to v2.25.0 [sync]
+
+
 ## [2.25.0] - 2026-05-06
 
 ### Changed

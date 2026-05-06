@@ -278,6 +278,22 @@ get_impl_model_tag() {
   echo "${val:-absent}"
 }
 
+# Helper: read tier from backlog YAML (returns "" if absent — caller must default)
+get_story_tier() {
+  local id="$1"
+  awk -v id="$id" '
+    $0 == "- id: " id { found=1; next }
+    found && /^- id:/ { exit }
+    found && /^[[:space:]]+tier:/ {
+      gsub(/^[[:space:]]+tier:[[:space:]]*/, "")
+      gsub(/[[:space:]]*$/, "")
+      gsub(/^"|"$/, "")
+      print
+      exit
+    }
+  ' "$BACKLOG_FILE" 2>/dev/null || true
+}
+
 # Helper: read story title from backlog YAML (returns "" if absent)
 get_story_title() {
   local id="$1"
@@ -716,6 +732,30 @@ handle_impl_phase() {
   fi
   local _secondary_route_flag="false"
   [[ "$_impl_route" == "secondary" ]] && _secondary_route_flag="true"
+
+  # ── HARD GATE — Tier 2 stories MUST NOT run on secondary route ─────────────
+  # Per PAT-STORY-SCOPE-DISCIPLINE-001 + empirical evidence (E135S02 2026-05-06
+  # — Tier 2 secondary triggered 3 compacts in 47 events then cascaded to
+  # in-process Sonnet fallback, masking the real failure as "fb=-" in routing
+  # log). Tier 2 stories cumulative input crosses 167K threshold (= 0.83 ×
+  # GLM 200K window) within ~16 events, regardless of R1-R7 directive
+  # compliance. The fix is upstream story scope (decompose to Tier 1) or
+  # opt-out to primary explicitly. Daemon refuses the dispatch with a clear
+  # error so the operator sees the structural mismatch immediately.
+  if [[ "$_impl_route" == "secondary" ]]; then
+    local _tier
+    _tier=$(get_story_tier "$story_id")
+    if [[ "$_tier" =~ ^[0-9]+$ ]] && (( _tier >= 2 )); then
+      echo "[ERROR] ${story_id} handle_impl_phase: Tier ${_tier} stories MUST NOT run on secondary route"
+      echo "[ERROR]   Empirical : Tier 2 secondary GLM 200K context overflows in ~4-5 turns,"
+      echo "[ERROR]   triggering rapid_refill_breaker + in-process Sonnet fallback (cost double-burn)."
+      echo "[ERROR]   Fix : either (a) decompose to Tier 1 sub-stories per PAT-STORY-SCOPE-DISCIPLINE-001,"
+      echo "[ERROR]   or (b) set 'impl_model: primary' explicitly in backlog YAML."
+      _emit_routing_record "$story_id" "$trace_id" "impl" "error" "TIER2_SECONDARY_REJECTED"
+      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      return 1
+    fi
+  fi
 
   local prompt_content
   if ! prompt_content=$(
