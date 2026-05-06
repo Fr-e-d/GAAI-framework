@@ -716,6 +716,27 @@ handle_impl_phase() {
   local impl_tag
   impl_tag=$(get_impl_model_tag "$story_id")
 
+  # ── DEC-94 — Tier-aware default impl_model coercion ───────────────────────
+  # When impl_model is absent (no story-level opt-in/out), default routing
+  # is secondary (per DEC-93 reversal commit 38e6b3f5) for cost optimization.
+  # BUT Tier 2 stories on secondary structurally die at 167K compact threshold
+  # (cumulative input grows past 0.83 × GLM 200K window in ~16 events).
+  # Doctrine PAT-STORY-SCOPE-DISCIPLINE-001 + empirical evidence (E135S02
+  # 2026-05-06 cascade-to-Sonnet at event 51 after 3 compacts).
+  #
+  # Tier-aware default : tier ≥ 2 + absent tag → coerce to primary. Operators
+  # who explicitly opt-in `impl_model: secondary` for a Tier 2 story still
+  # hit the hard-gate (commit 443d5ad1) — that's intentional, forces them
+  # to either decompose to Tier 1 or switch to primary.
+  if [[ "$impl_tag" == "absent" ]]; then
+    local _tier
+    _tier=$(get_story_tier "$story_id")
+    if [[ "$_tier" =~ ^[0-9]+$ ]] && (( _tier >= 2 )); then
+      impl_tag="primary"
+      echo "[INFO] ${story_id} handle_impl_phase: tier ${_tier} + absent tag → coerced to primary (DEC-94)"
+    fi
+  fi
+
   # ── Pre-compute SECONDARY_ROUTE — parity with nested-claude-spawn.js
   #    resolveMode(). Must be done BEFORE the prompt is built. Without this,
   #    secondary-route spawns (e.g. GLM) start without the R1-R6 notes-file

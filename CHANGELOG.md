@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.27.0] - 2026-05-06
+
+### Changed
+- feat(daemon-dispatch): DEC-94 — tier-aware default impl_model = primary for Tier 2
+- chore: bump local VERSION to v2.26.0 [sync]
+
+
 ## [2.26.0] - 2026-05-06
 
 ### Changed
