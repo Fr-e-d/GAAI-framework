@@ -64,7 +64,8 @@ The `impl_model` field is **optional**. Stories without it validate exactly as b
 |---|---|
 | `impl_model` absent (story frontmatter or backlog entry) | **PASS** — default behavior |
 | `impl_model: primary` | **PASS** |
-| `impl_model: secondary` | **PASS** |
+| `impl_model: secondary` AND `tier ≤ 1` (or absent) | **PASS** |
+| `impl_model: secondary` AND `tier ≥ 2` | **BLOCKED** — see "Tier × impl_model compatibility" below (DEC-94 hard gate) |
 | Any other value (e.g. `tertiary`, `claude-opus-4-6`, `""`) | **FAIL** — `impl_model must be 'primary' or 'secondary' (got: '<value>')` |
 | `impl_model` in frontmatter AND backlog entry with different values | **FAIL** — `impl_model mismatch: frontmatter=<X>, backlog=<Y>` |
 
@@ -74,6 +75,30 @@ The `impl_model` field is **optional**. Stories without it validate exactly as b
 - If only one source is present → accept it.
 - If both are present and agree → PASS.
 - If both are present and differ → **FAIL** with mismatch message above.
+
+#### Tier × impl_model compatibility (DEC-94 hard gate)
+
+The delivery daemon (`daemon-dispatch.sh:766-779`) refuses to dispatch the Impl phase for any story with `tier ≥ 2` AND `impl_model: secondary`. Empirical evidence (E135S02 + E135S04 first attempts on 2026-05-06) showed Tier 2 cumulative input crosses the 167K compact threshold (= 0.83 × GLM 200K window) within ~16 events on the secondary route, regardless of R1-R7 directive compliance, triggering rapid_refill_breaker + masked Sonnet fallback.
+
+**This skill MUST detect the invalid combination at Discovery time and return BLOCKED**, with a remediation message naming the two acceptable fixes (per the daemon's own error message) :
+
+```
+impl_model: secondary on a tier ≥ 2 story is BLOCKED by DEC-94 hard gate.
+Daemon will refuse the Impl phase dispatch (TIER2_SECONDARY_REJECTED).
+Fix one of :
+  (a) Decompose the story into Tier 1 sub-stories per PAT-STORY-SCOPE-DISCIPLINE-001
+      (≤5 files, ≤6 ACs, ≤300 LOC per sub-story).
+  (b) Remove `impl_model: secondary` and let DEC-94 default coercion route to primary.
+  (c) Set `impl_model: primary` explicitly if the operator wants to override the default.
+```
+
+**Recommended path for routine V1 stories**: leave the field ABSENT. Per DEC-94 :
+- Tier 1 absent → default routing (secondary if env vars set, else primary)
+- Tier 2 absent → coerced to primary automatically (DEC-94 §1)
+
+**When `impl_model: secondary` is acceptable**: only on Tier 1 stories where cost optimization matters and the GLM 200K context budget is comfortably sufficient.
+
+**When `impl_model: primary` should be set explicitly**: only when overriding a Tier 1 default for a sensitivity reason (security, compliance, accuracy-critical). For Tier 2+ stories where DEC-94 already coerces, leaving the field absent is preferred (no redundant directive).
 
 Test fixtures: `.gaai/core/skills/discovery/validate-artefacts/tests/impl_model.test.yaml`
 
