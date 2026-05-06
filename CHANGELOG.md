@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(discovery+scheduler): prevent tier≥2 + impl_model:secondary landmine (DEC-94)
 - fix(daemon): heartbeat checks 3phase per-phase logs (was killing wrappers)
 - fix(daemon-monitor): detect_active_stories emits 3phase stories post Option-A
 

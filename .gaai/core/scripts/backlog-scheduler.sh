@@ -169,14 +169,18 @@ with open(file_path, 'r') as f:
 
 in_target = False
 modified = False
+target_block_start = None
+target_block_end = None
 
 for i, line in enumerate(lines):
     stripped = line.strip()
     if re.match(r'-\s+id:\s+' + re.escape(target_id) + r'\s*$', stripped):
         in_target = True
+        target_block_start = i
         continue
     if in_target:
         if re.match(r'-\s+id:\s+', stripped):
+            target_block_end = i
             break
         m = re.match(r'^(\s+status:\s+)\S+', line)
         if m:
@@ -187,6 +191,39 @@ for i, line in enumerate(lines):
 if not modified:
     print(f'Error: could not update status for {target_id}', file=sys.stderr)
     sys.exit(1)
+
+# ── DEC-94 hard-gate guard on draft → refined transition ────
+# Refuse to promote a story to 'refined' if it has an invalid
+# tier × impl_model combination that the Impl-phase daemon
+# (daemon-dispatch.sh:766) would reject. Catches the landmine
+# at promotion time instead of at dispatch time.
+if new_status == 'refined' and target_block_start is not None:
+    end = target_block_end if target_block_end is not None else len(lines)
+    block = lines[target_block_start:end]
+    impl_model = None
+    tier = None
+    for bl in block:
+        ms = re.match(r'^\s+impl_model:\s+([\w\-]+)', bl)
+        if ms:
+            impl_model = ms.group(1).strip()
+        mt = re.match(r'^\s+tier:\s+([\w\-]+)', bl)
+        if mt:
+            try:
+                tier = int(mt.group(1))
+            except ValueError:
+                pass
+    if impl_model == 'secondary' and tier is not None and tier >= 2:
+        print(
+            f'Error: refusing to promote {target_id} to refined — '
+            f'tier {tier} + impl_model: secondary is rejected by the '
+            f'daemon Impl-phase hard gate (DEC-94, daemon-dispatch.sh:766).',
+            file=sys.stderr)
+        print(
+            'Fix one of: (a) decompose to Tier 1 sub-stories per '
+            'PAT-STORY-SCOPE-DISCIPLINE-001, (b) remove impl_model: secondary '
+            '(DEC-94 default coercion routes to primary), or (c) set '
+            'impl_model: primary explicitly.', file=sys.stderr)
+        sys.exit(2)
 
 with open(file_path, 'w') as f:
     f.writelines(lines)
