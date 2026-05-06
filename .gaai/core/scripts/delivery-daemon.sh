@@ -624,15 +624,54 @@ check_heartbeats() {
     fi
 
     # Check delivery log heartbeat
+    # For 3phase pipeline (DEC-88) : per-phase logs at <worktree>/.delivery-logs/<sid>.<phase>.log
+    # Fall through to legacy <sid>.log only if no 3phase log exists.
     local logfile="$LOG_DIR/${sid}.log"
-    if [[ ! -f "$logfile" ]]; then
-      # No log yet — check lock file age instead (session just started?)
+    local _3phase_log_mtime=0
+    local _3phase_logdir
+    if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+      _3phase_logdir="${GAAI_WORKTREES_BASE}/${sid}-workspace/.delivery-logs"
+    else
+      local _repo_name
+      _repo_name=$(basename "$PROJECT_DIR" 2>/dev/null || echo "gaai-platform")
+      _3phase_logdir="$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd)/.gaai-worktrees/${_repo_name}/${sid}-workspace/.delivery-logs"
+    fi
+    if [[ -d "$_3phase_logdir" ]]; then
+      for _phlog in "$_3phase_logdir/${sid}".plan.log "$_3phase_logdir/${sid}".impl.log "$_3phase_logdir/${sid}".qa.log; do
+        if [[ -f "$_phlog" ]]; then
+          local _m
+          _m=$(file_mtime "$_phlog")
+          (( _m > _3phase_log_mtime )) && _3phase_log_mtime=$_m
+        fi
+      done
+    fi
+
+    if [[ ! -f "$logfile" ]] && (( _3phase_log_mtime == 0 )); then
+      # No log yet (legacy or 3phase) — check lock file age instead (session just started?)
       local lock_age=$(( now - $(file_mtime "$lock") ))
       if (( lock_age > HEARTBEAT_STALE )); then
         log "${RED}HEARTBEAT: $sid has no log file after ${lock_age}s — killing PID $pid${NC}"
         kill -TERM "$pid" 2>/dev/null || true
       fi
       continue
+    fi
+    # If 3phase log exists and is more recent than legacy logfile (or legacy missing),
+    # use 3phase mtime as the heartbeat reference.
+    if (( _3phase_log_mtime > 0 )); then
+      local _legacy_mtime=0
+      [[ -f "$logfile" ]] && _legacy_mtime=$(file_mtime "$logfile")
+      if (( _3phase_log_mtime >= _legacy_mtime )); then
+        # Synthetic logfile path is irrelevant — we'll use mtime directly below
+        # by overwriting log_mtime via this branch before the staleness check.
+        local log_age=$(( now - _3phase_log_mtime ))
+        if (( log_age > HEARTBEAT_STALE )); then
+          log "${RED}HEARTBEAT: $sid — no 3phase log output for $(( log_age / 60 ))min — sending SIGTERM to PID $pid${NC}"
+          kill -TERM "$pid" 2>/dev/null || true
+          sleep 5
+          kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+        fi
+        continue
+      fi
     fi
 
     local log_mtime log_age
