@@ -73,8 +73,14 @@ detect_active_stories() {
         gsub(/[[:space:]]*/, ""); print; exit
       }
     ' "$BACKLOG" 2>/dev/null || true)
-    [[ "$_dp" != "3phase" ]] && echo "$_id"
-    seen+=("$_id")
+    # Only emit + dedup-track when this is a LEGACY pipeline tmux. For 3phase
+    # tmux sessions (created by launch_3phase_in_tmux post Option A), we let
+    # the active-marker block below handle them — adding them to seen here
+    # would cause that block to skip its own stories.
+    if [[ "$_dp" != "3phase" ]]; then
+      echo "$_id"
+      seen+=("$_id")
+    fi
   done
 
   # 3phase: per-phase active markers (<story_id>.{plan|impl|qa|commit}.active)
