@@ -2245,8 +2245,9 @@ export GAAI_IMPL_MODEL_FALLBACK="${GAAI_IMPL_MODEL_FALLBACK:-}"
 export GAAI_AUTO_MERGE_POLICY="${GAAI_AUTO_MERGE_POLICY:-off}"
 export GAAI_AUTO_MERGE_ADMIN_FALLBACK="${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-false}"
 
-# Source dispatch helpers (function definitions only — no top-level work)
-source "$PROJECT_DIR/.gaai/core/scripts/daemon-dispatch.sh" 2>&1 | head -3 || true
+# Source dispatch helpers (function definitions only — no top-level work).
+# Plain source, no pipe : pipe creates subshell which loses function defs.
+source "$PROJECT_DIR/.gaai/core/scripts/daemon-dispatch.sh"
 
 # 3phase loop — same logic as in-process version, just runs in own tmux
 while true; do
