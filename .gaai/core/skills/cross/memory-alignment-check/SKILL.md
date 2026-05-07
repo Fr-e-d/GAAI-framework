@@ -84,6 +84,7 @@ Written to: `contexts/artefacts/memory-deltas/{id}.memory-delta.md`
 
 ```yaml
 ---
+artefact_type: memory-delta
 skill: memory-alignment-check
 story_id: E01S01
 generated_at: YYYY-MM-DD
