@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- fix(skill+daemon): memory-alignment-check template adds 'artefact_type: memory-delta' + E137S01b done
+
 ## [2.23.0] - 2026-05-07
 
 ### Changed
