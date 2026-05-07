@@ -1237,17 +1237,23 @@ ${qa_snippet}"
   fi
 
   # ── git push with retry-backoff (AC1-iii + AC5-a) ────────────────────────
-  local push_exit=1 push_attempt=0 push_max=3
+  # Note : stderr captured (NOT 2>/dev/null) so push errors are diagnosable.
+  # Empirical : silent stderr previously hid stalls (auth prompts, network
+  # timeouts, pre-push hook rejections) until heartbeat fired ~30+ min later
+  # with no log evidence. Capturing stderr to the wrapper's output stream
+  # routes it to the daemon's dispatch log for forensics.
+  local push_exit=1 push_attempt=0 push_max=3 push_stderr=""
   while [[ $push_attempt -lt $push_max ]]; do
     push_attempt=$(( push_attempt + 1 ))
-    if git -C "$worktree_path" push origin "$branch" 2>/dev/null; then
+    push_stderr=$(git -C "$worktree_path" push origin "$branch" 2>&1)
+    if [[ $? -eq 0 ]]; then
       push_exit=0; break
     fi
-    echo "[WARN] ${story_id} handle_commit_phase: git push attempt ${push_attempt}/${push_max} failed"
+    echo "[WARN] ${story_id} handle_commit_phase: git push attempt ${push_attempt}/${push_max} failed: ${push_stderr: -300}"
     [[ $push_attempt -lt $push_max ]] && sleep $((push_attempt * 2))
   done
   if [[ "$push_exit" -ne 0 ]]; then
-    echo "[ERROR] ${story_id} handle_commit_phase: git push failed after ${push_max} attempts [class=PUSH_FAILED]"
+    echo "[ERROR] ${story_id} handle_commit_phase: git push failed after ${push_max} attempts: ${push_stderr: -300} [class=PUSH_FAILED]"
     _emit_commit_routing_record "$story_id" "$trace_id" "error" "PUSH_FAILED" "0" "" "false"
     return 1
   fi
