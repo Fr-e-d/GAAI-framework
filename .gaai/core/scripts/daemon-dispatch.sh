@@ -892,12 +892,12 @@ handle_impl_phase() {
   #     (YAML inline-comment leak in get_impl_model_tag — fixed separately).
   #   - Operator friction : forced to chase down each rejection even when the
   #     story was correctly authored.
-  # DEC-93 doctrine ("primary always pre-PMF unless explicit secondary opt-in")
-  # + the tier-aware default coercion (Tier 2+ absent → primary) are sufficient
-  # at the authoring layer. If a Tier 2 story is explicitly opted in to
-  # secondary by an operator, that's a deliberate choice — let it run, observe
-  # the outcome, learn from data. Removing the gate trades probabilistic cost
-  # exposure for deterministic governability.
+  # The authoring-layer doctrine ("primary always pre-PMF unless explicit
+  # secondary opt-in") plus the tier-aware default coercion (Tier 2+ absent →
+  # primary) are sufficient at story-creation time. If a Tier 2 story is
+  # explicitly opted in to secondary by an operator, that's a deliberate
+  # choice — let it run, observe the outcome, learn from data. Removing the
+  # gate trades probabilistic cost exposure for deterministic governability.
 
   local prompt_content
   if ! prompt_content=$(
