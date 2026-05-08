@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.26.0] - 2026-05-08
+
+### Changed
+- feat(daemon-dispatch): remove Tier 2 secondary hard-gate + reset 2 ghost stories
+
+
 ## [2.25.0] - 2026-05-08
 
 ### Changed
