@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- chore(rules): tighten default collaboration stance — scope, blast radius, default-deny verrou
+
 ## [2.24.0] - 2026-05-08
 
 ### Changed
