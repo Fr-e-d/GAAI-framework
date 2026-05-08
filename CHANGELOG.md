@@ -7,10 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.23.0] - 2026-05-08
 
 ### Changed
+- chore(DEC-99): memory index active/archive split + 11 superseded DECs migrated
 - fix(skill+daemon): memory-alignment-check template adds 'artefact_type: memory-delta' + E137S01b done
+- fix(daemon-dispatch): capture git push stderr for diagnostic visibility
+- fix(daemon): propagate TARGET_BRANCH to 3phase wrapper subshell + reset E137S01a/S02a to QA-ready
+- fix(daemon-dispatch): tolerate plan filename variation — auto-rename .plan.md to canonical .execution-plan.md
+- fix(discovery+scheduler): prevent tier≥2 + impl_model:secondary landmine (DEC-94)
+- fix(daemon): heartbeat checks 3phase per-phase logs (was killing wrappers)
+- fix(daemon-monitor): detect_active_stories emits 3phase stories post Option-A
+- fix(daemon): wrapper must source dispatch.sh without pipe (function defs)
+- chore: bump local VERSION to v2.23.0 [sync]
+- feat(daemon): launch 3phase pipeline in dedicated tmux session
+- chore: bump local VERSION to v2.27.0 [sync]
+- feat(daemon-dispatch): DEC-94 — tier-aware default impl_model = primary for Tier 2
+- chore: bump local VERSION to v2.26.0 [sync]
+- feat(daemon-dispatch): hard-gate Tier 2 stories on secondary route
+- chore: bump local VERSION to v2.25.0 [sync]
+- feat(daemon-routing): default impl_model = secondary (reverses DEC-93)
+- fix(daemon): reset CLAUDE_CODE_AUTO_COMPACT_WINDOW from 229K to 200K
+- chore: bump local VERSION to v2.24.0 [sync]
+- feat(daemon): admin-fallback for auto-merge on free-tier (opt-in)
+- feat(daemon-start): forward GAAI_AUTO_MERGE_POLICY env to tmux session
+- fix(daemon-prompt): strengthen R1 R3 R6 wording + promote R7 Bash bounding
+- fix(daemon-prompt): strengthen R4 chunked retrieval (mandatory wording + workflow)
+- fix(skill): generate-stories step 12 mandates phase_status + delivery_pipeline fields
+- feat(routing): bump CLAUDE_CODE_AUTO_COMPACT_WINDOW 200K → 229K + opt-in E79S03a secondary
+- feat(routing): DEC-93 — flip impl_model default to primary (pre-PMF cost-reliability)
+- fix(daemon-start): forward GAAI_IMPL_* env vars to tmux session
+- fix(daemon-dispatch): drop iso-date refs from .mcp.json comments per oss-refcheck
+- feat(gap-004): workspace-scoped URL + .mcp.json single source of truth
+- fix(daemon-prompt): revert orchestrator pattern + adopt scope discipline doctrine
+- fix(daemon-prompt): tighten orchestrator triggers — empirically derived
+- feat(daemon-prompt): impl orchestrator pattern — Task delegation on long stories
+- fix(daemon-prompt): explicit skill-path resolution to prevent guess-loop
+- fix(daemon-dispatch): QA base_ref defaults to origin/$TARGET_BRANCH not main
+- fix(daemon-prompt): mandatory HANDOFF section + advance E79S01 to implemented
+- fix(daemon-prompt): route-aware impl prompt — slim path refs for secondary
+- fix(daemon-dispatch): mktemp templates without .md suffix (macOS BSD mktemp)
+- fix(daemon-spawn): pass worktree_path as cwd to all claude -p children
+- fix(daemon-dispatch): pre-compute SECONDARY_ROUTE before impl prompt build
+- fix(daemon-spawn): correct misdiagnosis + worktree-scope audit
+- fix(daemon-dispatch): pass --dangerously-skip-permissions to plan + qa spawns
+- fix(daemon-dispatch): genericize loop-breaker comment for OSS sync
+- fix(daemon-dispatch): loop breaker + no-heredoc steering across phase prompts
+- feat(daemon-monitor): show story title alongside id in active deliveries
+- fix(daemon-dispatch): rotate per-phase log before retry to avoid cumulative metrics
+- chore(daemon): carry forward delivery monitor + dispatch updates
+
 
 ## [2.23.0] - 2026-05-07
 

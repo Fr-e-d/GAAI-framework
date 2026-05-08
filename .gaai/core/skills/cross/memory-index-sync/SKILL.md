@@ -9,7 +9,7 @@ metadata:
   category: cross
   track: cross-cutting
   id: SKILL-MEMORY-INDEX-SYNC-001
-  updated_at: 2026-03-03
+  updated_at: 2026-05-08
   status: stable
 inputs:
   - contexts/memory/  (full scan — read-only except index.md)
@@ -37,12 +37,14 @@ This skill **heals drift** — it does NOT create new knowledge. It only registe
 ### Step 1 — Decision Registry Sync
 
 1. Read `index.md` Decision Registry table — extract all registered DEC IDs
-2. Glob `decisions/DEC-*.md` — list all files on disk, extract IDs from filenames
-3. For each DEC file on disk **not** in the registry:
-   - Read its YAML frontmatter: `id`, `domain`, `level`, `title`, `status`, `superseded_by`
-   - Add one row to the Decision Registry: `| DEC-{N} | {domain} | {level} | {title} |`
-   - If frontmatter `status: superseded` and `superseded_by` is set: append `⚠️ SUPERSEDED by DEC-{M}` to the description column
-4. For each registered DEC with **no file on disk**: flag `⚠️ MISSING FILE` in the sync report — do NOT delete registry rows (possible archive situation)
+2. Read `archive/superseded-decisions.archive.md` "Superseded DEC entries" table — extract all archived DEC IDs (column 1)
+3. Glob `decisions/DEC-*.md` — list all files on disk, extract IDs from filenames
+4. For each DEC file on disk:
+   - Read its YAML frontmatter : `id`, `domain`, `level`, `title`, `status`, `superseded_by`, **`archived_to`** (new check 2026-05-08)
+   - **If `archived_to:` field is set** (e.g. `archive/superseded-decisions.archive.md`) AND the DEC ID is present in the archive index: SKIP active registration. The DEC's active home is the archive. Do NOT add a row to the active Decision Registry. (T1 fix — prevents undo of archive operation by `memory-archive-superseded` skill.)
+   - **If `archived_to:` is set BUT no matching archive row**: flag `⚠️ ARCHIVE INCONSISTENCY: DEC-{N} frontmatter declares archived_to but no row in archive index` — escalate, do NOT auto-add either way
+   - **If `archived_to:` is NOT set AND DEC is not in active registry**: add a row to the active Decision Registry as before : `| DEC-{N} | {domain} | {level} | {title} |`. If frontmatter `status: superseded` and `superseded_by` is set: append `⚠️ SUPERSEDED by DEC-{M}` to the description column AND flag in report : "consider invoking `memory-archive-superseded` for DEC-{N}"
+5. For each registered DEC with **no file on disk**: flag `⚠️ MISSING FILE` in the sync report — do NOT delete registry rows (possible archive situation)
 
 ### Step 2 — File Count Update
 
@@ -66,6 +68,12 @@ Re-count all `DEC-*.md` files on disk. Update the Shared Categories table file c
 
 Update `index.md` frontmatter `updated_at` field:
 - Format: `{YYYY-MM-DD} ({N} entries synced, {M} anomalies flagged)` — or `(no drift — confirmed clean)` if nothing changed
+
+### Step 6 — Archive Index Symmetry Check (added 2026-05-08)
+
+1. For every DEC ID in `archive/superseded-decisions.archive.md` "Superseded DEC entries" table : verify there is exactly one matching pointer row in `index.md` § "Superseded (archived)" pointer table. Dangling archive row (no active pointer) = anomaly.
+2. For every pointer row in `index.md` § "Superseded (archived)" : verify there is exactly one matching archive row. Orphan pointer (no archive backing) = anomaly.
+3. Hand off to `memory-index-lint` for full discoverability invariant validation. If `memory-index-lint` is invokable (shell available), run `python3 scripts/validate-memory-index.py` and require `CLEAN` exit before declaring `DRIFT_HEALED` ; otherwise perform the L3 prompt-based check from `memory-index-lint/SKILL.md`.
 
 ---
 

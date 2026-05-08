@@ -107,6 +107,8 @@ Ask: "Does this describe *how to do something*, or *whether something is allowed
 - "How to generate a Story from an Epic" → skill (`generate-stories`)
 - "Stories must have acceptance criteria before entering the backlog" → rule (`orchestration.rules.md`)
 - "How to compact memory when it exceeds a size threshold" → skill (`memory-compact`)
+- "How to archive a superseded DEC out of the active index" → skill (`memory-archive-superseded`)
+- "How to validate memory index discoverability invariants" → skill (`memory-index-lint`)
 - "Memory must never be auto-loaded by a skill" → rule (`orchestration.rules.md`)
 
 If your answer is "how to do something" → skill.
