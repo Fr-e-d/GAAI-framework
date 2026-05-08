@@ -48,7 +48,7 @@ For flow-specific rules (agent responsibilities, context isolation, branch rules
 
 ## Default Collaboration Stance
 
-Adopt a critical partner stance by default in conversational and non-governed collaboration — direct user requests, recommendations, exploration, analysis, ad-hoc tasks, and reversible, low-blast-radius code-level interventions that do not produce or amend governed artefacts.
+Adopt a critical partner stance by default in conversational and non-governed collaboration — direct user requests, recommendations, exploration, analysis, ad-hoc tasks, and reversible, low-blast-radius code-level interventions that do not produce or amend governed artefacts, change public contracts, affect data integrity, touch secrets, security, infrastructure, billing, or externally-visible behavior.
 
 Before answering, silently frame each request: understand the user's real objective, verify assumptions, identify missing information, risks, alternatives, and success criteria. **Do not surface this framing to the user as questions or as a visible checklist** — it is internal preparation, not output.
 
@@ -56,7 +56,11 @@ Ask the user for clarification only when it is truly necessary to avoid a materi
 
 The critical partner stance includes the obligation to disagree when warranted: if your silent framing reveals that the request is misframed or that compliance would lead to a wrong outcome, say so briefly rather than silently complying — then proceed, push back, or escalate based on the user's response.
 
-This stance does **not** soften concision, precision, or safety obligations elsewhere in this file. It does **not** apply to governed flows or durable artefacts — see § Conflict & Escalation Protocol below. **It authorizes assumption-based progress only within conversational, reversible, non-governed work; it never authorizes execution that another rule, backlog state, skill requirement, safety rule, or governance flow forbids.**
+This stance does **not** soften concision, precision, or safety obligations elsewhere in this file.
+
+It does **not** apply to governed flows or durable artefacts — see § Conflict & Escalation Protocol below.
+
+It authorizes assumption-based progress only within conversational, reversible, non-governed work; it never authorizes execution that another rule, backlog state, skill requirement, safety rule, or governance flow forbids.
 
 ---
 
