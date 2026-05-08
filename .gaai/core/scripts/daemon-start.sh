@@ -61,7 +61,7 @@ PID_FILE="$LOCK_DIR/.daemon.pid"
 LOG_FILE="$GAAI_DIR/project/contexts/backlog/.delivery-daemon.log"
 LOG_DIR="$GAAI_DIR/project/contexts/backlog/.delivery-logs"
 
-# OSS-3 : drain timeout for /gaai:stop graceful shutdown. Wrappers may be in
+# OSS-3 : drain timeout for daemon-start.sh --stop graceful shutdown. Wrappers may be in
 # the middle of a long phase (impl up to 90 min per OSS-7 timeout) ; the drain
 # is a best-effort grace period after which we escalate to tmux kill-session.
 STOP_DRAIN_TIMEOUT="${GAAI_STOP_DRAIN_TIMEOUT:-600}"
@@ -82,6 +82,10 @@ ACTION="start"
 NO_DRAIN=false
 PASSTHROUGH_ARGS=()
 
+_print_help() {
+  sed -n '/^# Description:/,/^# ═══.*═══$/{ /^# ═══.*═══$/d; p; }' "$0"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --start)    ACTION="start";   shift ;;
@@ -90,6 +94,7 @@ while [[ $# -gt 0 ]]; do
     --monitor)  ACTION="status";  shift ;;
     --restart)  ACTION="restart"; shift ;;
     --no-drain) NO_DRAIN=true;    shift ;;
+    --help|-h)  _print_help; exit 0 ;;
     *)          PASSTHROUGH_ARGS+=("$1"); shift ;;
   esac
 done

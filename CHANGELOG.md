@@ -7,14 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.24.0] - 2026-05-08
 
 ### Changed
+- feat(daemon): OSS-3 graceful drain on stop + docstring naming fix
 - chore(daemon): strip private story-id ref from heartbeat comment
 - fix(daemon-dispatch): tighten OSS-7 watchdog poll granularity
 - fix(daemon): harden 3-phase pipeline — livelock, heartbeat, status, timeouts
 - chore(memory): teach drift hook + sync skill about sibling index-*.md registries
 - chore(skills): strip narrative dates from .gaai/core/ for OSS sync compatibility
+
 
 ## [2.23.0] - 2026-05-08
 
