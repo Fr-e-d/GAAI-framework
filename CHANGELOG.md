@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.24.0] - 2026-05-08
 
 ### Changed
+- chore(rules): add default collaboration stance + scope ambiguity escalation
+- feat(daemon): OSS-3 graceful drain on stop + docstring naming fix
+
+
+## [2.24.0] - 2026-05-08
+
+### Changed
 - feat(daemon): OSS-3 graceful drain on stop + docstring naming fix
 - chore(daemon): strip private story-id ref from heartbeat comment
 - fix(daemon-dispatch): tighten OSS-7 watchdog poll granularity
