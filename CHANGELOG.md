@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(daemon-dispatch): YAML inline-comment stripping in 5 awk extractors
 - fix(daemon-dispatch): YAML inline-comment stripping in 5 extractors + reset E145S01
 - chore(rules): align scope enumeration + split closing clauses for readability
 - chore(rules): tighten default collaboration stance — scope, blast radius, default-deny verrou

@@ -328,11 +328,13 @@ else
   fail "T8: dispatch on done state returned non-zero"
 fi
 
-# ── T8b: YAML inline-comment stripping in extractors (regression — 2026-05-08)
+# ── T8b: YAML inline-comment stripping in extractors (regression guard) ──
 # Bug : awk extractors (get_phase_status, get_delivery_pipeline, get_impl_model_tag,
-# get_story_tier, get_story_title) did not strip inline `# ...` comments.
-# Symptom : E145S01 plan-phase OK but impl-phase TIER2_SECONDARY_REJECTED because
-# `impl_model: primary  # DEC-93 + ...` was read as the full string with comment.
+# get_story_tier, get_story_title) stripped leading whitespace + outer quotes
+# but did not strip inline `# comment` text. Symptom : a backlog entry like
+# `impl_model: primary  # some comment` was read as the full string with the
+# comment included, causing string-equality checks against `primary` to fail
+# and the daemon hard-gate to fall back to secondary route on Tier 2 stories.
 # Fix : added gsub `[[:space:]]+#.*$` to all 5 extractors. This test prevents
 # regression by exercising each extractor against a fixture with inline comments.
 echo "T8b: YAML inline-comment stripping in extractors (regression guard)"
@@ -346,7 +348,7 @@ items:
   phase_status: not_started   # phase_status with comment
   delivery_pipeline: 3phase  # pipeline with comment
   tier: 2  # tier with comment
-  impl_model: primary  # DEC-93 + daemon hard gate Tier 2 protection
+  impl_model: primary  # impl_model with inline comment
 EOF
 T8B_OLD_BACKLOG="$BACKLOG_FILE"
 export BACKLOG_FILE="$T8b_FIXTURE"
