@@ -10,6 +10,33 @@
 #   GAAI_STUB_DELAY_S — seconds to sleep between stubs (default: 0)
 #   ROUTING_LOG_PATH  — test-only override for --log-path (default: empty, uses logger default)
 
+# ── Per-phase wall-clock timeouts (OSS-7) ────────────────────────────────
+# Bound the lifetime of each phase to detect hangs that loop-breaker (which
+# only fires on identical consecutive errors) cannot catch — silent network
+# stalls, MCP server deadlocks, agent that produces output but never
+# converges. Override via env when needed (longer impl on giant stories).
+GAAI_TIMEOUT_PLAN_SEC="${GAAI_TIMEOUT_PLAN_SEC:-1800}"     # 30 min
+GAAI_TIMEOUT_IMPL_SEC="${GAAI_TIMEOUT_IMPL_SEC:-5400}"     # 90 min
+GAAI_TIMEOUT_QA_SEC="${GAAI_TIMEOUT_QA_SEC:-1800}"         # 30 min
+GAAI_TIMEOUT_COMMIT_SEC="${GAAI_TIMEOUT_COMMIT_SEC:-600}"  # 10 min (commit-phase
+                                                            # is bash-only; this
+                                                            # is informational)
+# Distinct exit code for wall-clock timeout (vs 124 loop-breaker).
+GAAI_TIMEOUT_RC=137
+
+# Resolve the available timeout binary. Linux ships `timeout`, macOS coreutils
+# ships `gtimeout`. Empty string when neither is present — callers must then
+# fall back to the in-process watchdog.
+_resolve_timeout_cmd() {
+  if command -v timeout >/dev/null 2>&1; then
+    echo "timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    echo "gtimeout"
+  else
+    echo ""
+  fi
+}
+
 # ── Active-spawn marker directory (AC1) ──────────────────────────────────
 # LOCK_DIR is set by delivery-daemon.sh before sourcing this library.
 # Provide a fallback so this library is usable in tests without the full daemon env.
@@ -139,6 +166,17 @@ _run_claude_with_loop_breaker() {
   local threshold="${GAAI_LOOP_BREAKER_THRESHOLD:-3}"
   local disabled="${GAAI_LOOP_BREAKER_DISABLE:-0}"
 
+  # Resolve per-phase wall-clock timeout. Caller may also pass GAAI_PHASE_TIMEOUT_SEC
+  # to override; otherwise we look up the phase-specific default.
+  local timeout_sec="${GAAI_PHASE_TIMEOUT_SEC:-}"
+  if [[ -z "$timeout_sec" ]]; then
+    case "$phase" in
+      plan) timeout_sec="$GAAI_TIMEOUT_PLAN_SEC" ;;
+      qa)   timeout_sec="$GAAI_TIMEOUT_QA_SEC" ;;
+      *)    timeout_sec="$GAAI_TIMEOUT_PLAN_SEC" ;;
+    esac
+  fi
+
   # Worktree must exist — claude is launched with cwd=$worktree_path so all
   # cwd-relative writes by the agent land in the per-story worktree branch.
   # Without this, agents writing relative paths pollute the parent repo.
@@ -152,9 +190,24 @@ _run_claude_with_loop_breaker() {
   # $! reports claude's PID and signals propagate correctly.
   if [[ "$disabled" == "1" ]]; then
     set -o pipefail
-    ( cd "$worktree_path" && exec claude -p "$@" < "$prompt_file" 2>&1 ) | tee -a "$log_path"
+    local _to_cmd
+    _to_cmd=$(_resolve_timeout_cmd)
+    if [[ -n "$_to_cmd" ]]; then
+      ( cd "$worktree_path" && exec "$_to_cmd" --kill-after=10s "${timeout_sec}s" claude -p "$@" < "$prompt_file" 2>&1 ) | tee -a "$log_path"
+    else
+      ( cd "$worktree_path" && exec claude -p "$@" < "$prompt_file" 2>&1 ) | tee -a "$log_path"
+    fi
     local rc=${PIPESTATUS[0]}
     set +o pipefail
+    # `timeout` exits 124 on SIGTERM, 137 on SIGKILL — translate both to our
+    # canonical wall-clock RC. 124 collides with the loop-breaker code, but
+    # the breaker path emits a synthetic JSONL marker and only triggers via
+    # the streaming reader (not bypass mode), so a 124 here can only mean
+    # `timeout` fired.
+    if [[ "$rc" == "124" || "$rc" == "137" ]]; then
+      echo "[TIMEOUT] ${story_id} phase=${phase}: claude wall-clock timeout after ${timeout_sec}s (bypass mode)"
+      return "$GAAI_TIMEOUT_RC"
+    fi
     return "$rc"
   fi
 
@@ -175,6 +228,30 @@ _run_claude_with_loop_breaker() {
   # so $! is claude's PID and kill -TERM propagates correctly.
   ( cd "$worktree_path" && exec claude -p "$@" < "$prompt_file" > "$fifo" 2>&1 ) &
   local claude_pid=$!
+
+  # Wall-clock watchdog: send SIGTERM after $timeout_sec, then SIGKILL after
+  # an additional 10s grace. Decoupled from the loop-breaker — handles silent
+  # hangs that emit no errors. The watchdog auto-exits via `kill -0` check
+  # once claude has ended cleanly, so we don't need to track it for cleanup.
+  local watchdog_pid=""
+  if [[ -n "$timeout_sec" && "$timeout_sec" -gt 0 ]] 2>/dev/null; then
+    (
+      local _waited=0
+      while (( _waited < timeout_sec )); do
+        sleep 30
+        kill -0 "$claude_pid" 2>/dev/null || exit 0
+        _waited=$((_waited + 30))
+      done
+      # Timeout reached — terminate claude.
+      printf '{"type":"system","subtype":"phase_timeout","story_id":"%s","phase":"%s","timeout_sec":%d,"timestamp":"%s"}\n' \
+        "$story_id" "$phase" "$timeout_sec" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$log_path" 2>/dev/null || true
+      kill -TERM "$claude_pid" 2>/dev/null || true
+      sleep 10
+      kill -0 "$claude_pid" 2>/dev/null && kill -KILL "$claude_pid" 2>/dev/null || true
+    ) &
+    watchdog_pid=$!
+    disown "$watchdog_pid" 2>/dev/null || true
+  fi
 
   # Stream reader: tee each line to log + watch for repeated tool errors
   local last_err="" err_count=0 breaker_triggered=0
@@ -220,10 +297,20 @@ _run_claude_with_loop_breaker() {
   wait "$claude_pid" 2>/dev/null
   local claude_exit=$?
 
+  # Cleanup: stop the watchdog (no-op if it already exited).
+  if [[ -n "$watchdog_pid" ]]; then
+    kill "$watchdog_pid" 2>/dev/null || true
+  fi
+
   rm -f "$fifo"
 
   if [[ "$breaker_triggered" == "1" ]]; then
     return 124
+  fi
+  # Translate SIGTERM/SIGKILL exit codes from the watchdog to our canonical
+  # wall-clock timeout RC. claude exits 143 on SIGTERM, 137 on SIGKILL.
+  if [[ "$claude_exit" == "143" || "$claude_exit" == "137" ]]; then
+    return "$GAAI_TIMEOUT_RC"
   fi
   return "$claude_exit"
 }
@@ -825,22 +912,40 @@ handle_impl_phase() {
   local spawn_script
   spawn_script="${PROJECT_DIR}/.gaai/core/adapters/claude-code/nested-claude-spawn.js"
 
-  local spawn_output
+  # Wall-clock timeout (OSS-7): bound impl phase to GAAI_TIMEOUT_IMPL_SEC so a
+  # silent hang in the node spawner doesn't pin a wrapper indefinitely. Use the
+  # `timeout` binary when available; otherwise rely on internal backoff.
+  local _impl_to_cmd
+  _impl_to_cmd=$(_resolve_timeout_cmd)
+  local _impl_to_prefix=()
+  if [[ -n "$_impl_to_cmd" ]]; then
+    _impl_to_prefix=("$_impl_to_cmd" "--kill-after=15s" "${GAAI_TIMEOUT_IMPL_SEC}s")
+  fi
+
+  local spawn_output spawn_rc
   spawn_output=$(
     GAAI_STORY_ID="$story_id" \
     GAAI_WORKTREE_PATH="$worktree_path" \
     GAAI_EPIC_PATH="${epic_path:-}" \
     GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-}" \
     GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
-      node "$spawn_script" \
+      ${_impl_to_prefix[@]+"${_impl_to_prefix[@]}"} node "$spawn_script" \
         --story-id       "$story_id" \
         --report-path    "$impl_report_path" \
         --prompt-file    "$prompt_file" \
         --impl-model-tag "$impl_tag" \
         --log-file       "$log_path" \
         --worktree-path  "$worktree_path" \
-        2>>"$log_path" || true
+        2>>"$log_path"
   )
+  spawn_rc=$?
+  if [[ "$spawn_rc" == "124" || "$spawn_rc" == "137" ]]; then
+    echo "[TIMEOUT] ${story_id} handle_impl_phase: nested-claude-spawn wall-clock timeout after ${GAAI_TIMEOUT_IMPL_SEC}s"
+    printf '{"type":"system","subtype":"phase_timeout","story_id":"%s","phase":"impl","timeout_sec":%d,"timestamp":"%s"}\n' \
+      "$story_id" "$GAAI_TIMEOUT_IMPL_SEC" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$log_path" 2>/dev/null || true
+    rm -f "$prompt_file"
+    return 1
+  fi
 
   rm -f "$prompt_file"
 
@@ -1417,6 +1522,27 @@ ${qa_snippet}"
     echo "[ERROR] ${story_id} handle_commit_phase: --set-phase-status done failed [class=SCHEDULER_FAILURE]"
     _emit_commit_routing_record "$story_id" "$trace_id" "error" "SCHEDULER_FAILURE" "0" "$pr_url" "$auto_merge_applied"
     return 1
+  fi
+
+  # ── Honest top-level status: phase_status:done MUST coincide with status:done.
+  # Without this, the story stays status:in_progress in the YAML even though the
+  # 3-phase pipeline is terminal — daemon-staleness then misclassifies it as a
+  # stuck delivery on the next cycle. Soft-fail (|| true) because the
+  # phase_status flip already constitutes the audit gate; if status flip fails,
+  # the post-delivery hook can still reconcile.
+  if ! "$SCHEDULER" --set-status "$story_id" done "$BACKLOG_FILE" 2>/dev/null; then
+    echo "[WARN] ${story_id} handle_commit_phase: --set-status done failed (phase_status already done; reconcile via post-delivery hook)"
+  fi
+
+  # ── Worktree cleanup post-merge: only when PR actually merged. ────────────
+  # Pending-review PRs keep the worktree alive so manual review/edits can land.
+  if [[ "$auto_merge_applied" == "true" && -d "$worktree_path" ]]; then
+    if git -C "$PROJECT_DIR" worktree remove --force "$worktree_path" 2>/dev/null; then
+      echo "[INFO] ${story_id} handle_commit_phase: worktree removed post-merge ($worktree_path)"
+    else
+      echo "[WARN] ${story_id} handle_commit_phase: worktree remove failed (will be pruned next cycle)"
+    fi
+    git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
   fi
 
   # ── Duration end ─────────────────────────────────────────────────────────

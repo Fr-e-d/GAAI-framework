@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- chore(memory): teach drift hook + sync skill about sibling index-*.md registries
 - chore(skills): strip narrative dates from .gaai/core/ for OSS sync compatibility
 
 ## [2.23.0] - 2026-05-08
