@@ -233,14 +233,19 @@ _run_claude_with_loop_breaker() {
   # an additional 10s grace. Decoupled from the loop-breaker — handles silent
   # hangs that emit no errors. The watchdog auto-exits via `kill -0` check
   # once claude has ended cleanly, so we don't need to track it for cleanup.
+  # Polling granularity = min(timeout/3, 5s) — keeps overshoot bounded for
+  # short timeouts (tests, debug overrides) while staying cheap for long ones.
   local watchdog_pid=""
   if [[ -n "$timeout_sec" && "$timeout_sec" -gt 0 ]] 2>/dev/null; then
+    local _poll_step=$(( timeout_sec / 3 ))
+    (( _poll_step > 5 )) && _poll_step=5
+    (( _poll_step < 1 )) && _poll_step=1
     (
       local _waited=0
       while (( _waited < timeout_sec )); do
-        sleep 30
+        sleep "$_poll_step"
         kill -0 "$claude_pid" 2>/dev/null || exit 0
-        _waited=$((_waited + 30))
+        _waited=$((_waited + _poll_step))
       done
       # Timeout reached — terminate claude.
       printf '{"type":"system","subtype":"phase_timeout","story_id":"%s","phase":"%s","timeout_sec":%d,"timestamp":"%s"}\n' \
