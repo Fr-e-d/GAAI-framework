@@ -600,7 +600,7 @@ clean_stale_locks() {
 # background loop that touches $LOCK_DIR/<sid>.heartbeat every 30s for the
 # entire wrapper lifetime. This covers commit-phase (pure bash, writes no
 # claude log) which previously triggered false-positive kills during long
-# `gh pr merge` retry waits (see E137S01a/S02a stalls).
+# `gh pr merge` retry waits.
 #
 # Fallback: if no .heartbeat file exists yet (wrapper still bootstrapping),
 # fall back to lock file mtime within the grace period; outside that window,
@@ -829,6 +829,304 @@ RSTEOF
       rm -f "$reset_script"
     fi
   done <<< "$in_progress_ids"
+}
+
+# ── OSS-5 : Crash-recovery scan ──────────────────────────────────────────
+# Runs ONCE at daemon start, BEFORE the main loop. For each story
+# `status: in_progress` in the backlog with NO live wrapper lock,
+# classifies the story state via (.interrupted touch, phase_status, worktree
+# state, artefact filesystem) and decides : skip / re-launch (resume) /
+# revert refined / reconcile-status.
+#
+# Rationale : the historical check_stale_in_progress brute-force-marks
+# orphan in_progress stories as `failed` after STALENESS_THRESHOLD even
+# when the work was intact (commits pushed, PR created, artefacts
+# produced). This scan inspects what was actually accomplished and
+# resumes from the latest valid checkpoint instead.
+#
+# Coexistence : check_stale_in_progress stays in the main loop as a
+# fallback for during-life orphans not caught at startup. V1.5 may
+# deprecate it once OSS-5 is proven.
+#
+# Decision table :
+#   .interrupted touch present
+#     → revert status:refined, KEEP phase_status, no retry++, rm touch
+#       Reason : /gaai:stop graceful drain (OSS-3) ; clean resume next start.
+#   live wrapper (lock + PID alive)
+#     → skip — wrapper survived daemon restart via independent tmux
+#   phase_status terminal (done|failed|escalated|qa_escalated)
+#     → reconcile YAML status if mismatched, no relaunch
+#   phase_status in {qa_passed, implemented, qa_failed}
+#     → re-launch wrapper to resume from current phase
+#   phase_status == planned + execution-plan.md present
+#     → re-launch (resumes impl)
+#   phase_status == planned + no execution-plan
+#     → revert refined + reset phase_status:not_started + retry++
+#   phase_status == not_started or empty
+#     → revert refined + retry++
+crash_recovery_scan() {
+  local backlog_content
+  backlog_content=$(fetch_and_read_backlog)
+  [[ -z "$backlog_content" ]] && return 0
+
+  # Extract (id|phase_status) pairs for status:in_progress stories in one pass.
+  local in_progress_pairs
+  in_progress_pairs=$(echo "$backlog_content" | python3 -c '
+import sys
+content = sys.stdin.read()
+cur_id = None
+cur_status = None
+cur_phase = None
+def emit():
+    if cur_id and cur_status == "in_progress":
+        print(cur_id + "|" + (cur_phase or ""))
+for line in content.splitlines():
+    stripped = line.strip()
+    if stripped.startswith("- id:"):
+        emit()
+        cur_id = stripped.split(":", 1)[1].strip()
+        cur_status = None
+        cur_phase = None
+    elif cur_id and stripped.startswith("status:"):
+        cur_status = stripped.split(":", 1)[1].strip()
+    elif cur_id and stripped.startswith("phase_status:"):
+        cur_phase = stripped.split(":", 1)[1].strip()
+emit()
+' 2>/dev/null) || return 0
+
+  [[ -z "$in_progress_pairs" ]] && {
+    log "${CYAN}[RECOVERY] No in_progress stories to evaluate${NC}"
+    return 0
+  }
+
+  log "${CYAN}[RECOVERY] Crash-recovery scan : evaluating in_progress stories${NC}"
+
+  local resumed=0 reverted=0 reconciled=0 skipped=0 interrupted=0
+
+  while IFS= read -r pair; do
+    [[ -z "$pair" ]] && continue
+    local sid ps
+    sid="${pair%%|*}"
+    ps="${pair##*|}"
+
+    # ── Path 1 : .interrupted touch (graceful /gaai:stop, OSS-3) ─────────
+    local interrupted_marker="$LOCK_DIR/${sid}.interrupted"
+    if [[ -f "$interrupted_marker" ]]; then
+      log "${YELLOW}[RECOVERY] $sid : .interrupted present — graceful stop, reverting refined (keep phase_status=${ps:-empty})${NC}"
+      if $DRY_RUN; then
+        log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined + rm .interrupted${NC}"
+        ((interrupted++))
+        continue
+      fi
+      if _recovery_revert_refined "$sid" "false" "interrupted"; then
+        rm -f "$interrupted_marker"
+        ((interrupted++))
+      else
+        log "${RED}[RECOVERY] $sid : revert refined failed — manual intervention${NC}"
+      fi
+      continue
+    fi
+
+    # ── Path 2 : live wrapper survived restart → skip ─────────────────────
+    if is_locked "$sid"; then
+      log "${BLUE}[RECOVERY] $sid : live wrapper detected — skipping (will continue independently)${NC}"
+      ((skipped++))
+      continue
+    fi
+
+    # ── Resolve worktree path (mirror handle_*_phase formula) ─────────────
+    local worktree_path
+    worktree_path=$(_recovery_resolve_worktree "$sid")
+
+    # ── Classify by phase_status ──────────────────────────────────────────
+    case "$ps" in
+      done)
+        log "${GREEN}[RECOVERY] $sid : phase_status=done — reconciling YAML status${NC}"
+        if $DRY_RUN; then
+          log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=done${NC}"
+          ((reconciled++))
+          continue
+        fi
+        if _recovery_set_status "$sid" "done" "reconcile-done"; then
+          ((reconciled++))
+        fi
+        ;;
+      failed)
+        log "${YELLOW}[RECOVERY] $sid : phase_status=failed — reconciling YAML status${NC}"
+        if $DRY_RUN; then
+          log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=failed${NC}"
+          ((reconciled++))
+          continue
+        fi
+        if _recovery_set_status "$sid" "failed" "reconcile-failed"; then
+          ((reconciled++))
+        fi
+        ;;
+      escalated|qa_escalated)
+        log "${YELLOW}[RECOVERY] $sid : phase_status=$ps — reconciling YAML status escalated${NC}"
+        if $DRY_RUN; then
+          log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=escalated${NC}"
+          ((reconciled++))
+          continue
+        fi
+        if _recovery_set_status "$sid" "escalated" "reconcile-escalated"; then
+          ((reconciled++))
+        fi
+        ;;
+      qa_passed|implemented|qa_failed)
+        log "${GREEN}[RECOVERY] $sid : phase_status=$ps — re-launching wrapper to resume${NC}"
+        if $DRY_RUN; then
+          log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
+          ((resumed++))
+          continue
+        fi
+        if _recovery_relaunch "$sid"; then
+          ((resumed++))
+        fi
+        ;;
+      planned)
+        local plan_path="${worktree_path}/.gaai/project/contexts/artefacts/plans/${sid}.execution-plan.md"
+        if [[ -s "$plan_path" ]]; then
+          log "${GREEN}[RECOVERY] $sid : phase_status=planned + execution-plan.md present — re-launching${NC}"
+          if $DRY_RUN; then
+            log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
+            ((resumed++))
+            continue
+          fi
+          if _recovery_relaunch "$sid"; then
+            ((resumed++))
+          fi
+        else
+          log "${YELLOW}[RECOVERY] $sid : phase_status=planned but no execution-plan.md — revert refined + reset phase_status${NC}"
+          if $DRY_RUN; then
+            log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined + reset phase_status${NC}"
+            ((reverted++))
+            continue
+          fi
+          if _recovery_revert_refined "$sid" "true" "missing-plan"; then
+            increment_retry "$sid"
+            ((reverted++))
+          fi
+        fi
+        ;;
+      not_started|"")
+        log "${YELLOW}[RECOVERY] $sid : phase_status=${ps:-empty} — revert refined + retry++${NC}"
+        if $DRY_RUN; then
+          log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined${NC}"
+          ((reverted++))
+          continue
+        fi
+        if _recovery_revert_refined "$sid" "false" "no-progress"; then
+          increment_retry "$sid"
+          ((reverted++))
+        fi
+        ;;
+      *)
+        log "${RED}[RECOVERY] $sid : unknown phase_status='$ps' — skipping (manual review)${NC}"
+        ((skipped++))
+        ;;
+    esac
+  done <<< "$in_progress_pairs"
+
+  log "${CYAN}[RECOVERY] Scan done : resumed=$resumed reverted=$reverted reconciled=$reconciled interrupted=$interrupted skipped=$skipped${NC}"
+}
+
+# ── OSS-5 helper : worktree path resolution ──────────────────────────────
+# Mirror of the formula in handle_plan_phase / handle_impl_phase / handle_qa_phase.
+# Kept duplicated here so crash_recovery_scan does not depend on dispatch
+# library being sourced (forward-compat : recovery may move to its own helper
+# script V1.5).
+_recovery_resolve_worktree() {
+  local sid="$1"
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    echo "${GAAI_WORKTREES_BASE}/${sid}-workspace"
+  else
+    local repo_name
+    repo_name=$(basename "$PROJECT_DIR")
+    echo "$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
+  fi
+}
+
+# ── OSS-5 helper : revert YAML status to refined (cross-device pushed) ────
+# Args: sid, reset_phase_status (true|false), reason (log marker).
+# Pulls staging, sets status, optionally resets phase_status, commits with
+# [daemon-recovery:reason] tag, pushes. Mirrors check_stale_in_progress
+# pattern (line ~800) — V1 accepts the duplication ; V1.5 may factor.
+_recovery_revert_refined() {
+  local sid="$1" reset_phase="$2" reason="$3"
+  local script
+  script=$(mktemp)
+  cat > "$script" <<RSTEOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$PROJECT_DIR"
+if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
+  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    git stash push -m "daemon-autosave-\$(date +%s)" --quiet 2>/dev/null || true
+  fi
+  git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
+  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
+fi
+"$SCHEDULER" --set-status "$sid" refined "$BACKLOG"
+RSTEOF
+  if [[ "$reset_phase" == "true" ]]; then
+    cat >> "$script" <<RSTEOF
+"$SCHEDULER" --set-phase-status "$sid" not_started "$BACKLOG"
+RSTEOF
+  fi
+  cat >> "$script" <<RSTEOF
+git add "$BACKLOG_REL"
+git diff --cached --quiet || git commit -m "chore($sid): refined [daemon-recovery:$reason]" --quiet
+git push origin "$TARGET_BRANCH" --quiet 2>&1
+RSTEOF
+  chmod +x "$script"
+  local rc=0
+  with_staging_lock bash "$script" 2>/dev/null || rc=$?
+  rm -f "$script"
+  return $rc
+}
+
+# ── OSS-5 helper : reconcile YAML status to a target value ────────────────
+# Used when phase_status is terminal (done|failed|escalated) but YAML status
+# still reads in_progress. Idempotent : commits only if there's a real diff.
+_recovery_set_status() {
+  local sid="$1" new_status="$2" reason="$3"
+  local script
+  script=$(mktemp)
+  cat > "$script" <<RSTEOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$PROJECT_DIR"
+if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
+  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    git stash push -m "daemon-autosave-\$(date +%s)" --quiet 2>/dev/null || true
+  fi
+  git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
+  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
+fi
+"$SCHEDULER" --set-status "$sid" "$new_status" "$BACKLOG"
+git add "$BACKLOG_REL"
+git diff --cached --quiet || git commit -m "chore($sid): $new_status [daemon-recovery:$reason]" --quiet
+git push origin "$TARGET_BRANCH" --quiet 2>&1 || true
+RSTEOF
+  chmod +x "$script"
+  local rc=0
+  with_staging_lock bash "$script" 2>/dev/null || rc=$?
+  rm -f "$script"
+  return $rc
+}
+
+# ── OSS-5 helper : re-launch a 3phase wrapper for an in_progress story ────
+# Skips pre_launch_mark_in_progress — story is already status:in_progress in
+# YAML (we're resuming, not initiating). Generates a fresh trace_id.
+# Requires daemon-dispatch.sh sourced (caller orders the call site).
+_recovery_relaunch() {
+  local sid="$1"
+  local trace_id
+  trace_id=$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \
+    || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
+    || echo "recovery-$(date +%s)-$$-$RANDOM")
+  launch_3phase_in_tmux "$sid" "$trace_id"
 }
 
 # ── Status mode ──────────────────────────────────────────────────────────
@@ -2236,6 +2534,7 @@ set +e
 
 LOCK_FILE="$LOCK_DIR/$story_id.lock"
 HEARTBEAT_FILE="$LOCK_DIR/$story_id.heartbeat"
+INTERRUPTED_FILE="$LOCK_DIR/$story_id.interrupted"
 echo \$\$ > "\$LOCK_FILE"
 
 # ── Dedicated heartbeat (decoupled from claude -p log output) ──────────────
@@ -2250,8 +2549,29 @@ disown \$HEARTBEAT_PID 2>/dev/null || true
 cleanup() {
   kill \$HEARTBEAT_PID 2>/dev/null || true
   rm -f "\$LOCK_FILE" "\$HEARTBEAT_FILE"
+  # NB: do NOT remove \$INTERRUPTED_FILE — OSS-5 (crash_recovery_scan) reads
+  # it at the next daemon start to differentiate graceful /gaai:stop from
+  # crash. The recovery scan removes it after reverting status:refined.
 }
 trap cleanup EXIT
+
+# ── OSS-3 : SIGTERM/SIGINT graceful drain trap ────────────────────────────
+# /gaai:stop sends SIGTERM to this wrapper PID (not the tmux session) so that
+# claude -p children are NOT killed mid-phase. The trap sets a flag and
+# touches \$INTERRUPTED_FILE ; the dispatch loop checks the flag at each
+# iteration boundary and exits gracefully after the current phase completes.
+#
+# If /gaai:stop's STOP_DRAIN_TIMEOUT elapses before the wrapper exits, the
+# stop logic escalates to tmux kill-session (which DOES kill claude). The
+# .interrupted file is still set, so OSS-5 still classifies this as a graceful
+# stop on next start.
+_INTERRUPT_REQUESTED=0
+on_interrupt() {
+  _INTERRUPT_REQUESTED=1
+  date +%s > "\$INTERRUPTED_FILE" 2>/dev/null || true
+  echo "[\$(date '+%H:%M:%S')] $story_id — SIGTERM/SIGINT received, will exit after current phase"
+}
+trap on_interrupt SIGTERM SIGINT
 
 cd "$PROJECT_DIR" || exit 1
 
@@ -2281,6 +2601,14 @@ while true; do
     break
   fi
   _ps=\$(get_phase_status "$story_id" 2>/dev/null || echo "?")
+  # OSS-3 : honour graceful drain request before evaluating terminal states
+  # so /gaai:stop interrupts at the closest phase boundary without losing
+  # the current phase_status. INTERRUPTED_FILE is preserved across exit
+  # for OSS-5 to read on next daemon start.
+  if [[ "\$_INTERRUPT_REQUESTED" == "1" ]]; then
+    echo "[\$(date '+%H:%M:%S')] $story_id — interrupted (graceful drain), exiting at phase_status='\$_ps'"
+    break
+  fi
   # Terminal phase_status values that must exit the wrapper loop.
   # qa_failed and qa_escalated are non-terminal for the YAML lifecycle (daemon
   # post-QA triage may still flip status to done/failed) but ARE terminal for
@@ -2396,6 +2724,15 @@ fi
 # ── Load 3-phase dispatch library (E134S02) ──────────────────────────────
 # shellcheck disable=SC1090
 source "$(dirname "$0")/daemon-dispatch.sh"
+
+# ── OSS-5 : Crash-recovery scan (one-shot at daemon start) ───────────────
+# Lock cleanup first so is_locked accurately reports liveness inside the
+# scan. The scan classifies orphan in_progress stories (artefact + git +
+# .interrupted) and resumes / reverts / reconciles instead of brute-marking
+# failed (the historical check_stale_in_progress behaviour, which is now
+# a fallback for during-life orphans only).
+clean_stale_locks
+crash_recovery_scan || true
 
 # ── Main loop ─────────────────────────────────────────────────────────────
 # Counter for consecutive polls where active=0 AND no ready stories. Resets to

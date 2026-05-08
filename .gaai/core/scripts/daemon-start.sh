@@ -11,7 +11,8 @@ set -euo pipefail
 #
 # Usage:
 #   daemon-start.sh [options]          Start the daemon
-#   daemon-start.sh --stop             Graceful shutdown
+#   daemon-start.sh --stop             Graceful shutdown (drains in-flight wrappers)
+#   daemon-start.sh --stop --no-drain  Stop daemon, leave wrappers running
 #   daemon-start.sh --status           Live monitoring dashboard (tmux) or static status
 #   daemon-start.sh --monitor          Alias for --status
 #   daemon-start.sh --restart          Stop + start
@@ -24,6 +25,14 @@ set -euo pipefail
 #                          default 5. Useful for one-shot batches that should
 #                          drain the backlog and then exit cleanly.
 #   --dry-run              Show what would launch, don't execute
+#
+# Stop options:
+#   --no-drain             Skip wrapper drain (legacy behaviour ; in-flight
+#                          deliveries continue independently after daemon
+#                          exits). Default is graceful drain : SIGTERM
+#                          wrappers via lock files, wait STOP_DRAIN_TIMEOUT
+#                          (default 600s, override via GAAI_STOP_DRAIN_TIMEOUT),
+#                          then SIGTERM tmux sessions, +30s grace, SIGKILL.
 #
 # Exit codes:
 #   0 — success
@@ -47,9 +56,15 @@ esac
 DAEMON_SCRIPT="$SCRIPT_DIR/delivery-daemon.sh"
 MONITOR_TOP="$SCRIPT_DIR/daemon-monitor-top.sh"
 MONITOR_TAIL="$SCRIPT_DIR/daemon-monitor-tail.sh"
-PID_FILE="$GAAI_DIR/project/contexts/backlog/.delivery-locks/.daemon.pid"
+LOCK_DIR="$GAAI_DIR/project/contexts/backlog/.delivery-locks"
+PID_FILE="$LOCK_DIR/.daemon.pid"
 LOG_FILE="$GAAI_DIR/project/contexts/backlog/.delivery-daemon.log"
 LOG_DIR="$GAAI_DIR/project/contexts/backlog/.delivery-logs"
+
+# OSS-3 : drain timeout for /gaai:stop graceful shutdown. Wrappers may be in
+# the middle of a long phase (impl up to 90 min per OSS-7 timeout) ; the drain
+# is a best-effort grace period after which we escalate to tmux kill-session.
+STOP_DRAIN_TIMEOUT="${GAAI_STOP_DRAIN_TIMEOUT:-600}"
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -64,16 +79,18 @@ get_pid() {
 # ── Parse action ──────────────────────────────────────────────────────────
 
 ACTION="start"
+NO_DRAIN=false
 PASSTHROUGH_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --start)   ACTION="start";   shift ;;
-    --stop)    ACTION="stop";    shift ;;
-    --status)  ACTION="status";  shift ;;
-    --monitor) ACTION="status";  shift ;;
-    --restart) ACTION="restart"; shift ;;
-    *)         PASSTHROUGH_ARGS+=("$1"); shift ;;
+    --start)    ACTION="start";   shift ;;
+    --stop)     ACTION="stop";    shift ;;
+    --status)   ACTION="status";  shift ;;
+    --monitor)  ACTION="status";  shift ;;
+    --restart)  ACTION="restart"; shift ;;
+    --no-drain) NO_DRAIN=true;    shift ;;
+    *)          PASSTHROUGH_ARGS+=("$1"); shift ;;
   esac
 done
 
@@ -107,15 +124,112 @@ _launch_monitor() {
 
 # ── Actions ───────────────────────────────────────────────────────────────
 
+# OSS-3 : enumerate live wrapper PIDs from $LOCK_DIR/*.lock files.
+# Returns lines "<sid>|<pid>". Skips placeholder ("pending") locks and dead PIDs.
+_list_live_wrappers() {
+  local lock pid sid
+  [[ -d "$LOCK_DIR" ]] || return 0
+  for lock in "$LOCK_DIR"/*.lock; do
+    [[ -f "$lock" ]] || continue
+    pid=$(head -1 "$lock" 2>/dev/null || echo "")
+    [[ -z "$pid" || "$pid" == "pending" ]] && continue
+    kill -0 "$pid" 2>/dev/null || continue
+    sid=$(basename "$lock" .lock)
+    echo "${sid}|${pid}"
+  done
+}
+
+# OSS-3 : graceful drain of in-flight wrappers.
+#   1. SIGTERM each wrapper PID (NOT the tmux session — the wrapper's trap
+#      sets _INTERRUPT_REQUESTED and lets claude -p finish current phase).
+#   2. Poll for lock files to disappear (wrapper exit) up to STOP_DRAIN_TIMEOUT.
+#   3. For wrappers still alive after timeout, SIGTERM their tmux sessions
+#      (kills claude -p too), grace 30s, then SIGKILL.
+_drain_wrappers() {
+  local entries
+  entries=$(_list_live_wrappers)
+  if [[ -z "$entries" ]]; then
+    echo "  No live wrappers to drain."
+    return 0
+  fi
+
+  local count
+  count=$(echo "$entries" | wc -l | tr -d ' ')
+  echo "Draining $count in-flight wrapper(s) — SIGTERM, will wait up to ${STOP_DRAIN_TIMEOUT}s for graceful exit..."
+
+  # Phase 1 : SIGTERM each wrapper PID directly (not the tmux session).
+  while IFS='|' read -r sid pid; do
+    [[ -z "$sid" || -z "$pid" ]] && continue
+    echo "  SIGTERM $sid (PID $pid)"
+    kill -TERM "$pid" 2>/dev/null || true
+  done <<< "$entries"
+
+  # Phase 2 : poll for wrapper exits up to STOP_DRAIN_TIMEOUT.
+  local waited=0 step=5
+  while (( waited < STOP_DRAIN_TIMEOUT )); do
+    local remaining
+    remaining=$(_list_live_wrappers)
+    if [[ -z "$remaining" ]]; then
+      echo "  All wrappers exited cleanly after ${waited}s."
+      return 0
+    fi
+    sleep "$step"
+    waited=$(( waited + step ))
+  done
+
+  # Phase 3 : escalate — SIGTERM tmux sessions of wrappers still alive.
+  echo "  Drain timeout (${STOP_DRAIN_TIMEOUT}s) reached. Escalating to tmux kill-session..."
+  local stragglers
+  stragglers=$(_list_live_wrappers)
+  while IFS='|' read -r sid pid; do
+    [[ -z "$sid" || -z "$pid" ]] && continue
+    if command -v tmux &>/dev/null && tmux has-session -t "gaai-deliver-${sid}" 2>/dev/null; then
+      echo "  tmux kill-session gaai-deliver-${sid} (PID $pid)"
+      tmux kill-session -t "gaai-deliver-${sid}" 2>/dev/null || true
+    else
+      echo "  SIGTERM PID $pid (no tmux session for $sid)"
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
+  done <<< "$stragglers"
+
+  # Phase 4 : grace then SIGKILL anything still alive.
+  sleep 30
+  local final
+  final=$(_list_live_wrappers)
+  if [[ -n "$final" ]]; then
+    while IFS='|' read -r sid pid; do
+      [[ -z "$sid" || -z "$pid" ]] && continue
+      echo "  SIGKILL $sid (PID $pid)"
+      kill -KILL "$pid" 2>/dev/null || true
+    done <<< "$final"
+  fi
+}
+
 do_stop() {
   if ! daemon_is_running; then
     echo "No daemon running."
     [[ -f "$PID_FILE" ]] && rm -f "$PID_FILE"
+    # Still drain stale wrappers (daemon dead, wrappers may have survived).
+    if ! $NO_DRAIN; then
+      _drain_wrappers
+    fi
     return 0
   fi
 
   local pid
   pid=$(get_pid)
+
+  # OSS-3 : drain in-flight wrappers BEFORE stopping the daemon. The daemon
+  # itself only manages dispatch ; wrappers run independently in their own
+  # tmux sessions and survive a daemon kill. Default behaviour drains them
+  # gracefully ; --no-drain preserves the legacy "wrappers continue
+  # independently" behaviour.
+  if ! $NO_DRAIN; then
+    _drain_wrappers
+  else
+    echo "Skipping wrapper drain (--no-drain) — in-flight deliveries continue independently."
+  fi
+
   echo "Stopping daemon (PID $pid)..."
   kill "$pid" 2>/dev/null || true
 
