@@ -329,6 +329,7 @@ get_phase_status() {
     found && /^- id:/ { exit }
     found && /^[[:space:]]+phase_status:/ {
       gsub(/^[[:space:]]+phase_status:[[:space:]]*/, "")
+      gsub(/[[:space:]]+#.*$/, "")  # strip YAML inline comment (defensive — `#` after whitespace)
       gsub(/[[:space:]]*$/, "")
       gsub(/^"|"$/, "")
       print
@@ -344,6 +345,7 @@ get_delivery_pipeline() {
     found && /^- id:/ { exit }
     found && /^[[:space:]]+delivery_pipeline:/ {
       gsub(/^[[:space:]]+delivery_pipeline:[[:space:]]*/, "")
+      gsub(/[[:space:]]+#.*$/, "")  # strip YAML inline comment (defensive — `#` after whitespace)
       gsub(/[[:space:]]*$/, "")
       gsub(/^"|"$/, "")
       print
@@ -361,6 +363,8 @@ get_impl_model_tag() {
     found && /^- id:/ { exit }
     found && /^[[:space:]]+impl_model:/ {
       gsub(/^[[:space:]]+impl_model:[[:space:]]*/, "")
+      gsub(/[[:space:]]+#.*$/, "")  # strip YAML inline comment (`#` preceded by whitespace)
+      gsub(/[[:space:]]+#.*$/, "")  # strip YAML inline comment (defensive — `#` after whitespace)
       gsub(/[[:space:]]*$/, "")
       gsub(/^"|"$/, "")
       print
@@ -378,6 +382,7 @@ get_story_tier() {
     found && /^- id:/ { exit }
     found && /^[[:space:]]+tier:/ {
       gsub(/^[[:space:]]+tier:[[:space:]]*/, "")
+      gsub(/[[:space:]]+#.*$/, "")  # strip YAML inline comment (defensive — `#` after whitespace)
       gsub(/[[:space:]]*$/, "")
       gsub(/^"|"$/, "")
       print
@@ -394,6 +399,7 @@ get_story_title() {
     found && /^- id:/ { exit }
     found && /^[[:space:]]+title:/ {
       gsub(/^[[:space:]]+title:[[:space:]]*/, "")
+      gsub(/[[:space:]]+#.*$/, "")  # strip YAML inline comment (defensive — `#` after whitespace)
       gsub(/[[:space:]]*$/, "")
       gsub(/^"|"$/, "")
       print
@@ -539,6 +545,7 @@ get_cutover_default_pipeline() {
     in_section && /^[^[:space:]]/ { exit }
     in_section && /^[[:space:]]+default_pipeline:/ {
       gsub(/^[[:space:]]+default_pipeline:[[:space:]]*/, "")
+      gsub(/[[:space:]]+#.*$/, "")  # strip YAML inline comment (defensive — `#` after whitespace)
       gsub(/[[:space:]]*$/, "")
       gsub(/^"|"$/, "")
       print

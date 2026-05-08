@@ -328,6 +328,55 @@ else
   fail "T8: dispatch on done state returned non-zero"
 fi
 
+# ── T8b: YAML inline-comment stripping in extractors (regression — 2026-05-08)
+# Bug : awk extractors (get_phase_status, get_delivery_pipeline, get_impl_model_tag,
+# get_story_tier, get_story_title) did not strip inline `# ...` comments.
+# Symptom : E145S01 plan-phase OK but impl-phase TIER2_SECONDARY_REJECTED because
+# `impl_model: primary  # DEC-93 + ...` was read as the full string with comment.
+# Fix : added gsub `[[:space:]]+#.*$` to all 5 extractors. This test prevents
+# regression by exercising each extractor against a fixture with inline comments.
+echo "T8b: YAML inline-comment stripping in extractors (regression guard)"
+T8b_FIXTURE="/tmp/gaai-t8b-fixture-$$.yaml"
+cat > "$T8b_FIXTURE" <<'EOF'
+items:
+- id: TST-T8B-INLINE
+  epic: TST
+  title: Test inline comment   # leading title with comment
+  status: refined
+  phase_status: not_started   # phase_status with comment
+  delivery_pipeline: 3phase  # pipeline with comment
+  tier: 2  # tier with comment
+  impl_model: primary  # DEC-93 + daemon hard gate Tier 2 protection
+EOF
+T8B_OLD_BACKLOG="$BACKLOG_FILE"
+export BACKLOG_FILE="$T8b_FIXTURE"
+T8b_pass=0
+T8b_fail=0
+for _t in 'phase_status:not_started:get_phase_status' \
+          'delivery_pipeline:3phase:get_delivery_pipeline' \
+          'tier:2:get_story_tier' \
+          'impl_model:primary:get_impl_model_tag'; do
+  _field="${_t%%:*}"; _expected="${_t#*:}"; _expected="${_expected%%:*}"; _fn="${_t##*:}"
+  _actual=$("$_fn" "TST-T8B-INLINE")
+  if [[ "$_actual" == "$_expected" ]]; then
+    pass "T8b: $_fn strips inline comment (got '$_actual')"
+    T8b_pass=$((T8b_pass+1))
+  else
+    fail "T8b: $_fn expected '$_expected' got '$_actual' (inline-comment regression!)"
+    T8b_fail=$((T8b_fail+1))
+  fi
+done
+# Title is special — value is multi-word with embedded comment, just verify no `#` leaks
+_title=$(get_story_title "TST-T8B-INLINE")
+if [[ "$_title" != *"#"* ]]; then
+  pass "T8b: get_story_title strips inline comment (got '$_title')"
+else
+  fail "T8b: get_story_title did not strip inline comment (got '$_title')"
+fi
+export BACKLOG_FILE="$T8B_OLD_BACKLOG"
+unset T8B_OLD_BACKLOG _t _field _expected _fn _actual _title T8b_pass T8b_fail
+rm -f "$T8b_FIXTURE"
+
 # Cleanup T4-T8 dispatch fixtures
 export PATH="$DISPATCH_OLD_PATH"
 unset GAAI_WORKTREE_PATH CLAUDE_MODEL_PRIMARY GAAI_WORKTREES_BASE
