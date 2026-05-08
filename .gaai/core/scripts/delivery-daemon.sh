@@ -851,7 +851,7 @@ RSTEOF
 # Decision table :
 #   .interrupted touch present
 #     → revert status:refined, KEEP phase_status, no retry++, rm touch
-#       Reason : /gaai:stop graceful drain (OSS-3) ; clean resume next start.
+#       Reason : daemon-start.sh --stop graceful drain (OSS-3) ; clean resume next start.
 #   live wrapper (lock + PID alive)
 #     → skip — wrapper survived daemon restart via independent tmux
 #   phase_status terminal (done|failed|escalated|qa_escalated)
@@ -909,7 +909,7 @@ emit()
     sid="${pair%%|*}"
     ps="${pair##*|}"
 
-    # ── Path 1 : .interrupted touch (graceful /gaai:stop, OSS-3) ─────────
+    # ── Path 1 : .interrupted touch (graceful daemon-start.sh --stop, OSS-3) ─────────
     local interrupted_marker="$LOCK_DIR/${sid}.interrupted"
     if [[ -f "$interrupted_marker" ]]; then
       log "${YELLOW}[RECOVERY] $sid : .interrupted present — graceful stop, reverting refined (keep phase_status=${ps:-empty})${NC}"
@@ -2550,18 +2550,18 @@ cleanup() {
   kill \$HEARTBEAT_PID 2>/dev/null || true
   rm -f "\$LOCK_FILE" "\$HEARTBEAT_FILE"
   # NB: do NOT remove \$INTERRUPTED_FILE — OSS-5 (crash_recovery_scan) reads
-  # it at the next daemon start to differentiate graceful /gaai:stop from
+  # it at the next daemon start to differentiate graceful daemon-start.sh --stop from
   # crash. The recovery scan removes it after reverting status:refined.
 }
 trap cleanup EXIT
 
 # ── OSS-3 : SIGTERM/SIGINT graceful drain trap ────────────────────────────
-# /gaai:stop sends SIGTERM to this wrapper PID (not the tmux session) so that
+# daemon-start.sh --stop sends SIGTERM to this wrapper PID (not the tmux session) so that
 # claude -p children are NOT killed mid-phase. The trap sets a flag and
 # touches \$INTERRUPTED_FILE ; the dispatch loop checks the flag at each
 # iteration boundary and exits gracefully after the current phase completes.
 #
-# If /gaai:stop's STOP_DRAIN_TIMEOUT elapses before the wrapper exits, the
+# If daemon-start.sh --stop's STOP_DRAIN_TIMEOUT elapses before the wrapper exits, the
 # stop logic escalates to tmux kill-session (which DOES kill claude). The
 # .interrupted file is still set, so OSS-5 still classifies this as a graceful
 # stop on next start.
@@ -2602,7 +2602,7 @@ while true; do
   fi
   _ps=\$(get_phase_status "$story_id" 2>/dev/null || echo "?")
   # OSS-3 : honour graceful drain request before evaluating terminal states
-  # so /gaai:stop interrupts at the closest phase boundary without losing
+  # so daemon-start.sh --stop interrupts at the closest phase boundary without losing
   # the current phase_status. INTERRUPTED_FILE is preserved across exit
   # for OSS-5 to read on next daemon start.
   if [[ "\$_INTERRUPT_REQUESTED" == "1" ]]; then

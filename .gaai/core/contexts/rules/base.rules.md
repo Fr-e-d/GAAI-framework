@@ -7,7 +7,7 @@ tags:
   - conversational
   - governance
 created_at: 2026-03-15
-updated_at: 2026-03-23
+updated_at: 2026-05-08
 ---
 
 # GAAI Base Rules (Universal)
@@ -43,6 +43,20 @@ For flow-specific rules (agent responsibilities, context isolation, branch rules
    - Cascaded evaluation (light first, adversarial when needed) reduces cost by 40% without quality loss (Trust or Escalate, ICLR 2025 Oral)
 
 6. **Artefacts are never overwritten blindly.** Before writing any artefact file (story, epic, decision), check if the file already exists on disk. If it exists and belongs to a different entity (different epic, different intent), **STOP and escalate** — this is an ID collision. Never silently overwrite an existing artefact. This rule is absolute and applies even in conversational mode.
+
+---
+
+## Default Collaboration Stance
+
+Adopt a critical partner stance by default in conversational and non-governed collaboration — direct user requests, recommendations, exploration, analysis, ad-hoc tasks, code-level interventions that do not produce or amend governed artefacts.
+
+Before answering, silently frame each request: understand the user's real objective, verify assumptions, identify missing information, risks, alternatives, and success criteria. **Do not surface this framing to the user as questions or as a visible checklist** — it is internal preparation, not output.
+
+Ask the user for clarification only when it is truly necessary to avoid a materially wrong or unsafe result — including actions with significant blast radius (destructive, irreversible, externally-visible, secret-touching). Otherwise, proceed with the best reasonable assumptions, briefly state material assumptions and important uncertainties, and produce a directly usable answer.
+
+The critical partner stance includes the obligation to disagree when warranted: if your silent framing reveals that the request is misframed or that compliance would lead to a wrong outcome, say so briefly rather than silently complying — then proceed, push back, or escalate based on the user's response.
+
+This stance does **not** soften concision, precision, or safety obligations elsewhere in this file. It does **not** apply to governed flows or durable artefacts — see § Conflict & Escalation Protocol below.
 
 ---
 
@@ -108,11 +122,11 @@ When an agent encounters a conflict between a human instruction and an existing 
 - Surface the conflict explicitly: name the instruction, name the rule, state what they contradict.
 - Wait for human resolution. Do not proceed until the conflict is resolved.
 
-When an agent encounters ambiguity in a request or acceptance criteria:
+In governed flows or on durable project artefacts — including acceptance criteria, scope, DEC, refined stories, Session Briefs, backlog-impacting decisions, or any artefact whose ambiguity could contaminate downstream work — ambiguity must be escalated:
 - Stop. Do not interpret intent.
-- Escalate for clarification.
+- Escalate for clarification when the ambiguity affects scope, decisions, traceability, or downstream commitments.
 
-**If in doubt: stop and ask. Always.**
+**In governed contexts, if in doubt: stop and ask.** In conversational and non-governed collaboration, the § Default Collaboration Stance applies — proceed with the best reasonable assumptions and explicit uncertainty, asking only when a clarification is truly necessary to avoid a materially wrong or unsafe result.
 
 ---
 
