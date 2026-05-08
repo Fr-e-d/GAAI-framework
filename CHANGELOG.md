@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- chore(skills): strip narrative dates from .gaai/core/ for OSS sync compatibility
+
 ## [2.23.0] - 2026-05-08
 
 ### Changed

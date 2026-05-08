@@ -62,7 +62,7 @@ When the agent is on a surface without shell access, or when invoking the script
 
 #### Invariant checks (mandatory)
 
-1. **Table column consistency.** For every Markdown table in `index.md` and the archive, every row has the same number of `|`-delimited cells. If a row has different cell count → format corruption, FAIL. (This catches the kind of corruption seen historically on lines 94, 104, 105 of the index before the 2026-05-08 migration.)
+1. **Table column consistency.** For every Markdown table in `index.md` and the archive, every row has the same number of `|`-delimited cells. If a row has different cell count → format corruption, FAIL. (This catches the kind of manual-edit corruption where two table rows get concatenated into one — empirically observed in earlier index revisions.)
 
 2. **Active ↔ archive symmetry.** Every DEC ID in the "Superseded (archived)" pointer table of `index.md` MUST have exactly one matching row (column 1) in `archive/superseded-decisions.archive.md` § "Superseded DEC entries", and vice versa. Dangling pointer (active claims archived but no archive row) = FAIL. Orphan archive row (archive has DEC but active doesn't reference it) = FAIL.
 
