@@ -881,20 +881,23 @@ handle_impl_phase() {
   # compliance. The fix is upstream story scope (decompose to Tier 1) or
   # opt-out to primary explicitly. Daemon refuses the dispatch with a clear
   # error so the operator sees the structural mismatch immediately.
-  if [[ "$_impl_route" == "secondary" ]]; then
-    local _tier
-    _tier=$(get_story_tier "$story_id")
-    if [[ "$_tier" =~ ^[0-9]+$ ]] && (( _tier >= 2 )); then
-      echo "[ERROR] ${story_id} handle_impl_phase: Tier ${_tier} stories MUST NOT run on secondary route"
-      echo "[ERROR]   Empirical : Tier 2 secondary GLM 200K context overflows in ~4-5 turns,"
-      echo "[ERROR]   triggering rapid_refill_breaker + in-process Sonnet fallback (cost double-burn)."
-      echo "[ERROR]   Fix : either (a) decompose to Tier 1 sub-stories per PAT-STORY-SCOPE-DISCIPLINE-001,"
-      echo "[ERROR]   or (b) set 'impl_model: primary' explicitly in backlog YAML."
-      _emit_routing_record "$story_id" "$trace_id" "impl" "error" "TIER2_SECONDARY_REJECTED"
-      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
-      return 1
-    fi
-  fi
+  # ── Tier 2 + secondary hard-gate REMOVED ─────────────────────────────────
+  # Previously this block refused dispatch for Tier 2 stories on the secondary
+  # route, raising TIER2_SECONDARY_REJECTED. Empirically this defensive gate
+  # produced more harm than benefit in practice :
+  #   - Multiple ghost-state stuck stories in backlog (status=in_progress with
+  #     no active markers + no tmux + no lock files) when wrappers exited via
+  #     this branch on transient parser/config issues.
+  #   - Cascading mis-attribution of failures that were actually parser bugs
+  #     (YAML inline-comment leak in get_impl_model_tag — fixed separately).
+  #   - Operator friction : forced to chase down each rejection even when the
+  #     story was correctly authored.
+  # DEC-93 doctrine ("primary always pre-PMF unless explicit secondary opt-in")
+  # + the tier-aware default coercion (Tier 2+ absent → primary) are sufficient
+  # at the authoring layer. If a Tier 2 story is explicitly opted in to
+  # secondary by an operator, that's a deliberate choice — let it run, observe
+  # the outcome, learn from data. Removing the gate trades probabilistic cost
+  # exposure for deterministic governability.
 
   local prompt_content
   if ! prompt_content=$(
