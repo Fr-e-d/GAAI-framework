@@ -36,14 +36,14 @@ This skill **heals drift** — it does NOT create new knowledge. It only registe
 
 ### Step 1 — Decision Registry Sync
 
-1. Read `index.md` Decision Registry table — extract all registered DEC IDs
+1. Read all registry files at `contexts/memory/` root (`index.md` + any `index-*.md` siblings such as `index-decisions.md` when Decision Registry has been extracted per file-size budget) — extract all registered DEC IDs from any of them
 2. Read `archive/superseded-decisions.archive.md` "Superseded DEC entries" table — extract all archived DEC IDs (column 1)
 3. Glob `decisions/DEC-*.md` — list all files on disk, extract IDs from filenames
 4. For each DEC file on disk:
    - Read its YAML frontmatter : `id`, `domain`, `level`, `title`, `status`, `superseded_by`, **`archived_to`** (coordinated with `memory-archive-superseded` skill)
    - **If `archived_to:` field is set** (e.g. `archive/superseded-decisions.archive.md`) AND the DEC ID is present in the archive index: SKIP active registration. The DEC's active home is the archive. Do NOT add a row to the active Decision Registry. (Prevents undo of archive operation by `memory-archive-superseded` skill.)
    - **If `archived_to:` is set BUT no matching archive row**: flag `⚠️ ARCHIVE INCONSISTENCY: DEC-{N} frontmatter declares archived_to but no row in archive index` — escalate, do NOT auto-add either way
-   - **If `archived_to:` is NOT set AND DEC is not in active registry**: add a row to the active Decision Registry as before : `| DEC-{N} | {domain} | {level} | {title} |`. If frontmatter `status: superseded` and `superseded_by` is set: append `⚠️ SUPERSEDED by DEC-{M}` to the description column AND flag in report : "consider invoking `memory-archive-superseded` for DEC-{N}"
+   - **If `archived_to:` is NOT set AND DEC is not in any active registry**: add a row to the appropriate Decision Registry — prefer `index-decisions.md` if it exists (Decision Registry has been extracted there) ; otherwise add to `index.md` Decision Registry as before. Format : `| DEC-{N} | {domain} | {level} | {title} |`. If frontmatter `status: superseded` and `superseded_by` is set: append `⚠️ SUPERSEDED by DEC-{M}` to the description column AND flag in report : "consider invoking `memory-archive-superseded` for DEC-{N}"
 5. For each registered DEC with **no file on disk**: flag `⚠️ MISSING FILE` in the sync report — do NOT delete registry rows (possible archive situation)
 
 ### Step 2 — File Count Update

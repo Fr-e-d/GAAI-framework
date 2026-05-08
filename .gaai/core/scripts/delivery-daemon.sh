@@ -596,10 +596,15 @@ clean_stale_locks() {
 }
 
 # ── Heartbeat monitoring ─────────────────────────────────────────────────
-# Claude generates output continuously when working. The tee command in the
-# wrapper writes to a per-delivery log file. If the log file hasn't been
-# updated in HEARTBEAT_STALE seconds, the session is stuck (event loop
-# blocked, network hang, etc.). The daemon sends SIGTERM, then SIGKILL.
+# Liveness signal is decoupled from claude -p log output: the wrapper runs a
+# background loop that touches $LOCK_DIR/<sid>.heartbeat every 30s for the
+# entire wrapper lifetime. This covers commit-phase (pure bash, writes no
+# claude log) which previously triggered false-positive kills during long
+# `gh pr merge` retry waits (see E137S01a/S02a stalls).
+#
+# Fallback: if no .heartbeat file exists yet (wrapper still bootstrapping),
+# fall back to lock file mtime within the grace period; outside that window,
+# legacy log mtime is consulted as a last resort for legacy pipeline wrappers.
 check_heartbeats() {
   local now
   now=$(date +%s)
@@ -616,80 +621,48 @@ check_heartbeats() {
       continue  # Will be cleaned by clean_stale_locks
     fi
 
-    # Grace period: skip heartbeat for recently-launched sessions
-    # Prevents stale log files from previous runs triggering immediate kills
+    # Grace period: skip heartbeat for recently-launched sessions.
     local lock_age=$(( now - $(file_mtime "$lock") ))
     if (( lock_age < HEARTBEAT_STALE )); then
       continue
     fi
 
-    # Check delivery log heartbeat
-    # For 3phase pipeline (DEC-88) : per-phase logs at <worktree>/.delivery-logs/<sid>.<phase>.log
-    # Fall through to legacy <sid>.log only if no 3phase log exists.
-    local logfile="$LOG_DIR/${sid}.log"
-    local _3phase_log_mtime=0
-    local _3phase_logdir
-    if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
-      _3phase_logdir="${GAAI_WORKTREES_BASE}/${sid}-workspace/.delivery-logs"
-    else
-      local _repo_name
-      _repo_name=$(basename "$PROJECT_DIR" 2>/dev/null || echo "gaai-platform")
-      _3phase_logdir="$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd)/.gaai-worktrees/${_repo_name}/${sid}-workspace/.delivery-logs"
-    fi
-    if [[ -d "$_3phase_logdir" ]]; then
-      for _phlog in "$_3phase_logdir/${sid}".plan.log "$_3phase_logdir/${sid}".impl.log "$_3phase_logdir/${sid}".qa.log; do
-        if [[ -f "$_phlog" ]]; then
-          local _m
-          _m=$(file_mtime "$_phlog")
-          (( _m > _3phase_log_mtime )) && _3phase_log_mtime=$_m
-        fi
-      done
-    fi
-
-    if [[ ! -f "$logfile" ]] && (( _3phase_log_mtime == 0 )); then
-      # No log yet (legacy or 3phase) — check lock file age instead (session just started?)
-      local lock_age=$(( now - $(file_mtime "$lock") ))
-      if (( lock_age > HEARTBEAT_STALE )); then
-        log "${RED}HEARTBEAT: $sid has no log file after ${lock_age}s — killing PID $pid${NC}"
+    # ── Primary: dedicated heartbeat file written by wrapper ────────────────
+    local hb_file="$LOCK_DIR/${sid}.heartbeat"
+    if [[ -f "$hb_file" ]]; then
+      local hb_age=$(( now - $(file_mtime "$hb_file") ))
+      if (( hb_age > HEARTBEAT_STALE )); then
+        log "${RED}HEARTBEAT: $sid — heartbeat stale ($(( hb_age / 60 ))min) — sending SIGTERM to PID $pid${NC}"
         kill -TERM "$pid" 2>/dev/null || true
+        sleep 30
+        if kill -0 "$pid" 2>/dev/null; then
+          log "${RED}HEARTBEAT: $sid — SIGKILL PID $pid (did not respond to SIGTERM)${NC}"
+          kill -KILL "$pid" 2>/dev/null || true
+        fi
       fi
       continue
     fi
-    # If 3phase log exists and is more recent than legacy logfile (or legacy missing),
-    # use 3phase mtime as the heartbeat reference.
-    if (( _3phase_log_mtime > 0 )); then
-      local _legacy_mtime=0
-      [[ -f "$logfile" ]] && _legacy_mtime=$(file_mtime "$logfile")
-      if (( _3phase_log_mtime >= _legacy_mtime )); then
-        # Synthetic logfile path is irrelevant — we'll use mtime directly below
-        # by overwriting log_mtime via this branch before the staleness check.
-        local log_age=$(( now - _3phase_log_mtime ))
-        if (( log_age > HEARTBEAT_STALE )); then
-          log "${RED}HEARTBEAT: $sid — no 3phase log output for $(( log_age / 60 ))min — sending SIGTERM to PID $pid${NC}"
-          kill -TERM "$pid" 2>/dev/null || true
-          sleep 5
-          kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
-        fi
-        continue
+
+    # ── Fallback (legacy / pre-heartbeat wrappers): log mtime ──────────────
+    # Kept narrow to avoid the false-positive class fixed by the dedicated
+    # heartbeat. Legacy 1-process wrappers and any in-flight wrapper started
+    # before this fix still produce log output, so this branch covers them
+    # until the next daemon restart cycles all wrappers to the new contract.
+    local logfile="$LOG_DIR/${sid}.log"
+    if [[ -f "$logfile" ]]; then
+      local log_age=$(( now - $(file_mtime "$logfile") ))
+      if (( log_age > HEARTBEAT_STALE )); then
+        log "${RED}HEARTBEAT: $sid (legacy log fallback) — no output for $(( log_age / 60 ))min — sending SIGTERM to PID $pid${NC}"
+        kill -TERM "$pid" 2>/dev/null || true
+        sleep 30
+        kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
       fi
+      continue
     fi
 
-    local log_mtime log_age
-    log_mtime=$(file_mtime "$logfile")
-    log_age=$(( now - log_mtime ))
-
-    if (( log_age > HEARTBEAT_STALE )); then
-      log "${RED}HEARTBEAT: $sid — no output for $(( log_age / 60 ))min — sending SIGTERM to PID $pid${NC}"
-      kill -TERM "$pid" 2>/dev/null || true
-
-      # Give 30s for graceful shutdown (wrapper trap → mark failed → cleanup)
-      sleep 30
-
-      if kill -0 "$pid" 2>/dev/null; then
-        log "${RED}HEARTBEAT: $sid — SIGKILL PID $pid (did not respond to SIGTERM)${NC}"
-        kill -KILL "$pid" 2>/dev/null || true
-      fi
-    fi
+    # No heartbeat, no log — wrapper is past grace and produced nothing.
+    log "${RED}HEARTBEAT: $sid has no heartbeat or log after ${lock_age}s — killing PID $pid${NC}"
+    kill -TERM "$pid" 2>/dev/null || true
   done
 }
 
@@ -2262,10 +2235,21 @@ launch_3phase_in_tmux() {
 set +e
 
 LOCK_FILE="$LOCK_DIR/$story_id.lock"
+HEARTBEAT_FILE="$LOCK_DIR/$story_id.heartbeat"
 echo \$\$ > "\$LOCK_FILE"
 
+# ── Dedicated heartbeat (decoupled from claude -p log output) ──────────────
+# Touched every 30s for the wrapper's entire lifetime, including during
+# pure-bash phases (commit-phase, gh pr merge waits) that emit no claude log.
+# The daemon's check_heartbeats reads this file as the primary liveness signal.
+date +%s > "\$HEARTBEAT_FILE"
+( while :; do sleep 30; date +%s > "\$HEARTBEAT_FILE" 2>/dev/null || exit 0; done ) &
+HEARTBEAT_PID=\$!
+disown \$HEARTBEAT_PID 2>/dev/null || true
+
 cleanup() {
-  rm -f "\$LOCK_FILE"
+  kill \$HEARTBEAT_PID 2>/dev/null || true
+  rm -f "\$LOCK_FILE" "\$HEARTBEAT_FILE"
 }
 trap cleanup EXIT
 
@@ -2297,10 +2281,18 @@ while true; do
     break
   fi
   _ps=\$(get_phase_status "$story_id" 2>/dev/null || echo "?")
-  if [[ "\$_ps" == "done" || "\$_ps" == "failed" || "\$_ps" == "escalated" ]]; then
-    echo "[\$(date '+%H:%M:%S')] $story_id — 3phase loop exit at phase_status='\$_ps'"
-    break
-  fi
+  # Terminal phase_status values that must exit the wrapper loop.
+  # qa_failed and qa_escalated are non-terminal for the YAML lifecycle (daemon
+  # post-QA triage may still flip status to done/failed) but ARE terminal for
+  # this wrapper — dispatch_3phase_story returns 0 on these without advancing,
+  # which would tight-loop if not broken here. The daemon resolution path takes
+  # over once the wrapper exits.
+  case "\$_ps" in
+    done|failed|escalated|qa_failed|qa_escalated)
+      echo "[\$(date '+%H:%M:%S')] $story_id — 3phase loop exit at phase_status='\$_ps'"
+      break
+      ;;
+  esac
 done
 WRAPPER_EOF
 
@@ -2552,6 +2544,12 @@ while true; do
       fi
     done
   fi
+
+  # ── Worktree prune (cycle housekeeping) ──────────────────────────────────
+  # Reaps administrative entries left behind by failed/escalated wrappers.
+  # `git worktree prune` only removes entries whose directory is gone — it
+  # never deletes a live worktree. Cheap, safe, runs once per cycle.
+  git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
 
   sleep "$POLL_INTERVAL"
 done
