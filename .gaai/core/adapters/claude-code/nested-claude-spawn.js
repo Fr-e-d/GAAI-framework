@@ -15,7 +15,7 @@
  *   | 'primary'      | any            | primary   |  ← explicit opt-out
  *   | 'secondary'    | yes            | secondary |  ← explicit opt-in
  *   | 'secondary'    | no             | primary   |  ← warn + silent fallback
- *   | 'absent'/null  | yes            | secondary |  ← env-driven default (DEC-72 ; DEC-101 supersedes DEC-93)
+ *   | 'absent'/null  | yes            | secondary |  ← env-driven default (DEC-72)
  *   | 'absent'/null  | no             | primary   |  ← OSS non-regression (E94 D-0)
  *
  * Entry points:
@@ -676,17 +676,14 @@ export function resolveMode(implModelTag, envState) {
   }
 
   // Row 4 (DEFAULT, env configured): no tag + secondary env configured → secondary.
-  // Per DEC-101 (supersedes DEC-93). DEC-93's primary-default stance was based on
-  // the 2026-05-05 Z.AI shim caching gap empirical signal (rapid_refill_breaker on
-  // GLM secondary) ; that signal was empirically invalidated 2026-05-06 (ADDENDUM
-  // in anthropic-shim-translator-product-evaluation-2026-05-05.md) + 2026-05-09
-  // context-engineering improvements (CLAUDE_CODE_AUTO_COMPACT_WINDOW reset to 200K
-  // giving 33K headroom + R1-R7 directive wording internalized by GLM, E135S02
-  // pre-tune showed wc -l first + offset/limit compliance). The cost-reliability
-  // balance flips back : secondary is cheap (~70% cost reduction vs primary) and
-  // reliable enough for Tier 1 stories. Universal fallback (AC3) absorbs failures
-  // by cascading to primary. Default to secondary maximizes cost savings ; stories
-  // that require primary opt-out via explicit `impl_model: primary`.
+  // Default routing reflects the project routing decision currently in force.
+  // Rationale : when context-engineering at the prompt layer (e.g., compact-window
+  // headroom, directive wording internalized by the model) mitigates the
+  // rapid_refill_breaker risk on the secondary path, the cost-reliability balance
+  // favors secondary as default — typically ~70% cost reduction vs primary while
+  // remaining reliable enough for routine work. Universal fallback (AC3) absorbs
+  // failures by cascading to primary. Stories that require primary opt-out via
+  // explicit `impl_model: primary`.
   if (normalized === null && envConfigured) {
     return { mode: 'secondary', tag_recorded };
   }
