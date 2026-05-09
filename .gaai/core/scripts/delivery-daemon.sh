@@ -44,7 +44,8 @@ set -euo pipefail
 #   GAAI_MAX_TURNS=200               max claude tool-call turns per delivery (primary safety)
 #   GAAI_MAX_TURNS_PLAN=100          max turns for PLAN phase claude -p spawn (default: 100)
 #                                    Was hardcoded 60 — empirically too tight for Tier 2 stories
-#                                    with 5+ DECs (retry-1 E145S02 hit error_max_turns at exactly 61).
+#                                    with several governing decisions to assimilate ; runs landed
+#                                    at exactly turn 61 / error_max_turns under the prior cap.
 #   GAAI_MAX_TURNS_QA=60             max turns for QA phase claude -p spawn (default: 60)
 #                                    Was hardcoded 30 — raised in tandem with PLAN budget.
 #   GAAI_HEARTBEAT_STALE=900         seconds without log output before killing (default: 15min)
