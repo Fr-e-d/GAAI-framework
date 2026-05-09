@@ -64,8 +64,7 @@ The `impl_model` field is **optional**. Stories without it validate exactly as b
 |---|---|
 | `impl_model` absent (story frontmatter or backlog entry) | **PASS** — default behavior |
 | `impl_model: primary` | **PASS** |
-| `impl_model: secondary` AND `tier ≤ 1` (or absent) | **PASS** |
-| `impl_model: secondary` AND `tier ≥ 2` | **BLOCKED** — see "Tier × impl_model compatibility" below (daemon hard gate) |
+| `impl_model: secondary` (any tier) | **PASS** — Tier × impl_model hard-gate retired per DEC-101 active 2026-05-09 (which supersedes DEC-93). Daemon hard-gate already removed in commit `071eb758` 2026-05-08, ahead of formal DEC. Fallback to primary on secondary failure is preserved via DEC-72 §AC3 universal cascade. |
 | Any other value (e.g. `tertiary`, `claude-opus-4-6`, `""`) | **FAIL** — `impl_model must be 'primary' or 'secondary' (got: '<value>')` |
 | `impl_model` in frontmatter AND backlog entry with different values | **FAIL** — `impl_model mismatch: frontmatter=<X>, backlog=<Y>` |
 
@@ -76,31 +75,23 @@ The `impl_model` field is **optional**. Stories without it validate exactly as b
 - If both are present and agree → PASS.
 - If both are present and differ → **FAIL** with mismatch message above.
 
-#### Tier × impl_model compatibility (daemon hard gate)
+#### Tier × impl_model compatibility (skill-side gate retired 2026-05-09)
 
-The delivery daemon refuses to dispatch the Impl phase for any story with `tier ≥ 2` AND `impl_model: secondary`. Empirical evidence has shown that Tier 2 stories on the secondary (cost-optimal) route systematically overflow the secondary model's context window within a small number of events, triggering rapid context-compact cascades and masked fallback to the primary model. The hard gate at the daemon makes this structural mismatch visible immediately rather than masking it behind a probabilistic dispatch failure.
+Per DEC-101 active 2026-05-09 (supersedes DEC-93) :
+- **Default routing** : `impl_model` ABSENT → `secondary` when env-configured (else `primary`, OSS non-regression)
+- **Fallback** : secondary spawn failure (any class) → primary subprocess via DEC-72 §AC3 universal cascade (preserved)
+- **Tier 2 stories needing Sonnet's stronger reasoning** : declare `impl_model: primary` explicitly per story author judgment. DEC-101 does NOT auto-coerce Tier 2 to primary (former DEC-93 behavior is removed).
 
-**This skill MUST detect the invalid combination at Discovery time and return BLOCKED**, with a remediation message naming the three acceptable fixes :
+This skill now :
+- Enforces only the `primary | secondary` value list (lines 65-71)
+- Enforces frontmatter / backlog parity
+- No longer pre-blocks any `tier × impl_model` combination (was the DEC-93-era hard-gate, retired)
 
-```
-impl_model: secondary on a tier ≥ 2 story is BLOCKED by the daemon
-Impl-phase hard gate. Daemon will refuse dispatch and flip phase_status
-to failed. Fix one of :
-  (a) Decompose the story into Tier 1 sub-stories per the story-scope-
-      discipline pattern (≤5 files, ≤6 ACs, ≤300 LOC per sub-story).
-  (b) Remove the `impl_model: secondary` line and let the tier-aware
-      default route the story to primary automatically.
-  (c) Set `impl_model: primary` explicitly if the operator wants to
-      override the default with intent.
-```
+**Setting `impl_model: secondary` explicitly**: always passes. Useful for cost-optimal stories where the author has verified the secondary model's context budget is comfortably sufficient OR is comfortable relying on the DEC-72 §AC3 fallback.
 
-**Recommended path for routine stories**: leave the field ABSENT. The tier-aware default :
-- Tier 1 absent → default routing (secondary if secondary-route env vars are configured, else primary)
-- Tier 2+ absent → coerced to primary automatically
+**Setting `impl_model: primary` explicitly**: always passes. Useful for Tier 2+ stories needing stronger reasoning, security/compliance-critical work, or other sensitivity overrides.
 
-**When `impl_model: secondary` is acceptable**: only on Tier 1 stories where cost optimization is intentional and the secondary model's context budget is comfortably sufficient.
-
-**When `impl_model: primary` should be set explicitly**: only when overriding a Tier 1 default for a sensitivity reason (security, compliance, accuracy-critical). For Tier 2+ stories where the default already coerces, leaving the field absent is preferred (no redundant directive).
+**Leaving `impl_model` ABSENT**: per DEC-101 default routing (secondary when env-configured else primary). Recommended for Tier 1 stories.
 
 Test fixtures: `.gaai/core/skills/discovery/validate-artefacts/tests/impl_model.test.yaml`
 
