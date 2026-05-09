@@ -169,17 +169,6 @@ Then load **domain-specific** anchors per Phase 1 detection :
 
 If domain unknown → ask the human, do not invent governance docs.
 
-**Transitive reads — follow `linked_research` AND lifecycle fields on every cited DEC :**
-
-When loading any cited DEC, the skill MUST :
-
-1. Read the DEC body in full.
-2. Check the DEC's `status` field — if `superseded`, follow the `superseded_by` field and read the superseding DEC. The verdict must apply against the **currently-active** DEC, not the superseded one.
-3. Check the DEC's `linked_research` frontmatter field (if present). For each path listed, read the research doc in full — **paying particular attention to any `ADDENDUM` section**, which by GAAI convention may post-date the DEC body and contain empirical evidence that invalidates, qualifies, or amends the DEC's original conclusions. ADDENDUMs are appended after a DEC is `active`, NOT promoted into the DEC body, so they would otherwise be missed by readers who only follow the DEC reference.
-4. Check the DEC's `amends` field — read the amended DEC for context.
-
-**Rationale** : a past incident saw a DEC reversal proposal REJECTed by a review-input invocation that read the cited DEC but did not follow the DEC's `linked_research` field. The linked research doc contained an ADDENDUM that empirically invalidated the DEC's foundational assumption. The verdict was therefore based on stale evidence the skill did not have access to. The override path corrected the outcome, but the false REJECT consumed reviewer cycles that the transitive-read discipline above prevents.
-
 ### Step 2.2 — Veracity Gate (skip if zero factual claim detected)
 
 Detect factual claims in the input — pattern-match on : product/competitor names, version numbers, dates, citations of standards (RFC/ISO/NIST/OWASP), technical capability assertions, regulatory facts, market data, benchmarks.

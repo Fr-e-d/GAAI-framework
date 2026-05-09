@@ -42,12 +42,6 @@ set -euo pipefail
 #   GAAI_TARGET_BRANCH=staging       target branch (default: staging)
 #   GAAI_DELIVERY_TIMEOUT=14400      hard kill timeout in seconds (default: 4h, last resort)
 #   GAAI_MAX_TURNS=200               max claude tool-call turns per delivery (primary safety)
-#   GAAI_MAX_TURNS_PLAN=100          max turns for PLAN phase claude -p spawn (default: 100)
-#                                    Was hardcoded 60 — empirically too tight for Tier 2 stories
-#                                    with several governing decisions to assimilate ; runs landed
-#                                    at exactly turn 61 / error_max_turns under the prior cap.
-#   GAAI_MAX_TURNS_QA=60             max turns for QA phase claude -p spawn (default: 60)
-#                                    Was hardcoded 30 — raised in tandem with PLAN budget.
 #   GAAI_HEARTBEAT_STALE=900         seconds without log output before killing (default: 15min)
 #   GAAI_CLAUDE_MODEL=sonnet         claude model to use (default: sonnet)
 #   GAAI_STALENESS_THRESHOLD=15000   seconds before orphan in_progress is stale (default: timeout+10min)
@@ -139,6 +133,7 @@ BACKLOG="$PROJECT_DIR/$BACKLOG_REL"
 BACKLOG_FILE="$BACKLOG"   # alias for daemon-dispatch.sh library (E134S02)
 SCHEDULER="$SCRIPT_DIR/backlog-scheduler.sh"
 LOCK_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-locks"
+DRIFT_MARKER="$LOCK_DIR/.drift-detected.audit"
 LOG_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-logs"
 STAGING_LOCK="$LOCK_DIR/.staging.lock"
 RETRY_FILE="$LOCK_DIR/.retry-counts"
@@ -500,6 +495,22 @@ log() {
   echo -e "$msg" | sed "s/${ESC}\[[0-9;]*m//g" >> "$LOG_FILE"
 }
 
+# ── AC4: Drift marker helpers ─────────────────────────────────────────────
+# Single-slot file: last-write wins. Cleared when working tree is clean again.
+_write_drift_marker() {
+  local context="$1" reason="$2"
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
+  printf '%s|%s|%s\n' "$ts" "$context" "$reason" > "$DRIFT_MARKER" 2>/dev/null || true
+  log "${YELLOW}[DRIFT] working-tree drift detected ($context): $reason${NC}"
+}
+
+_clear_drift_marker_if_clean() {
+  if git -C "$PROJECT_DIR" diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+    rm -f "$DRIFT_MARKER"
+  fi
+}
+
 # ── Preflight checks ─────────────────────────────────────────────────────
 mkdir -p "$LOCK_DIR" "$LOG_DIR"
 
@@ -752,13 +763,10 @@ check_stale_in_progress() {
   backlog_content=$(fetch_and_read_backlog)
   [[ -z "$backlog_content" ]] && return 0
 
-  # Extract story IDs with status: in_progress (filter epic IDs — only stories
-  # have delivery semantics ; an epic with status:in_progress reflects child
-  # in-flight stories, has no commit trail and must not be brute-marked failed).
+  # Extract story IDs with status: in_progress
   local in_progress_ids
   in_progress_ids=$(echo "$backlog_content" | python3 -c '
 import sys, re
-STORY_RE = re.compile(r"^E\d+S\d+")
 content = sys.stdin.read()
 current_id = None
 for line in content.splitlines():
@@ -767,7 +775,7 @@ for line in content.splitlines():
         current_id = stripped.split(":", 1)[1].strip()
     elif current_id and stripped.startswith("status:"):
         status = stripped.split(":", 1)[1].strip()
-        if status == "in_progress" and STORY_RE.match(current_id):
+        if status == "in_progress":
             print(current_id)
         current_id = None
 ' 2>/dev/null) || return 0
@@ -817,10 +825,15 @@ cd "$PROJECT_DIR"
 if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
   # Preserve any uncommitted work before force-syncing
   if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    git stash push -m "daemon-autosave-$(date +%s)" --quiet 2>/dev/null || true
+    git stash push -m "daemon-autosave-\$(date +%s)" --quiet 2>/dev/null || true
   fi
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
   git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null
+fi
+# AC3: refuse-and-skip if working-tree drift exists before we modify the backlog
+if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+  echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping staleness-failed for $sid; commit or stash your edits" >&2
+  exit 6
 fi
 "$SCHEDULER" --set-status "$sid" failed "$BACKLOG"
 git add "$BACKLOG_REL"
@@ -828,14 +841,18 @@ git commit -m "chore($sid): failed [daemon-staleness]" --quiet
 git push origin "$TARGET_BRANCH" --quiet 2>&1
 RSTEOF
       chmod +x "$reset_script"
-      if with_staging_lock bash "$reset_script" 2>/dev/null; then
+      local stale_rc=0
+      with_staging_lock bash "$reset_script" 2>/dev/null || stale_rc=$?
+      rm -f "$reset_script"
+      if [[ "$stale_rc" -eq 0 ]]; then
         log "${GREEN}$sid marked as failed (stale recovery)${NC}"
         notify_escalation "$sid" "Stale: stuck in_progress for ${age_min}min" "Run: git log --oneline origin/staging | grep $sid — then reset manually or re-refine"
         track_for_resolution "$sid" "failed"
+      elif [[ "$stale_rc" -eq 6 ]]; then
+        _write_drift_marker "commit" "staleness-failed-$sid"
       else
         log "${RED}Could not mark $sid as failed — manual intervention needed${NC}"
       fi
-      rm -f "$reset_script"
     fi
   done <<< "$in_progress_ids"
 }
@@ -878,21 +895,36 @@ crash_recovery_scan() {
   backlog_content=$(fetch_and_read_backlog)
   [[ -z "$backlog_content" ]] && return 0
 
+  # AC1: Read working-tree backlog for per-story drift comparison (before any relaunch).
+  # Parses id|status|phase_status for all stories. Empty on python3 failure (graceful degrade).
+  local wt_all_status=""
+  if [[ -f "$BACKLOG" ]]; then
+    wt_all_status=$(python3 -c '
+import sys
+content = open(sys.argv[1]).read()
+cur_id = None; cur_status = None; cur_phase = None
+def emit():
+    if cur_id:
+        print(cur_id + "|" + (cur_status or "") + "|" + (cur_phase or ""))
+for line in content.splitlines():
+    s = line.strip()
+    if s.startswith("- id:"): emit(); cur_id = s.split(":",1)[1].strip(); cur_status = None; cur_phase = None
+    elif cur_id and s.startswith("status:"): cur_status = s.split(":",1)[1].strip()
+    elif cur_id and s.startswith("phase_status:"): cur_phase = s.split(":",1)[1].strip()
+emit()
+' "$BACKLOG" 2>/dev/null) || wt_all_status=""
+  fi
+
   # Extract (id|phase_status) pairs for status:in_progress stories in one pass.
-  # Filter epic IDs (E\d+ without S\d+ suffix) — only stories run through the
-  # delivery lifecycle ; epics may legitimately have status:in_progress when their
-  # children are in flight, but they have no worktree / wrapper / phase_status
-  # semantics, so the recovery classifier mis-flags them as "unknown phase_status".
   local in_progress_pairs
   in_progress_pairs=$(echo "$backlog_content" | python3 -c '
-import sys, re
-STORY_RE = re.compile(r"^E\d+S\d+")
+import sys
 content = sys.stdin.read()
 cur_id = None
 cur_status = None
 cur_phase = None
 def emit():
-    if cur_id and cur_status == "in_progress" and STORY_RE.match(cur_id):
+    if cur_id and cur_status == "in_progress":
         print(cur_id + "|" + (cur_phase or ""))
 for line in content.splitlines():
     stripped = line.strip()
@@ -915,13 +947,31 @@ emit()
 
   log "${CYAN}[RECOVERY] Crash-recovery scan : evaluating in_progress stories${NC}"
 
-  local resumed=0 reverted=0 reconciled=0 skipped=0 interrupted=0
+  local resumed=0 reverted=0 reconciled=0 skipped=0 interrupted=0 drift_detected=0
 
   while IFS= read -r pair; do
     [[ -z "$pair" ]] && continue
     local sid ps
     sid="${pair%%|*}"
     ps="${pair##*|}"
+
+    # ── AC1: per-story working-tree drift check (in_progress targets only) ───────────
+    # HEAD says in_progress; compare WT status/phase_status. Only checks stories that
+    # are already in in_progress_pairs (HEAD status == in_progress). Benign edits on
+    # draft/deferred/refined stories do NOT freeze recovery for the whole backlog.
+    if [[ -n "$wt_all_status" ]]; then
+      local wt_row wt_status wt_ps
+      wt_row=$(printf '%s\n' "$wt_all_status" | grep "^${sid}|" | head -1)
+      wt_status="${wt_row#*|}"
+      wt_status="${wt_status%%|*}"
+      wt_ps="${wt_row##*|}"
+      if [[ -n "$wt_row" ]] && ( [[ "$wt_status" != "in_progress" ]] || [[ "$wt_ps" != "$ps" ]] ); then
+        log "${YELLOW}[RECOVERY] $sid : working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) — skipping relaunch this scan${NC}"
+        _write_drift_marker "scan" "drift-$sid"
+        drift_detected=1
+        continue
+      fi
+    fi
 
     # ── Path 1 : .interrupted touch (graceful daemon-start.sh --stop, OSS-3) ─────────
     local interrupted_marker="$LOCK_DIR/${sid}.interrupted"
@@ -1042,6 +1092,11 @@ emit()
     esac
   done <<< "$in_progress_pairs"
 
+  # AC1/AC4: if this scan detected no drift, clear the marker (working tree is clean).
+  if [[ "$drift_detected" -eq 0 ]]; then
+    _clear_drift_marker_if_clean
+  fi
+
   log "${CYAN}[RECOVERY] Scan done : resumed=$resumed reverted=$reverted reconciled=$reconciled interrupted=$interrupted skipped=$skipped${NC}"
 }
 
@@ -1081,6 +1136,11 @@ if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
   git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
 fi
+# AC3: refuse-and-skip if working-tree drift exists before we modify the backlog
+if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+  echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping revert-refined for $sid; commit or stash your edits" >&2
+  exit 6
+fi
 "$SCHEDULER" --set-status "$sid" refined "$BACKLOG"
 RSTEOF
   if [[ "$reset_phase" == "true" ]]; then
@@ -1097,6 +1157,9 @@ RSTEOF
   local rc=0
   with_staging_lock bash "$script" 2>/dev/null || rc=$?
   rm -f "$script"
+  if [[ "$rc" -eq 6 ]]; then
+    _write_drift_marker "commit" "revert-refined-$sid"
+  fi
   return $rc
 }
 
@@ -1118,6 +1181,11 @@ if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
   git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
 fi
+# AC3: refuse-and-skip if working-tree drift exists before we modify the backlog
+if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+  echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping reconcile-$new_status for $sid; commit or stash your edits" >&2
+  exit 6
+fi
 "$SCHEDULER" --set-status "$sid" "$new_status" "$BACKLOG"
 git add "$BACKLOG_REL"
 git diff --cached --quiet || git commit -m "chore($sid): $new_status [daemon-recovery:$reason]" --quiet
@@ -1127,6 +1195,9 @@ RSTEOF
   local rc=0
   with_staging_lock bash "$script" 2>/dev/null || rc=$?
   rm -f "$script"
+  if [[ "$rc" -eq 6 ]]; then
+    _write_drift_marker "commit" "reconcile-$new_status-$sid"
+  fi
   return $rc
 }
 
@@ -1136,6 +1207,28 @@ RSTEOF
 # Requires daemon-dispatch.sh sourced (caller orders the call site).
 _recovery_relaunch() {
   local sid="$1"
+
+  # AC2: re-read WT status immediately before spawning (covers the narrow race window
+  # between AC1's scan-time drift check and the wrapper spawn — e.g. operator commits
+  # a reset between the case "$ps" branch and this function call).
+  local wt_recheck_status=""
+  if [[ -f "$BACKLOG" ]]; then
+    wt_recheck_status=$(python3 -c "
+import sys, os
+content = open('$BACKLOG').read() if os.path.isfile('$BACKLOG') else ''
+cur_id = None; cur_status = None
+for line in content.splitlines():
+    s = line.strip()
+    if s.startswith('- id:'): cur_id = s.split(':',1)[1].strip(); cur_status = None
+    elif cur_id == '${sid}' and s.startswith('status:'): cur_status = s.split(':',1)[1].strip(); break
+print(cur_status or '')
+" 2>/dev/null) || wt_recheck_status=""
+  fi
+  if [[ -n "$wt_recheck_status" && "$wt_recheck_status" != "in_progress" ]]; then
+    log "${YELLOW}[RECOVERY] $sid : status changed to $wt_recheck_status mid-scan — skipping relaunch${NC}"
+    return 1
+  fi
+
   local trace_id
   trace_id=$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \
     || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
@@ -1218,6 +1311,13 @@ if ! "$SCHEDULER" --ready-ids "$BACKLOG" 2>/dev/null | grep -q "^${story_id}\$";
   exit 2
 fi
 
+# AC3: refuse-and-skip if working-tree drift exists before we modify the backlog.
+# This prevents operator's unstaged edits from being swept into the in_progress commit.
+if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+  echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping in_progress mark for $story_id; commit or stash your edits" >&2
+  exit 6
+fi
+
 # Step 3: Mark in_progress locally + set started_at
 "$SCHEDULER" --set-status "$story_id" in_progress "$BACKLOG"
 "$SCHEDULER" --set-field "$story_id" started_at "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BACKLOG"
@@ -1264,6 +1364,10 @@ PLEOF
       log "${YELLOW}$story_id push conflict (concurrent claim). Skipping.${NC}"
       return 1
       ;;
+    6)
+      _write_drift_marker "commit" "mark-in-progress-$story_id"
+      return 1
+      ;;
     *)
       log "${RED}Failed to mark $story_id in_progress (rc=$rc)${NC}"
       return 1
@@ -1299,6 +1403,13 @@ capture_metadata() {
   # the Claude Code Stop hook — metadata would never be captured otherwise.
   local delivery_log="$LOG_DIR/${story_id}.log"
   local fields_updated=0
+
+  # AC3: skip metadata capture (and backlog modification) if working-tree drift exists.
+  # Check before any --set-field calls so operator edits are not swept into the commit.
+  if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+    echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping metadata capture for $story_id; commit or stash your edits"
+    return 0
+  fi
 
   # cost_usd — from delivery log (type:result → total_cost_usd)
   if [[ -f "\$delivery_log" ]]; then
@@ -1709,6 +1820,12 @@ on_exit() {
     fi
 
     (
+      # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+      git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+        printf '%s|commit|drift-escalated-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+        echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping escalated for $story_id; commit or stash your edits" >&2
+        exit 6
+      }
       if command -v flock &>/dev/null; then
         flock "$STAGING_LOCK" bash -c "
           '$SCHEDULER' --set-status '$story_id' escalated '$BACKLOG' 2>/dev/null || true
@@ -1728,6 +1845,12 @@ on_exit() {
     if is_rate_limit_failure; then
       echo "[WRAPPER] Delivery hit Anthropic rate-limit (transient). Reverting $story_id to refined for retry..."
       (
+        # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+        git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+          printf '%s|commit|drift-rate-limit-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+          echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping rate_limit_retry for $story_id; commit or stash your edits" >&2
+          exit 6
+        }
         if command -v flock &>/dev/null; then
           flock "$STAGING_LOCK" bash -c "
             '$SCHEDULER' --set-status '$story_id' refined '$BACKLOG' 2>/dev/null || true
@@ -1746,6 +1869,12 @@ on_exit() {
     else
       echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
       (
+        # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+        git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+          printf '%s|commit|drift-failed-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+          echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping failed for $story_id; commit or stash your edits" >&2
+          exit 6
+        }
         if command -v flock &>/dev/null; then
           flock "$STAGING_LOCK" bash -c "
             '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
@@ -1943,6 +2072,12 @@ capture_metadata() {
   # Same as tmux wrapper — stop hook doesn't fire in -p mode.
   local delivery_log="$LOG_DIR/${story_id}.log"
   local fields_updated=0
+
+  # AC3: skip metadata capture if working-tree drift exists (check before scheduler calls)
+  if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+    echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping metadata capture for $story_id; commit or stash your edits"
+    return 0
+  fi
 
   if [[ -f "\$delivery_log" ]]; then
     local cost
@@ -2327,6 +2462,12 @@ on_exit() {
     fi
 
     (
+      # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+      git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+        printf '%s|commit|drift-escalated-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+        echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping escalated for $story_id; commit or stash your edits" >&2
+        exit 6
+      }
       '$SCHEDULER' --set-status '$story_id' escalated '$BACKLOG' 2>/dev/null || true
       git add '$BACKLOG_REL' 2>/dev/null
       git commit -m 'chore($story_id): escalated [daemon-wrapper]' --quiet 2>/dev/null
@@ -2337,6 +2478,12 @@ on_exit() {
     if is_rate_limit_failure; then
       echo "[WRAPPER] Delivery hit Anthropic rate-limit (transient). Reverting $story_id to refined for retry..."
       (
+        # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+        git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+          printf '%s|commit|drift-rate-limit-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+          echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping rate_limit_retry for $story_id; commit or stash your edits" >&2
+          exit 6
+        }
         '$SCHEDULER' --set-status '$story_id' refined '$BACKLOG' 2>/dev/null || true
         git add '$BACKLOG_REL' 2>/dev/null
         git commit -m 'chore($story_id): rate_limit_retry [delivery-wrapper]' --quiet 2>/dev/null
@@ -2346,6 +2493,12 @@ on_exit() {
     else
       echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
       (
+        # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+        git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+          printf '%s|commit|drift-failed-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+          echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping failed for $story_id; commit or stash your edits" >&2
+          exit 6
+        }
         '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
         git add '$BACKLOG_REL' 2>/dev/null
         git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
@@ -2738,18 +2891,6 @@ fi
 # ── Load 3-phase dispatch library (E134S02) ──────────────────────────────
 # shellcheck disable=SC1090
 source "$(dirname "$0")/daemon-dispatch.sh"
-
-# ── Reset retry counters (session-scoped per get_retry_count contract) ──
-# .retry-counts is documented as session-scoped ("Resets on daemon restart
-# (intentional)" — see get_retry_count). The user-facing "Skipping (restart
-# daemon to reset)" log message also assumes restart clears the counter.
-# Empirically the file persisted across restarts before this truncate, which
-# blocked stories that operators had manually healed via failed→refined
-# transitions (the counter outlived the failure context that produced it).
-if [[ -f "$RETRY_FILE" ]]; then
-  : > "$RETRY_FILE"
-  log "${CYAN}Retry counters reset (session-scoped — see get_retry_count contract)${NC}"
-fi
 
 # ── OSS-5 : Crash-recovery scan (one-shot at daemon start) ───────────────
 # Lock cleanup first so is_locked accurately reports liveness inside the
