@@ -788,24 +788,21 @@ describe('resolveMode (DEC-72 five-row matrix)', () => {
     assert.equal(r.tag_recorded, 'secondary');
   });
 
-  // Row 4: absent/null tag + env configured → secondary (DEC-101 supersedes DEC-93)
-  // Default re-flipped to secondary post 2026-05-06 ADDENDUM (Z.AI shim caching empirically usable)
-  // + 2026-05-09 context-engineering improvements (CLAUDE_CODE_AUTO_COMPACT_WINDOW reset to 200K
-  // giving 33K headroom + R1-R7 directive wording internalized by GLM). Universal fallback (AC3)
-  // absorbs the rare failure cases by cascading to primary.
-  test('Row 4a: absent sentinel + env configured → mode=secondary, tag_recorded=absent (DEC-101 default)', () => {
+  // Row 4: absent/null tag + env configured → secondary (DEC-72 env-driven default)
+  // Universal fallback (AC3) absorbs the rare failure cases by cascading to primary.
+  test('Row 4a: absent sentinel + env configured → mode=secondary, tag_recorded=absent', () => {
     const r = resolveMode('absent', fullEnv);
     assert.equal(r.mode, 'secondary');
     assert.equal(r.tag_recorded, 'absent');
   });
 
-  test('Row 4b: null (no backlog tag) + env configured → mode=secondary, tag_recorded=absent (DEC-101 default)', () => {
+  test('Row 4b: null (no backlog tag) + env configured → mode=secondary, tag_recorded=absent', () => {
     const r = resolveMode(null, fullEnv);
     assert.equal(r.mode, 'secondary');
     assert.equal(r.tag_recorded, 'absent');
   });
 
-  test('Row 4c: undefined (no backlog tag) + env configured → mode=secondary, tag_recorded=absent (DEC-101 default)', () => {
+  test('Row 4c: undefined (no backlog tag) + env configured → mode=secondary, tag_recorded=absent', () => {
     const r = resolveMode(undefined, fullEnv);
     assert.equal(r.mode, 'secondary');
     assert.equal(r.tag_recorded, 'absent');

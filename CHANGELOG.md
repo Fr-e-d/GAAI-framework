@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- chore(routing): genericize OSS-bound comments — preserve WHY, drop project-specific WHEN/WHO
+
 ## [2.23.0] - 2026-05-09
 
 ### Changed
