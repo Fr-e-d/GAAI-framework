@@ -15,6 +15,7 @@ ROUTING_LOG="${PROJECT_DIR}/.gaai/project/contexts/logs/runtime-routing.jsonl"
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
 DIM='\033[2m'
 NC='\033[0m'
 
@@ -178,9 +179,12 @@ render_phase_metrics() {
 while true; do
   clear
   render_banner
-  # Per-phase metrics removed — redundant with the bottom "Active Deliveries"
-  # section which already renders phase + duration + model + activity in a
-  # richer single-source-of-truth format.
+
+  # AC4: drift detection banner — shown while .drift-detected.audit marker exists
+  if [[ -f "$LOCK_DIR/.drift-detected.audit" ]]; then
+    echo -e "  ${YELLOW}⚠ working-tree drift detected (recovery/commits paused) — commit or stash your edits${NC}"
+    echo ""
+  fi
 
   if [[ -f "$LOG_FILE" ]]; then
     # Calculate available lines for logs (banner takes ~11 lines)
