@@ -15,7 +15,7 @@
  *   | 'primary'      | any            | primary   |  ← explicit opt-out
  *   | 'secondary'    | yes            | secondary |  ← explicit opt-in
  *   | 'secondary'    | no             | primary   |  ← warn + silent fallback
- *   | 'absent'/null  | yes            | secondary |  ← env-driven default (DEC-72)
+ *   | 'absent'/null  | yes            | secondary |  ← env-driven default (DEC-72 ; DEC-101 supersedes DEC-93)
  *   | 'absent'/null  | no             | primary   |  ← OSS non-regression (E94 D-0)
  *
  * Entry points:
@@ -676,14 +676,17 @@ export function resolveMode(implModelTag, envState) {
   }
 
   // Row 4 (DEFAULT, env configured): no tag + secondary env configured → secondary.
-  // Reverses the earlier DEC-93 default-to-primary stance. With the WINDOW=200K
-  // reset (commit e72c7919) giving 33K headroom + R1-R7 directive wording
-  // empirically internalized by GLM (E135S02 pre-tune showed wc -l first +
-  // offset/limit compliance), the cost-reliability balance flips back :
-  // secondary is cheap (~70% cost reduction vs primary) and reliable enough
-  // for Tier 1 stories. Universal fallback (AC3) absorbs failures by cascading
-  // to primary. Default to secondary maximizes cost savings ; stories that
-  // require primary opt-out via explicit `impl_model: primary`.
+  // Per DEC-101 (supersedes DEC-93). DEC-93's primary-default stance was based on
+  // the 2026-05-05 Z.AI shim caching gap empirical signal (rapid_refill_breaker on
+  // GLM secondary) ; that signal was empirically invalidated 2026-05-06 (ADDENDUM
+  // in anthropic-shim-translator-product-evaluation-2026-05-05.md) + 2026-05-09
+  // context-engineering improvements (CLAUDE_CODE_AUTO_COMPACT_WINDOW reset to 200K
+  // giving 33K headroom + R1-R7 directive wording internalized by GLM, E135S02
+  // pre-tune showed wc -l first + offset/limit compliance). The cost-reliability
+  // balance flips back : secondary is cheap (~70% cost reduction vs primary) and
+  // reliable enough for Tier 1 stories. Universal fallback (AC3) absorbs failures
+  // by cascading to primary. Default to secondary maximizes cost savings ; stories
+  // that require primary opt-out via explicit `impl_model: primary`.
   if (normalized === null && envConfigured) {
     return { mode: 'secondary', tag_recorded };
   }
