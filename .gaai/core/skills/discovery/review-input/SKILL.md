@@ -178,7 +178,7 @@ When loading any cited DEC, the skill MUST :
 3. Check the DEC's `linked_research` frontmatter field (if present). For each path listed, read the research doc in full — **paying particular attention to any `ADDENDUM` section**, which by GAAI convention may post-date the DEC body and contain empirical evidence that invalidates, qualifies, or amends the DEC's original conclusions. ADDENDUMs are appended after a DEC is `active`, NOT promoted into the DEC body, so they would otherwise be missed by readers who only follow the DEC reference.
 4. Check the DEC's `amends` field — read the amended DEC for context.
 
-**Rationale (incident 2026-05-09)** : a DEC reversal proposal was REJECTed by a review-input invocation that read the cited DEC but did not follow the DEC's `linked_research` field. The linked research doc contained an ADDENDUM (dated after the DEC's `created_at`) that empirically invalidated the DEC's foundational assumption. The verdict was therefore based on stale evidence the skill did not have access to. The override path corrected the outcome, but the false REJECT consumed reviewer cycles that the transitive-read discipline above prevents.
+**Rationale** : a past incident saw a DEC reversal proposal REJECTed by a review-input invocation that read the cited DEC but did not follow the DEC's `linked_research` field. The linked research doc contained an ADDENDUM that empirically invalidated the DEC's foundational assumption. The verdict was therefore based on stale evidence the skill did not have access to. The override path corrected the outcome, but the false REJECT consumed reviewer cycles that the transitive-read discipline above prevents.
 
 ### Step 2.2 — Veracity Gate (skip if zero factual claim detected)
 
