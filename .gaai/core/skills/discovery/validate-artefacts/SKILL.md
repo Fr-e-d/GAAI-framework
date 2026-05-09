@@ -64,7 +64,7 @@ The `impl_model` field is **optional**. Stories without it validate exactly as b
 |---|---|
 | `impl_model` absent (story frontmatter or backlog entry) | **PASS** — default behavior |
 | `impl_model: primary` | **PASS** |
-| `impl_model: secondary` (any tier) | **PASS** — Tier × impl_model hard-gate retired per DEC-101 active 2026-05-09 (which supersedes DEC-93). Daemon hard-gate already removed in commit `071eb758` 2026-05-08, ahead of formal DEC. Fallback to primary on secondary failure is preserved via DEC-72 §AC3 universal cascade. |
+| `impl_model: secondary` (any tier) | **PASS** — Tier × impl_model hard-gate retired ; daemon hard-gate previously removed ahead of formal decision. Fallback to primary on secondary failure is preserved via DEC-72 §AC3 universal cascade. |
 | Any other value (e.g. `tertiary`, `claude-opus-4-6`, `""`) | **FAIL** — `impl_model must be 'primary' or 'secondary' (got: '<value>')` |
 | `impl_model` in frontmatter AND backlog entry with different values | **FAIL** — `impl_model mismatch: frontmatter=<X>, backlog=<Y>` |
 
@@ -75,23 +75,23 @@ The `impl_model` field is **optional**. Stories without it validate exactly as b
 - If both are present and agree → PASS.
 - If both are present and differ → **FAIL** with mismatch message above.
 
-#### Tier × impl_model compatibility (skill-side gate retired 2026-05-09)
+#### Tier × impl_model compatibility (skill-side gate retired)
 
-Per DEC-101 active 2026-05-09 (supersedes DEC-93) :
+Current routing doctrine :
 - **Default routing** : `impl_model` ABSENT → `secondary` when env-configured (else `primary`, OSS non-regression)
 - **Fallback** : secondary spawn failure (any class) → primary subprocess via DEC-72 §AC3 universal cascade (preserved)
-- **Tier 2 stories needing Sonnet's stronger reasoning** : declare `impl_model: primary` explicitly per story author judgment. DEC-101 does NOT auto-coerce Tier 2 to primary (former DEC-93 behavior is removed).
+- **Tier 2 stories needing primary's stronger reasoning** : declare `impl_model: primary` explicitly per story author judgment. The current decision does NOT auto-coerce Tier 2 to primary (former hard-gate behavior is removed).
 
 This skill now :
 - Enforces only the `primary | secondary` value list (lines 65-71)
 - Enforces frontmatter / backlog parity
-- No longer pre-blocks any `tier × impl_model` combination (was the DEC-93-era hard-gate, retired)
+- No longer pre-blocks any `tier × impl_model` combination (the prior tier-aware hard-gate is retired)
 
 **Setting `impl_model: secondary` explicitly**: always passes. Useful for cost-optimal stories where the author has verified the secondary model's context budget is comfortably sufficient OR is comfortable relying on the DEC-72 §AC3 fallback.
 
 **Setting `impl_model: primary` explicitly**: always passes. Useful for Tier 2+ stories needing stronger reasoning, security/compliance-critical work, or other sensitivity overrides.
 
-**Leaving `impl_model` ABSENT**: per DEC-101 default routing (secondary when env-configured else primary). Recommended for Tier 1 stories.
+**Leaving `impl_model` ABSENT**: routes to default (secondary when env-configured else primary). Recommended for Tier 1 stories.
 
 Test fixtures: `.gaai/core/skills/discovery/validate-artefacts/tests/impl_model.test.yaml`
 

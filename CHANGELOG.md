@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- chore(skills): genericize OSS-bound DEC/SHA/date refs in validate-artefacts SKILL.md
 - chore(discovery): register E146S06 P7 cutover as draft + cycle-1 REFINE findings logged
 - chore(routing): genericize OSS-bound comments — preserve WHY, drop project-specific WHEN/WHO
 
