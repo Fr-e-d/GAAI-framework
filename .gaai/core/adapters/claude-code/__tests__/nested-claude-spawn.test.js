@@ -788,8 +788,8 @@ describe('resolveMode (DEC-72 five-row matrix)', () => {
     assert.equal(r.tag_recorded, 'secondary');
   });
 
-  // Row 4: absent/null tag + env configured → secondary (DEC-72 env-driven default)
-  // Universal fallback (AC3) absorbs the rare failure cases by cascading to primary.
+  // Row 4: absent/null tag + env configured → secondary (env-driven default)
+  // Universal fallback absorbs the rare failure cases by cascading to primary.
   test('Row 4a: absent sentinel + env configured → mode=secondary, tag_recorded=absent', () => {
     const r = resolveMode('absent', fullEnv);
     assert.equal(r.mode, 'secondary');
