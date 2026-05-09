@@ -2739,6 +2739,18 @@ fi
 # shellcheck disable=SC1090
 source "$(dirname "$0")/daemon-dispatch.sh"
 
+# ── Reset retry counters (session-scoped per get_retry_count contract) ──
+# .retry-counts is documented as session-scoped ("Resets on daemon restart
+# (intentional)" — see get_retry_count). The user-facing "Skipping (restart
+# daemon to reset)" log message also assumes restart clears the counter.
+# Empirically the file persisted across restarts before this truncate, which
+# blocked stories that operators had manually healed via failed→refined
+# transitions (the counter outlived the failure context that produced it).
+if [[ -f "$RETRY_FILE" ]]; then
+  : > "$RETRY_FILE"
+  log "${CYAN}Retry counters reset (session-scoped — see get_retry_count contract)${NC}"
+fi
+
 # ── OSS-5 : Crash-recovery scan (one-shot at daemon start) ───────────────
 # Lock cleanup first so is_locked accurately reports liveness inside the
 # scan. The scan classifies orphan in_progress stories (artefact + git +
