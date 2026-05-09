@@ -7,15 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.24.0] - 2026-05-09
 
 ### Changed
+- feat(skill): review-input mandates transitive reads on cited DECs (linked_research + lifecycle)
 - fix(daemon): genericize project-specific ref in env var doc
 - fix(daemon): bump PLAN/QA max-turns + filter epic IDs in recovery scans
 - chore(discovery-skill): genericize OSS-bound validate-artefacts skill — drop project-specific DEC refs
 - chore(skills): genericize OSS-bound DEC/SHA/date refs in validate-artefacts SKILL.md
 - chore(discovery): register E146S06 P7 cutover as draft + cycle-1 REFINE findings logged
 - chore(routing): genericize OSS-bound comments — preserve WHY, drop project-specific WHEN/WHO
+
 
 ## [2.23.0] - 2026-05-09
 
