@@ -42,6 +42,11 @@ set -euo pipefail
 #   GAAI_TARGET_BRANCH=staging       target branch (default: staging)
 #   GAAI_DELIVERY_TIMEOUT=14400      hard kill timeout in seconds (default: 4h, last resort)
 #   GAAI_MAX_TURNS=200               max claude tool-call turns per delivery (primary safety)
+#   GAAI_MAX_TURNS_PLAN=100          max turns for PLAN phase claude -p spawn (default: 100)
+#                                    Was hardcoded 60 — empirically too tight for Tier 2 stories
+#                                    with 5+ DECs (retry-1 E145S02 hit error_max_turns at exactly 61).
+#   GAAI_MAX_TURNS_QA=60             max turns for QA phase claude -p spawn (default: 60)
+#                                    Was hardcoded 30 — raised in tandem with PLAN budget.
 #   GAAI_HEARTBEAT_STALE=900         seconds without log output before killing (default: 15min)
 #   GAAI_CLAUDE_MODEL=sonnet         claude model to use (default: sonnet)
 #   GAAI_STALENESS_THRESHOLD=15000   seconds before orphan in_progress is stale (default: timeout+10min)
@@ -746,10 +751,13 @@ check_stale_in_progress() {
   backlog_content=$(fetch_and_read_backlog)
   [[ -z "$backlog_content" ]] && return 0
 
-  # Extract story IDs with status: in_progress
+  # Extract story IDs with status: in_progress (filter epic IDs — only stories
+  # have delivery semantics ; an epic with status:in_progress reflects child
+  # in-flight stories, has no commit trail and must not be brute-marked failed).
   local in_progress_ids
   in_progress_ids=$(echo "$backlog_content" | python3 -c '
 import sys, re
+STORY_RE = re.compile(r"^E\d+S\d+")
 content = sys.stdin.read()
 current_id = None
 for line in content.splitlines():
@@ -758,7 +766,7 @@ for line in content.splitlines():
         current_id = stripped.split(":", 1)[1].strip()
     elif current_id and stripped.startswith("status:"):
         status = stripped.split(":", 1)[1].strip()
-        if status == "in_progress":
+        if status == "in_progress" and STORY_RE.match(current_id):
             print(current_id)
         current_id = None
 ' 2>/dev/null) || return 0
@@ -870,15 +878,20 @@ crash_recovery_scan() {
   [[ -z "$backlog_content" ]] && return 0
 
   # Extract (id|phase_status) pairs for status:in_progress stories in one pass.
+  # Filter epic IDs (E\d+ without S\d+ suffix) — only stories run through the
+  # delivery lifecycle ; epics may legitimately have status:in_progress when their
+  # children are in flight, but they have no worktree / wrapper / phase_status
+  # semantics, so the recovery classifier mis-flags them as "unknown phase_status".
   local in_progress_pairs
   in_progress_pairs=$(echo "$backlog_content" | python3 -c '
-import sys
+import sys, re
+STORY_RE = re.compile(r"^E\d+S\d+")
 content = sys.stdin.read()
 cur_id = None
 cur_status = None
 cur_phase = None
 def emit():
-    if cur_id and cur_status == "in_progress":
+    if cur_id and cur_status == "in_progress" and STORY_RE.match(cur_id):
         print(cur_id + "|" + (cur_phase or ""))
 for line in content.splitlines():
     stripped = line.strip()

@@ -683,6 +683,7 @@ handle_plan_phase() {
   fi
 
   local claude_exit
+  local plan_max_turns="${GAAI_MAX_TURNS_PLAN:-100}"
   GAAI_STORY_ID="$story_id" \
   GAAI_WORKTREE_PATH="$worktree_path" \
   GAAI_STORY_PATH="$story_path" \
@@ -694,7 +695,7 @@ handle_plan_phase() {
     _run_claude_with_loop_breaker \
       "$story_id" "plan" "$log_path" "$prompt_file" "$worktree_path" \
       --model sonnet \
-      --max-turns 60 \
+      --max-turns "$plan_max_turns" \
       --output-format stream-json \
       --verbose \
       --dangerously-skip-permissions
@@ -1114,6 +1115,7 @@ handle_qa_phase() {
 
   # ── Spawn claude -p (AC1 — child bash subshell, NOT nested-claude-spawn.js) ──
   local claude_exit
+  local qa_max_turns="${GAAI_MAX_TURNS_QA:-60}"
   GAAI_STORY_ID="$story_id" \
   GAAI_WORKTREE_PATH="$worktree_path" \
   GAAI_STORY_PATH="$story_path" \
@@ -1129,7 +1131,7 @@ handle_qa_phase() {
     _run_claude_with_loop_breaker \
       "$story_id" "qa" "$log_path" "$prompt_file" "$worktree_path" \
       --model sonnet \
-      --max-turns 30 \
+      --max-turns "$qa_max_turns" \
       --output-format stream-json \
       --verbose \
       --dangerously-skip-permissions
