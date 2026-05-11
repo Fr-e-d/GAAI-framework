@@ -433,6 +433,297 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# AC4 — Concurrent chore-commit serialization (E134S16 — T12–T17)
+# Tests chore_commit_field / chore_commit_multi_field: single-field write,
+# idempotency, cross-story drift detection, multi-field atomicity,
+# concurrent caller serialization, and Option A fallback warning.
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== AC4: chore-commit serialization (T12-T17) ==="
+
+CHORE_LIB="$SCRIPT_DIR/../lib/chore-commit.sh"
+AC4_DIR="$FIXTURE_DIR/ac4-project"
+AC4_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
+AC4_LOCK_DIR="$FIXTURE_DIR/ac4-locks"
+AC4_STORY_A="TST-CC-A"
+AC4_STORY_B="TST-CC-B"
+mkdir -p "$AC4_LOCK_DIR"
+
+AC4_HEAD_YAML="items:
+- id: $AC4_STORY_A
+  status: refined
+  phase_status: not_started
+- id: $AC4_STORY_B
+  status: refined
+  phase_status: not_started"
+
+setup_git_repo "$AC4_DIR" "$AC4_HEAD_YAML"
+git -C "$AC4_DIR" config user.email "test@gaai.local"
+git -C "$AC4_DIR" config user.name "GAAI Test"
+
+# ── T12: single-field write succeeds on clean working tree ────────────────────
+echo "T12: chore_commit_field single-field write on clean WT"
+T12_HARNESS=$(mktemp /tmp/ac4-t12-XXXXXX.sh)
+cat > "$T12_HARNESS" <<SCRIPT
+#!/usr/bin/env bash
+BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
+BACKLOG_REL="$AC4_BACKLOG_REL"
+LOCK_DIR="$AC4_LOCK_DIR"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+cd "$AC4_DIR"
+source "$CHORE_LIB"
+chore_commit_field "$AC4_STORY_A" status in_progress "chore($AC4_STORY_A): in_progress [test]"
+SCRIPT
+chmod +x "$T12_HARNESS"
+T12_RC=0
+bash "$T12_HARNESS" 2>/dev/null || T12_RC=$?
+rm -f "$T12_HARNESS"
+
+if [[ "$T12_RC" -eq 0 ]]; then
+  pass "T12: chore_commit_field exited 0 on clean WT"
+else
+  fail "T12: chore_commit_field exited $T12_RC (expected 0)"
+fi
+T12_STATUS=$(git -C "$AC4_DIR" show HEAD:"$AC4_BACKLOG_REL" 2>/dev/null \
+  | grep -A 4 "id: $AC4_STORY_A" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"' || echo "")
+if [[ "$T12_STATUS" == "in_progress" ]]; then
+  pass "T12b: status committed as in_progress"
+else
+  fail "T12b: status in HEAD is '$T12_STATUS' (expected in_progress)"
+fi
+
+# ── T13: idempotency — same value → no new commit ─────────────────────────────
+echo "T13: chore_commit_field idempotency (same value)"
+T13_COUNT_BEFORE=$(git -C "$AC4_DIR" log --oneline | wc -l | tr -d ' ')
+T13_HARNESS=$(mktemp /tmp/ac4-t13-XXXXXX.sh)
+cat > "$T13_HARNESS" <<SCRIPT
+#!/usr/bin/env bash
+BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
+BACKLOG_REL="$AC4_BACKLOG_REL"
+LOCK_DIR="$AC4_LOCK_DIR"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+cd "$AC4_DIR"
+source "$CHORE_LIB"
+chore_commit_field "$AC4_STORY_A" status in_progress "chore($AC4_STORY_A): in_progress [test-dup]"
+SCRIPT
+chmod +x "$T13_HARNESS"
+T13_RC=0
+bash "$T13_HARNESS" 2>/dev/null || T13_RC=$?
+rm -f "$T13_HARNESS"
+T13_COUNT_AFTER=$(git -C "$AC4_DIR" log --oneline | wc -l | tr -d ' ')
+
+if [[ "$T13_RC" -eq 0 ]]; then
+  pass "T13: idempotent call exited 0"
+else
+  fail "T13: idempotent call exited $T13_RC (expected 0)"
+fi
+if [[ "$T13_COUNT_BEFORE" -eq "$T13_COUNT_AFTER" ]]; then
+  pass "T13b: no new commit on idempotent call"
+else
+  fail "T13b: unexpected new commit ($T13_COUNT_BEFORE → $T13_COUNT_AFTER)"
+fi
+
+# ── T14: cross-story drift → exit 6 ──────────────────────────────────────────
+echo "T14: chore_commit_field exits 6 on cross-story drift (dirty WT)"
+# Introduce unstaged edit to simulate operator editing an unrelated story
+python3 -c "
+with open('$AC4_DIR/$AC4_BACKLOG_REL') as f: content = f.read()
+content = content.replace('  phase_status: not_started', '  phase_status: not_started\n  notes: operator-edited', 1)
+with open('$AC4_DIR/$AC4_BACKLOG_REL', 'w') as f: f.write(content)
+" 2>/dev/null || true
+
+if git -C "$AC4_DIR" diff --quiet HEAD -- "$AC4_BACKLOG_REL" 2>/dev/null; then
+  fail "T14-precondition: expected dirty WT, found clean"
+else
+  T14_HARNESS=$(mktemp /tmp/ac4-t14-XXXXXX.sh)
+  cat > "$T14_HARNESS" <<SCRIPT
+#!/usr/bin/env bash
+BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
+BACKLOG_REL="$AC4_BACKLOG_REL"
+LOCK_DIR="$AC4_LOCK_DIR"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+cd "$AC4_DIR"
+source "$CHORE_LIB"
+chore_commit_field "$AC4_STORY_B" status in_progress "chore($AC4_STORY_B): in_progress [test]"
+SCRIPT
+  chmod +x "$T14_HARNESS"
+  T14_RC=0
+  bash "$T14_HARNESS" 2>/dev/null || T14_RC=$?
+  rm -f "$T14_HARNESS"
+
+  if [[ "$T14_RC" -eq 6 ]]; then
+    pass "T14: exit code 6 on cross-story drift"
+  else
+    fail "T14: expected exit code 6, got $T14_RC"
+  fi
+  # Verify no commit for story B was created
+  T14_STATUS=$(git -C "$AC4_DIR" show HEAD:"$AC4_BACKLOG_REL" 2>/dev/null \
+    | grep -A 4 "id: $AC4_STORY_B" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"' || echo "")
+  if [[ "$T14_STATUS" == "refined" ]]; then
+    pass "T14b: story B still refined in HEAD (commit correctly refused)"
+  else
+    fail "T14b: story B status in HEAD is '$T14_STATUS' (expected refined)"
+  fi
+fi
+# Reset WT before T15
+git -C "$AC4_DIR" checkout HEAD -- "$AC4_BACKLOG_REL" 2>/dev/null || true
+
+# ── T15: chore_commit_multi_field atomic multi-field write ────────────────────
+echo "T15: chore_commit_multi_field writes multiple fields in one commit"
+T15_HARNESS=$(mktemp /tmp/ac4-t15-XXXXXX.sh)
+cat > "$T15_HARNESS" <<SCRIPT
+#!/usr/bin/env bash
+BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
+BACKLOG_REL="$AC4_BACKLOG_REL"
+LOCK_DIR="$AC4_LOCK_DIR"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+cd "$AC4_DIR"
+source "$CHORE_LIB"
+chore_commit_multi_field "$AC4_STORY_B" status in_progress phase_status planning \
+  "chore($AC4_STORY_B): in_progress [test]"
+SCRIPT
+chmod +x "$T15_HARNESS"
+T15_RC=0
+bash "$T15_HARNESS" 2>/dev/null || T15_RC=$?
+rm -f "$T15_HARNESS"
+
+if [[ "$T15_RC" -eq 0 ]]; then
+  pass "T15: chore_commit_multi_field exited 0"
+else
+  fail "T15: chore_commit_multi_field exited $T15_RC (expected 0)"
+fi
+T15_SNAP=$(git -C "$AC4_DIR" show HEAD:"$AC4_BACKLOG_REL" 2>/dev/null \
+  | grep -A 6 "id: $AC4_STORY_B")
+T15_STATUS=$(echo "$T15_SNAP" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"' || echo "")
+T15_PHASE=$(echo "$T15_SNAP" | grep "phase_status:" | head -1 | sed 's/.*phase_status: *//' | tr -d '"' || echo "")
+if [[ "$T15_STATUS" == "in_progress" ]]; then
+  pass "T15b: status field committed as in_progress"
+else
+  fail "T15b: status in HEAD is '$T15_STATUS' (expected in_progress)"
+fi
+if [[ "$T15_PHASE" == "planning" ]]; then
+  pass "T15c: phase_status field committed as planning"
+else
+  fail "T15c: phase_status in HEAD is '$T15_PHASE' (expected planning)"
+fi
+
+# ── T16: concurrent callers on distinct stories both succeed ──────────────────
+echo "T16: two concurrent chore_commit_field calls on distinct stories both succeed"
+AC4B_DIR="$FIXTURE_DIR/ac4b-project"
+AC4B_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
+AC4B_LOCK_DIR="$FIXTURE_DIR/ac4b-locks"
+AC4B_STORY_A="TST-CC-C"
+AC4B_STORY_B="TST-CC-D"
+mkdir -p "$AC4B_LOCK_DIR"
+
+AC4B_HEAD_YAML="items:
+- id: $AC4B_STORY_A
+  status: refined
+  phase_status: not_started
+- id: $AC4B_STORY_B
+  status: refined
+  phase_status: not_started"
+setup_git_repo "$AC4B_DIR" "$AC4B_HEAD_YAML"
+git -C "$AC4B_DIR" config user.email "test@gaai.local"
+git -C "$AC4B_DIR" config user.name "GAAI Test"
+
+T16_HARNESS_A=$(mktemp /tmp/ac4-t16a-XXXXXX.sh)
+T16_HARNESS_B=$(mktemp /tmp/ac4-t16b-XXXXXX.sh)
+for _hf in "$T16_HARNESS_A" "$T16_HARNESS_B"; do
+  _sid="$AC4B_STORY_A"; [[ "$_hf" == "$T16_HARNESS_B" ]] && _sid="$AC4B_STORY_B"
+  cat > "$_hf" <<SCRIPT
+#!/usr/bin/env bash
+BACKLOG_FILE="$AC4B_DIR/$AC4B_BACKLOG_REL"
+BACKLOG_REL="$AC4B_BACKLOG_REL"
+LOCK_DIR="$AC4B_LOCK_DIR"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+cd "$AC4B_DIR"
+source "$CHORE_LIB"
+chore_commit_field "$_sid" status in_progress "chore($_sid): in_progress [test]"
+SCRIPT
+  chmod +x "$_hf"
+done
+
+T16_RC_A=0; T16_RC_B=0
+if command -v flock &>/dev/null && command -v yq &>/dev/null \
+    && yq --version 2>/dev/null | grep -q 'v4\.'; then
+  # Option B' available — true concurrent execution, flock serializes safely
+  bash "$T16_HARNESS_A" 2>/dev/null & T16_PID_A=$!
+  bash "$T16_HARNESS_B" 2>/dev/null & T16_PID_B=$!
+  wait "$T16_PID_A" || T16_RC_A=$?
+  wait "$T16_PID_B" || T16_RC_B=$?
+else
+  # Option A fallback — sequential (no flock serialization available)
+  bash "$T16_HARNESS_A" 2>/dev/null || T16_RC_A=$?
+  bash "$T16_HARNESS_B" 2>/dev/null || T16_RC_B=$?
+fi
+rm -f "$T16_HARNESS_A" "$T16_HARNESS_B"
+
+if [[ "$T16_RC_A" -eq 0 ]]; then
+  pass "T16: caller A ($AC4B_STORY_A) exited 0"
+else
+  fail "T16: caller A exited $T16_RC_A (expected 0)"
+fi
+if [[ "$T16_RC_B" -eq 0 ]]; then
+  pass "T16b: caller B ($AC4B_STORY_B) exited 0"
+else
+  fail "T16b: caller B exited $T16_RC_B (expected 0)"
+fi
+T16_SA=$(git -C "$AC4B_DIR" show HEAD:"$AC4B_BACKLOG_REL" 2>/dev/null \
+  | grep -A 3 "id: $AC4B_STORY_A" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"' || echo "")
+T16_SB=$(git -C "$AC4B_DIR" show HEAD:"$AC4B_BACKLOG_REL" 2>/dev/null \
+  | grep -A 3 "id: $AC4B_STORY_B" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"' || echo "")
+if [[ "$T16_SA" == "in_progress" ]]; then
+  pass "T16c: story $AC4B_STORY_A committed as in_progress"
+else
+  fail "T16c: story $AC4B_STORY_A status in HEAD is '$T16_SA' (expected in_progress)"
+fi
+if [[ "$T16_SB" == "in_progress" ]]; then
+  pass "T16d: story $AC4B_STORY_B committed as in_progress"
+else
+  fail "T16d: story $AC4B_STORY_B status in HEAD is '$T16_SB' (expected in_progress)"
+fi
+
+# ── T17: Option A fallback warning flag written ───────────────────────────────
+echo "T17: Option A fallback writes warning flag when flock/yq unavailable"
+T17_LOCK_DIR="$FIXTURE_DIR/ac4-t17-locks"
+mkdir -p "$T17_LOCK_DIR"
+T17_HARNESS=$(mktemp /tmp/ac4-t17-XXXXXX.sh)
+cat > "$T17_HARNESS" <<SCRIPT
+#!/usr/bin/env bash
+BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
+BACKLOG_REL="$AC4_BACKLOG_REL"
+LOCK_DIR="$T17_LOCK_DIR"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+cd "$AC4_DIR"
+source "$CHORE_LIB"
+# Force Option A path to test the warning flag regardless of flock/yq presence
+_CHORE_HELPER_AVAILABLE=0
+chore_commit_field "$AC4_STORY_A" status done "chore($AC4_STORY_A): done [test-fallback]"
+SCRIPT
+chmod +x "$T17_HARNESS"
+T17_RC=0
+bash "$T17_HARNESS" 2>/dev/null || T17_RC=$?
+rm -f "$T17_HARNESS"
+
+if [[ "$T17_RC" -eq 0 ]]; then
+  pass "T17: Option A fallback exited 0"
+else
+  fail "T17: Option A fallback exited $T17_RC (expected 0)"
+fi
+if [[ -f "$T17_LOCK_DIR/.chore-helper-missing.warning" ]]; then
+  pass "T17b: warning flag written at .chore-helper-missing.warning"
+else
+  fail "T17b: warning flag not found at $T17_LOCK_DIR/.chore-helper-missing.warning"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Summary
 # ═══════════════════════════════════════════════════════════════════════════════
 echo ""

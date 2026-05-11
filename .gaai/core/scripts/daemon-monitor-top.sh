@@ -186,32 +186,6 @@ while true; do
     echo ""
   fi
 
-  # PR watcher status line
-  local pr_watcher_status="active"
-  local pr_watcher_last="?"
-  local pr_watcher_tracked=0
-  if [[ "${GAAI_PR_WATCHER_DISABLED:-}" == "1" ]]; then
-    pr_watcher_status="disabled"
-  elif [[ -f "$LOCK_DIR/.pr-watcher.gh-warning-emitted" ]]; then
-    pr_watcher_status="no gh"
-  fi
-  if [[ -f "$LOCK_DIR/.pr-watcher.last-poll" ]]; then
-    local last_poll _now
-    last_poll=$(cat "$LOCK_DIR/.pr-watcher.last-poll" 2>/dev/null || echo 0)
-    _now=$(date +%s)
-    pr_watcher_last="$(( _now - last_poll ))s ago"
-  fi
-  if [[ -f "$BACKLOG" ]]; then
-    pr_watcher_tracked=$(awk '
-      /^[[:space:]]+pr_url:/ { has_pr=1 }
-      /^[[:space:]]+status:[[:space:]]*in_progress/ { if (has_pr) count++ }
-      /^- id:/ { has_pr=0 }
-      END { print count+0 }
-    ' "$BACKLOG" 2>/dev/null || echo 0)
-  fi
-  echo -e "  ${CYAN}🔄 PR watcher : ${BOLD}${pr_watcher_tracked}${NC}${CYAN} stories tracked, last poll ${pr_watcher_last} [${pr_watcher_status}]${NC}"
-  echo ""
-
   if [[ -f "$LOG_FILE" ]]; then
     # Calculate available lines for logs (banner takes ~11 lines)
     term_lines=$(tput lines 2>/dev/null || echo 24)
