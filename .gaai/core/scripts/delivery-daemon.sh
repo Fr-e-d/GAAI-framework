@@ -1287,6 +1287,9 @@ sweep_cleanup_pending() {
 # Daemon is sole coordinator: phase_status transitions are daemon-owned, never agent-owned.
 # Watcher is read-only: observes operator merges, never auto-merges (trust arc — manual review default).
 # Requires chore-commit infrastructure; falls back to inline scheduler if lib/chore-commit.sh absent.
+#
+# @see DEC-88 — 3-phase pipeline phase_status semantics (daemon owns transitions).
+# @see DEC-76 — trust arc auto-merge OFF baseline (§11 ; watcher observes manual merges only).
 watch_pr_merge_status() {
   # AC4: opt-out env var
   if [[ "${GAAI_PR_WATCHER_DISABLED:-}" == "1" ]]; then
