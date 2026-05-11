@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(chore-commit): transactional Option A fallback — rollback disk on commit/push failure
 - fix(daemon-monitor): regex match quoted status (status: "in_progress") post-scheduler auto-quote
 - fix(chore-commit): disable yq path, force Option A fallback (preserves formatting)
 - fix(chore-commit): replace strict line-count drift check with block-scope check (cycle-2 MEDIUM-N1 fix)

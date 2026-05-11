@@ -45,8 +45,30 @@ _chore_option_a_fallback() {
   done
   git add "$backlog_rel" 2>/dev/null
   git diff --cached --quiet && return 0
-  git commit -m "$commit_subject" --quiet -- "$backlog_rel" 2>/dev/null
-  git push origin "$target_branch" --quiet 2>/dev/null || true
+  if ! git commit -m "$commit_subject" --quiet -- "$backlog_rel" 2>/dev/null; then
+    # Transactional rollback : commit failed → revert disk write to prevent
+    # orphan drift blocking subsequent stories (RC : 2026-05-12 E99S03 orphan).
+    git reset HEAD -- "$backlog_rel" 2>/dev/null || true
+    git checkout HEAD -- "$backlog_rel" 2>/dev/null || true
+    echo "[CHORE-COMMIT] $story_id : commit failed — disk write rolled back" >&2
+    return 1
+  fi
+  if ! git push origin "$target_branch" --quiet 2>/dev/null; then
+    # Push failed → try rebase-retry once
+    if git fetch origin "$target_branch" --quiet 2>/dev/null \
+      && git rebase "origin/$target_branch" --quiet 2>/dev/null \
+      && git push origin "$target_branch" --quiet 2>/dev/null; then
+      return 0
+    fi
+    # Rebase or retry-push failed → reset the local commit + restore disk to HEAD
+    # (HEAD here is post-fetch origin/branch since rebase failed cleanly aborted)
+    git rebase --abort 2>/dev/null || true
+    git reset --soft HEAD~1 2>/dev/null || true
+    git reset HEAD -- "$backlog_rel" 2>/dev/null || true
+    git checkout HEAD -- "$backlog_rel" 2>/dev/null || true
+    echo "[CHORE-COMMIT] $story_id : push failed — local commit + disk rolled back" >&2
+    return 1
+  fi
   return 0
 }
 
