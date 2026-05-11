@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.25.0] - 2026-05-11
 
 ### Changed
+- fix(daemon): salvage E134S12 daemon recovery + chore-commit hardening (13/13 tests pass)
 - fix(daemon): truncate retry counters at startup (session-scoped contract)
+- chore: bump local VERSION to v2.24.0 [sync]
+- feat(skill): review-input mandates transitive reads on cited DECs (linked_research + lifecycle)
+- fix(daemon): genericize project-specific ref in env var doc
+- fix(daemon): bump PLAN/QA max-turns + filter epic IDs in recovery scans
+
 
 ## [2.24.0] - 2026-05-09
 

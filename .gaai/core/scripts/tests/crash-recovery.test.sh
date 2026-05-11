@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# crash-recovery.test.sh — regression tests for E134S12
+# crash-recovery.test.sh — regression tests for daemon recovery + chore-commit hardening
 #
-# AC5: drift detection in crash_recovery_scan prevents lock creation
-# AC6: chore-commit purity — daemon's git add only stages the targeted story's changes
+# Covers : drift detection in crash_recovery_scan prevents lock creation when an
+# operator has working-tree edits ; chore-commit purity ensures daemon's git add
+# only stages the targeted story's changes (working-tree drift on unrelated stories
+# is preserved untouched).
 #
 # Usage: bash .gaai/core/scripts/tests/crash-recovery.test.sh
 
