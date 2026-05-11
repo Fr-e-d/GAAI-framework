@@ -1480,14 +1480,21 @@ for line in content.splitlines():
 
   if [[ -f "$chore_lib" ]]; then
     # chore-commit helper available: use chore_commit_field
+    # Helper signature: chore_commit_field <story_id> <field> <new_value> <commit_subject>
+    # Requires env vars: LOCK_DIR, BACKLOG (= BACKLOG_FILE), TARGET_BRANCH — export below.
     cat > "$reconcile_script" <<RECONCILE_EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$PROJECT_DIR"
+export LOCK_DIR="$LOCK_DIR"
+export BACKLOG="$BACKLOG"
+export BACKLOG_FILE="$BACKLOG"
+export BACKLOG_REL="$BACKLOG_REL"
+export TARGET_BRANCH="$TARGET_BRANCH"
 source "$chore_lib"
-chore_commit_field "$sid" status done "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
-chore_commit_field "$sid" phase_status done "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
-chore_commit_field "$sid" completed_at "$merged_at" "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
+chore_commit_field "$sid" status done "chore($sid): done [pr-watcher: PR #$pr_number merged $merged_at]"
+chore_commit_field "$sid" phase_status done "chore($sid): phase_status=done [pr-watcher]"
+chore_commit_field "$sid" completed_at "$merged_at" "chore($sid): completed_at=$merged_at [pr-watcher]"
 RECONCILE_EOF
   else
     # chore-commit helper absent — inline fallback with mandatory working-tree drift guard
