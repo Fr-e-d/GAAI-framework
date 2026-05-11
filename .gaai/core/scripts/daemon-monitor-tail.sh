@@ -73,6 +73,8 @@ detect_active_stories() {
         gsub(/[[:space:]]*/, ""); print; exit
       }
     ' "$BACKLOG" 2>/dev/null || true)
+    # Strip scheduler --set-field auto-quotes (e.g. delivery_pipeline: "3phase").
+    _dp="${_dp//\"/}"
     # Only emit + dedup-track when this is a LEGACY pipeline tmux. For 3phase
     # tmux sessions (created by launch_3phase_in_tmux post Option A), we let
     # the active-marker block below handle them — adding them to seen here
@@ -118,6 +120,10 @@ detect_active_stories() {
           gsub(/[[:space:]]*/, ""); print; exit
         }
       ' "$BACKLOG" 2>/dev/null || true)
+      # Strip surrounding quotes : scheduler --set-field auto-quotes string values,
+      # producing status: "in_progress" / delivery_pipeline: "3phase" in YAML.
+      _status="${_status//\"/}"
+      _dp2="${_dp2//\"/}"
       if [[ "$_status" == "in_progress" && "$_dp2" == "3phase" ]]; then
         echo "$_sid"
         _emitted_3phase+=("$_sid")
