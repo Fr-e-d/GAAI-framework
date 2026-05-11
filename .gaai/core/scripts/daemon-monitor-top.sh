@@ -186,11 +186,6 @@ while true; do
     echo ""
   fi
 
-  # E134S15: rebase-conflict banner — shown while .rebase-conflict.audit marker exists
-  if [[ -f "$LOCK_DIR/.rebase-conflict.audit" ]]; then
-    echo -e "  ${YELLOW}⚠ rebase conflict detected (push-race recovery failed) — manual operator intervention required${NC}"
-    echo ""
-  fi
   # PR watcher status line (E134S17)
   local pr_watcher_status="active"
   local pr_watcher_last="?"
