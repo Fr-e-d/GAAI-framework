@@ -134,17 +134,13 @@ BACKLOG_FILE="$BACKLOG"   # alias for daemon-dispatch.sh library (E134S02)
 SCHEDULER="$SCRIPT_DIR/backlog-scheduler.sh"
 LOCK_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-locks"
 DRIFT_MARKER="$LOCK_DIR/.drift-detected.audit"
+REBASE_CONFLICT_MARKER="$LOCK_DIR/.rebase-conflict.audit"
 LOG_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-logs"
 STAGING_LOCK="$LOCK_DIR/.staging.lock"
 RETRY_FILE="$LOCK_DIR/.retry-counts"
 RESOLUTION_TRACKING="$LOCK_DIR/.resolution-tracking"
 LOG_FILE="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-daemon.log"
 MAX_RETRIES=3
-
-# Source chore-commit helper (Option B' flock+yq — E134S16)
-# shellcheck source=lib/chore-commit.sh
-BACKLOG_FILE="$BACKLOG"
-source "$SCRIPT_DIR/lib/chore-commit.sh"
 NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
 WEBHOOK_SECRET="${GAAI_DAEMON_WEBHOOK_SECRET:-}"
 
@@ -827,22 +823,26 @@ for line in content.splitlines():
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$PROJECT_DIR"
-BACKLOG_FILE="$BACKLOG"
-BACKLOG_REL="$BACKLOG_REL"
-LOCK_DIR="$LOCK_DIR"
-TARGET_BRANCH="$TARGET_BRANCH"
-SCHEDULER="$SCHEDULER"
-# shellcheck source=lib/chore-commit.sh
-source "$SCRIPT_DIR/lib/chore-commit.sh"
 if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  # Preserve any uncommitted work before force-syncing
-  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    git stash push -m "daemon-autosave-\$(date +%s)" --quiet 2>/dev/null || true
-  fi
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null
+  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
+    git rebase --abort --quiet 2>/dev/null || true
+    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
+    printf '%s|recovery|rebase-failed-staleness-$sid\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+    exit 1
+  fi
+  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
+  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
 fi
-chore_commit_field "$sid" status failed "chore($sid): failed [daemon-staleness]" || exit \$?
+# AC3: refuse-and-skip if working-tree drift exists before we modify the backlog
+if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+  echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping staleness-failed for $sid; commit or stash your edits" >&2
+  exit 6
+fi
+"$SCHEDULER" --set-status "$sid" failed "$BACKLOG"
+git add "$BACKLOG_REL"
+git commit -m "chore($sid): failed [daemon-staleness]" --quiet
+git push origin "$TARGET_BRANCH" --quiet 2>&1
 RSTEOF
       chmod +x "$reset_script"
       local stale_rc=0
@@ -1133,31 +1133,33 @@ _recovery_revert_refined() {
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$PROJECT_DIR"
-BACKLOG_FILE="$BACKLOG"
-BACKLOG_REL="$BACKLOG_REL"
-LOCK_DIR="$LOCK_DIR"
-TARGET_BRANCH="$TARGET_BRANCH"
-SCHEDULER="$SCHEDULER"
-# shellcheck source=lib/chore-commit.sh
-source "$SCRIPT_DIR/lib/chore-commit.sh"
 if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    git stash push -m "daemon-autosave-\$(date +%s)" --quiet 2>/dev/null || true
-  fi
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
+  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
+    git rebase --abort --quiet 2>/dev/null || true
+    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
+    printf '%s|recovery|rebase-failed-revert-$sid\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+    exit 1
+  fi
+  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
+  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
 fi
+# AC3: refuse-and-skip if working-tree drift exists before we modify the backlog
+if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+  echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping revert-refined for $sid; commit or stash your edits" >&2
+  exit 6
+fi
+"$SCHEDULER" --set-status "$sid" refined "$BACKLOG"
 RSTEOF
   if [[ "$reset_phase" == "true" ]]; then
     cat >> "$script" <<RSTEOF
-chore_commit_multi_field "$sid" status refined phase_status not_started "chore($sid): refined [daemon-recovery:$reason]" || exit \$?
-RSTEOF
-  else
-    cat >> "$script" <<RSTEOF
-chore_commit_field "$sid" status refined "chore($sid): refined [daemon-recovery:$reason]" || exit \$?
+"$SCHEDULER" --set-phase-status "$sid" not_started "$BACKLOG"
 RSTEOF
   fi
-  cat >> "$script" <<'RSTEOF'
+  cat >> "$script" <<RSTEOF
+git add "$BACKLOG_REL"
+git diff --cached --quiet || git commit -m "chore($sid): refined [daemon-recovery:$reason]" --quiet
+git push origin "$TARGET_BRANCH" --quiet 2>&1
 RSTEOF
   chmod +x "$script"
   local rc=0
@@ -1180,21 +1182,26 @@ _recovery_set_status() {
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$PROJECT_DIR"
-BACKLOG_FILE="$BACKLOG"
-BACKLOG_REL="$BACKLOG_REL"
-LOCK_DIR="$LOCK_DIR"
-TARGET_BRANCH="$TARGET_BRANCH"
-SCHEDULER="$SCHEDULER"
-# shellcheck source=lib/chore-commit.sh
-source "$SCRIPT_DIR/lib/chore-commit.sh"
 if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    git stash push -m "daemon-autosave-\$(date +%s)" --quiet 2>/dev/null || true
-  fi
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
+  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
+    git rebase --abort --quiet 2>/dev/null || true
+    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
+    printf '%s|recovery|rebase-failed-reconcile-$new_status-$sid\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+    exit 1
+  fi
+  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
+  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
 fi
-chore_commit_field "$sid" status "$new_status" "chore($sid): $new_status [daemon-recovery:$reason]" || exit \$?
+# AC3: refuse-and-skip if working-tree drift exists before we modify the backlog
+if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+  echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping reconcile-$new_status for $sid; commit or stash your edits" >&2
+  exit 6
+fi
+"$SCHEDULER" --set-status "$sid" "$new_status" "$BACKLOG"
+git add "$BACKLOG_REL"
+git diff --cached --quiet || git commit -m "chore($sid): $new_status [daemon-recovery:$reason]" --quiet
+git push origin "$TARGET_BRANCH" --quiet 2>&1 || true
 RSTEOF
   chmod +x "$script"
   local rc=0
@@ -1239,6 +1246,298 @@ print(cur_status or '')
     || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
     || echo "recovery-$(date +%s)-$$-$RANDOM")
   launch_3phase_in_tmux "$sid" "$trace_id"
+}
+
+# ── E134S17 : PR merge watcher + reconcile helpers ──────────────────────────
+
+# Retries pending worktree/branch cleanup entries from .cleanup-pending.audit.
+# Called each main-loop cycle. Idempotent: entries cleared on success, kept on failure.
+sweep_cleanup_pending() {
+  local marker="$LOCK_DIR/.cleanup-pending.audit"
+  [[ -f "$marker" ]] || return 0
+
+  local tmp_remaining
+  tmp_remaining=$(mktemp "$LOCK_DIR/.cleanup-pending-tmp-XXXXXX.audit")
+  local cleaned=0 kept=0
+
+  while IFS='|' read -r ts sid marker_type; do
+    [[ -z "$sid" ]] && continue
+    [[ "$marker_type" != "cleanup-pending" ]] && continue
+
+    local worktree_path
+    if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+      worktree_path="${GAAI_WORKTREES_BASE}/${sid}-workspace"
+    else
+      local repo_name
+      repo_name=$(basename "$PROJECT_DIR")
+      worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
+    fi
+
+    local wt_ok=true
+    if [[ -d "$worktree_path" ]]; then
+      git -C "$PROJECT_DIR" worktree remove "$worktree_path" --force 2>/dev/null || wt_ok=false
+    fi
+    git -C "$PROJECT_DIR" branch -D "story/$sid" 2>/dev/null || true  # already gone = ok
+
+    if $wt_ok; then
+      log "${GREEN}[PR-WATCHER] sweep: cleaned pending worktree/branch for $sid${NC}"
+      (( cleaned++ )) || true
+    else
+      printf '%s|%s|cleanup-pending\n' "$ts" "$sid" >> "$tmp_remaining"
+      (( kept++ )) || true
+    fi
+  done < "$marker"
+
+  if [[ $kept -eq 0 ]]; then
+    rm -f "$marker" "$tmp_remaining" 2>/dev/null || true
+  else
+    mv "$tmp_remaining" "$marker" 2>/dev/null || rm -f "$tmp_remaining" 2>/dev/null || true
+  fi
+}
+
+# PR merge watcher — polls GitHub for merged PRs on every daemon cycle.
+# @see DEC-88 (3-phase pipeline owns phase_status; daemon is sole coordinator)
+# @see DEC-76 v4 §11 (trust arc auto-merge OFF baseline — watcher observes only, never merges)
+# @see E134S15/S16 (chore-commit dependencies; E134S16 fallback via inline scheduler if not shipped)
+watch_pr_merge_status() {
+  # AC4: opt-out env var
+  if [[ "${GAAI_PR_WATCHER_DISABLED:-}" == "1" ]]; then
+    return 0
+  fi
+
+  # Rate-limit guard: skip if last poll was < 60s ago (silent)
+  local poll_ts_file="$LOCK_DIR/.pr-watcher.last-poll"
+  if [[ -f "$poll_ts_file" ]]; then
+    local last_poll now_ts
+    last_poll=$(cat "$poll_ts_file" 2>/dev/null || echo 0)
+    now_ts=$(date +%s)
+    if (( now_ts - last_poll < 60 )); then
+      return 0
+    fi
+  fi
+
+  # gh availability check (warn once per daemon session)
+  local gh_warn_flag="$LOCK_DIR/.pr-watcher.gh-warning-emitted"
+  if ! command -v gh &>/dev/null; then
+    if [[ ! -f "$gh_warn_flag" ]]; then
+      log "${YELLOW}[PR-WATCHER] gh CLI not found — PR merge watcher disabled. Install gh to enable.${NC}"
+      touch "$gh_warn_flag" 2>/dev/null || true
+    fi
+    return 0
+  fi
+  if ! gh auth status &>/dev/null 2>&1; then
+    if [[ ! -f "$gh_warn_flag" ]]; then
+      log "${YELLOW}[PR-WATCHER] gh CLI not authenticated — PR merge watcher disabled. Run: gh auth login${NC}"
+      touch "$gh_warn_flag" 2>/dev/null || true
+    fi
+    return 0
+  fi
+  # gh available + authenticated — clear stale warning flag
+  rm -f "$gh_warn_flag" 2>/dev/null || true
+
+  # Update rate-limit timestamp
+  date +%s > "$poll_ts_file" 2>/dev/null || true
+
+  # Read backlog from origin (avoids working-tree drift)
+  local backlog_content
+  backlog_content=$(git -C "$PROJECT_DIR" show "origin/${TARGET_BRANCH}:${BACKLOG_REL}" 2>/dev/null) || {
+    log "${YELLOW}[PR-WATCHER] cannot read backlog from origin/${TARGET_BRANCH} — skipping cycle${NC}"
+    return 0
+  }
+
+  # Parse in_progress stories with pr_url set → "sid|pr_url" pairs
+  local story_pr_pairs
+  story_pr_pairs=$(printf '%s\n' "$backlog_content" | python3 -c "
+import sys
+lines = sys.stdin.read().splitlines()
+stories = []
+cur = {}
+for line in lines:
+    s = line.strip()
+    if s.startswith('- id:'):
+        if cur.get('id'):
+            stories.append(cur)
+        cur = {'id': s.split(':',1)[1].strip(), 'status': None, 'pr_url': None}
+    elif cur and s.startswith('status:'):
+        cur['status'] = s.split(':',1)[1].strip()
+    elif cur and s.startswith('pr_url:'):
+        cur['pr_url'] = s.split(':',1)[1].strip().strip('\"').strip(\"'\")
+if cur.get('id'):
+    stories.append(cur)
+for st in stories:
+    if st.get('status') == 'in_progress' and st.get('pr_url'):
+        print('{}|{}'.format(st['id'], st['pr_url']))
+" 2>/dev/null || true)
+
+  # Clear stale .pr-abandoned.emitted.<sid> flags for stories no longer tracked
+  for emitted_flag in "$LOCK_DIR"/.pr-abandoned.emitted.*; do
+    [[ -f "$emitted_flag" ]] || continue
+    local flag_sid="${emitted_flag##*.pr-abandoned.emitted.}"
+    if ! printf '%s\n' "$story_pr_pairs" | grep -q "^${flag_sid}|"; then
+      rm -f "$emitted_flag" 2>/dev/null || true
+    fi
+  done
+
+  [[ -z "$story_pr_pairs" ]] && return 0
+
+  while IFS='|' read -r sid pr_url; do
+    [[ -z "$sid" || -z "$pr_url" ]] && continue
+
+    # AC1: parse PR number via regex pull/([0-9]+)
+    local pr_num
+    pr_num=$(printf '%s' "$pr_url" | grep -oE 'pull/[0-9]+' | head -1 | sed 's|pull/||')
+    if [[ -z "$pr_num" ]]; then
+      log "${YELLOW}[PR-WATCHER] $sid : pr_url '$pr_url' does not match canonical pull/<N> pattern, skipping story${NC}"
+      continue
+    fi
+
+    # Query GitHub API
+    local gh_output
+    gh_output=$(gh pr view "$pr_num" --json mergedAt,state,baseRefName 2>/dev/null) || {
+      log "${YELLOW}[PR-WATCHER] $sid : gh pr view failed (rate limit or network) — skipping, will retry next cycle${NC}"
+      continue
+    }
+
+    # Parse response (jq preferred, python3 fallback — mirrors daemon-monitor-top.sh pattern)
+    local merged_at state base_ref
+    if command -v jq &>/dev/null; then
+      merged_at=$(printf '%s' "$gh_output" | jq -r '.mergedAt // empty' 2>/dev/null || true)
+      state=$(printf '%s' "$gh_output" | jq -r '.state // empty' 2>/dev/null || true)
+      base_ref=$(printf '%s' "$gh_output" | jq -r '.baseRefName // empty' 2>/dev/null || true)
+    else
+      merged_at=$(printf '%s' "$gh_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('mergedAt') or '')" 2>/dev/null || true)
+      state=$(printf '%s' "$gh_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('state',''))" 2>/dev/null || true)
+      base_ref=$(printf '%s' "$gh_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('baseRefName',''))" 2>/dev/null || true)
+    fi
+
+    # AC1 MEDIUM-F5: only reconcile if PR targets staging branch
+    local effective_target="${TARGET_BRANCH:-staging}"
+    if [[ -n "$base_ref" && "$base_ref" != "$effective_target" ]]; then
+      log "${YELLOW}[PR-WATCHER] $sid : PR targets baseRefName='$base_ref' (not $effective_target), skipping reconcile — operator retargeted PR experimentally${NC}"
+      continue
+    fi
+
+    # AC3: PR closed without merge (abandoned PR pattern)
+    if [[ "$state" == "CLOSED" && -z "$merged_at" ]]; then
+      local emitted_flag="$LOCK_DIR/.pr-abandoned.emitted.${sid}"
+      if [[ ! -f "$emitted_flag" ]]; then
+        log "${YELLOW}[PR-WATCHER] $sid : PR closed without merge — manual operator decision required${NC}"
+        printf '%s|%s|pr-closed-no-merge\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" \
+          >> "$LOCK_DIR/.pr-abandoned.audit" 2>/dev/null || true
+        touch "$emitted_flag" 2>/dev/null || true
+      fi
+      continue
+    fi
+
+    # Merge detected: reconcile backlog + clean up
+    if [[ -n "$merged_at" && "$base_ref" == "$effective_target" ]]; then
+      _reconcile_merged_pr "$sid" "$merged_at"
+    fi
+
+  done <<< "$story_pr_pairs"
+}
+
+# Atomic reconciliation when a PR merge is detected for story <sid>.
+_reconcile_merged_pr() {
+  local sid="$1" merged_at="$2"
+
+  # MEDIUM-F4: concurrent pre-check — re-read working-tree status before chore-commit
+  local current_status=""
+  if [[ -f "$BACKLOG" ]]; then
+    current_status=$(python3 -c "
+import sys, os
+content = open('$BACKLOG').read() if os.path.isfile('$BACKLOG') else ''
+cur_id = None
+for line in content.splitlines():
+    s = line.strip()
+    if s.startswith('- id:') and s.split(':',1)[1].strip() == '$sid':
+        cur_id = True
+    elif cur_id and s.startswith('status:'):
+        print(s.split(':',1)[1].strip())
+        break
+" 2>/dev/null || echo "")
+  fi
+  if [[ "$current_status" == "done" ]]; then
+    log "${CYAN}[PR-WATCHER] $sid : already reconciled by concurrent path, skipping${NC}"
+    return 0
+  fi
+
+  # Check if E134S16 chore-commit helper is available
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local chore_lib="$script_dir/lib/chore-commit.sh"
+
+  local reconcile_script
+  reconcile_script=$(mktemp "$LOCK_DIR/.pr-watcher-reconcile-XXXXXX.sh")
+
+  if [[ -f "$chore_lib" ]]; then
+    # E134S16 shipped path: use _chore_commit_field helper
+    cat > "$reconcile_script" <<RECONCILE_EOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$PROJECT_DIR"
+source "$chore_lib"
+_chore_commit_field "$sid" status done "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
+_chore_commit_field "$sid" phase_status done "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
+_chore_commit_field "$sid" completed_at "$merged_at" "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
+RECONCILE_EOF
+  else
+    # E134S16 not shipped — inline chore-commit with E134S12 Option A purity guard (HIGH-F2)
+    cat > "$reconcile_script" <<RECONCILE_EOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$PROJECT_DIR"
+if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
+  git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
+  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
+fi
+if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+  echo "[PR-WATCHER] $sid : working-tree drift on $BACKLOG_REL — operator must resolve drift before watcher can reconcile, skipping this cycle" >&2
+  exit 1
+fi
+"$SCHEDULER" --set-status "$sid" done "$BACKLOG" 2>/dev/null
+"$SCHEDULER" --set-phase-status "$sid" done "$BACKLOG" 2>/dev/null
+"$SCHEDULER" --set-field "$sid" completed_at "$merged_at" "$BACKLOG" 2>/dev/null
+git add "$BACKLOG_REL"
+git diff --cached --quiet || git commit -m "chore($sid): done [pr-watcher]" --quiet
+git push origin "$TARGET_BRANCH" --quiet 2>&1
+RECONCILE_EOF
+  fi
+
+  chmod +x "$reconcile_script"
+  local rc=0
+  with_staging_lock bash "$reconcile_script" 2>/dev/null || rc=$?
+  rm -f "$reconcile_script" 2>/dev/null || true
+
+  if [[ $rc -ne 0 ]]; then
+    log "${RED}[PR-WATCHER] $sid : chore-commit failed (rc=$rc) — leaving in_progress, will retry next cycle${NC}"
+    return 1
+  fi
+
+  # HIGH-F3: cleanup after successful chore-commit
+  local worktree_path
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    worktree_path="${GAAI_WORKTREES_BASE}/${sid}-workspace"
+  else
+    local repo_name
+    repo_name=$(basename "$PROJECT_DIR")
+    worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
+  fi
+
+  local cleanup_failed=false
+  if [[ -d "$worktree_path" ]]; then
+    git -C "$PROJECT_DIR" worktree remove "$worktree_path" --force 2>/dev/null || cleanup_failed=true
+  fi
+  git -C "$PROJECT_DIR" branch -D "story/$sid" 2>/dev/null || true  # branch already gone = ok
+
+  if $cleanup_failed; then
+    printf '%s|%s|cleanup-pending\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" \
+      >> "$LOCK_DIR/.cleanup-pending.audit" 2>/dev/null || true
+    log "${YELLOW}[PR-WATCHER] $sid : cleanup partial failure → .cleanup-pending.audit written${NC}"
+  fi
+
+  log "${GREEN}[PR-WATCHER] $sid : merged at $merged_at to ${TARGET_BRANCH:-staging}, reconciled to status:done + worktree/branch cleaned (or .cleanup-pending.audit emitted)${NC}"
+  return 0
 }
 
 # ── Status mode ──────────────────────────────────────────────────────────
@@ -1297,23 +1596,18 @@ pre_launch_mark_in_progress() {
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$PROJECT_DIR"
-BACKLOG_FILE="$BACKLOG"
-BACKLOG_REL="$BACKLOG_REL"
-LOCK_DIR="$LOCK_DIR"
-TARGET_BRANCH="$TARGET_BRANCH"
-SCHEDULER="$SCHEDULER"
-# shellcheck source=lib/chore-commit.sh
-source "$SCRIPT_DIR/lib/chore-commit.sh"
 
 # Step 1: Sync with latest remote
 if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  # Preserve any uncommitted work before force-syncing
-  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    git stash push -m "daemon-autosave-\$(date +%s)" --quiet 2>/dev/null || true
-  fi
-  # Local branch diverged (e.g. previous failed push) — force sync
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null
+  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
+    git rebase --abort --quiet 2>/dev/null || true
+    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
+    printf '%s|recovery|rebase-failed-in-progress-$story_id\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+    exit 1
+  fi
+  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
+  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
 fi
 
 # Step 2: Re-verify story is still ready after pulling latest
@@ -1323,10 +1617,47 @@ if ! "$SCHEDULER" --ready-ids "$BACKLOG" 2>/dev/null | grep -q "^${story_id}\$";
   exit 2
 fi
 
-# Step 3: Mark in_progress + set started_at (atomic via chore_commit_multi_field)
-_started_at="\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-chore_commit_multi_field "$story_id" status in_progress started_at "\$_started_at" \
-  "chore($story_id): in_progress [daemon]" || exit \$?
+# AC3: refuse-and-skip if working-tree drift exists before we modify the backlog.
+# This prevents operator's unstaged edits from being swept into the in_progress commit.
+if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+  echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping in_progress mark for $story_id; commit or stash your edits" >&2
+  exit 6
+fi
+
+# Step 3: Mark in_progress locally + set started_at
+"$SCHEDULER" --set-status "$story_id" in_progress "$BACKLOG"
+"$SCHEDULER" --set-field "$story_id" started_at "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BACKLOG"
+
+# YAML safety check — abort if backlog is corrupted (prevents committing broken YAML)
+if ! python3 -c "import yaml; yaml.safe_load(open('$BACKLOG'))" 2>/dev/null; then
+  echo "YAML_BROKEN: backlog YAML is invalid after status update — aborting" >&2
+  git checkout -- "$BACKLOG_REL" 2>/dev/null || true
+  exit 4
+fi
+
+git add "$BACKLOG_REL"
+git commit -m "chore($story_id): in_progress [daemon]" --quiet
+
+# Step 4: Push — this is the atomic coordination point
+# If another VPS pushes between our pull and push, this fails (non-fast-forward)
+if ! git push origin "$TARGET_BRANCH" --quiet 2>&1; then
+  # Concurrent push — rebase our commit on top of origin then retry
+  git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
+  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
+    git rebase --abort --quiet 2>/dev/null || true
+    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
+    printf '%s|recovery|rebase-failed-push-claim-$story_id\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+    echo "PUSH_CONFLICT: concurrent claim on $story_id (rebase conflict)" >&2
+    exit 3
+  fi
+  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
+  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+  # Retry the push on rebase-clean tree
+  if ! git push origin "$TARGET_BRANCH" --quiet 2>&1; then
+    echo "PUSH_CONFLICT: concurrent claim on $story_id (retry after rebase failed)" >&2
+    exit 3
+  fi
+fi
 PLEOF
   chmod +x "$plscript"
 
@@ -1340,6 +1671,10 @@ PLEOF
       ;;
     2)
       log "${YELLOW}$story_id already claimed by another device. Skipping.${NC}"
+      return 1
+      ;;
+    1)
+      log "${YELLOW}$story_id rebase conflict during in_progress mark. Skipping.${NC}"
       return 1
       ;;
     3)
@@ -1379,21 +1714,19 @@ EXITING=false  # Re-entry guard for on_exit
 LOCK_FILE="$LOCK_DIR/$story_id.lock"
 echo \$\$ > "\$LOCK_FILE"
 
-# Variables for chore-commit helper (E134S16 Option B' flock+yq)
-BACKLOG_FILE="$BACKLOG"
-BACKLOG_REL="$BACKLOG_REL"
-LOCK_DIR="$LOCK_DIR"
-TARGET_BRANCH="$TARGET_BRANCH"
-SCHEDULER="$SCHEDULER"
-# shellcheck source=lib/chore-commit.sh
-source "$PROJECT_DIR/.gaai/core/scripts/lib/chore-commit.sh"
-
 capture_metadata() {
   # Capture delivery metadata directly from delivery log + git log.
   # This runs in the wrapper because claude -p (headless) does not trigger
   # the Claude Code Stop hook — metadata would never be captured otherwise.
   local delivery_log="$LOG_DIR/${story_id}.log"
-  local pairs=()
+  local fields_updated=0
+
+  # AC3: skip metadata capture (and backlog modification) if working-tree drift exists.
+  # Check before any --set-field calls so operator edits are not swept into the commit.
+  if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+    echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping metadata capture for $story_id; commit or stash your edits"
+    return 0
+  fi
 
   # cost_usd — from delivery log (type:result → total_cost_usd)
   if [[ -f "\$delivery_log" ]]; then
@@ -1414,18 +1747,33 @@ try:
 except: pass
 PYEOF
     2>/dev/null) || cost=""
-    [[ -n "\$cost" && "\$cost" != "0" ]] && pairs+=(cost_usd "\$cost") && echo "[WRAPPER] cost_usd=\$cost"
+    if [[ -n "\$cost" && "\$cost" != "0" ]]; then
+      "$SCHEDULER" --set-field "$story_id" cost_usd "\$cost" "$BACKLOG" 2>/dev/null && {
+        fields_updated=1
+        echo "[WRAPPER] cost_usd=\$cost"
+      }
+    fi
   fi
 
   # started_at — from git log
   local started
   started=\$(git log --all --format='%aI' --grep="chore(${story_id}): in_progress" -1 2>/dev/null) || started=""
-  [[ -n "\$started" ]] && pairs+=(started_at "\$started") && echo "[WRAPPER] started_at=\$started"
+  if [[ -n "\$started" ]]; then
+    "$SCHEDULER" --set-field "$story_id" started_at "\$started" "$BACKLOG" 2>/dev/null && {
+      fields_updated=1
+      echo "[WRAPPER] started_at=\$started"
+    }
+  fi
 
   # completed_at — from git log
   local completed
   completed=\$(git log --all --format='%aI' --grep="chore(${story_id}): done" -1 2>/dev/null) || completed=""
-  [[ -n "\$completed" ]] && pairs+=(completed_at "\$completed") && echo "[WRAPPER] completed_at=\$completed"
+  if [[ -n "\$completed" ]]; then
+    "$SCHEDULER" --set-field "$story_id" completed_at "\$completed" "$BACKLOG" 2>/dev/null && {
+      fields_updated=1
+      echo "[WRAPPER] completed_at=\$completed"
+    }
+  fi
 
   # PR fields — from gh CLI
   if command -v gh &>/dev/null; then
@@ -1436,15 +1784,21 @@ PYEOF
       pr_url=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('url',''))" 2>/dev/null) || pr_url=""
       pr_number=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('number',''))" 2>/dev/null) || pr_number=""
       pr_state=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); s=d[0]; print('merged' if s.get('mergedAt') else s.get('state','open').lower())" 2>/dev/null) || pr_state=""
-      [[ -n "\$pr_url" ]] && pairs+=(pr_url "\$pr_url")
-      [[ -n "\$pr_number" ]] && pairs+=(pr_number "\$pr_number")
-      [[ -n "\$pr_state" ]] && pairs+=(pr_status "\$pr_state")
+      [[ -n "\$pr_url" ]] && "$SCHEDULER" --set-field "$story_id" pr_url "\$pr_url" "$BACKLOG" 2>/dev/null && fields_updated=1
+      [[ -n "\$pr_number" ]] && "$SCHEDULER" --set-field "$story_id" pr_number "\$pr_number" "$BACKLOG" 2>/dev/null && fields_updated=1
+      [[ -n "\$pr_state" ]] && "$SCHEDULER" --set-field "$story_id" pr_status "\$pr_state" "$BACKLOG" 2>/dev/null && fields_updated=1
     fi
   fi
 
-  if [[ "\${#pairs[@]}" -gt 0 ]]; then
-    chore_commit_multi_field "$story_id" "\${pairs[@]}" "chore($story_id): delivery-metadata [daemon-wrapper]" \
-      || echo "[WRAPPER] Warning: could not commit metadata for $story_id"
+  # Commit + push if any field was updated
+  if [[ "\$fields_updated" -eq 1 ]]; then
+    (
+      git add "$BACKLOG_REL" 2>/dev/null || exit 1
+      git diff --cached --quiet 2>/dev/null && exit 0
+      git commit -m "chore($story_id): delivery-metadata [daemon-wrapper]" --quiet 2>/dev/null || exit 1
+      git push origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+      echo "[WRAPPER] delivery metadata committed for $story_id"
+    ) || echo "[WRAPPER] Warning: could not commit metadata for $story_id"
   fi
 }
 
@@ -1782,19 +2136,76 @@ on_exit() {
         || echo "[WRAPPER] Warning: could not push story branch"
     fi
 
-    chore_commit_field "$story_id" status escalated "chore($story_id): escalated [daemon-wrapper]" \
-      || echo "[WRAPPER] Warning: could not mark $story_id as escalated (will be caught by staleness detection)"
+    (
+      # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+      git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+        printf '%s|commit|drift-escalated-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+        echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping escalated for $story_id; commit or stash your edits" >&2
+        exit 6
+      }
+      if command -v flock &>/dev/null; then
+        flock "$STAGING_LOCK" bash -c "
+          '$SCHEDULER' --set-status '$story_id' escalated '$BACKLOG' 2>/dev/null || true
+          git add '$BACKLOG_REL' 2>/dev/null
+          git commit -m 'chore($story_id): escalated [daemon-wrapper]' --quiet 2>/dev/null
+          git push origin '$TARGET_BRANCH' --quiet 2>&1
+        "
+      else
+        '$SCHEDULER' --set-status '$story_id' escalated '$BACKLOG' 2>/dev/null || true
+        git add '$BACKLOG_REL' 2>/dev/null
+        git commit -m 'chore($story_id): escalated [daemon-wrapper]' --quiet 2>/dev/null
+        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+      fi
+    ) || echo "[WRAPPER] Warning: could not mark $story_id as escalated (will be caught by staleness detection)"
     notify_escalation_inline "$story_id" "Escalated: agent stopped without completing delivery" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
   elif [[ \$EXIT_CODE -ne 0 ]]; then
     if is_rate_limit_failure; then
       echo "[WRAPPER] Delivery hit Anthropic rate-limit (transient). Reverting $story_id to refined for retry..."
-      chore_commit_field "$story_id" status refined "chore($story_id): rate_limit_retry [delivery-wrapper]" \
-        || echo "[WRAPPER] Warning: could not revert $story_id to refined"
+      (
+        # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+        git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+          printf '%s|commit|drift-rate-limit-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+          echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping rate_limit_retry for $story_id; commit or stash your edits" >&2
+          exit 6
+        }
+        if command -v flock &>/dev/null; then
+          flock "$STAGING_LOCK" bash -c "
+            '$SCHEDULER' --set-status '$story_id' refined '$BACKLOG' 2>/dev/null || true
+            git add '$BACKLOG_REL' 2>/dev/null
+            git commit -m 'chore($story_id): rate_limit_retry [delivery-wrapper]' --quiet 2>/dev/null
+            git push origin '$TARGET_BRANCH' --quiet 2>&1
+          "
+        else
+          '$SCHEDULER' --set-status '$story_id' refined '$BACKLOG' 2>/dev/null || true
+          git add '$BACKLOG_REL' 2>/dev/null
+          git commit -m 'chore($story_id): rate_limit_retry [delivery-wrapper]' --quiet 2>/dev/null
+          git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+        fi
+      ) || echo "[WRAPPER] Warning: could not revert $story_id to refined"
       # No escalation notification — rate-limit is a transient platform event, not an incident
     else
       echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
-      chore_commit_field "$story_id" status failed "chore($story_id): failed [delivery-wrapper]" \
-        || echo "[WRAPPER] Warning: could not mark $story_id as failed (will be caught by staleness detection)"
+      (
+        # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+        git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+          printf '%s|commit|drift-failed-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+          echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping failed for $story_id; commit or stash your edits" >&2
+          exit 6
+        }
+        if command -v flock &>/dev/null; then
+          flock "$STAGING_LOCK" bash -c "
+            '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
+            git add '$BACKLOG_REL' 2>/dev/null
+            git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
+            git push origin '$TARGET_BRANCH' --quiet 2>&1
+          "
+        else
+          '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
+          git add '$BACKLOG_REL' 2>/dev/null
+          git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
+          git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+        fi
+      ) || echo "[WRAPPER] Warning: could not mark $story_id as failed (will be caught by staleness detection)"
       notify_escalation_inline "$story_id" "Failed: delivery exit code \$EXIT_CODE" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
     fi
   fi
@@ -1973,20 +2384,17 @@ EXITING=false  # Re-entry guard for on_exit
 LOCK_FILE="$LOCK_DIR/$story_id.lock"
 echo \$\$ > "\$LOCK_FILE"
 
-# Variables for chore-commit helper (E134S16 Option B' flock+yq)
-BACKLOG_FILE="$BACKLOG"
-BACKLOG_REL="$BACKLOG_REL"
-LOCK_DIR="$LOCK_DIR"
-TARGET_BRANCH="$TARGET_BRANCH"
-SCHEDULER="$SCHEDULER"
-# shellcheck source=lib/chore-commit.sh
-source "$PROJECT_DIR/.gaai/core/scripts/lib/chore-commit.sh"
-
 capture_metadata() {
   # Capture delivery metadata directly from delivery log + git log.
   # Same as tmux wrapper — stop hook doesn't fire in -p mode.
   local delivery_log="$LOG_DIR/${story_id}.log"
-  local pairs=()
+  local fields_updated=0
+
+  # AC3: skip metadata capture if working-tree drift exists (check before scheduler calls)
+  if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
+    echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping metadata capture for $story_id; commit or stash your edits"
+    return 0
+  fi
 
   if [[ -f "\$delivery_log" ]]; then
     local cost
@@ -2006,14 +2414,16 @@ try:
 except: pass
 PYEOF
     2>/dev/null) || cost=""
-    [[ -n "\$cost" && "\$cost" != "0" ]] && pairs+=(cost_usd "\$cost")
+    if [[ -n "\$cost" && "\$cost" != "0" ]]; then
+      "$SCHEDULER" --set-field "$story_id" cost_usd "\$cost" "$BACKLOG" 2>/dev/null && fields_updated=1
+    fi
   fi
 
   local started completed
   started=\$(git log --all --format='%aI' --grep="chore(${story_id}): in_progress" -1 2>/dev/null) || started=""
   completed=\$(git log --all --format='%aI' --grep="chore(${story_id}): done" -1 2>/dev/null) || completed=""
-  [[ -n "\$started" ]] && pairs+=(started_at "\$started")
-  [[ -n "\$completed" ]] && pairs+=(completed_at "\$completed")
+  [[ -n "\$started" ]] && "$SCHEDULER" --set-field "$story_id" started_at "\$started" "$BACKLOG" 2>/dev/null && fields_updated=1
+  [[ -n "\$completed" ]] && "$SCHEDULER" --set-field "$story_id" completed_at "\$completed" "$BACKLOG" 2>/dev/null && fields_updated=1
 
   if command -v gh &>/dev/null; then
     local pr_json
@@ -2023,15 +2433,19 @@ PYEOF
       pr_url=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('url',''))" 2>/dev/null) || pr_url=""
       pr_number=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('number',''))" 2>/dev/null) || pr_number=""
       pr_state=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); s=d[0]; print('merged' if s.get('mergedAt') else s.get('state','open').lower())" 2>/dev/null) || pr_state=""
-      [[ -n "\$pr_url" ]] && pairs+=(pr_url "\$pr_url")
-      [[ -n "\$pr_number" ]] && pairs+=(pr_number "\$pr_number")
-      [[ -n "\$pr_state" ]] && pairs+=(pr_status "\$pr_state")
+      [[ -n "\$pr_url" ]] && "$SCHEDULER" --set-field "$story_id" pr_url "\$pr_url" "$BACKLOG" 2>/dev/null && fields_updated=1
+      [[ -n "\$pr_number" ]] && "$SCHEDULER" --set-field "$story_id" pr_number "\$pr_number" "$BACKLOG" 2>/dev/null && fields_updated=1
+      [[ -n "\$pr_state" ]] && "$SCHEDULER" --set-field "$story_id" pr_status "\$pr_state" "$BACKLOG" 2>/dev/null && fields_updated=1
     fi
   fi
 
-  if [[ "\${#pairs[@]}" -gt 0 ]]; then
-    chore_commit_multi_field "$story_id" "\${pairs[@]}" "chore($story_id): delivery-metadata [daemon-wrapper]" \
-      || true
+  if [[ "\$fields_updated" -eq 1 ]]; then
+    (
+      git add "$BACKLOG_REL" 2>/dev/null || exit 1
+      git diff --cached --quiet 2>/dev/null && exit 0
+      git commit -m "chore($story_id): delivery-metadata [daemon-wrapper]" --quiet 2>/dev/null || exit 1
+      git push origin '$TARGET_BRANCH' --quiet 2>/dev/null || true
+    ) || true
   fi
 }
 
@@ -2364,19 +2778,49 @@ on_exit() {
         || echo "[WRAPPER] Warning: could not push story branch"
     fi
 
-    chore_commit_field "$story_id" status escalated "chore($story_id): escalated [daemon-wrapper]" \
-      || echo "[WRAPPER] Warning: could not mark $story_id as escalated (will be caught by staleness detection)"
+    (
+      # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+      git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+        printf '%s|commit|drift-escalated-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+        echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping escalated for $story_id; commit or stash your edits" >&2
+        exit 6
+      }
+      '$SCHEDULER' --set-status '$story_id' escalated '$BACKLOG' 2>/dev/null || true
+      git add '$BACKLOG_REL' 2>/dev/null
+      git commit -m 'chore($story_id): escalated [daemon-wrapper]' --quiet 2>/dev/null
+      git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+    ) || echo "[WRAPPER] Warning: could not mark $story_id as escalated"
     notify_escalation_inline "$story_id" "Escalated: agent stopped without completing delivery" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
   elif [[ \$EXIT_CODE -ne 0 ]]; then
     if is_rate_limit_failure; then
       echo "[WRAPPER] Delivery hit Anthropic rate-limit (transient). Reverting $story_id to refined for retry..."
-      chore_commit_field "$story_id" status refined "chore($story_id): rate_limit_retry [delivery-wrapper]" \
-        || echo "[WRAPPER] Warning: could not revert $story_id to refined"
+      (
+        # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+        git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+          printf '%s|commit|drift-rate-limit-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+          echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping rate_limit_retry for $story_id; commit or stash your edits" >&2
+          exit 6
+        }
+        '$SCHEDULER' --set-status '$story_id' refined '$BACKLOG' 2>/dev/null || true
+        git add '$BACKLOG_REL' 2>/dev/null
+        git commit -m 'chore($story_id): rate_limit_retry [delivery-wrapper]' --quiet 2>/dev/null
+        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+      ) || echo "[WRAPPER] Warning: could not revert $story_id to refined"
       # No escalation notification — rate-limit is a transient platform event, not an incident
     else
       echo "[WRAPPER] Delivery failed (exit \$EXIT_CODE). Marking $story_id as failed on staging..."
-      chore_commit_field "$story_id" status failed "chore($story_id): failed [delivery-wrapper]" \
-        || echo "[WRAPPER] Warning: could not mark $story_id as failed (will be caught by staleness detection)"
+      (
+        # AC3: refuse-and-skip if working-tree drift exists before scheduler modifies backlog
+        git diff --quiet HEAD -- '$BACKLOG_REL' 2>/dev/null || {
+          printf '%s|commit|drift-failed-$story_id\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" > '$DRIFT_MARKER' 2>/dev/null || true
+          echo "[CHORE-COMMIT] working-tree drift on active.backlog.yaml — skipping failed for $story_id; commit or stash your edits" >&2
+          exit 6
+        }
+        '$SCHEDULER' --set-status '$story_id' failed '$BACKLOG' 2>/dev/null || true
+        git add '$BACKLOG_REL' 2>/dev/null
+        git commit -m 'chore($story_id): failed [delivery-wrapper]' --quiet 2>/dev/null
+        git push origin '$TARGET_BRANCH' --quiet 2>&1 || true
+      ) || echo "[WRAPPER] Warning: could not mark $story_id as failed"
       notify_escalation_inline "$story_id" "Failed: delivery exit code \$EXIT_CODE" "Check .gaai/project/contexts/backlog/.delivery-logs/${story_id}.log"
     fi
   fi
@@ -2588,6 +3032,14 @@ disown \$HEARTBEAT_PID 2>/dev/null || true
 
 cleanup() {
   kill \$HEARTBEAT_PID 2>/dev/null || true
+  # AC2 (E134S14): only reconcile on clean exit — skip if interrupted
+  if [[ "\$_INTERRUPT_REQUESTED" != "1" ]] && [[ ! -f "\$INTERRUPTED_FILE" ]]; then
+    # AC1 (E134S14): reconcile top-level YAML status from phase_status before releasing lock.
+    # Guard: declare -f ensures the function was sourced (not a pre-source exit).
+    if declare -f _reconcile_yaml_status_on_exit >/dev/null 2>&1; then
+      _reconcile_yaml_status_on_exit "$story_id"
+    fi
+  fi
   rm -f "\$LOCK_FILE" "\$HEARTBEAT_FILE"
   # NB: do NOT remove \$INTERRUPTED_FILE — OSS-5 (crash_recovery_scan) reads
   # it at the next daemon start to differentiate graceful daemon-start.sh --stop from
@@ -2632,11 +3084,6 @@ export GAAI_AUTO_MERGE_ADMIN_FALLBACK="${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-false}"
 # Source dispatch helpers (function definitions only — no top-level work).
 # Plain source, no pipe : pipe creates subshell which loses function defs.
 source "$PROJECT_DIR/.gaai/core/scripts/daemon-dispatch.sh"
-
-# Source chore-commit helper (Option B' flock+yq — E134S16)
-export BACKLOG_REL="$BACKLOG_REL"
-# shellcheck source=lib/chore-commit.sh
-source "$PROJECT_DIR/.gaai/core/scripts/lib/chore-commit.sh"
 
 # 3phase loop — same logic as in-process version, just runs in own tmux
 while true; do
@@ -2765,6 +3212,9 @@ log "${GREEN}Daemon started on $(hostname) — target: $TARGET_BRANCH${NC}"
 if (( EXIT_WHEN_IDLE_THRESHOLD > 0 )); then
   log "${BLUE}Auto-stop enabled — daemon will exit after $EXIT_WHEN_IDLE_THRESHOLD consecutive idle polls (no ready stories + zero in-flight)${NC}"
 fi
+if [[ "${GAAI_PR_WATCHER_DISABLED:-}" == "1" ]]; then
+  log "${YELLOW}[PR-WATCHER] disabled via GAAI_PR_WATCHER_DISABLED env var${NC}"
+fi
 
 # ── Load 3-phase dispatch library (E134S02) ──────────────────────────────
 # shellcheck disable=SC1090
@@ -2789,6 +3239,7 @@ empty_idle_polls=0
 while true; do
   clean_stale_locks
   check_heartbeats || true
+  watch_pr_merge_status || true
 
   active=$(active_count)
 
@@ -2926,6 +3377,9 @@ while true; do
       fi
     done
   fi
+
+  # ── PR watcher: sweep pending cleanup entries ────────────────────────────
+  sweep_cleanup_pending || true
 
   # ── Worktree prune (cycle housekeeping) ──────────────────────────────────
   # Reaps administrative entries left behind by failed/escalated wrappers.
