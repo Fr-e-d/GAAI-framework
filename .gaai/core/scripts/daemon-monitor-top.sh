@@ -186,7 +186,7 @@ while true; do
     echo ""
   fi
 
-  # PR watcher status line (E134S17)
+  # PR watcher status line
   local pr_watcher_status="active"
   local pr_watcher_last="?"
   local pr_watcher_tracked=0

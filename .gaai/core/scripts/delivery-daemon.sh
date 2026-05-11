@@ -1248,7 +1248,7 @@ print(cur_status or '')
   launch_3phase_in_tmux "$sid" "$trace_id"
 }
 
-# ── E134S17 : PR merge watcher + reconcile helpers ──────────────────────────
+# ── PR merge watcher + reconcile helpers ────────────────────────────────────
 
 # Retries pending worktree/branch cleanup entries from .cleanup-pending.audit.
 # Called each main-loop cycle. Idempotent: entries cleared on success, kept on failure.
@@ -1296,9 +1296,9 @@ sweep_cleanup_pending() {
 }
 
 # PR merge watcher — polls GitHub for merged PRs on every daemon cycle.
-# @see DEC-88 (3-phase pipeline owns phase_status; daemon is sole coordinator)
-# @see DEC-76 v4 §11 (trust arc auto-merge OFF baseline — watcher observes only, never merges)
-# @see E134S15/S16 (chore-commit dependencies; E134S16 fallback via inline scheduler if not shipped)
+# Daemon is sole coordinator: phase_status transitions are daemon-owned, never agent-owned.
+# Watcher is read-only: observes operator merges, never auto-merges (trust arc — manual review default).
+# Requires chore-commit infrastructure; falls back to inline scheduler if lib/chore-commit.sh absent.
 watch_pr_merge_status() {
   # AC4: opt-out env var
   if [[ "${GAAI_PR_WATCHER_DISABLED:-}" == "1" ]]; then
@@ -1462,7 +1462,7 @@ for line in content.splitlines():
     return 0
   fi
 
-  # Check if E134S16 chore-commit helper is available
+  # Use chore-commit helper if available; otherwise fall back to inline scheduler
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local chore_lib="$script_dir/lib/chore-commit.sh"
@@ -1471,7 +1471,7 @@ for line in content.splitlines():
   reconcile_script=$(mktemp "$LOCK_DIR/.pr-watcher-reconcile-XXXXXX.sh")
 
   if [[ -f "$chore_lib" ]]; then
-    # E134S16 shipped path: use _chore_commit_field helper
+    # chore-commit helper available: use _chore_commit_field
     cat > "$reconcile_script" <<RECONCILE_EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -1482,7 +1482,7 @@ _chore_commit_field "$sid" phase_status done "$BACKLOG" "$BACKLOG_REL" "$TARGET_
 _chore_commit_field "$sid" completed_at "$merged_at" "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
 RECONCILE_EOF
   else
-    # E134S16 not shipped — inline chore-commit with E134S12 Option A purity guard (HIGH-F2)
+    # chore-commit helper absent — inline fallback with mandatory working-tree drift guard
     cat > "$reconcile_script" <<RECONCILE_EOF
 #!/usr/bin/env bash
 set -euo pipefail
