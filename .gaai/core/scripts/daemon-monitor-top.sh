@@ -192,17 +192,16 @@ while true; do
     echo ""
   fi
 
-  # PR watcher status line
-  local pr_watcher_status="active"
-  local pr_watcher_last="?"
-  local pr_watcher_tracked=0
+  # PR watcher status line (variables scoped to while-loop iteration, no `local` needed at top level)
+  pr_watcher_status="active"
+  pr_watcher_last="?"
+  pr_watcher_tracked=0
   if [[ "${GAAI_PR_WATCHER_DISABLED:-}" == "1" ]]; then
     pr_watcher_status="disabled"
   elif [[ -f "$LOCK_DIR/.pr-watcher.gh-warning-emitted" ]]; then
     pr_watcher_status="no gh"
   fi
   if [[ -f "$LOCK_DIR/.pr-watcher.last-poll" ]]; then
-    local last_poll _now
     last_poll=$(cat "$LOCK_DIR/.pr-watcher.last-poll" 2>/dev/null || echo 0)
     _now=$(date +%s)
     pr_watcher_last="$(( _now - last_poll ))s ago"
