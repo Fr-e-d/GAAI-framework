@@ -134,6 +134,7 @@ BACKLOG_FILE="$BACKLOG"   # alias for daemon-dispatch.sh library (E134S02)
 SCHEDULER="$SCRIPT_DIR/backlog-scheduler.sh"
 LOCK_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-locks"
 DRIFT_MARKER="$LOCK_DIR/.drift-detected.audit"
+REBASE_CONFLICT_MARKER="$LOCK_DIR/.rebase-conflict.audit"
 LOG_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-logs"
 STAGING_LOCK="$LOCK_DIR/.staging.lock"
 RETRY_FILE="$LOCK_DIR/.retry-counts"
@@ -823,12 +824,15 @@ for line in content.splitlines():
 set -euo pipefail
 cd "$PROJECT_DIR"
 if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  # Preserve any uncommitted work before force-syncing
-  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    git stash push -m "daemon-autosave-\$(date +%s)" --quiet 2>/dev/null || true
-  fi
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null
+  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
+    git rebase --abort --quiet 2>/dev/null || true
+    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
+    printf '%s|recovery|rebase-failed-staleness-$sid\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+    exit 1
+  fi
+  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
+  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
 fi
 # AC3: refuse-and-skip if working-tree drift exists before we modify the backlog
 if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
@@ -1130,11 +1134,15 @@ _recovery_revert_refined() {
 set -euo pipefail
 cd "$PROJECT_DIR"
 if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    git stash push -m "daemon-autosave-\$(date +%s)" --quiet 2>/dev/null || true
-  fi
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
+  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
+    git rebase --abort --quiet 2>/dev/null || true
+    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
+    printf '%s|recovery|rebase-failed-revert-$sid\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+    exit 1
+  fi
+  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
+  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
 fi
 # AC3: refuse-and-skip if working-tree drift exists before we modify the backlog
 if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
@@ -1175,11 +1183,15 @@ _recovery_set_status() {
 set -euo pipefail
 cd "$PROJECT_DIR"
 if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    git stash push -m "daemon-autosave-\$(date +%s)" --quiet 2>/dev/null || true
-  fi
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
+  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
+    git rebase --abort --quiet 2>/dev/null || true
+    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
+    printf '%s|recovery|rebase-failed-reconcile-$new_status-$sid\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+    exit 1
+  fi
+  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
+  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
 fi
 # AC3: refuse-and-skip if working-tree drift exists before we modify the backlog
 if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
@@ -1234,298 +1246,6 @@ print(cur_status or '')
     || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
     || echo "recovery-$(date +%s)-$$-$RANDOM")
   launch_3phase_in_tmux "$sid" "$trace_id"
-}
-
-# ── E134S17 : PR merge watcher + reconcile helpers ──────────────────────────
-
-# Retries pending worktree/branch cleanup entries from .cleanup-pending.audit.
-# Called each main-loop cycle. Idempotent: entries cleared on success, kept on failure.
-sweep_cleanup_pending() {
-  local marker="$LOCK_DIR/.cleanup-pending.audit"
-  [[ -f "$marker" ]] || return 0
-
-  local tmp_remaining
-  tmp_remaining=$(mktemp "$LOCK_DIR/.cleanup-pending-tmp-XXXXXX.audit")
-  local cleaned=0 kept=0
-
-  while IFS='|' read -r ts sid marker_type; do
-    [[ -z "$sid" ]] && continue
-    [[ "$marker_type" != "cleanup-pending" ]] && continue
-
-    local worktree_path
-    if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
-      worktree_path="${GAAI_WORKTREES_BASE}/${sid}-workspace"
-    else
-      local repo_name
-      repo_name=$(basename "$PROJECT_DIR")
-      worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
-    fi
-
-    local wt_ok=true
-    if [[ -d "$worktree_path" ]]; then
-      git -C "$PROJECT_DIR" worktree remove "$worktree_path" --force 2>/dev/null || wt_ok=false
-    fi
-    git -C "$PROJECT_DIR" branch -D "story/$sid" 2>/dev/null || true  # already gone = ok
-
-    if $wt_ok; then
-      log "${GREEN}[PR-WATCHER] sweep: cleaned pending worktree/branch for $sid${NC}"
-      (( cleaned++ )) || true
-    else
-      printf '%s|%s|cleanup-pending\n' "$ts" "$sid" >> "$tmp_remaining"
-      (( kept++ )) || true
-    fi
-  done < "$marker"
-
-  if [[ $kept -eq 0 ]]; then
-    rm -f "$marker" "$tmp_remaining" 2>/dev/null || true
-  else
-    mv "$tmp_remaining" "$marker" 2>/dev/null || rm -f "$tmp_remaining" 2>/dev/null || true
-  fi
-}
-
-# PR merge watcher — polls GitHub for merged PRs on every daemon cycle.
-# @see DEC-88 (3-phase pipeline owns phase_status; daemon is sole coordinator)
-# @see DEC-76 v4 §11 (trust arc auto-merge OFF baseline — watcher observes only, never merges)
-# @see E134S15/S16 (chore-commit dependencies; E134S16 fallback via inline scheduler if not shipped)
-watch_pr_merge_status() {
-  # AC4: opt-out env var
-  if [[ "${GAAI_PR_WATCHER_DISABLED:-}" == "1" ]]; then
-    return 0
-  fi
-
-  # Rate-limit guard: skip if last poll was < 60s ago (silent)
-  local poll_ts_file="$LOCK_DIR/.pr-watcher.last-poll"
-  if [[ -f "$poll_ts_file" ]]; then
-    local last_poll now_ts
-    last_poll=$(cat "$poll_ts_file" 2>/dev/null || echo 0)
-    now_ts=$(date +%s)
-    if (( now_ts - last_poll < 60 )); then
-      return 0
-    fi
-  fi
-
-  # gh availability check (warn once per daemon session)
-  local gh_warn_flag="$LOCK_DIR/.pr-watcher.gh-warning-emitted"
-  if ! command -v gh &>/dev/null; then
-    if [[ ! -f "$gh_warn_flag" ]]; then
-      log "${YELLOW}[PR-WATCHER] gh CLI not found — PR merge watcher disabled. Install gh to enable.${NC}"
-      touch "$gh_warn_flag" 2>/dev/null || true
-    fi
-    return 0
-  fi
-  if ! gh auth status &>/dev/null 2>&1; then
-    if [[ ! -f "$gh_warn_flag" ]]; then
-      log "${YELLOW}[PR-WATCHER] gh CLI not authenticated — PR merge watcher disabled. Run: gh auth login${NC}"
-      touch "$gh_warn_flag" 2>/dev/null || true
-    fi
-    return 0
-  fi
-  # gh available + authenticated — clear stale warning flag
-  rm -f "$gh_warn_flag" 2>/dev/null || true
-
-  # Update rate-limit timestamp
-  date +%s > "$poll_ts_file" 2>/dev/null || true
-
-  # Read backlog from origin (avoids working-tree drift)
-  local backlog_content
-  backlog_content=$(git -C "$PROJECT_DIR" show "origin/${TARGET_BRANCH}:${BACKLOG_REL}" 2>/dev/null) || {
-    log "${YELLOW}[PR-WATCHER] cannot read backlog from origin/${TARGET_BRANCH} — skipping cycle${NC}"
-    return 0
-  }
-
-  # Parse in_progress stories with pr_url set → "sid|pr_url" pairs
-  local story_pr_pairs
-  story_pr_pairs=$(printf '%s\n' "$backlog_content" | python3 -c "
-import sys
-lines = sys.stdin.read().splitlines()
-stories = []
-cur = {}
-for line in lines:
-    s = line.strip()
-    if s.startswith('- id:'):
-        if cur.get('id'):
-            stories.append(cur)
-        cur = {'id': s.split(':',1)[1].strip(), 'status': None, 'pr_url': None}
-    elif cur and s.startswith('status:'):
-        cur['status'] = s.split(':',1)[1].strip()
-    elif cur and s.startswith('pr_url:'):
-        cur['pr_url'] = s.split(':',1)[1].strip().strip('\"').strip(\"'\")
-if cur.get('id'):
-    stories.append(cur)
-for st in stories:
-    if st.get('status') == 'in_progress' and st.get('pr_url'):
-        print('{}|{}'.format(st['id'], st['pr_url']))
-" 2>/dev/null || true)
-
-  # Clear stale .pr-abandoned.emitted.<sid> flags for stories no longer tracked
-  for emitted_flag in "$LOCK_DIR"/.pr-abandoned.emitted.*; do
-    [[ -f "$emitted_flag" ]] || continue
-    local flag_sid="${emitted_flag##*.pr-abandoned.emitted.}"
-    if ! printf '%s\n' "$story_pr_pairs" | grep -q "^${flag_sid}|"; then
-      rm -f "$emitted_flag" 2>/dev/null || true
-    fi
-  done
-
-  [[ -z "$story_pr_pairs" ]] && return 0
-
-  while IFS='|' read -r sid pr_url; do
-    [[ -z "$sid" || -z "$pr_url" ]] && continue
-
-    # AC1: parse PR number via regex pull/([0-9]+)
-    local pr_num
-    pr_num=$(printf '%s' "$pr_url" | grep -oE 'pull/[0-9]+' | head -1 | sed 's|pull/||')
-    if [[ -z "$pr_num" ]]; then
-      log "${YELLOW}[PR-WATCHER] $sid : pr_url '$pr_url' does not match canonical pull/<N> pattern, skipping story${NC}"
-      continue
-    fi
-
-    # Query GitHub API
-    local gh_output
-    gh_output=$(gh pr view "$pr_num" --json mergedAt,state,baseRefName 2>/dev/null) || {
-      log "${YELLOW}[PR-WATCHER] $sid : gh pr view failed (rate limit or network) — skipping, will retry next cycle${NC}"
-      continue
-    }
-
-    # Parse response (jq preferred, python3 fallback — mirrors daemon-monitor-top.sh pattern)
-    local merged_at state base_ref
-    if command -v jq &>/dev/null; then
-      merged_at=$(printf '%s' "$gh_output" | jq -r '.mergedAt // empty' 2>/dev/null || true)
-      state=$(printf '%s' "$gh_output" | jq -r '.state // empty' 2>/dev/null || true)
-      base_ref=$(printf '%s' "$gh_output" | jq -r '.baseRefName // empty' 2>/dev/null || true)
-    else
-      merged_at=$(printf '%s' "$gh_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('mergedAt') or '')" 2>/dev/null || true)
-      state=$(printf '%s' "$gh_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('state',''))" 2>/dev/null || true)
-      base_ref=$(printf '%s' "$gh_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('baseRefName',''))" 2>/dev/null || true)
-    fi
-
-    # AC1 MEDIUM-F5: only reconcile if PR targets staging branch
-    local effective_target="${TARGET_BRANCH:-staging}"
-    if [[ -n "$base_ref" && "$base_ref" != "$effective_target" ]]; then
-      log "${YELLOW}[PR-WATCHER] $sid : PR targets baseRefName='$base_ref' (not $effective_target), skipping reconcile — operator retargeted PR experimentally${NC}"
-      continue
-    fi
-
-    # AC3: PR closed without merge (abandoned PR pattern)
-    if [[ "$state" == "CLOSED" && -z "$merged_at" ]]; then
-      local emitted_flag="$LOCK_DIR/.pr-abandoned.emitted.${sid}"
-      if [[ ! -f "$emitted_flag" ]]; then
-        log "${YELLOW}[PR-WATCHER] $sid : PR closed without merge — manual operator decision required${NC}"
-        printf '%s|%s|pr-closed-no-merge\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" \
-          >> "$LOCK_DIR/.pr-abandoned.audit" 2>/dev/null || true
-        touch "$emitted_flag" 2>/dev/null || true
-      fi
-      continue
-    fi
-
-    # Merge detected: reconcile backlog + clean up
-    if [[ -n "$merged_at" && "$base_ref" == "$effective_target" ]]; then
-      _reconcile_merged_pr "$sid" "$merged_at"
-    fi
-
-  done <<< "$story_pr_pairs"
-}
-
-# Atomic reconciliation when a PR merge is detected for story <sid>.
-_reconcile_merged_pr() {
-  local sid="$1" merged_at="$2"
-
-  # MEDIUM-F4: concurrent pre-check — re-read working-tree status before chore-commit
-  local current_status=""
-  if [[ -f "$BACKLOG" ]]; then
-    current_status=$(python3 -c "
-import sys, os
-content = open('$BACKLOG').read() if os.path.isfile('$BACKLOG') else ''
-cur_id = None
-for line in content.splitlines():
-    s = line.strip()
-    if s.startswith('- id:') and s.split(':',1)[1].strip() == '$sid':
-        cur_id = True
-    elif cur_id and s.startswith('status:'):
-        print(s.split(':',1)[1].strip())
-        break
-" 2>/dev/null || echo "")
-  fi
-  if [[ "$current_status" == "done" ]]; then
-    log "${CYAN}[PR-WATCHER] $sid : already reconciled by concurrent path, skipping${NC}"
-    return 0
-  fi
-
-  # Check if E134S16 chore-commit helper is available
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  local chore_lib="$script_dir/lib/chore-commit.sh"
-
-  local reconcile_script
-  reconcile_script=$(mktemp "$LOCK_DIR/.pr-watcher-reconcile-XXXXXX.sh")
-
-  if [[ -f "$chore_lib" ]]; then
-    # E134S16 shipped path: use _chore_commit_field helper
-    cat > "$reconcile_script" <<RECONCILE_EOF
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$PROJECT_DIR"
-source "$chore_lib"
-_chore_commit_field "$sid" status done "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
-_chore_commit_field "$sid" phase_status done "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
-_chore_commit_field "$sid" completed_at "$merged_at" "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
-RECONCILE_EOF
-  else
-    # E134S16 not shipped — inline chore-commit with E134S12 Option A purity guard (HIGH-F2)
-    cat > "$reconcile_script" <<RECONCILE_EOF
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$PROJECT_DIR"
-if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
-fi
-if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
-  echo "[PR-WATCHER] $sid : working-tree drift on $BACKLOG_REL — operator must resolve drift before watcher can reconcile, skipping this cycle" >&2
-  exit 1
-fi
-"$SCHEDULER" --set-status "$sid" done "$BACKLOG" 2>/dev/null
-"$SCHEDULER" --set-phase-status "$sid" done "$BACKLOG" 2>/dev/null
-"$SCHEDULER" --set-field "$sid" completed_at "$merged_at" "$BACKLOG" 2>/dev/null
-git add "$BACKLOG_REL"
-git diff --cached --quiet || git commit -m "chore($sid): done [pr-watcher]" --quiet
-git push origin "$TARGET_BRANCH" --quiet 2>&1
-RECONCILE_EOF
-  fi
-
-  chmod +x "$reconcile_script"
-  local rc=0
-  with_staging_lock bash "$reconcile_script" 2>/dev/null || rc=$?
-  rm -f "$reconcile_script" 2>/dev/null || true
-
-  if [[ $rc -ne 0 ]]; then
-    log "${RED}[PR-WATCHER] $sid : chore-commit failed (rc=$rc) — leaving in_progress, will retry next cycle${NC}"
-    return 1
-  fi
-
-  # HIGH-F3: cleanup after successful chore-commit
-  local worktree_path
-  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
-    worktree_path="${GAAI_WORKTREES_BASE}/${sid}-workspace"
-  else
-    local repo_name
-    repo_name=$(basename "$PROJECT_DIR")
-    worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
-  fi
-
-  local cleanup_failed=false
-  if [[ -d "$worktree_path" ]]; then
-    git -C "$PROJECT_DIR" worktree remove "$worktree_path" --force 2>/dev/null || cleanup_failed=true
-  fi
-  git -C "$PROJECT_DIR" branch -D "story/$sid" 2>/dev/null || true  # branch already gone = ok
-
-  if $cleanup_failed; then
-    printf '%s|%s|cleanup-pending\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" \
-      >> "$LOCK_DIR/.cleanup-pending.audit" 2>/dev/null || true
-    log "${YELLOW}[PR-WATCHER] $sid : cleanup partial failure → .cleanup-pending.audit written${NC}"
-  fi
-
-  log "${GREEN}[PR-WATCHER] $sid : merged at $merged_at to ${TARGET_BRANCH:-staging}, reconciled to status:done + worktree/branch cleaned (or .cleanup-pending.audit emitted)${NC}"
-  return 0
 }
 
 # ── Status mode ──────────────────────────────────────────────────────────
@@ -1587,13 +1307,15 @@ cd "$PROJECT_DIR"
 
 # Step 1: Sync with latest remote
 if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  # Preserve any uncommitted work before force-syncing
-  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    git stash push -m "daemon-autosave-$(date +%s)" --quiet 2>/dev/null || true
-  fi
-  # Local branch diverged (e.g. previous failed push) — force sync
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null
+  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
+    git rebase --abort --quiet 2>/dev/null || true
+    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
+    printf '%s|recovery|rebase-failed-in-progress-$story_id\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+    exit 1
+  fi
+  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
+  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
 fi
 
 # Step 2: Re-verify story is still ready after pulling latest
@@ -1627,15 +1349,22 @@ git commit -m "chore($story_id): in_progress [daemon]" --quiet
 # Step 4: Push — this is the atomic coordination point
 # If another VPS pushes between our pull and push, this fails (non-fast-forward)
 if ! git push origin "$TARGET_BRANCH" --quiet 2>&1; then
-  # Preserve any uncommitted work before force-syncing
-  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    git stash push -m "daemon-autosave-$(date +%s)" --quiet 2>/dev/null || true
-  fi
-  # Concurrent push detected — reset local to match remote and abort
+  # Concurrent push — rebase our commit on top of origin then retry
   git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null
-  echo "PUSH_CONFLICT: concurrent claim on $story_id" >&2
-  exit 3
+  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
+    git rebase --abort --quiet 2>/dev/null || true
+    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
+    printf '%s|recovery|rebase-failed-push-claim-$story_id\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+    echo "PUSH_CONFLICT: concurrent claim on $story_id (rebase conflict)" >&2
+    exit 3
+  fi
+  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
+  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
+  # Retry the push on rebase-clean tree
+  if ! git push origin "$TARGET_BRANCH" --quiet 2>&1; then
+    echo "PUSH_CONFLICT: concurrent claim on $story_id (retry after rebase failed)" >&2
+    exit 3
+  fi
 fi
 PLEOF
   chmod +x "$plscript"
@@ -1650,6 +1379,10 @@ PLEOF
       ;;
     2)
       log "${YELLOW}$story_id already claimed by another device. Skipping.${NC}"
+      return 1
+      ;;
+    1)
+      log "${YELLOW}$story_id rebase conflict during in_progress mark. Skipping.${NC}"
       return 1
       ;;
     3)
@@ -3179,9 +2912,6 @@ log "${GREEN}Daemon started on $(hostname) — target: $TARGET_BRANCH${NC}"
 if (( EXIT_WHEN_IDLE_THRESHOLD > 0 )); then
   log "${BLUE}Auto-stop enabled — daemon will exit after $EXIT_WHEN_IDLE_THRESHOLD consecutive idle polls (no ready stories + zero in-flight)${NC}"
 fi
-if [[ "${GAAI_PR_WATCHER_DISABLED:-}" == "1" ]]; then
-  log "${YELLOW}[PR-WATCHER] disabled via GAAI_PR_WATCHER_DISABLED env var${NC}"
-fi
 
 # ── Load 3-phase dispatch library (E134S02) ──────────────────────────────
 # shellcheck disable=SC1090
@@ -3206,7 +2936,6 @@ empty_idle_polls=0
 while true; do
   clean_stale_locks
   check_heartbeats || true
-  watch_pr_merge_status || true
 
   active=$(active_count)
 
@@ -3344,9 +3073,6 @@ while true; do
       fi
     done
   fi
-
-  # ── PR watcher: sweep pending cleanup entries ────────────────────────────
-  sweep_cleanup_pending || true
 
   # ── Worktree prune (cycle housekeeping) ──────────────────────────────────
   # Reaps administrative entries left behind by failed/escalated wrappers.
