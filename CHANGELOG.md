@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(pr-watcher): correct function name _chore_commit_field → chore_commit_field
 - fix(daemon-monitor): remove invalid 'local' keyword outside function scope
 
 ## [2.23.0] - 2026-05-11

@@ -1479,15 +1479,15 @@ for line in content.splitlines():
   reconcile_script=$(mktemp "$LOCK_DIR/.pr-watcher-reconcile-XXXXXX.sh")
 
   if [[ -f "$chore_lib" ]]; then
-    # chore-commit helper available: use _chore_commit_field
+    # chore-commit helper available: use chore_commit_field
     cat > "$reconcile_script" <<RECONCILE_EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$PROJECT_DIR"
 source "$chore_lib"
-_chore_commit_field "$sid" status done "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
-_chore_commit_field "$sid" phase_status done "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
-_chore_commit_field "$sid" completed_at "$merged_at" "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
+chore_commit_field "$sid" status done "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
+chore_commit_field "$sid" phase_status done "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
+chore_commit_field "$sid" completed_at "$merged_at" "$BACKLOG" "$BACKLOG_REL" "$TARGET_BRANCH" "pr-watcher"
 RECONCILE_EOF
   else
     # chore-commit helper absent — inline fallback with mandatory working-tree drift guard
