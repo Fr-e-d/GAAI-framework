@@ -12,11 +12,16 @@
 #   SCHEDULER     — path to backlog-scheduler.sh (used by Option A fallback only)
 
 _CHORE_HELPER_AVAILABLE=0
-if command -v flock &>/dev/null \
-  && command -v yq &>/dev/null \
-  && yq --version 2>/dev/null | grep -q 'v4\.'; then
-  _CHORE_HELPER_AVAILABLE=1
-fi
+# DISABLED 2026-05-12 — yq -i rewrites entire YAML file with normalized formatting
+# (quotes, key order, trailing whitespace), defeating both line-count AND block-scope
+# drift checks. Forces fallback to Option A (scheduler --set-field) which preserves
+# original formatting via awk-based targeted edit. Re-enable when yq formatting can be
+# pinned to preserve byte-identical output for non-target story blocks.
+# if command -v flock &>/dev/null \
+#   && command -v yq &>/dev/null \
+#   && yq --version 2>/dev/null | grep -q 'v4\.'; then
+#   _CHORE_HELPER_AVAILABLE=1
+# fi
 
 # Option A fallback (E134S12 semantics): refuse if drift, else scheduler-write + commit + push.
 # Used when flock/yq/yq-v4 are unavailable.

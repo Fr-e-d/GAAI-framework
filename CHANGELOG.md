@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(chore-commit): disable yq path, force Option A fallback (preserves formatting)
 - fix(chore-commit): replace strict line-count drift check with block-scope check (cycle-2 MEDIUM-N1 fix)
 - fix(pr-watcher): correct chore_commit_field signature + export env vars in reconcile subshell
 - fix(pr-watcher): correct function name _chore_commit_field → chore_commit_field
