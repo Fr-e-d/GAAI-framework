@@ -433,301 +433,294 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Wrapper EXIT reconciliation (E134S14 — AC4)
-# Tests _reconcile_yaml_status_on_exit via direct harness invocation.
+# AC4 — Concurrent chore-commit serialization (E134S16 — T12–T17)
+# Tests chore_commit_field / chore_commit_multi_field: single-field write,
+# idempotency, cross-story drift detection, multi-field atomicity,
+# concurrent caller serialization, and Option A fallback warning.
 # ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== Wrapper EXIT reconciliation (T1-T5) ==="
+echo "=== AC4: chore-commit serialization (T12-T17) ==="
 
-DISPATCH="$SCRIPT_DIR/../daemon-dispatch.sh"
+CHORE_LIB="$SCRIPT_DIR/../lib/chore-commit.sh"
+AC4_DIR="$FIXTURE_DIR/ac4-project"
+AC4_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
+AC4_LOCK_DIR="$FIXTURE_DIR/ac4-locks"
+AC4_STORY_A="TST-CC-A"
+AC4_STORY_B="TST-CC-B"
+mkdir -p "$AC4_LOCK_DIR"
 
-# Shared helper: build a harness that sources _reconcile_yaml_status_on_exit
-# (and its dependency get_phase_status) from daemon-dispatch.sh and invokes it.
-# Args: $1=project_dir $2=story_id $3=backlog_rel $4=phase_status $5=initial_status
-# Writes a temp script to $REC_HARNESS (set by caller).
-_write_reconcile_harness() {
-  local proj="$1" sid="$2" brel="$3" initial_phase="$4" initial_status="$5"
-  cat > "$REC_HARNESS" <<HEOF
+AC4_HEAD_YAML="items:
+- id: $AC4_STORY_A
+  status: refined
+  phase_status: not_started
+- id: $AC4_STORY_B
+  status: refined
+  phase_status: not_started"
+
+setup_git_repo "$AC4_DIR" "$AC4_HEAD_YAML"
+git -C "$AC4_DIR" config user.email "test@gaai.local"
+git -C "$AC4_DIR" config user.name "GAAI Test"
+
+# ── T12: single-field write succeeds on clean working tree ────────────────────
+echo "T12: chore_commit_field single-field write on clean WT"
+T12_HARNESS=$(mktemp /tmp/ac4-t12-XXXXXX.sh)
+cat > "$T12_HARNESS" <<SCRIPT
 #!/usr/bin/env bash
-set -uo pipefail
-PROJECT_DIR="$proj"
-BACKLOG_FILE="\$PROJECT_DIR/$brel"
-SCHEDULER="$SCHEDULER"
-LOCK_DIR="$FIXTURE_DIR/rec-locks-$$"
+BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
+BACKLOG_REL="$AC4_BACKLOG_REL"
+LOCK_DIR="$AC4_LOCK_DIR"
 TARGET_BRANCH="main"
-mkdir -p "\$LOCK_DIR"
+SCHEDULER="$SCHEDULER"
+cd "$AC4_DIR"
+source "$CHORE_LIB"
+chore_commit_field "$AC4_STORY_A" status in_progress "chore($AC4_STORY_A): in_progress [test]"
+SCRIPT
+chmod +x "$T12_HARNESS"
+T12_RC=0
+bash "$T12_HARNESS" 2>/dev/null || T12_RC=$?
+rm -f "$T12_HARNESS"
 
-eval "\$(awk '
-  /^get_phase_status\(\)/{ p=1; depth=0 }
-  /^_reconcile_yaml_status_on_exit\(\)/{ p=1; depth=0 }
-  p {
-    print
-    for (i=1; i<=length(\$0); i++) {
-      c = substr(\$0, i, 1)
-      if (c == "{") depth++
-      if (c == "}") depth--
-    }
-    if (p && depth == 0 && NR > 1) { p=0 }
-  }
-' "$DISPATCH" 2>/dev/null)"
-
-_reconcile_yaml_status_on_exit "$sid"
-HEOF
-  chmod +x "$REC_HARNESS"
-}
-
-# ── T1: phase_status=done, status=in_progress → commit created, YAML status=done ──
-echo ""
-echo "T1: phase_status=done → reconcile commits status=done"
-T1_DIR="$FIXTURE_DIR/rec-t1-$$"
-T1_BREL=".gaai/project/contexts/backlog/active.backlog.yaml"
-T1_SID="TST-REC-T1"
-
-T1_YAML="- id: $T1_SID
-  status: in_progress
-  phase_status: done
-  delivery_pipeline: 3phase"
-
-setup_git_repo "$T1_DIR" "$T1_YAML"
-git -C "$T1_DIR" config user.email "test@gaai.local"
-git -C "$T1_DIR" config user.name "GAAI Test"
-
-REC_HARNESS=$(mktemp /tmp/rec-harness-XXXXXX.sh)
-_write_reconcile_harness "$T1_DIR" "$T1_SID" "$T1_BREL" "done" "in_progress"
-bash "$REC_HARNESS" 2>/dev/null
-rm -f "$REC_HARNESS"
-
-commit_line=$(git -C "$T1_DIR" log --oneline --grep="chore($T1_SID).*wrapper-reconcile" 2>/dev/null | head -1)
-if [[ -n "$commit_line" ]]; then
-  pass "T1a: wrapper-reconcile commit found: $commit_line"
+if [[ "$T12_RC" -eq 0 ]]; then
+  pass "T12: chore_commit_field exited 0 on clean WT"
 else
-  fail "T1a: no wrapper-reconcile commit for $T1_SID"
+  fail "T12: chore_commit_field exited $T12_RC (expected 0)"
+fi
+T12_STATUS=$(git -C "$AC4_DIR" show HEAD:"$AC4_BACKLOG_REL" 2>/dev/null \
+  | grep -A 4 "id: $AC4_STORY_A" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"' || echo "")
+if [[ "$T12_STATUS" == "in_progress" ]]; then
+  pass "T12b: status committed as in_progress"
+else
+  fail "T12b: status in HEAD is '$T12_STATUS' (expected in_progress)"
 fi
 
-final_status=$(awk -v id="$T1_SID" '
-  $0 == "- id: " id { found=1; next }
-  found && /^- id:/ { exit }
-  found && /^[[:space:]]+status:/ {
-    gsub(/^[[:space:]]+status:[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print; exit
-  }
-' "$T1_DIR/$T1_BREL" 2>/dev/null)
-if [[ "$final_status" == "done" ]]; then
-  pass "T1b: YAML status=done after reconcile"
-else
-  fail "T1b: expected status=done, got '$final_status'"
-fi
-
-# ── T2: phase_status=failed, status=in_progress → commit created, YAML status=failed ──
-echo ""
-echo "T2: phase_status=failed → reconcile commits status=failed"
-T2_DIR="$FIXTURE_DIR/rec-t2-$$"
-T2_BREL=".gaai/project/contexts/backlog/active.backlog.yaml"
-T2_SID="TST-REC-T2"
-
-T2_YAML="- id: $T2_SID
-  status: in_progress
-  phase_status: failed
-  delivery_pipeline: 3phase"
-
-setup_git_repo "$T2_DIR" "$T2_YAML"
-git -C "$T2_DIR" config user.email "test@gaai.local"
-git -C "$T2_DIR" config user.name "GAAI Test"
-
-REC_HARNESS=$(mktemp /tmp/rec-harness-XXXXXX.sh)
-_write_reconcile_harness "$T2_DIR" "$T2_SID" "$T2_BREL" "failed" "in_progress"
-bash "$REC_HARNESS" 2>/dev/null
-rm -f "$REC_HARNESS"
-
-commit_line=$(git -C "$T2_DIR" log --oneline --grep="chore($T2_SID).*wrapper-reconcile" 2>/dev/null | head -1)
-if [[ -n "$commit_line" ]]; then
-  pass "T2a: wrapper-reconcile commit found: $commit_line"
-else
-  fail "T2a: no wrapper-reconcile commit for $T2_SID"
-fi
-
-final_status=$(awk -v id="$T2_SID" '
-  $0 == "- id: " id { found=1; next }
-  found && /^- id:/ { exit }
-  found && /^[[:space:]]+status:/ {
-    gsub(/^[[:space:]]+status:[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print; exit
-  }
-' "$T2_DIR/$T2_BREL" 2>/dev/null)
-if [[ "$final_status" == "failed" ]]; then
-  pass "T2b: YAML status=failed after reconcile"
-else
-  fail "T2b: expected status=failed, got '$final_status'"
-fi
-
-# ── T3: phase_status=qa_failed → no reconciliation (retry-loop owns this) ──
-echo ""
-echo "T3: phase_status=qa_failed → no reconciliation (left for retry-loop)"
-T3_DIR="$FIXTURE_DIR/rec-t3-$$"
-T3_BREL=".gaai/project/contexts/backlog/active.backlog.yaml"
-T3_SID="TST-REC-T3"
-
-T3_YAML="- id: $T3_SID
-  status: in_progress
-  phase_status: qa_failed
-  delivery_pipeline: 3phase"
-
-setup_git_repo "$T3_DIR" "$T3_YAML"
-git -C "$T3_DIR" config user.email "test@gaai.local"
-git -C "$T3_DIR" config user.name "GAAI Test"
-
-REC_HARNESS=$(mktemp /tmp/rec-harness-XXXXXX.sh)
-_write_reconcile_harness "$T3_DIR" "$T3_SID" "$T3_BREL" "qa_failed" "in_progress"
-bash "$REC_HARNESS" 2>/dev/null
-rm -f "$REC_HARNESS"
-
-commit_line=$(git -C "$T3_DIR" log --oneline --grep="chore($T3_SID).*wrapper-reconcile" 2>/dev/null | head -1)
-if [[ -z "$commit_line" ]]; then
-  pass "T3a: no wrapper-reconcile commit (qa_failed is no-op)"
-else
-  fail "T3a: unexpected wrapper-reconcile commit for qa_failed: $commit_line"
-fi
-
-final_status=$(awk -v id="$T3_SID" '
-  $0 == "- id: " id { found=1; next }
-  found && /^- id:/ { exit }
-  found && /^[[:space:]]+status:/ {
-    gsub(/^[[:space:]]+status:[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print; exit
-  }
-' "$T3_DIR/$T3_BREL" 2>/dev/null)
-if [[ "$final_status" == "in_progress" ]]; then
-  pass "T3b: YAML status=in_progress unchanged (retry-loop will handle)"
-else
-  fail "T3b: expected status=in_progress unchanged, got '$final_status'"
-fi
-
-# ── T4: INTERRUPTED_FILE present → caller-level guard skips reconcile ──
-echo ""
-echo "T4: INTERRUPTED_FILE present → no reconciliation (daemon crash-recovery owns it)"
-T4_DIR="$FIXTURE_DIR/rec-t4-$$"
-T4_BREL=".gaai/project/contexts/backlog/active.backlog.yaml"
-T4_SID="TST-REC-T4"
-T4_LOCK_DIR="$FIXTURE_DIR/rec-locks-t4-$$"
-T4_INTERRUPTED="$T4_LOCK_DIR/${T4_SID}.interrupted"
-
-T4_YAML="- id: $T4_SID
-  status: in_progress
-  phase_status: done
-  delivery_pipeline: 3phase"
-
-setup_git_repo "$T4_DIR" "$T4_YAML"
-git -C "$T4_DIR" config user.email "test@gaai.local"
-git -C "$T4_DIR" config user.name "GAAI Test"
-mkdir -p "$T4_LOCK_DIR"
-date +%s > "$T4_INTERRUPTED"   # simulate the interrupt marker
-
-# Simulate the AC2 caller-level guard from cleanup(): only call reconcile if
-# INTERRUPTED_FILE is absent. Since it's present, reconcile is never invoked.
-T4_HARNESS=$(mktemp /tmp/rec-harness-XXXXXX.sh)
-cat > "$T4_HARNESS" <<T4EOF
+# ── T13: idempotency — same value → no new commit ─────────────────────────────
+echo "T13: chore_commit_field idempotency (same value)"
+T13_COUNT_BEFORE=$(git -C "$AC4_DIR" log --oneline | wc -l | tr -d ' ')
+T13_HARNESS=$(mktemp /tmp/ac4-t13-XXXXXX.sh)
+cat > "$T13_HARNESS" <<SCRIPT
 #!/usr/bin/env bash
-set -uo pipefail
-PROJECT_DIR="$T4_DIR"
-BACKLOG_FILE="\$PROJECT_DIR/$T4_BREL"
-SCHEDULER="$SCHEDULER"
-LOCK_DIR="$T4_LOCK_DIR"
+BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
+BACKLOG_REL="$AC4_BACKLOG_REL"
+LOCK_DIR="$AC4_LOCK_DIR"
 TARGET_BRANCH="main"
-INTERRUPTED_FILE="$T4_INTERRUPTED"
-_INTERRUPT_REQUESTED=0
+SCHEDULER="$SCHEDULER"
+cd "$AC4_DIR"
+source "$CHORE_LIB"
+chore_commit_field "$AC4_STORY_A" status in_progress "chore($AC4_STORY_A): in_progress [test-dup]"
+SCRIPT
+chmod +x "$T13_HARNESS"
+T13_RC=0
+bash "$T13_HARNESS" 2>/dev/null || T13_RC=$?
+rm -f "$T13_HARNESS"
+T13_COUNT_AFTER=$(git -C "$AC4_DIR" log --oneline | wc -l | tr -d ' ')
 
-eval "\$(awk '
-  /^get_phase_status\(\)/{ p=1; depth=0 }
-  /^_reconcile_yaml_status_on_exit\(\)/{ p=1; depth=0 }
-  p {
-    print
-    for (i=1; i<=length(\$0); i++) {
-      c = substr(\$0, i, 1)
-      if (c == "{") depth++
-      if (c == "}") depth--
-    }
-    if (p && depth == 0 && NR > 1) { p=0 }
-  }
-' "$DISPATCH" 2>/dev/null)"
-
-# Mirrors the cleanup() AC2 guard added by E134S14
-if [[ "\$_INTERRUPT_REQUESTED" != "1" ]] && [[ ! -f "\$INTERRUPTED_FILE" ]]; then
-  _reconcile_yaml_status_on_exit "$T4_SID"
-fi
-T4EOF
-chmod +x "$T4_HARNESS"
-bash "$T4_HARNESS" 2>/dev/null
-rm -f "$T4_HARNESS"
-
-commit_line=$(git -C "$T4_DIR" log --oneline --grep="chore($T4_SID).*wrapper-reconcile" 2>/dev/null | head -1)
-if [[ -z "$commit_line" ]]; then
-  pass "T4: no reconcile commit when INTERRUPTED_FILE present"
+if [[ "$T13_RC" -eq 0 ]]; then
+  pass "T13: idempotent call exited 0"
 else
-  fail "T4: unexpected reconcile commit despite INTERRUPTED_FILE: $commit_line"
+  fail "T13: idempotent call exited $T13_RC (expected 0)"
+fi
+if [[ "$T13_COUNT_BEFORE" -eq "$T13_COUNT_AFTER" ]]; then
+  pass "T13b: no new commit on idempotent call"
+else
+  fail "T13b: unexpected new commit ($T13_COUNT_BEFORE → $T13_COUNT_AFTER)"
 fi
 
-# ── T5: phase_status=done, status=in_progress, WT drift → skip + log, no crash ──
-echo ""
-echo "T5: working-tree drift → skip reconcile with log line, wrapper exits cleanly"
-T5_DIR="$FIXTURE_DIR/rec-t5-$$"
-T5_BREL=".gaai/project/contexts/backlog/active.backlog.yaml"
-T5_SID="TST-REC-T5"
+# ── T14: cross-story drift → exit 6 ──────────────────────────────────────────
+echo "T14: chore_commit_field exits 6 on cross-story drift (dirty WT)"
+# Introduce unstaged edit to simulate operator editing an unrelated story
+python3 -c "
+with open('$AC4_DIR/$AC4_BACKLOG_REL') as f: content = f.read()
+content = content.replace('  phase_status: not_started', '  phase_status: not_started\n  notes: operator-edited', 1)
+with open('$AC4_DIR/$AC4_BACKLOG_REL', 'w') as f: f.write(content)
+" 2>/dev/null || true
 
-T5_YAML="- id: $T5_SID
-  status: in_progress
-  phase_status: done
-  delivery_pipeline: 3phase"
-
-setup_git_repo "$T5_DIR" "$T5_YAML"
-git -C "$T5_DIR" config user.email "test@gaai.local"
-git -C "$T5_DIR" config user.name "GAAI Test"
-
-# Introduce WT drift: edit the backlog without committing
-printf '%s\n' "- id: $T5_SID
-  status: in_progress
-  phase_status: done
-  delivery_pipeline: 3phase
-  notes: operator-edited-drift" > "$T5_DIR/$T5_BREL"
-
-if git -C "$T5_DIR" diff --quiet HEAD -- "$T5_BREL"; then
-  fail "T5-precondition: expected WT drift, found none"
+if git -C "$AC4_DIR" diff --quiet HEAD -- "$AC4_BACKLOG_REL" 2>/dev/null; then
+  fail "T14-precondition: expected dirty WT, found clean"
 else
-  pass "T5-precondition: WT drift present as expected"
+  T14_HARNESS=$(mktemp /tmp/ac4-t14-XXXXXX.sh)
+  cat > "$T14_HARNESS" <<SCRIPT
+#!/usr/bin/env bash
+BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
+BACKLOG_REL="$AC4_BACKLOG_REL"
+LOCK_DIR="$AC4_LOCK_DIR"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+cd "$AC4_DIR"
+source "$CHORE_LIB"
+chore_commit_field "$AC4_STORY_B" status in_progress "chore($AC4_STORY_B): in_progress [test]"
+SCRIPT
+  chmod +x "$T14_HARNESS"
+  T14_RC=0
+  bash "$T14_HARNESS" 2>/dev/null || T14_RC=$?
+  rm -f "$T14_HARNESS"
+
+  if [[ "$T14_RC" -eq 6 ]]; then
+    pass "T14: exit code 6 on cross-story drift"
+  else
+    fail "T14: expected exit code 6, got $T14_RC"
+  fi
+  # Verify no commit for story B was created
+  T14_STATUS=$(git -C "$AC4_DIR" show HEAD:"$AC4_BACKLOG_REL" 2>/dev/null \
+    | grep -A 4 "id: $AC4_STORY_B" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"' || echo "")
+  if [[ "$T14_STATUS" == "refined" ]]; then
+    pass "T14b: story B still refined in HEAD (commit correctly refused)"
+  else
+    fail "T14b: story B status in HEAD is '$T14_STATUS' (expected refined)"
+  fi
+fi
+# Reset WT before T15
+git -C "$AC4_DIR" checkout HEAD -- "$AC4_BACKLOG_REL" 2>/dev/null || true
+
+# ── T15: chore_commit_multi_field atomic multi-field write ────────────────────
+echo "T15: chore_commit_multi_field writes multiple fields in one commit"
+T15_HARNESS=$(mktemp /tmp/ac4-t15-XXXXXX.sh)
+cat > "$T15_HARNESS" <<SCRIPT
+#!/usr/bin/env bash
+BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
+BACKLOG_REL="$AC4_BACKLOG_REL"
+LOCK_DIR="$AC4_LOCK_DIR"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+cd "$AC4_DIR"
+source "$CHORE_LIB"
+chore_commit_multi_field "$AC4_STORY_B" status in_progress phase_status planning \
+  "chore($AC4_STORY_B): in_progress [test]"
+SCRIPT
+chmod +x "$T15_HARNESS"
+T15_RC=0
+bash "$T15_HARNESS" 2>/dev/null || T15_RC=$?
+rm -f "$T15_HARNESS"
+
+if [[ "$T15_RC" -eq 0 ]]; then
+  pass "T15: chore_commit_multi_field exited 0"
+else
+  fail "T15: chore_commit_multi_field exited $T15_RC (expected 0)"
+fi
+T15_SNAP=$(git -C "$AC4_DIR" show HEAD:"$AC4_BACKLOG_REL" 2>/dev/null \
+  | grep -A 6 "id: $AC4_STORY_B")
+T15_STATUS=$(echo "$T15_SNAP" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"' || echo "")
+T15_PHASE=$(echo "$T15_SNAP" | grep "phase_status:" | head -1 | sed 's/.*phase_status: *//' | tr -d '"' || echo "")
+if [[ "$T15_STATUS" == "in_progress" ]]; then
+  pass "T15b: status field committed as in_progress"
+else
+  fail "T15b: status in HEAD is '$T15_STATUS' (expected in_progress)"
+fi
+if [[ "$T15_PHASE" == "planning" ]]; then
+  pass "T15c: phase_status field committed as planning"
+else
+  fail "T15c: phase_status in HEAD is '$T15_PHASE' (expected planning)"
 fi
 
-REC_HARNESS=$(mktemp /tmp/rec-harness-XXXXXX.sh)
-_write_reconcile_harness "$T5_DIR" "$T5_SID" "$T5_BREL" "done" "in_progress"
-T5_OUTPUT=$(bash "$REC_HARNESS" 2>&1)
-T5_RC=$?
-rm -f "$REC_HARNESS"
+# ── T16: concurrent callers on distinct stories both succeed ──────────────────
+echo "T16: two concurrent chore_commit_field calls on distinct stories both succeed"
+AC4B_DIR="$FIXTURE_DIR/ac4b-project"
+AC4B_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
+AC4B_LOCK_DIR="$FIXTURE_DIR/ac4b-locks"
+AC4B_STORY_A="TST-CC-C"
+AC4B_STORY_B="TST-CC-D"
+mkdir -p "$AC4B_LOCK_DIR"
 
-if [[ "$T5_RC" -eq 0 ]]; then
-  pass "T5a: function returned 0 (no crash on drift)"
+AC4B_HEAD_YAML="items:
+- id: $AC4B_STORY_A
+  status: refined
+  phase_status: not_started
+- id: $AC4B_STORY_B
+  status: refined
+  phase_status: not_started"
+setup_git_repo "$AC4B_DIR" "$AC4B_HEAD_YAML"
+git -C "$AC4B_DIR" config user.email "test@gaai.local"
+git -C "$AC4B_DIR" config user.name "GAAI Test"
+
+T16_HARNESS_A=$(mktemp /tmp/ac4-t16a-XXXXXX.sh)
+T16_HARNESS_B=$(mktemp /tmp/ac4-t16b-XXXXXX.sh)
+for _hf in "$T16_HARNESS_A" "$T16_HARNESS_B"; do
+  _sid="$AC4B_STORY_A"; [[ "$_hf" == "$T16_HARNESS_B" ]] && _sid="$AC4B_STORY_B"
+  cat > "$_hf" <<SCRIPT
+#!/usr/bin/env bash
+BACKLOG_FILE="$AC4B_DIR/$AC4B_BACKLOG_REL"
+BACKLOG_REL="$AC4B_BACKLOG_REL"
+LOCK_DIR="$AC4B_LOCK_DIR"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+cd "$AC4B_DIR"
+source "$CHORE_LIB"
+chore_commit_field "$_sid" status in_progress "chore($_sid): in_progress [test]"
+SCRIPT
+  chmod +x "$_hf"
+done
+
+T16_RC_A=0; T16_RC_B=0
+if command -v flock &>/dev/null && command -v yq &>/dev/null \
+    && yq --version 2>/dev/null | grep -q 'v4\.'; then
+  # Option B' available — true concurrent execution, flock serializes safely
+  bash "$T16_HARNESS_A" 2>/dev/null & T16_PID_A=$!
+  bash "$T16_HARNESS_B" 2>/dev/null & T16_PID_B=$!
+  wait "$T16_PID_A" || T16_RC_A=$?
+  wait "$T16_PID_B" || T16_RC_B=$?
 else
-  fail "T5a: function exited $T5_RC (expected 0)"
+  # Option A fallback — sequential (no flock serialization available)
+  bash "$T16_HARNESS_A" 2>/dev/null || T16_RC_A=$?
+  bash "$T16_HARNESS_B" 2>/dev/null || T16_RC_B=$?
+fi
+rm -f "$T16_HARNESS_A" "$T16_HARNESS_B"
+
+if [[ "$T16_RC_A" -eq 0 ]]; then
+  pass "T16: caller A ($AC4B_STORY_A) exited 0"
+else
+  fail "T16: caller A exited $T16_RC_A (expected 0)"
+fi
+if [[ "$T16_RC_B" -eq 0 ]]; then
+  pass "T16b: caller B ($AC4B_STORY_B) exited 0"
+else
+  fail "T16b: caller B exited $T16_RC_B (expected 0)"
+fi
+T16_SA=$(git -C "$AC4B_DIR" show HEAD:"$AC4B_BACKLOG_REL" 2>/dev/null \
+  | grep -A 3 "id: $AC4B_STORY_A" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"' || echo "")
+T16_SB=$(git -C "$AC4B_DIR" show HEAD:"$AC4B_BACKLOG_REL" 2>/dev/null \
+  | grep -A 3 "id: $AC4B_STORY_B" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"' || echo "")
+if [[ "$T16_SA" == "in_progress" ]]; then
+  pass "T16c: story $AC4B_STORY_A committed as in_progress"
+else
+  fail "T16c: story $AC4B_STORY_A status in HEAD is '$T16_SA' (expected in_progress)"
+fi
+if [[ "$T16_SB" == "in_progress" ]]; then
+  pass "T16d: story $AC4B_STORY_B committed as in_progress"
+else
+  fail "T16d: story $AC4B_STORY_B status in HEAD is '$T16_SB' (expected in_progress)"
 fi
 
-if echo "$T5_OUTPUT" | grep -q "working-tree drift"; then
-  pass "T5b: log line contains 'working-tree drift'"
-else
-  fail "T5b: expected 'working-tree drift' in output; got: $T5_OUTPUT"
-fi
+# ── T17: Option A fallback warning flag written ───────────────────────────────
+echo "T17: Option A fallback writes warning flag when flock/yq unavailable"
+T17_LOCK_DIR="$FIXTURE_DIR/ac4-t17-locks"
+mkdir -p "$T17_LOCK_DIR"
+T17_HARNESS=$(mktemp /tmp/ac4-t17-XXXXXX.sh)
+cat > "$T17_HARNESS" <<SCRIPT
+#!/usr/bin/env bash
+BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
+BACKLOG_REL="$AC4_BACKLOG_REL"
+LOCK_DIR="$T17_LOCK_DIR"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+cd "$AC4_DIR"
+source "$CHORE_LIB"
+# Force Option A path to test the warning flag regardless of flock/yq presence
+_CHORE_HELPER_AVAILABLE=0
+chore_commit_field "$AC4_STORY_A" status done "chore($AC4_STORY_A): done [test-fallback]"
+SCRIPT
+chmod +x "$T17_HARNESS"
+T17_RC=0
+bash "$T17_HARNESS" 2>/dev/null || T17_RC=$?
+rm -f "$T17_HARNESS"
 
-commit_line=$(git -C "$T5_DIR" log --oneline --grep="chore($T5_SID).*wrapper-reconcile" 2>/dev/null | head -1)
-if [[ -z "$commit_line" ]]; then
-  pass "T5c: no commit created on drift (skipped correctly)"
+if [[ "$T17_RC" -eq 0 ]]; then
+  pass "T17: Option A fallback exited 0"
 else
-  fail "T5c: unexpected commit despite working-tree drift: $commit_line"
+  fail "T17: Option A fallback exited $T17_RC (expected 0)"
 fi
-
-final_status=$(awk -v id="$T5_SID" '
-  $0 == "- id: " id { found=1; next }
-  found && /^- id:/ { exit }
-  found && /^[[:space:]]+status:/ {
-    gsub(/^[[:space:]]+status:[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print; exit
-  }
-' "$T5_DIR/$T5_BREL" 2>/dev/null)
-if [[ "$final_status" == "in_progress" ]]; then
-  pass "T5d: YAML status=in_progress unchanged (daemon will reconcile later)"
+if [[ -f "$T17_LOCK_DIR/.chore-helper-missing.warning" ]]; then
+  pass "T17b: warning flag written at .chore-helper-missing.warning"
 else
-  fail "T5d: expected status=in_progress unchanged, got '$final_status'"
+  fail "T17b: warning flag not found at $T17_LOCK_DIR/.chore-helper-missing.warning"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
