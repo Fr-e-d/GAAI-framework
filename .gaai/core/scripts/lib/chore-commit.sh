@@ -85,12 +85,21 @@ chore_commit_field() {
     return 1
   fi
 
-  # Drift verify: exactly 2 lines changed (1 removed + 1 added = our field only)
-  local changed
-  changed=$(git diff -U0 HEAD -- "$backlog_rel" \
-    | grep -E '^[+-]' | grep -v '^[+-][+-][+-]' | wc -l | tr -d ' ' 2>/dev/null || echo "0")
-  if [[ "$changed" != "2" ]]; then
-    echo "[CHORE-COMMIT] $story_id : cross-story drift ($changed lines) — yq reverted, refuse-skip, operator resolve drift first" >&2
+  # Drift verify (cycle-2 review MEDIUM-N1 fix) : check diff doesn't touch lines outside the target story block.
+  # Original strict 2-line check failed when field is ADDED (1 line) vs UPDATED (2 lines).
+  # New semantic check : diff hunks must only touch the target story's block.
+  local other_story_lines
+  other_story_lines=$(git diff -U0 HEAD -- "$backlog_rel" 2>/dev/null \
+    | awk -v sid="$story_id" '
+        /^@@/ { in_hunk=1; next }
+        in_hunk && /^[+-]- id: / {
+          gsub(/^[+-]- id: */, "")
+          gsub(/[[:space:]]+$/, "")
+          if ($0 != sid) print
+        }
+      ' | wc -l | tr -d ' ' 2>/dev/null || echo "0")
+  if [[ "$other_story_lines" != "0" ]]; then
+    echo "[CHORE-COMMIT] $story_id : cross-story drift ($other_story_lines other story block(s) touched) — yq reverted, refuse-skip, operator resolve drift first" >&2
     git checkout HEAD -- "$backlog_rel" 2>/dev/null || true
     exec 200>&-
     return 6
@@ -182,12 +191,22 @@ chore_commit_multi_field() {
     return 0
   fi
 
-  # Drift verify: exactly 2*n_changed lines (our fields only)
-  local changed
-  changed=$(git diff -U0 HEAD -- "$backlog_rel" \
-    | grep -E '^[+-]' | grep -v '^[+-][+-][+-]' | wc -l | tr -d ' ' 2>/dev/null || echo "0")
-  if [[ "$changed" != "$(( n_changed * 2 ))" ]]; then
-    echo "[CHORE-COMMIT] $story_id : cross-story drift ($changed lines, expected $((n_changed*2))) — yq reverted, refuse-skip" >&2
+  # Drift verify (cycle-2 review MEDIUM-N1 fix) : check diff doesn't touch lines outside the target story block.
+  # Original strict `2*n_changed` line count failed when a field is ADDED vs UPDATED (added → 1 line, updated → 2).
+  # New semantic check : diff hunks must only touch lines between `^- id: <story_id>` and the next `^- id:` line.
+  local other_story_lines
+  other_story_lines=$(git diff -U0 HEAD -- "$backlog_rel" 2>/dev/null \
+    | awk -v sid="$story_id" '
+        /^@@/ { in_hunk=1; next }
+        in_hunk && /^[+-]- id: / {
+          # Diff touches a story ID declaration line — extract the ID and check if it is ours
+          gsub(/^[+-]- id: */, "")
+          gsub(/[[:space:]]+$/, "")
+          if ($0 != sid) print
+        }
+      ' | wc -l | tr -d ' ' 2>/dev/null || echo "0")
+  if [[ "$other_story_lines" != "0" ]]; then
+    echo "[CHORE-COMMIT] $story_id : cross-story drift ($other_story_lines other story block(s) touched) — yq reverted, refuse-skip" >&2
     git checkout HEAD -- "$backlog_rel" 2>/dev/null || true
     exec 200>&-
     return 6
