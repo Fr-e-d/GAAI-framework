@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# pr-watcher.test.sh — regression tests for E134S17 PR merge watcher
+# pr-watcher.test.sh — regression tests for the PR merge watcher
 #
 # Covers: watch_pr_merge_status(), _reconcile_merged_pr(), sweep_cleanup_pending()
-# All 8 acceptance-criteria tests (T1–T8) from E134S17.
+# All 8 acceptance-criteria tests (T1–T8).
 #
 # Usage: bash .gaai/core/scripts/tests/pr-watcher.test.sh
 
