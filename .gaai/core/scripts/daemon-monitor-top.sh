@@ -68,7 +68,7 @@ render_phase_metrics() {
   # Extract in_progress story IDs from backlog
   local in_progress_ids
   in_progress_ids=$(awk '
-    /^[[:space:]]+status:[[:space:]]*in_progress/ { if (current_id != "") print current_id }
+    /^[[:space:]]+status:[[:space:]]*"?in_progress"?/ { if (current_id != "") print current_id }
     /^- id:/ { gsub(/^- id:[[:space:]]*/, ""); current_id=$0 }
   ' "$BACKLOG" 2>/dev/null || true)
 
@@ -209,7 +209,7 @@ while true; do
   if [[ -f "$BACKLOG" ]]; then
     pr_watcher_tracked=$(awk '
       /^[[:space:]]+pr_url:/ { has_pr=1 }
-      /^[[:space:]]+status:[[:space:]]*in_progress/ { if (has_pr) count++ }
+      /^[[:space:]]+status:[[:space:]]*"?in_progress"?/ { if (has_pr) count++ }
       /^- id:/ { has_pr=0 }
       END { print count+0 }
     ' "$BACKLOG" 2>/dev/null || echo 0)
