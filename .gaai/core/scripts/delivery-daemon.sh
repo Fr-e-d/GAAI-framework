@@ -2715,6 +2715,14 @@ disown \$HEARTBEAT_PID 2>/dev/null || true
 
 cleanup() {
   kill \$HEARTBEAT_PID 2>/dev/null || true
+  # AC2 (E134S14): only reconcile on clean exit — skip if interrupted
+  if [[ "\$_INTERRUPT_REQUESTED" != "1" ]] && [[ ! -f "\$INTERRUPTED_FILE" ]]; then
+    # AC1 (E134S14): reconcile top-level YAML status from phase_status before releasing lock.
+    # Guard: declare -f ensures the function was sourced (not a pre-source exit).
+    if declare -f _reconcile_yaml_status_on_exit >/dev/null 2>&1; then
+      _reconcile_yaml_status_on_exit "$story_id"
+    fi
+  fi
   rm -f "\$LOCK_FILE" "\$HEARTBEAT_FILE"
   # NB: do NOT remove \$INTERRUPTED_FILE — OSS-5 (crash_recovery_scan) reads
   # it at the next daemon start to differentiate graceful daemon-start.sh --stop from

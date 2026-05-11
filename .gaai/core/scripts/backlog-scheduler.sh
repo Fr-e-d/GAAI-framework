@@ -61,8 +61,6 @@ SET_PHASE_STATUS_ID=""
 SET_PHASE_STATUS_VAL=""
 SET_PIPELINE_ID=""
 SET_PIPELINE_VAL=""
-RESET_ID=""
-RESET_CLEAR_RETRY="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -116,24 +114,10 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 3
       ;;
-    --reset)
-      MODE="reset"
-      RESET_ID="${2:-}"
-      if [[ -z "$RESET_ID" ]]; then
-        >&2 echo "Error: --reset requires <id>"
-        >&2 echo "Usage: $0 --reset <id> [--clear-retry-count] <backlog-active-yaml>"
-        exit 1
-      fi
-      shift 2
-      ;;
-    --clear-retry-count)
-      RESET_CLEAR_RETRY="true"
-      shift
-      ;;
     --stdin)      FROM_STDIN=true;   shift ;;
     -*)
       >&2 echo "Unknown option: $1"
-      >&2 echo "Usage: $0 [--next|--list|--ready-ids|--graph|--conflicts|--set-status <id> <status>|--set-field <id> <field> <value>|--set-phase-status <id> <phase_status_value>|--set-pipeline <id> <legacy|3phase>|--reset <id> [--clear-retry-count]] [--stdin] [<backlog-active-yaml>]"
+      >&2 echo "Usage: $0 [--next|--list|--ready-ids|--graph|--conflicts|--set-status <id> <status>|--set-field <id> <field> <value>|--set-phase-status <id> <phase_status_value>|--set-pipeline <id> <legacy|3phase>] [--stdin] [<backlog-active-yaml>]"
       exit 1
       ;;
     *)
@@ -145,8 +129,7 @@ done
 
 # ── Validate inputs ──────────────────────────────────────────
 if [[ "$MODE" == "set-status" || "$MODE" == "set-field" || \
-      "$MODE" == "set-phase-status" || "$MODE" == "set-pipeline" || \
-      "$MODE" == "reset" ]]; then
+      "$MODE" == "set-phase-status" || "$MODE" == "set-pipeline" ]]; then
   # These modes always operate on a file (not stdin)
   if [[ -z "$BACKLOG_FILE" ]]; then
     >&2 echo "Error: --$MODE requires a backlog file path"
@@ -361,118 +344,6 @@ except Exception as e:
 
 print(f'{target_id} pipeline -> {new_value}')
 " "$BACKLOG_FILE" "$SET_PIPELINE_ID" "$SET_PIPELINE_VAL"
-  exit $?
-fi
-
-# ── reset mode: atomically reset status + phase_status + started_at ─────────
-if [[ "$MODE" == "reset" ]]; then
-  python3 -c "
-import sys, re, os
-
-file_path   = sys.argv[1]
-target_id   = sys.argv[2]
-clear_retry = sys.argv[3] == 'true'
-
-with open(file_path, 'r') as f:
-    lines = f.readlines()
-
-# Locate target block boundaries
-block_start = -1
-block_end   = len(lines)
-for i, line in enumerate(lines):
-    stripped = line.strip()
-    if re.match(r'-\s+id:\s+' + re.escape(target_id) + r'\s*$', stripped):
-        block_start = i
-        continue
-    if block_start >= 0 and re.match(r'-\s+id:\s+', stripped):
-        block_end = i
-        break
-
-if block_start < 0:
-    print(f'Error: story {target_id} not found in backlog', file=sys.stderr)
-    sys.exit(1)
-
-block = lines[block_start:block_end]
-
-# Idempotency check
-cur_status       = None
-cur_phase_status = None
-for bl in block:
-    ms = re.match(r'^\s+status:\s+(\S+)', bl)
-    if ms:
-        cur_status = ms.group(1).strip()
-    mp = re.match(r'^\s+phase_status:\s+(\S+)', bl)
-    if mp:
-        cur_phase_status = mp.group(1).strip()
-
-if cur_status == 'refined' and cur_phase_status == 'not_started':
-    print(f'{target_id} already status:refined + phase_status:not_started — no-op', file=sys.stderr)
-    sys.exit(0)
-
-# Apply atomic edits
-status_done = False
-phase_done  = False
-new_lines   = list(lines)
-
-for i in range(block_start, block_end):
-    line     = new_lines[i]
-    stripped = line.strip()
-    if not status_done:
-        m = re.match(r'^(\s+status:\s+)\S+', line)
-        if m:
-            new_lines[i] = m.group(1) + 'refined\n'
-            status_done = True
-            continue
-    if not phase_done:
-        m = re.match(r'^(\s+phase_status:\s+)\S+', line)
-        if m:
-            new_lines[i] = m.group(1) + 'not_started\n'
-            phase_done = True
-            continue
-    # Remove started_at line
-    if re.match(r'^\s+started_at:', line):
-        new_lines[i] = None
-        continue
-
-new_lines = [l for l in new_lines if l is not None]
-
-if not status_done:
-    print(f'Error: status field not found for {target_id}', file=sys.stderr)
-    sys.exit(1)
-if not phase_done:
-    print(f'Error: phase_status field not found for {target_id}', file=sys.stderr)
-    sys.exit(1)
-
-with open(file_path, 'w') as f:
-    f.writelines(new_lines)
-
-# Validate YAML after write
-try:
-    import yaml as _yaml
-    with open(file_path) as _f:
-        _yaml.safe_load(_f)
-except ImportError:
-    pass
-except Exception as e:
-    print(f'Warning: YAML validation after write: {e}', file=sys.stderr)
-
-# Handle --clear-retry-count
-if clear_retry:
-    retry_file = os.path.join(os.path.dirname(file_path), '.delivery-locks', '.retry-counts')
-    if os.path.isfile(retry_file):
-        with open(retry_file, 'r') as rf:
-            retry_lines = rf.readlines()
-        new_retry = [l for l in retry_lines if not l.startswith(target_id + '=')]
-        with open(retry_file, 'w') as rf:
-            rf.writelines(new_retry)
-        cleared = len(retry_lines) - len(new_retry)
-        if cleared > 0:
-            print(f'{target_id} retry-count cleared')
-    else:
-        print(f'{target_id} retry-counts file not found — skipping retry-count clear', file=sys.stderr)
-
-print(f'{target_id} reset: status->refined, phase_status->not_started, started_at removed')
-" "$BACKLOG_FILE" "$RESET_ID" "$RESET_CLEAR_RETRY"
   exit $?
 fi
 

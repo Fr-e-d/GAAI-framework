@@ -433,6 +433,304 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Wrapper EXIT reconciliation (E134S14 — AC4)
+# Tests _reconcile_yaml_status_on_exit via direct harness invocation.
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== Wrapper EXIT reconciliation (T1-T5) ==="
+
+DISPATCH="$SCRIPT_DIR/../daemon-dispatch.sh"
+
+# Shared helper: build a harness that sources _reconcile_yaml_status_on_exit
+# (and its dependency get_phase_status) from daemon-dispatch.sh and invokes it.
+# Args: $1=project_dir $2=story_id $3=backlog_rel $4=phase_status $5=initial_status
+# Writes a temp script to $REC_HARNESS (set by caller).
+_write_reconcile_harness() {
+  local proj="$1" sid="$2" brel="$3" initial_phase="$4" initial_status="$5"
+  cat > "$REC_HARNESS" <<HEOF
+#!/usr/bin/env bash
+set -uo pipefail
+PROJECT_DIR="$proj"
+BACKLOG_FILE="\$PROJECT_DIR/$brel"
+SCHEDULER="$SCHEDULER"
+LOCK_DIR="$FIXTURE_DIR/rec-locks-$$"
+TARGET_BRANCH="main"
+mkdir -p "\$LOCK_DIR"
+
+eval "\$(awk '
+  /^get_phase_status\(\)/{ p=1; depth=0 }
+  /^_reconcile_yaml_status_on_exit\(\)/{ p=1; depth=0 }
+  p {
+    print
+    for (i=1; i<=length(\$0); i++) {
+      c = substr(\$0, i, 1)
+      if (c == "{") depth++
+      if (c == "}") depth--
+    }
+    if (p && depth == 0 && NR > 1) { p=0 }
+  }
+' "$DISPATCH" 2>/dev/null)"
+
+_reconcile_yaml_status_on_exit "$sid"
+HEOF
+  chmod +x "$REC_HARNESS"
+}
+
+# ── T1: phase_status=done, status=in_progress → commit created, YAML status=done ──
+echo ""
+echo "T1: phase_status=done → reconcile commits status=done"
+T1_DIR="$FIXTURE_DIR/rec-t1-$$"
+T1_BREL=".gaai/project/contexts/backlog/active.backlog.yaml"
+T1_SID="TST-REC-T1"
+
+T1_YAML="- id: $T1_SID
+  status: in_progress
+  phase_status: done
+  delivery_pipeline: 3phase"
+
+setup_git_repo "$T1_DIR" "$T1_YAML"
+git -C "$T1_DIR" config user.email "test@gaai.local"
+git -C "$T1_DIR" config user.name "GAAI Test"
+
+REC_HARNESS=$(mktemp /tmp/rec-harness-XXXXXX.sh)
+_write_reconcile_harness "$T1_DIR" "$T1_SID" "$T1_BREL" "done" "in_progress"
+bash "$REC_HARNESS" 2>/dev/null
+rm -f "$REC_HARNESS"
+
+commit_line=$(git -C "$T1_DIR" log --oneline --grep="chore($T1_SID).*wrapper-reconcile" 2>/dev/null | head -1)
+if [[ -n "$commit_line" ]]; then
+  pass "T1a: wrapper-reconcile commit found: $commit_line"
+else
+  fail "T1a: no wrapper-reconcile commit for $T1_SID"
+fi
+
+final_status=$(awk -v id="$T1_SID" '
+  $0 == "- id: " id { found=1; next }
+  found && /^- id:/ { exit }
+  found && /^[[:space:]]+status:/ {
+    gsub(/^[[:space:]]+status:[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print; exit
+  }
+' "$T1_DIR/$T1_BREL" 2>/dev/null)
+if [[ "$final_status" == "done" ]]; then
+  pass "T1b: YAML status=done after reconcile"
+else
+  fail "T1b: expected status=done, got '$final_status'"
+fi
+
+# ── T2: phase_status=failed, status=in_progress → commit created, YAML status=failed ──
+echo ""
+echo "T2: phase_status=failed → reconcile commits status=failed"
+T2_DIR="$FIXTURE_DIR/rec-t2-$$"
+T2_BREL=".gaai/project/contexts/backlog/active.backlog.yaml"
+T2_SID="TST-REC-T2"
+
+T2_YAML="- id: $T2_SID
+  status: in_progress
+  phase_status: failed
+  delivery_pipeline: 3phase"
+
+setup_git_repo "$T2_DIR" "$T2_YAML"
+git -C "$T2_DIR" config user.email "test@gaai.local"
+git -C "$T2_DIR" config user.name "GAAI Test"
+
+REC_HARNESS=$(mktemp /tmp/rec-harness-XXXXXX.sh)
+_write_reconcile_harness "$T2_DIR" "$T2_SID" "$T2_BREL" "failed" "in_progress"
+bash "$REC_HARNESS" 2>/dev/null
+rm -f "$REC_HARNESS"
+
+commit_line=$(git -C "$T2_DIR" log --oneline --grep="chore($T2_SID).*wrapper-reconcile" 2>/dev/null | head -1)
+if [[ -n "$commit_line" ]]; then
+  pass "T2a: wrapper-reconcile commit found: $commit_line"
+else
+  fail "T2a: no wrapper-reconcile commit for $T2_SID"
+fi
+
+final_status=$(awk -v id="$T2_SID" '
+  $0 == "- id: " id { found=1; next }
+  found && /^- id:/ { exit }
+  found && /^[[:space:]]+status:/ {
+    gsub(/^[[:space:]]+status:[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print; exit
+  }
+' "$T2_DIR/$T2_BREL" 2>/dev/null)
+if [[ "$final_status" == "failed" ]]; then
+  pass "T2b: YAML status=failed after reconcile"
+else
+  fail "T2b: expected status=failed, got '$final_status'"
+fi
+
+# ── T3: phase_status=qa_failed → no reconciliation (retry-loop owns this) ──
+echo ""
+echo "T3: phase_status=qa_failed → no reconciliation (left for retry-loop)"
+T3_DIR="$FIXTURE_DIR/rec-t3-$$"
+T3_BREL=".gaai/project/contexts/backlog/active.backlog.yaml"
+T3_SID="TST-REC-T3"
+
+T3_YAML="- id: $T3_SID
+  status: in_progress
+  phase_status: qa_failed
+  delivery_pipeline: 3phase"
+
+setup_git_repo "$T3_DIR" "$T3_YAML"
+git -C "$T3_DIR" config user.email "test@gaai.local"
+git -C "$T3_DIR" config user.name "GAAI Test"
+
+REC_HARNESS=$(mktemp /tmp/rec-harness-XXXXXX.sh)
+_write_reconcile_harness "$T3_DIR" "$T3_SID" "$T3_BREL" "qa_failed" "in_progress"
+bash "$REC_HARNESS" 2>/dev/null
+rm -f "$REC_HARNESS"
+
+commit_line=$(git -C "$T3_DIR" log --oneline --grep="chore($T3_SID).*wrapper-reconcile" 2>/dev/null | head -1)
+if [[ -z "$commit_line" ]]; then
+  pass "T3a: no wrapper-reconcile commit (qa_failed is no-op)"
+else
+  fail "T3a: unexpected wrapper-reconcile commit for qa_failed: $commit_line"
+fi
+
+final_status=$(awk -v id="$T3_SID" '
+  $0 == "- id: " id { found=1; next }
+  found && /^- id:/ { exit }
+  found && /^[[:space:]]+status:/ {
+    gsub(/^[[:space:]]+status:[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print; exit
+  }
+' "$T3_DIR/$T3_BREL" 2>/dev/null)
+if [[ "$final_status" == "in_progress" ]]; then
+  pass "T3b: YAML status=in_progress unchanged (retry-loop will handle)"
+else
+  fail "T3b: expected status=in_progress unchanged, got '$final_status'"
+fi
+
+# ── T4: INTERRUPTED_FILE present → caller-level guard skips reconcile ──
+echo ""
+echo "T4: INTERRUPTED_FILE present → no reconciliation (daemon crash-recovery owns it)"
+T4_DIR="$FIXTURE_DIR/rec-t4-$$"
+T4_BREL=".gaai/project/contexts/backlog/active.backlog.yaml"
+T4_SID="TST-REC-T4"
+T4_LOCK_DIR="$FIXTURE_DIR/rec-locks-t4-$$"
+T4_INTERRUPTED="$T4_LOCK_DIR/${T4_SID}.interrupted"
+
+T4_YAML="- id: $T4_SID
+  status: in_progress
+  phase_status: done
+  delivery_pipeline: 3phase"
+
+setup_git_repo "$T4_DIR" "$T4_YAML"
+git -C "$T4_DIR" config user.email "test@gaai.local"
+git -C "$T4_DIR" config user.name "GAAI Test"
+mkdir -p "$T4_LOCK_DIR"
+date +%s > "$T4_INTERRUPTED"   # simulate the interrupt marker
+
+# Simulate the AC2 caller-level guard from cleanup(): only call reconcile if
+# INTERRUPTED_FILE is absent. Since it's present, reconcile is never invoked.
+T4_HARNESS=$(mktemp /tmp/rec-harness-XXXXXX.sh)
+cat > "$T4_HARNESS" <<T4EOF
+#!/usr/bin/env bash
+set -uo pipefail
+PROJECT_DIR="$T4_DIR"
+BACKLOG_FILE="\$PROJECT_DIR/$T4_BREL"
+SCHEDULER="$SCHEDULER"
+LOCK_DIR="$T4_LOCK_DIR"
+TARGET_BRANCH="main"
+INTERRUPTED_FILE="$T4_INTERRUPTED"
+_INTERRUPT_REQUESTED=0
+
+eval "\$(awk '
+  /^get_phase_status\(\)/{ p=1; depth=0 }
+  /^_reconcile_yaml_status_on_exit\(\)/{ p=1; depth=0 }
+  p {
+    print
+    for (i=1; i<=length(\$0); i++) {
+      c = substr(\$0, i, 1)
+      if (c == "{") depth++
+      if (c == "}") depth--
+    }
+    if (p && depth == 0 && NR > 1) { p=0 }
+  }
+' "$DISPATCH" 2>/dev/null)"
+
+# Mirrors the cleanup() AC2 guard added by E134S14
+if [[ "\$_INTERRUPT_REQUESTED" != "1" ]] && [[ ! -f "\$INTERRUPTED_FILE" ]]; then
+  _reconcile_yaml_status_on_exit "$T4_SID"
+fi
+T4EOF
+chmod +x "$T4_HARNESS"
+bash "$T4_HARNESS" 2>/dev/null
+rm -f "$T4_HARNESS"
+
+commit_line=$(git -C "$T4_DIR" log --oneline --grep="chore($T4_SID).*wrapper-reconcile" 2>/dev/null | head -1)
+if [[ -z "$commit_line" ]]; then
+  pass "T4: no reconcile commit when INTERRUPTED_FILE present"
+else
+  fail "T4: unexpected reconcile commit despite INTERRUPTED_FILE: $commit_line"
+fi
+
+# ── T5: phase_status=done, status=in_progress, WT drift → skip + log, no crash ──
+echo ""
+echo "T5: working-tree drift → skip reconcile with log line, wrapper exits cleanly"
+T5_DIR="$FIXTURE_DIR/rec-t5-$$"
+T5_BREL=".gaai/project/contexts/backlog/active.backlog.yaml"
+T5_SID="TST-REC-T5"
+
+T5_YAML="- id: $T5_SID
+  status: in_progress
+  phase_status: done
+  delivery_pipeline: 3phase"
+
+setup_git_repo "$T5_DIR" "$T5_YAML"
+git -C "$T5_DIR" config user.email "test@gaai.local"
+git -C "$T5_DIR" config user.name "GAAI Test"
+
+# Introduce WT drift: edit the backlog without committing
+printf '%s\n' "- id: $T5_SID
+  status: in_progress
+  phase_status: done
+  delivery_pipeline: 3phase
+  notes: operator-edited-drift" > "$T5_DIR/$T5_BREL"
+
+if git -C "$T5_DIR" diff --quiet HEAD -- "$T5_BREL"; then
+  fail "T5-precondition: expected WT drift, found none"
+else
+  pass "T5-precondition: WT drift present as expected"
+fi
+
+REC_HARNESS=$(mktemp /tmp/rec-harness-XXXXXX.sh)
+_write_reconcile_harness "$T5_DIR" "$T5_SID" "$T5_BREL" "done" "in_progress"
+T5_OUTPUT=$(bash "$REC_HARNESS" 2>&1)
+T5_RC=$?
+rm -f "$REC_HARNESS"
+
+if [[ "$T5_RC" -eq 0 ]]; then
+  pass "T5a: function returned 0 (no crash on drift)"
+else
+  fail "T5a: function exited $T5_RC (expected 0)"
+fi
+
+if echo "$T5_OUTPUT" | grep -q "working-tree drift"; then
+  pass "T5b: log line contains 'working-tree drift'"
+else
+  fail "T5b: expected 'working-tree drift' in output; got: $T5_OUTPUT"
+fi
+
+commit_line=$(git -C "$T5_DIR" log --oneline --grep="chore($T5_SID).*wrapper-reconcile" 2>/dev/null | head -1)
+if [[ -z "$commit_line" ]]; then
+  pass "T5c: no commit created on drift (skipped correctly)"
+else
+  fail "T5c: unexpected commit despite working-tree drift: $commit_line"
+fi
+
+final_status=$(awk -v id="$T5_SID" '
+  $0 == "- id: " id { found=1; next }
+  found && /^- id:/ { exit }
+  found && /^[[:space:]]+status:/ {
+    gsub(/^[[:space:]]+status:[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print; exit
+  }
+' "$T5_DIR/$T5_BREL" 2>/dev/null)
+if [[ "$final_status" == "in_progress" ]]; then
+  pass "T5d: YAML status=in_progress unchanged (daemon will reconcile later)"
+else
+  fail "T5d: expected status=in_progress unchanged, got '$final_status'"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Summary
 # ═══════════════════════════════════════════════════════════════════════════════
 echo ""
