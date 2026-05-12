@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- chore(oss-hygiene): de-projectify comments in .gaai/core/ (refcheck cleanup)
 - fix(daemon-monitor-tail): strip scheduler --set-field quotes in Active Deliveries detection
 - fix(chore-commit): transactional Option A fallback — rollback disk on commit/push failure
 - fix(daemon-monitor): regex match quoted status (status: "in_progress") post-scheduler auto-quote
