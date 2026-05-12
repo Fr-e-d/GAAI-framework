@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# @see DEC-88 — 3-phase daemon-spawn delivery, phase_status semantics
-# @see DEC-27 — audit-verified gate enforcement on backlog transitions
-# @see E134S12 §AC3 — Option B' lineage (flock+yq supersedes patch-apply)
+# 3-phase daemon-spawn delivery, phase_status semantics (see project design notes)
+# Audit-verified gate enforcement on backlog transitions
+# flock+yq serialization variant (supersedes patch-apply approach)
 #
-# Serialized backlog YAML mutations for concurrent delivery wrappers (E134S16).
+# Serialized backlog YAML mutations for concurrent delivery wrappers.
 # Requires these variables set in the calling shell:
 #   BACKLOG_FILE  — absolute path to active.backlog.yaml
 #   BACKLOG_REL   — relative path from repo root (e.g. .gaai/project/contexts/backlog/active.backlog.yaml)
@@ -12,7 +12,7 @@
 #   SCHEDULER     — path to backlog-scheduler.sh (used by Option A fallback only)
 
 _CHORE_HELPER_AVAILABLE=0
-# DISABLED 2026-05-12 — yq -i rewrites entire YAML file with normalized formatting
+# DISABLED — yq -i rewrites entire YAML file with normalized formatting
 # (quotes, key order, trailing whitespace), defeating both line-count AND block-scope
 # drift checks. Forces fallback to Option A (scheduler --set-field) which preserves
 # original formatting via awk-based targeted edit. Re-enable when yq formatting can be
@@ -23,7 +23,7 @@ _CHORE_HELPER_AVAILABLE=0
 #   _CHORE_HELPER_AVAILABLE=1
 # fi
 
-# Option A fallback (E134S12 semantics): refuse if drift, else scheduler-write + commit + push.
+# Option A fallback: refuse if drift, else scheduler-write + commit + push.
 # Used when flock/yq/yq-v4 are unavailable.
 _chore_option_a_fallback() {
   local story_id="$1" commit_subject="$2"; shift 2
@@ -31,7 +31,7 @@ _chore_option_a_fallback() {
   local target_branch="${TARGET_BRANCH:-staging}"
   local warn_flag="${LOCK_DIR}/.chore-helper-missing.warning"
   if [[ ! -f "$warn_flag" ]]; then
-    echo "[CHORE-COMMIT] WARNING: flock/yq/yq-v4 unavailable — using Option A fallback (E134S12 semantics)" >&2
+    echo "[CHORE-COMMIT] WARNING: flock/yq/yq-v4 unavailable — using Option A fallback" >&2
     echo "[CHORE-COMMIT] Install: macOS: brew install util-linux yq  Linux: apt install util-linux yq" >&2
     touch "$warn_flag" 2>/dev/null || true
   fi
@@ -47,7 +47,7 @@ _chore_option_a_fallback() {
   git diff --cached --quiet && return 0
   if ! git commit -m "$commit_subject" --quiet -- "$backlog_rel" 2>/dev/null; then
     # Transactional rollback : commit failed → revert disk write to prevent
-    # orphan drift blocking subsequent stories (RC : 2026-05-12 E99S03 orphan).
+    # orphan drift blocking subsequent stories (RC: prior orphan-drift incident).
     git reset HEAD -- "$backlog_rel" 2>/dev/null || true
     git checkout HEAD -- "$backlog_rel" 2>/dev/null || true
     echo "[CHORE-COMMIT] $story_id : commit failed — disk write rolled back" >&2
