@@ -767,40 +767,54 @@ exceeded_stories() {
 # ── Staleness detection ──────────────────────────────────────────────────
 # Detects stories stuck in in_progress for longer than STALENESS_THRESHOLD.
 # Uses git log to find when the story was marked in_progress.
-# If stale and no local lock exists → mark as failed on staging.
+# Phase-aware: recoverable phases (qa_passed, implemented, qa_failed, planned+plan)
+# are re-launched via the existing recovery primitive instead of being marked failed.
+# Genuinely stuck stories (not_started, empty phase) keep the mark-failed behavior.
+# A per-story retry counter prevents infinite resume loops on repeat-crashing wrappers.
 check_stale_in_progress() {
   local backlog_content
   backlog_content=$(fetch_and_read_backlog)
   [[ -z "$backlog_content" ]] && return 0
 
-  # Extract story IDs with status: in_progress
-  local in_progress_ids
-  in_progress_ids=$(echo "$backlog_content" | python3 -c '
-import sys, re
+  # Extract sid|phase_status pairs for stories with status: in_progress
+  local in_progress_pairs
+  in_progress_pairs=$(echo "$backlog_content" | python3 -c '
+import sys
 content = sys.stdin.read()
-current_id = None
+cur_id = None
+cur_status = None
+cur_phase = None
+def emit():
+    if cur_id and cur_status == "in_progress":
+        print(cur_id + "|" + (cur_phase or ""))
 for line in content.splitlines():
     stripped = line.strip()
     if stripped.startswith("- id:"):
-        current_id = stripped.split(":", 1)[1].strip()
-    elif current_id and stripped.startswith("status:"):
+        emit()
+        cur_id = stripped.split(":", 1)[1].strip()
+        cur_status = None
+        cur_phase = None
+    elif cur_id and stripped.startswith("status:"):
         # Quote-tolerant strip via chr() : strips both quote types. The chr()
         # form is required because this Python code is embedded in a bash
         # single-quoted heredoc where a literal quote char would prematurely
         # close the outer bash string.
-        status = stripped.split(":", 1)[1].strip().strip(chr(34)+chr(39))
-        if status == "in_progress":
-            print(current_id)
-        current_id = None
+        cur_status = stripped.split(":", 1)[1].strip().strip(chr(34)+chr(39))
+    elif cur_id and stripped.startswith("phase_status:"):
+        cur_phase = stripped.split(":", 1)[1].strip().strip(chr(34)+chr(39))
+emit()
 ' 2>/dev/null) || return 0
 
-  [[ -z "$in_progress_ids" ]] && return 0
+  [[ -z "$in_progress_pairs" ]] && return 0
 
   local now
   now=$(date +%s)
 
-  while IFS= read -r sid; do
-    [[ -z "$sid" ]] && continue
+  while IFS= read -r pair; do
+    [[ -z "$pair" ]] && continue
+    local sid ps
+    sid="${pair%%|*}"
+    ps="${pair##*|}"
 
     # Skip if we have an active local lock (delivery is running on this machine)
     if is_locked "$sid"; then
@@ -824,9 +838,88 @@ for line in content.splitlines():
       log "${RED}STALE: $sid has been in_progress for ${age_min}min (threshold: $(( STALENESS_THRESHOLD / 60 ))min)${NC}"
 
       if $DRY_RUN; then
-        log "${YELLOW}[DRY RUN] Would mark $sid as failed${NC}"
+        log "${YELLOW}[DRY RUN] Would apply phase-aware staleness recovery for $sid (phase=${ps:-empty})${NC}"
         continue
       fi
+
+      # ── Phase-aware dispatch ─────────────────────────────────────────────
+      # Recoverable phases resume via the existing recovery primitive.
+      # Genuinely stuck phases (not_started/empty) fall through to mark-failed.
+      local worktree_path_inloop
+      worktree_path_inloop=$(_recovery_resolve_worktree "$sid")
+
+      local _inloop_trace_id
+      _inloop_trace_id=$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \
+        || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
+        || echo "recovery-$(date +%s)-$$-$RANDOM")
+
+      local _inloop_retry_file _inloop_retry_count _inloop_retry_max
+      _inloop_retry_file="${LOCK_DIR}/.recovery-attempts-${sid}"
+      _inloop_retry_count=0
+      if [[ -f "$_inloop_retry_file" ]]; then
+        _inloop_retry_count=$(cat "$_inloop_retry_file" 2>/dev/null || echo 0)
+        [[ "$_inloop_retry_count" =~ ^[0-9]+$ ]] || _inloop_retry_count=0
+      fi
+      _inloop_retry_max="${GAAI_INLOOP_RECOVERY_MAX:-3}"
+
+      case "$ps" in
+        qa_passed|implemented|qa_failed)
+          if (( _inloop_retry_count >= _inloop_retry_max )); then
+            rm -f "$_inloop_retry_file" 2>/dev/null || true
+            log "${RED}[STALE] $sid recovery cap reached (${_inloop_retry_count}/${_inloop_retry_max}) — marking failed${NC}"
+            _emit_routing_record "$sid" "$_inloop_trace_id" "recovery" "error" \
+              "recovery_cap_exhausted:${ps}" 2>/dev/null || true
+            # fall through to existing mark-failed block below
+          else
+            _inloop_retry_count=$(( _inloop_retry_count + 1 ))
+            local _inloop_retry_tmp="${_inloop_retry_file}.tmp.$$"
+            printf '%s\n' "$_inloop_retry_count" > "$_inloop_retry_tmp" 2>/dev/null \
+              && mv "$_inloop_retry_tmp" "$_inloop_retry_file" 2>/dev/null \
+              || rm -f "$_inloop_retry_tmp" 2>/dev/null
+            _emit_routing_record "$sid" "$_inloop_trace_id" "recovery" "daemon-bash" \
+              "recovery_relaunch_in_loop:${ps}:${_inloop_retry_count}_of_${_inloop_retry_max}" 2>/dev/null || true
+            log "${GREEN}[STALE] $sid phase=$ps — re-launching (attempt ${_inloop_retry_count}/${_inloop_retry_max})${NC}"
+            _recovery_relaunch "$sid" || true
+            continue
+          fi
+          ;;
+        planned)
+          local _plan_path_inloop="${worktree_path_inloop}/.gaai/project/contexts/artefacts/plans/${sid}.execution-plan.md"
+          if [[ -s "$_plan_path_inloop" ]]; then
+            if (( _inloop_retry_count >= _inloop_retry_max )); then
+              rm -f "$_inloop_retry_file" 2>/dev/null || true
+              log "${RED}[STALE] $sid recovery cap reached (${_inloop_retry_count}/${_inloop_retry_max}) — marking failed${NC}"
+              _emit_routing_record "$sid" "$_inloop_trace_id" "recovery" "error" \
+                "recovery_cap_exhausted:${ps}" 2>/dev/null || true
+              # fall through to existing mark-failed block below
+            else
+              _inloop_retry_count=$(( _inloop_retry_count + 1 ))
+              local _inloop_retry_tmp_p="${_inloop_retry_file}.tmp.$$"
+              printf '%s\n' "$_inloop_retry_count" > "$_inloop_retry_tmp_p" 2>/dev/null \
+                && mv "$_inloop_retry_tmp_p" "$_inloop_retry_file" 2>/dev/null \
+                || rm -f "$_inloop_retry_tmp_p" 2>/dev/null
+              _emit_routing_record "$sid" "$_inloop_trace_id" "recovery" "daemon-bash" \
+                "recovery_relaunch_in_loop:${ps}:${_inloop_retry_count}_of_${_inloop_retry_max}" 2>/dev/null || true
+              log "${GREEN}[STALE] $sid phase=planned (plan present) — re-launching (attempt ${_inloop_retry_count}/${_inloop_retry_max})${NC}"
+              _recovery_relaunch "$sid" || true
+              continue
+            fi
+          else
+            log "${YELLOW}[STALE] $sid phase=planned but no execution-plan — reverting to refined${NC}"
+            if _recovery_revert_refined "$sid" true "missing-plan"; then
+              increment_retry "$sid"
+            fi
+            continue
+          fi
+          ;;
+        done|failed|escalated|qa_escalated)
+          # Terminal phase — no-op; status reconciliation handled by crash_recovery_scan at startup.
+          continue
+          ;;
+        *)
+          # not_started or empty — genuinely stuck; fall through to mark-failed.
+          ;;
+      esac
 
       # Mark as failed on staging
       log "${YELLOW}Marking $sid as failed (stale in_progress)...${NC}"
@@ -870,7 +963,7 @@ RSTEOF
         log "${RED}Could not mark $sid as failed — manual intervention needed${NC}"
       fi
     fi
-  done <<< "$in_progress_ids"
+  done <<< "$in_progress_pairs"
 }
 
 # ── OSS-5 : Crash-recovery scan ──────────────────────────────────────────
@@ -2933,7 +3026,7 @@ cleanup() {
       _reconcile_yaml_status_on_exit "$story_id"
     fi
   fi
-  rm -f "\$LOCK_FILE" "\$HEARTBEAT_FILE"
+  rm -f "\$LOCK_FILE" "\$HEARTBEAT_FILE" "${LOCK_DIR}/.recovery-attempts-${story_id}"
   # NB: do NOT remove \$INTERRUPTED_FILE — OSS-5 (crash_recovery_scan) reads
   # it at the next daemon start to differentiate graceful daemon-start.sh --stop from
   # crash. The recovery scan removes it after reverting status:refined.
