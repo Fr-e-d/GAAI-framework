@@ -369,9 +369,9 @@ for line in content.splitlines():
         current_id = stripped.split(':', 1)[1].strip()
     elif current_id and stripped.startswith('status:'):
         # Quote-tolerant : strip surrounding quotes so 'status: "escalated"'
-        # and 'status: escalated' both parse to 'escalated'. See 2026-05-13
-        # ghost-in_progress RCA — writer asymmetry produced quoted output
-        # invisible to naive split().strip() readers.
+        # and 'status: escalated' both parse to 'escalated'. Defensive against
+        # writer asymmetry producing quoted output invisible to naive
+        # split().strip() readers.
         status = stripped.split(':', 1)[1].strip().strip('\"').strip(\"'\")
         if status in ('escalated', 'failed'):
             print(current_id + '|' + status)
@@ -784,10 +784,10 @@ for line in content.splitlines():
     if stripped.startswith("- id:"):
         current_id = stripped.split(":", 1)[1].strip()
     elif current_id and stripped.startswith("status:"):
-        # Quote-tolerant : 2026-05-13 ghost-in_progress RCA. chr(34)+chr(39)
-        # used to strip both quote types because this Python code is embedded
-        # in a bash single-quoted heredoc where a literal quote char would
-        # prematurely close the outer bash string.
+        # Quote-tolerant strip via chr() : strips both quote types. The chr()
+        # form is required because this Python code is embedded in a bash
+        # single-quoted heredoc where a literal quote char would prematurely
+        # close the outer bash string.
         status = stripped.split(":", 1)[1].strip().strip(chr(34)+chr(39))
         if status == "in_progress":
             print(current_id)
@@ -925,7 +925,7 @@ def emit():
 for line in content.splitlines():
     s = line.strip()
     if s.startswith("- id:"): emit(); cur_id = s.split(":",1)[1].strip(); cur_status = None; cur_phase = None
-    elif cur_id and s.startswith("status:"): cur_status = s.split(":",1)[1].strip().strip(chr(34)+chr(39))  # quote-tolerant 2026-05-13 RCA
+    elif cur_id and s.startswith("status:"): cur_status = s.split(":",1)[1].strip().strip(chr(34)+chr(39))  # quote-tolerant
     elif cur_id and s.startswith("phase_status:"): cur_phase = s.split(":",1)[1].strip().strip(chr(34)+chr(39))  # quote-tolerant
 emit()
 ' "$BACKLOG" 2>/dev/null) || wt_all_status=""
@@ -950,10 +950,10 @@ for line in content.splitlines():
         cur_status = None
         cur_phase = None
     elif cur_id and stripped.startswith("status:"):
-        # Quote-tolerant strip via chr() : strips both " and avoids literal
-        # quote chars in the Python source (this code is embedded in a bash
+        # Quote-tolerant strip via chr() : strips both quote types. The chr()
+        # form is required because this Python code is embedded in a bash
         # single-quoted heredoc where any literal quote char would prematurely
-        # close the outer bash string). 2026-05-13 ghost-in_progress RCA.
+        # close the outer bash string.
         cur_status = stripped.split(":", 1)[1].strip().strip(chr(34)+chr(39))
     elif cur_id and stripped.startswith("phase_status:"):
         cur_phase = stripped.split(":", 1)[1].strip().strip(chr(34)+chr(39))
@@ -1249,7 +1249,7 @@ cur_id = None; cur_status = None
 for line in content.splitlines():
     s = line.strip()
     if s.startswith('- id:'): cur_id = s.split(':',1)[1].strip(); cur_status = None
-    elif cur_id == '${sid}' and s.startswith('status:'): cur_status = s.split(':',1)[1].strip().strip('\"').strip(\"'\"); break  # quote-tolerant (2026-05-13 RCA)
+    elif cur_id == '${sid}' and s.startswith('status:'): cur_status = s.split(':',1)[1].strip().strip('\"').strip(\"'\"); break  # quote-tolerant
 print(cur_status or '')
 " 2>/dev/null) || wt_recheck_status=""
   fi
@@ -1379,7 +1379,7 @@ for line in lines:
             stories.append(cur)
         cur = {'id': s.split(':',1)[1].strip(), 'status': None, 'pr_url': None}
     elif cur and s.startswith('status:'):
-        cur['status'] = s.split(':',1)[1].strip().strip('\"').strip(\"'\")  # quote-tolerant (2026-05-13 RCA)
+        cur['status'] = s.split(':',1)[1].strip().strip('\"').strip(\"'\")  # quote-tolerant
     elif cur and s.startswith('pr_url:'):
         cur['pr_url'] = s.split(':',1)[1].strip().strip('\"').strip(\"'\")
 if cur.get('id'):
