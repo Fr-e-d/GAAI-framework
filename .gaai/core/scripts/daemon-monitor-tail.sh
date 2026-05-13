@@ -8,6 +8,13 @@ BACKLOG="$PROJECT_DIR/.gaai/project/contexts/backlog/active.backlog.yaml"
 LOCK_DIR="${PROJECT_DIR}/.gaai/project/contexts/backlog/.delivery-locks"
 WORKTREE_BASE="${PROJECT_DIR}/../.gaai-worktrees/$(basename "$PROJECT_DIR")"
 
+_MONITOR_SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[[ -f "${_MONITOR_SCRIPT_DIR}/lib/backlog-yaml.sh" ]] && \
+  [[ -z "${_BACKLOG_YAML_SH_SOURCED:-}" ]] && \
+  source "${_MONITOR_SCRIPT_DIR}/lib/backlog-yaml.sh" && \
+  _BACKLOG_YAML_SH_SOURCED=1
+unset _MONITOR_SCRIPT_DIR
+
 HAS_JQ=false
 command -v jq &>/dev/null && HAS_JQ=true
 
@@ -70,11 +77,12 @@ detect_active_stories() {
       found && /^- id:/ { exit }
       found && /^[[:space:]]+delivery_pipeline:/ {
         gsub(/^[[:space:]]+delivery_pipeline:[[:space:]]*/, "")
-        gsub(/[[:space:]]*/, ""); print; exit
+        gsub(/[[:space:]]+#.*$/, "")
+        gsub(/[[:space:]]*/, "")
+        gsub(/^"|"$/, "")
+        print; exit
       }
     ' "$BACKLOG" 2>/dev/null || true)
-    # Strip scheduler --set-field auto-quotes (e.g. delivery_pipeline: "3phase").
-    _dp="${_dp//\"/}"
     # Only emit + dedup-track when this is a LEGACY pipeline tmux. For 3phase
     # tmux sessions (created by launch_3phase_in_tmux post Option A), we let
     # the active-marker block below handle them — adding them to seen here
@@ -104,26 +112,18 @@ detect_active_stories() {
       for _s in "${_emitted_3phase[@]:-}"; do [[ "$_s" == "$_sid" ]] && _dup=1 && break; done
       [[ $_dup -eq 1 ]] && continue
       local _status _dp2
-      _status=$(awk -v id="$_sid" '
-        $0 == "- id: " id { found=1; next }
-        found && /^- id:/ { exit }
-        found && /^[[:space:]]+status:/ {
-          gsub(/^[[:space:]]+status:[[:space:]]*/, "")
-          gsub(/[[:space:]]*/, ""); print; exit
-        }
-      ' "$BACKLOG" 2>/dev/null || true)
+      _status=$(backlog_status "$_sid" "$BACKLOG" 2>/dev/null || true)
       _dp2=$(awk -v id="$_sid" '
         $0 == "- id: " id { found=1; next }
         found && /^- id:/ { exit }
         found && /^[[:space:]]+delivery_pipeline:/ {
           gsub(/^[[:space:]]+delivery_pipeline:[[:space:]]*/, "")
-          gsub(/[[:space:]]*/, ""); print; exit
+          gsub(/[[:space:]]+#.*$/, "")
+          gsub(/[[:space:]]*/, "")
+          gsub(/^"|"$/, "")
+          print; exit
         }
       ' "$BACKLOG" 2>/dev/null || true)
-      # Strip surrounding quotes : scheduler --set-field auto-quotes string values,
-      # producing status: "in_progress" / delivery_pipeline: "3phase" in YAML.
-      _status="${_status//\"/}"
-      _dp2="${_dp2//\"/}"
       if [[ "$_status" == "in_progress" && "$_dp2" == "3phase" ]]; then
         echo "$_sid"
         _emitted_3phase+=("$_sid")
@@ -151,14 +151,7 @@ resolve_3phase_log() {
   if [[ -z "$active_phase" ]]; then
     # No active marker: derive last relevant phase from phase_status
     local ps
-    ps=$(awk -v id="$story_id" '
-      $0 == "- id: " id { found=1; next }
-      found && /^- id:/ { exit }
-      found && /^[[:space:]]+phase_status:/ {
-        gsub(/^[[:space:]]+phase_status:[[:space:]]*/, "")
-        gsub(/[[:space:]]*/, ""); print; exit
-      }
-    ' "$BACKLOG" 2>/dev/null || true)
+    ps=$(backlog_phase_status "$story_id" "$BACKLOG" 2>/dev/null || true)
     case "$ps" in
       not_started)            active_phase="plan"   ;;
       planned)                active_phase="plan"   ;;
@@ -200,14 +193,7 @@ detect_phase_3phase() {
 
   # No active marker: read phase_status for terminal / idle display
   local ps
-  ps=$(awk -v id="$story_id" '
-    $0 == "- id: " id { found=1; next }
-    found && /^- id:/ { exit }
-    found && /^[[:space:]]+phase_status:/ {
-      gsub(/^[[:space:]]+phase_status:[[:space:]]*/, "")
-      gsub(/[[:space:]]*/, ""); print; exit
-    }
-  ' "$BACKLOG" 2>/dev/null || true)
+  ps=$(backlog_phase_status "$story_id" "$BACKLOG" 2>/dev/null || true)
 
   case "$ps" in
     done)                   echo "DONE"              ;;
