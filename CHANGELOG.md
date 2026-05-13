@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.32.0] - 2026-05-13
+
+### Changed
+- feat(E134S18b): migrate 10 inline regex read-sites to backlog-yaml helper (AC1+AC4)
+
+
 ## [2.31.0] - 2026-05-13
 
 ### Changed
