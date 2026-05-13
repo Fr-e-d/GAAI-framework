@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.31.0] - 2026-05-13
+
+### Changed
+- feat(E134S18b): source backlog-yaml.sh helper in daemon + 2 wrappers (AC3)
+- feat(E134S18a): backlog-yaml helper + 3 low-fan-out consumer migrations (yq migration slice 1/3) (#661)
+
+
 ## [2.30.0] - 2026-05-13
 
 ### Changed
