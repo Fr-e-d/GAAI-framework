@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.30.0] - 2026-05-13
+
+### Changed
+- feat(E134S18a): yq helper lib + 3 low-fan-out consumer migrations
+
+
 ## [2.29.0] - 2026-05-13
 
 ### Changed
