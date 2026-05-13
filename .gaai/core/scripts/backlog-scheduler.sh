@@ -503,15 +503,31 @@ if block_start < 0:
     print(f'Error: item {target_id} not found', file=sys.stderr)
     sys.exit(1)
 
-# Format value: numbers stay bare, null/true/false/[] stay bare, strings get quoted
+# Format value: numbers stay bare, null/true/false/[] stay bare, simple
+# snake_case identifiers stay bare (in_progress, refined, qa_passed, done...),
+# everything else gets quoted.
+#
+# Why bare identifiers matter (2026-05-13 bug RCA — DEC-103 / E148S01 ghost
+# incident): naive readers across delivery-daemon.sh use
+# .split(':',1)[1].strip() without quote-stripping. Quoted values like
+# 'status: \"in_progress\"' compare-mismatch against unquoted Python literals
+# 'in_progress', making the story invisible to crash_recovery_scan. Symmetric
+# fix: writer emits canonical bare for simple identifiers (matches what
+# --set-status produces + matches what yq -i + manual edits produce), reader
+# strips quotes defensively. Postel's law applied to YAML.
 try:
     float(field_value)
     formatted = field_value
 except ValueError:
     if field_value in ('null', 'true', 'false', '[]'):
         formatted = field_value
+    elif re.match(r'^[a-z][a-z0-9_]*$', field_value):
+        # Simple snake_case identifier — safe as bare YAML scalar.
+        # Examples: in_progress, refined, qa_passed, done, merged, primary.
+        formatted = field_value
     else:
-        # Escape inner double quotes and wrap
+        # Anything else (timestamps with ':', URLs, free-text, mixed case,
+        # leading non-alpha) — escape inner double quotes and wrap.
         formatted = '\"' + field_value.replace('\\\\', '\\\\\\\\').replace('\"', '\\\\\"') + '\"'
 
 # Look for existing field within the block
