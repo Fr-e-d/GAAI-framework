@@ -49,6 +49,9 @@ ROUTING_LOG="${ROUTING_LOG_PATH:-$PROJECT_DIR/.gaai/project/contexts/logs/runtim
 BACKLOG_FILE="${BACKLOG_FILE:-$PROJECT_DIR/.gaai/project/contexts/backlog/active.backlog.yaml}"
 VERDICTS_DIR="${VERDICTS_DIR:-$PROJECT_DIR/.gaai/project/contexts/artefacts/cohort-verdicts}"
 
+# shellcheck source=/dev/null
+[[ -f "$SCRIPT_DIR/lib/backlog-yaml.sh" ]] && source "$SCRIPT_DIR/lib/backlog-yaml.sh"
+
 # ── Colors (suppressed if not a terminal) ─────────────────────────────────
 if [[ -t 1 ]]; then
   RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -345,36 +348,12 @@ echo -e "${BOLD}Running Gate 1: Stories Success Count...${RESET}" >&2
 GATE1_TOTAL=$COHORT_COUNT
 GATE1_DONE=0
 
-# Use Python to extract story statuses from YAML
-GATE1_DONE="$(python3 << PYEOF
-import re
-
-backlog = "${BACKLOG_FILE}"
-story_ids_str = """${COHORT_STORY_IDS}"""
-story_ids = [s.strip() for s in story_ids_str.splitlines() if s.strip()]
-
-try:
-    content = open(backlog).read()
-except FileNotFoundError:
-    print(0)
-    exit()
-
-done_count = 0
-for sid in story_ids:
-    # Find block starting with '- id: <sid>'
-    pattern = r'- id: ' + re.escape(sid) + r'\b(.*?)(?=\n- id:|\Z)'
-    m = re.search(pattern, content, re.DOTALL)
-    if m:
-        block = m.group(0)
-        sm = re.search(r'\bstatus:\s*([^\n]+)', block)
-        if sm:
-            status = sm.group(1).strip().strip("'").strip('"')
-            if status == 'done':
-                done_count += 1
-
-print(done_count)
-PYEOF
-)"
+# Use backlog-yaml helper to count done stories
+while IFS= read -r sid; do
+  [[ -z "$sid" ]] && continue
+  status=$(backlog_status "$sid" "$BACKLOG_FILE" 2>/dev/null) || true
+  [[ "${status:-}" == "done" ]] && GATE1_DONE=$(( GATE1_DONE + 1 ))
+done <<< "$COHORT_STORY_IDS"
 
 if [[ "$GATE1_TOTAL" -lt 5 ]]; then
   GATE1_STATUS="INSUFFICIENT_DATA"
