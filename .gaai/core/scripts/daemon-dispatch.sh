@@ -1652,23 +1652,61 @@ _reconcile_yaml_status_on_exit() {
   [[ -z "${BACKLOG_FILE:-}" || -z "${PROJECT_DIR:-}" || -z "${SCHEDULER:-}" || -z "${LOCK_DIR:-}" ]] && return 0
 
   local phase_status target_status current_status
+
   phase_status=$(get_phase_status "$story_id" 2>/dev/null)
 
-  # Map phase_status → target top-level status (AC1 table)
-  case "$phase_status" in
-    done)         target_status="done" ;;
-    failed)       target_status="failed" ;;
-    escalated)    target_status="escalated" ;;
-    qa_escalated) target_status="escalated" ;;
-    qa_failed)
-      # No-op: E146S03 P4 retry-loop owns this transition
-      return 0
-      ;;
-    *)
-      # Unknown or empty phase_status — no-op
-      return 0
-      ;;
-  esac
+  # ── Plan-block detection (defense in depth) ─────────────────────────────
+  # Plan agent writes {id}.plan-blocked.md to the worktree and exits
+  # non-zero when scope-discipline thresholds are exceeded. The wrapper's
+  # main dispatch loop returns early before the `--set-phase-status planned`
+  # call, so phase_status remains "not_started". Without this pre-check, the
+  # case statement below would no-op and the story ghosts as in_progress.
+  #
+  # Maps to target_status="failed" — already in the case table, OSS-clean,
+  # no new state semantics introduced. Operator inspects {id}.plan-blocked.md
+  # (preserved in artefacts) to drive decomposition before re-refining.
+  #
+  # Stale-marker guard: only fire when phase_status is unset / not_started
+  # AND no canonical execution-plan.md exists. A successful PLAN would have
+  # produced execution-plan.md and advanced phase_status to "planned"; if
+  # either is present, plan-blocked.md is from a prior attempt and stale.
+  local _worktree_path _plan_blocked_path _exec_plan_path _repo_name _parent_dir
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    _worktree_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
+  else
+    _repo_name=$(basename "$PROJECT_DIR")
+    if _parent_dir=$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd); then
+      _worktree_path="${_parent_dir}/.gaai-worktrees/${_repo_name}/${story_id}-workspace"
+    else
+      _worktree_path=""
+    fi
+  fi
+  _plan_blocked_path="${_worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.plan-blocked.md"
+  _exec_plan_path="${_worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
+
+  if [[ -n "$_worktree_path" && -f "$_plan_blocked_path" \
+        && ( -z "$phase_status" || "$phase_status" == "not_started" ) \
+        && ! -f "$_exec_plan_path" ]]; then
+    target_status="failed"
+    phase_status="plan-blocked"  # for the final log line only
+    echo "[WRAPPER-RECONCILE] $story_id : plan-blocked.md detected — reconciling status=failed (operator must decompose per plan-blocked.md inventory before re-refining)"
+  else
+    # Map phase_status → target top-level status
+    case "$phase_status" in
+      done)         target_status="done" ;;
+      failed)       target_status="failed" ;;
+      escalated)    target_status="escalated" ;;
+      qa_escalated) target_status="escalated" ;;
+      qa_failed)
+        # No-op: retry-loop owns this transition
+        return 0
+        ;;
+      *)
+        # Unknown or empty phase_status — no-op
+        return 0
+        ;;
+    esac
+  fi
 
   # Derive paths from exported env (no new exports needed)
   local backlog_rel staging_lock drift_marker

@@ -54,6 +54,38 @@ This is the **mandatory gate** between Discovery and Delivery. No Story proceeds
 - Has `related_decs` field in frontmatter (list or explicit empty `[]`)
 - Has `skills_invoked` field in frontmatter (must list the skill IDs that were read to produce it)
 
+### Story Scope Pre-Flight (Plan contract symmetry)
+
+The Plan phase agent enforces hard scope caps before producing an execution plan:
+**>5 distinct files modified OR created**, **>6 acceptance criteria**, or **>300 lines of code projected** all trigger a plan-block + decomposition demand and waste a full Delivery cycle (worktree spin, branch chore commit, then PLAN exit non-zero with `plan-blocked.md`). To prevent this Discovery → Refined → Plan-blocked round-trip, this skill enforces the **same caps** at the Discovery gate. The Refined contract MUST guarantee Plan-feasibility upstream.
+
+**Cap enforcement is hard, not advisory.**
+
+| Cap | Threshold | Source of truth in story |
+|---|---|---|
+| Files | ≤ 5 distinct files modified or created | `## File Inventory` section (mandatory for any multi-file story) |
+| Acceptance criteria | ≤ 6 | counted from `## Acceptance Criteria` bullets |
+| LOC projection | ≤ 300 | optional `loc_estimate` line in File Inventory, summed |
+
+**Multi-file detection (when File Inventory is mandatory):**
+
+A story requires a `## File Inventory` section if BOTH of the following are true (concrete signals — vibe-only triggers produce false-positives on legitimate single-file refactor stories):
+
+- (signal 1 — language) Title or body contains at least one of: "migrate ... to", "centralise", "eliminate ... regex", "scan-and-replace", "audit across", "every consumer", "all sites", "all callers", "across the codebase", or analogous explicit cross-cutting framing
+- (signal 2 — concrete references) The story body OR acceptance criteria reference at least **2 distinct file paths** (e.g. `path/to/foo.sh` + `path/to/bar.sh`). A single-file refactor mentioning one file fails this signal and is NOT subject to the File Inventory requirement.
+
+When BOTH signals match, the story body MUST contain a `## File Inventory` section listing each file to be modified or created, with a 1-line scope note per file (and an optional `loc_estimate` per row). Stories matching the detection criteria without this section are BLOCKED — the validator cannot compute the file cap without an explicit list.
+
+A `## File Inventory` listing more than 5 files is BLOCKED. Discovery must decompose before re-running this skill. This is the PLAN contract symmetry — any story that would plan-block at Delivery MUST be caught here instead. There is no escape hatch in V1: the cap mirrors the Plan agent's hard cap exactly, and the Plan agent does not honor exemption flags. Truly atomic cross-file refactors are vanishingly rare ; if encountered, raise the cap in BOTH this skill AND the Plan agent prompt as a single coordinated decision.
+
+**Single-file stories** (one of the two detection signals does not match) may omit the File Inventory section. AC and LOC caps still apply.
+
+**Rationale (why this lives in the Discovery gate, not in Plan only):**
+
+The Plan phase agent is the executor — its scope caps protect single-pass implementation reliability. But by the time PLAN runs, the wrapper has already spun a worktree, made a chore commit, and consumed a retry slot. Mirroring the caps here closes the gap: Discovery never produces a Refined story that PLAN would block. Defense-in-depth at the wrapper exit trap (reconcile to status=blocked when `plan-blocked.md` is detected) catches any edge case this skill misses.
+
+---
+
 ### `impl_model` Field Validation (optional field — E94)
 
 The `impl_model` field is **optional**. Stories without it validate exactly as before (non-regression guarantee).
@@ -152,6 +184,10 @@ The skill MUST block progression if:
 - Contradictions exist between artefacts
 - Any artefact is missing `skills_invoked` in frontmatter (Base Rule #2 violation)
 - Any Story is missing `related_decs` in frontmatter
+- A multi-file story (both detection signals match) is missing the `## File Inventory` section
+- A `## File Inventory` lists more than 5 files (no V1 escape hatch — decompose)
+- Acceptance criteria count exceeds 6 (Plan contract symmetry)
+- A `loc_estimate` total in File Inventory exceeds 300 (Plan contract symmetry)
 
 **No partial approval. No silent warnings.**
 
