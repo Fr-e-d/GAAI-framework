@@ -1630,7 +1630,80 @@ dispatch_3phase_story() {
       _remove_active_marker "$story_id" "commit"
       [[ $_commit_rc -ne 0 ]] && return 1
       ;;
-    done|failed|escalated|qa_failed|qa_escalated)
+    qa_failed)
+      # ── Retry-loop : QA FAIL → re-IMPL with qa-report context ────────────
+      # When QA verdict is FAIL, the canonical flow is to re-spawn IMPL with
+      # the qa-report findings as additional context, up to GAAI_QA_RETRY_MAX
+      # total IMPL+QA cycles. If the retry cap is exhausted, escalate to
+      # qa_escalated for human triage. Without this block, the wrapper exits
+      # at qa_failed and the story ghosts in_progress until daemon restart
+      # (the main poll loop ignores in_progress ; recovery at restart just
+      # re-spawns the wrapper which would re-hit the same terminal state).
+      #
+      # The QA retry counter is stored per-story at
+      # ${LOCK_DIR}/.qa-retries-${story_id} as a single integer line. It is
+      # intentionally distinct from the daemon main-loop's wrapper-launch
+      # retry counter — this counter tracks IMPL+QA cycles within a single
+      # story's lifetime, persists across wrapper relaunches, and is cleaned
+      # up on terminal transitions (qa_escalated branch here ; done/failed
+      # branches in _reconcile_yaml_status_on_exit).
+      #
+      # The qa-report path is exported as GAAI_QA_REPORT_PATH so the impl
+      # prompt construction helper injects the prior QA findings into the
+      # next IMPL claude-p invocation as fix-this-please context.
+      local _qa_retry_file _qa_retry_count _qa_retry_max
+      _qa_retry_file="${LOCK_DIR}/.qa-retries-${story_id}"
+      _qa_retry_count=0
+      if [[ -f "$_qa_retry_file" ]]; then
+        _qa_retry_count=$(cat "$_qa_retry_file" 2>/dev/null || echo 0)
+        [[ "$_qa_retry_count" =~ ^[0-9]+$ ]] || _qa_retry_count=0
+      fi
+      _qa_retry_max="${GAAI_QA_RETRY_MAX:-3}"
+      if (( _qa_retry_count >= _qa_retry_max )); then
+        echo "[$(date '+%H:%M:%S')] ${story_id} dispatch: QA retry cap reached (${_qa_retry_count}/${_qa_retry_max}) — escalating qa_failed -> qa_escalated"
+        if "$SCHEDULER" --set-phase-status "$story_id" qa_escalated "$BACKLOG_FILE" 2>/dev/null; then
+          _emit_routing_record "$story_id" "$trace_id" "qa" "error" "QA_RETRY_EXHAUSTED" 2>/dev/null || true
+        else
+          echo "[ERROR] ${story_id} dispatch: scheduler --set-phase-status qa_escalated failed"
+        fi
+        rm -f "$_qa_retry_file" 2>/dev/null || true
+        return 0
+      fi
+      # Increment counter via atomic temp-rename (no sed dependency, no shared helper).
+      _qa_retry_count=$((_qa_retry_count + 1))
+      local _qa_retry_tmp="${_qa_retry_file}.tmp.$$"
+      printf '%s\n' "$_qa_retry_count" > "$_qa_retry_tmp" 2>/dev/null \
+        && mv "$_qa_retry_tmp" "$_qa_retry_file" 2>/dev/null \
+        || rm -f "$_qa_retry_tmp" 2>/dev/null
+      # Resolve worktree path (mirrors handle_impl_phase formula).
+      local _wt_path _wt_parent _wt_repo
+      if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+        _wt_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
+      else
+        _wt_repo=$(basename "$PROJECT_DIR")
+        if _wt_parent=$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd); then
+          _wt_path="${_wt_parent}/.gaai-worktrees/${_wt_repo}/${story_id}-workspace"
+        else
+          echo "[ERROR] ${story_id} dispatch: cannot resolve worktree parent dir for qa-report path — retry aborted"
+          return 1
+        fi
+      fi
+      export GAAI_QA_REPORT_PATH="${_wt_path}/.gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-report.md"
+      # Emit retry routing record BEFORE rewinding phase_status so the qa_failed
+      # state itself is preserved in the routing trace for forensic post-mortem.
+      _emit_routing_record "$story_id" "$trace_id" "qa" "retry" "QA_RETRY_${_qa_retry_count}" 2>/dev/null || true
+      # Rewind phase_status to planned so the next outer-loop iteration calls
+      # handle_impl_phase. The IMPL prompt will pick up the qa-report via
+      # GAAI_QA_REPORT_PATH (read by daemon-prompt-construct.sh).
+      if ! "$SCHEDULER" --set-phase-status "$story_id" planned "$BACKLOG_FILE" 2>/dev/null; then
+        echo "[ERROR] ${story_id} dispatch: scheduler --set-phase-status planned failed during retry"
+        unset GAAI_QA_REPORT_PATH
+        return 1
+      fi
+      echo "[$(date '+%H:%M:%S')] ${story_id} dispatch: QA FAIL — retry ${_qa_retry_count}/${_qa_retry_max} (IMPL will re-spawn with qa-report context: ${GAAI_QA_REPORT_PATH})"
+      return 0
+      ;;
+    done|failed|escalated|qa_escalated)
       return 0
       ;;
     *)
@@ -1779,4 +1852,14 @@ _reconcile_yaml_status_on_exit() {
 
   git push origin "${TARGET_BRANCH:-staging}" --quiet 2>/dev/null || true
   echo "[WRAPPER-RECONCILE] $story_id : reconciled status=$target_status from phase_status=$phase_status"
+
+  # Cleanup QA retry counter on terminal transitions — escalated already
+  # cleaned in dispatch's cap-reached branch ; this handles done / failed
+  # so stale counter files don't accumulate when a story finishes through
+  # the happy path or a non-QA failure mode.
+  case "$target_status" in
+    done|failed|escalated)
+      rm -f "${LOCK_DIR}/.qa-retries-${story_id}" 2>/dev/null || true
+      ;;
+  esac
 }
