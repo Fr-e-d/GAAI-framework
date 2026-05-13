@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- chore(E134S18a): Backlog YAML helper introduction + low-fan-out consumers
+
 ## [2.27.0] - 2026-05-13
 
 ### Changed
