@@ -24,41 +24,89 @@ _CHORE_HELPER_AVAILABLE=0
 # fi
 
 # Option A fallback: refuse if drift, else scheduler-write + commit + push.
-# Used when flock/yq/yq-v4 are unavailable.
+# Used when yq is unavailable OR when the yq-formatting-pinning prerequisite
+# is not met (the non-fallback path is currently disabled — see comment above).
+#
+# Per-machine serialization via flock : when multiple wrappers run concurrently
+# in separate tmux sessions on the same machine, all calls to this function
+# raced on the git working tree (drift check / commit / push). One wrapper
+# could read clean drift state, then another wrote, then the first committed,
+# then push race resolved arbitrarily — wrappers that lost the race entered
+# rollback path losing legitimate close-out work. Flock around the critical
+# section serializes per-machine concurrent wrappers ; existing rebase-retry
+# handles the remaining cross-machine race window.
 _chore_option_a_fallback() {
   local story_id="$1" commit_subject="$2"; shift 2
   local backlog_file="${BACKLOG_FILE}" backlog_rel="${BACKLOG_REL}"
   local target_branch="${TARGET_BRANCH:-staging}"
   local warn_flag="${LOCK_DIR}/.chore-helper-missing.warning"
   if [[ ! -f "$warn_flag" ]]; then
-    echo "[CHORE-COMMIT] WARNING: flock/yq/yq-v4 unavailable — using Option A fallback" >&2
-    echo "[CHORE-COMMIT] Install: macOS: brew install util-linux yq  Linux: apt install util-linux yq" >&2
+    echo "[CHORE-COMMIT] WARNING: yq unavailable — using Option A fallback" >&2
+    echo "[CHORE-COMMIT] Install: macOS: brew install yq  Linux: apt install yq" >&2
     touch "$warn_flag" 2>/dev/null || true
   fi
+
+  # ── Per-machine serialization (NEW) ──────────────────────────────────
+  # Acquire file-level flock around the entire critical section. Released
+  # implicitly when the file descriptor closes (every return path below
+  # closes fd 201 explicitly). Use fd 201 to avoid clashing with the
+  # non-fallback path's fd 200 (those paths are mutually exclusive but
+  # using a distinct fd makes future co-existence safer).
+  local _have_lock=0
+  if command -v flock &>/dev/null; then
+    local lock_dir="${LOCK_DIR:-.}" lock_file="${LOCK_DIR:-.}/.backlog.lock"
+    mkdir -p "$lock_dir" 2>/dev/null && touch "$lock_file" 2>/dev/null
+    exec 201< "$lock_file"
+    if flock -w 30 201; then
+      _have_lock=1
+    else
+      echo "[CHORE-COMMIT] $story_id : lock timeout 30s — refuse-skip (Option A)" >&2
+      printf '%s|%s|lock-timeout-30s-option-a\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" "$story_id" \
+        >> "${lock_dir}/.chore-lock-timeout.audit" 2>/dev/null || true
+      exec 201>&-
+      return 1
+    fi
+  fi
+
+  # Inline helper to release lock and return — avoids repeating cleanup
+  # at each of the 6 return points below.
+  _chore_a_done() {
+    local _rc="$1"
+    [[ "$_have_lock" -eq 1 ]] && exec 201>&-
+    return "$_rc"
+  }
+
   if ! git diff --quiet HEAD -- "$backlog_rel" 2>/dev/null; then
     echo "[CHORE-COMMIT] $story_id : working-tree drift — refuse-skip (Option A)" >&2
-    return 6
+    _chore_a_done 6
+    return $?
   fi
   while [[ $# -ge 2 ]]; do
     "${SCHEDULER:-}" --set-field "$story_id" "$1" "$2" "$backlog_file" 2>/dev/null || true
     shift 2
   done
   git add "$backlog_rel" 2>/dev/null
-  git diff --cached --quiet && return 0
+  if git diff --cached --quiet; then
+    _chore_a_done 0
+    return $?
+  fi
   if ! git commit -m "$commit_subject" --quiet -- "$backlog_rel" 2>/dev/null; then
     # Transactional rollback : commit failed → revert disk write to prevent
     # orphan drift blocking subsequent stories (RC: prior orphan-drift incident).
     git reset HEAD -- "$backlog_rel" 2>/dev/null || true
     git checkout HEAD -- "$backlog_rel" 2>/dev/null || true
     echo "[CHORE-COMMIT] $story_id : commit failed — disk write rolled back" >&2
-    return 1
+    _chore_a_done 1
+    return $?
   fi
   if ! git push origin "$target_branch" --quiet 2>/dev/null; then
     # Push failed → try rebase-retry once
     if git fetch origin "$target_branch" --quiet 2>/dev/null \
       && git rebase "origin/$target_branch" --quiet 2>/dev/null \
       && git push origin "$target_branch" --quiet 2>/dev/null; then
-      return 0
+      _chore_a_done 0
+      return $?
     fi
     # Rebase or retry-push failed → reset the local commit + restore disk to HEAD
     # (HEAD here is post-fetch origin/branch since rebase failed cleanly aborted)
@@ -67,9 +115,11 @@ _chore_option_a_fallback() {
     git reset HEAD -- "$backlog_rel" 2>/dev/null || true
     git checkout HEAD -- "$backlog_rel" 2>/dev/null || true
     echo "[CHORE-COMMIT] $story_id : push failed — local commit + disk rolled back" >&2
-    return 1
+    _chore_a_done 1
+    return $?
   fi
-  return 0
+  _chore_a_done 0
+  return $?
 }
 
 # chore_commit_field <story_id> <field> <new_value> <commit_subject>
