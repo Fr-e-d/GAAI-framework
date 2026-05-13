@@ -146,6 +146,8 @@ MAX_RETRIES=3
 # shellcheck source=lib/chore-commit.sh
 BACKLOG_FILE="$BACKLOG"
 source "$SCRIPT_DIR/lib/chore-commit.sh"
+# shellcheck source=lib/backlog-yaml.sh
+[[ -z "${_BACKLOG_YAML_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/backlog-yaml.sh" && _BACKLOG_YAML_SH_SOURCED=1
 NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
 WEBHOOK_SECRET="${GAAI_DAEMON_WEBHOOK_SECRET:-}"
 
@@ -1712,6 +1714,8 @@ TARGET_BRANCH="$TARGET_BRANCH"
 SCHEDULER="$SCHEDULER"
 # shellcheck source=lib/chore-commit.sh
 source "$PROJECT_DIR/.gaai/core/scripts/lib/chore-commit.sh"
+# shellcheck source=lib/backlog-yaml.sh
+source "$PROJECT_DIR/.gaai/core/scripts/lib/backlog-yaml.sh"
 
 capture_metadata() {
   # Capture delivery metadata directly from delivery log + git log.
@@ -2306,6 +2310,8 @@ TARGET_BRANCH="$TARGET_BRANCH"
 SCHEDULER="$SCHEDULER"
 # shellcheck source=lib/chore-commit.sh
 source "$PROJECT_DIR/.gaai/core/scripts/lib/chore-commit.sh"
+# shellcheck source=lib/backlog-yaml.sh
+source "$PROJECT_DIR/.gaai/core/scripts/lib/backlog-yaml.sh"
 
 capture_metadata() {
   # Capture delivery metadata directly from delivery log + git log.
