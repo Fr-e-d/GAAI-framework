@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.26.0] - 2026-05-13
 
 ### Changed
+- feat(framework): close Plan-block ghost class — Discovery gate mirrors Plan caps + wrapper auto-reconcile
 - chore(oss-hygiene): de-projectify comments in .gaai/core/ (refcheck cleanup)
 - fix(daemon-monitor-tail): strip scheduler --set-field quotes in Active Deliveries detection
 - fix(chore-commit): transactional Option A fallback — rollback disk on commit/push failure
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(pr-watcher): correct chore_commit_field signature + export env vars in reconcile subshell
 - fix(pr-watcher): correct function name _chore_commit_field → chore_commit_field
 - fix(daemon-monitor): remove invalid 'local' keyword outside function scope
+
 
 ## [2.23.0] - 2026-05-11
 
