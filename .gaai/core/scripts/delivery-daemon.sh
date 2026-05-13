@@ -2988,13 +2988,15 @@ while true; do
     break
   fi
   # Terminal phase_status values that must exit the wrapper loop.
-  # qa_failed and qa_escalated are non-terminal for the YAML lifecycle (daemon
-  # post-QA triage may still flip status to done/failed) but ARE terminal for
-  # this wrapper — dispatch_3phase_story returns 0 on these without advancing,
-  # which would tight-loop if not broken here. The daemon resolution path takes
-  # over once the wrapper exits.
+  # qa_failed is NOT in this list — dispatch_3phase_story's qa_failed case
+  # handles the retry-loop inline (re-IMPL with qa-report context) and
+  # rewinds phase_status to "planned" before returning. When the retry cap
+  # is exhausted, dispatch sets phase_status to "qa_escalated" instead,
+  # which IS terminal here. qa_escalated and escalated remain non-terminal
+  # for the YAML lifecycle (operator may still flip top-level status to
+  # done/failed) but ARE terminal for this wrapper.
   case "\$_ps" in
-    done|failed|escalated|qa_failed|qa_escalated)
+    done|failed|escalated|qa_escalated)
       echo "[\$(date '+%H:%M:%S')] $story_id — 3phase loop exit at phase_status='\$_ps'"
       break
       ;;

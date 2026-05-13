@@ -326,6 +326,44 @@ else
   fi
 fi
 
+# ── Section 4b: Prior QA findings (retry-loop re-spawn only) ──────────────
+# When the impl phase is re-spawned by the retry-loop after a QA FAIL, the
+# dispatcher exports GAAI_QA_REPORT_PATH pointing at the previous QA agent's
+# qa-report. Inject those findings here so the IMPL agent fixes the specific
+# defects rather than re-implementing from scratch. The qa-report's verdict
+# is FAIL (or this code path would not run). Iterations are capped by
+# GAAI_QA_RETRY_MAX at the dispatcher level — this section only delivers context.
+if [[ -n "${GAAI_QA_REPORT_PATH:-}" && -f "$GAAI_QA_REPORT_PATH" && -s "$GAAI_QA_REPORT_PATH" ]]; then
+  if [[ "$SECONDARY_ROUTE" == "true" ]]; then
+    cat <<QA_FINDINGS_REF
+=== PRIOR QA FINDINGS — RETRY-LOOP RE-SPAWN ===
+
+This is a re-spawn of the IMPL phase. A previous QA pass produced verdict
+FAIL with concrete findings recorded at :
+
+  ${GAAI_QA_REPORT_PATH}
+
+Your task is to ADDRESS those findings (NOT re-implement the story from
+scratch). Read the qa-report first, then read the prior impl-report and
+plan, locate the defective sites, apply the minimal correction, and update
+the impl-report with a "Cycle N corrections" section listing what changed.
+
+Do NOT broaden scope. Do NOT make architectural decisions. The qa-report
+identifies specific defects — fix those, run the tests called out in the
+acceptance criteria, and exit.
+
+=== END PRIOR QA FINDINGS ===
+
+QA_FINDINGS_REF
+  else
+    echo "=== PRIOR QA FINDINGS (verdict: FAIL — address these) ==="
+    cat "$GAAI_QA_REPORT_PATH"
+    echo ""
+    echo "(Above qa-report is from a previous QA pass on this story. Your task is to address the specific findings, NOT re-implement from scratch. Read the impl-report + plan + story to triangulate. Apply minimal corrections and update the impl-report with a 'Cycle N corrections' section.)"
+    echo ""
+  fi
+fi
+
 # ── Section 5: DEC reads instruction ─────────────────────────────────────
 # Parse related_decs from story YAML frontmatter (--- block).
 # Format in frontmatter: related_decs: [DEC-NN, DEC-MM, ...]

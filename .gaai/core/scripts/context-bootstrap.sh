@@ -42,9 +42,6 @@ VERSION="unknown"
 CORE_DIR="${GAAI_DIR%/project}/core"
 [[ -f "$CORE_DIR/VERSION" ]] && VERSION=$(cat "$CORE_DIR/VERSION" | tr -d '[:space:]')
 
-# shellcheck source=/dev/null
-[[ -f "$CORE_DIR/scripts/lib/backlog-yaml.sh" ]] && source "$CORE_DIR/scripts/lib/backlog-yaml.sh"
-
 echo ""
 echo "╔══════════════════════════════════════╗"
 echo "║      GAAI Context Summary v$VERSION      ║"
@@ -69,10 +66,8 @@ fi
 ACTIVE_BACKLOG="$GAAI_DIR/contexts/backlog/active.backlog.yaml"
 if [[ -f "$ACTIVE_BACKLOG" ]]; then
   total=$(grep -c "^  - id:" "$ACTIVE_BACKLOG" 2>/dev/null || echo 0)
-  refined_ids=$(backlog_ids_by_status "refined" "$ACTIVE_BACKLOG" 2>/dev/null || true)
-  refined=$(echo "$refined_ids" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)
-  in_progress_ids=$(backlog_in_progress_ids "$ACTIVE_BACKLOG" 2>/dev/null || true)
-  in_progress=$(echo "$in_progress_ids" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)
+  refined=$(grep -c "status: refined" "$ACTIVE_BACKLOG" 2>/dev/null || echo 0)
+  in_progress=$(grep -c "status: in-progress" "$ACTIVE_BACKLOG" 2>/dev/null || echo 0)
   echo "── Active Backlog ──────────────────────"
   echo "  Total items : $total"
   echo "  Refined     : $refined"

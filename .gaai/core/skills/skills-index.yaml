@@ -2,8 +2,8 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md — core framework skills only
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-04-30
-total: 59
+generated_at: 2026-05-13
+total: 61
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -352,6 +352,15 @@ cross:
     tags: []
     updated_at: 2026-02-26
     path: core/skills/cross/memory-alignment-check/SKILL.md
+  - id: SKILL-MEMORY-ARCHIVE-SUPERSEDED-001
+    name: memory-archive-superseded
+    source: core
+    description: "Migrate a superseded DEC's index rows from active `index.md` to `archive/superseded-decisions.archive.md`. Idempotent. Discovery-only — never invoked by daemon delivery. Updates DEC frontmatter as canonical source of truth."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-05-08
+    path: core/skills/cross/memory-archive-superseded/SKILL.md
   - id: SKILL-MEMORY-COMPACT-001
     name: memory-compact
     source: core
@@ -370,33 +379,24 @@ cross:
     tags: []
     updated_at: 2026-04-12
     path: core/skills/cross/memory-delta-triage/SKILL.md
+  - id: SKILL-MEMORY-INDEX-LINT-001
+    name: memory-index-lint
+    source: core
+    description: "Validate discoverability invariants of memory `index.md` and `archive/superseded-decisions.archive.md`. Tool-agnostic L3 prompt + capability-dependent L4 script. Detects table corruption, dangling/orphan supersession pointers, frontmatter inconsistencies, missing affordance signals."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-05-08
+    path: core/skills/cross/memory-index-lint/SKILL.md
   - id: SKILL-MEMORY-INDEX-SYNC-001
     name: memory-index-sync
     source: core
-    description: "Detect and heal index.md drift — finds memory files on disk not registered in index.md and registers them. Run when /gaai-status reports unregistered files, after batch memory operations, or as a post-delivery gate. Skips DECs with archived_to: frontmatter (coordinates with memory-archive-superseded skill)."
+    description: "Detect and heal index.md drift — finds memory files on disk not registered in index.md and registers them. Run when /gaai-status reports unregistered files, after batch memory operations, or as a post-delivery gate."
     category: cross
     track: cross-cutting
     tags: []
     updated_at: 2026-05-08
     path: core/skills/cross/memory-index-sync/SKILL.md
-  - id: SKILL-MEMORY-ARCHIVE-SUPERSEDED-001
-    name: memory-archive-superseded
-    source: core
-    description: "Migrate a superseded DEC's index rows from active index.md to archive/superseded-decisions.archive.md. Idempotent. Discovery-only (never daemon delivery). Updates DEC frontmatter as canonical source of truth (status + superseded_by + archived_at + archived_to). Files NOT moved — path stable."
-    category: cross
-    track: cross-cutting
-    tags: [memory, archive, supersession, governance]
-    updated_at: 2026-05-08
-    path: core/skills/cross/memory-archive-superseded/SKILL.md
-  - id: SKILL-MEMORY-INDEX-LINT-001
-    name: memory-index-lint
-    source: core
-    description: "Validate discoverability invariants of memory index.md and archive/superseded-decisions.archive.md. Tool-agnostic L3 prompt + capability-dependent L4 Python script (scripts/validate-memory-index.py). Detects table corruption, dangling/orphan supersession pointers, frontmatter inconsistencies, missing affordance signals. Stateless + idempotent. Pre-commit + CI integration."
-    category: cross
-    track: cross-cutting
-    tags: [memory, lint, validation, invariants]
-    updated_at: 2026-05-08
-    path: core/skills/cross/memory-index-lint/SKILL.md
   - id: SKILL-MEMORY-INGEST-001
     name: memory-ingest
     source: core

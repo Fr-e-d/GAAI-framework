@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.28.0] - 2026-05-13
 
 ### Changed
+- feat(framework): implement QA-retry-loop in OSS bash daemon (canonical DEC-89)
+- chore: sync skills-index + preserve E134S18 plan-blocked evidence
 - chore(E134S18a): Backlog YAML helper introduction + low-fan-out consumers
+
 
 ## [2.27.0] - 2026-05-13
 
