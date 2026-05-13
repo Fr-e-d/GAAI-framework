@@ -146,6 +146,8 @@ MAX_RETRIES=3
 # shellcheck source=lib/chore-commit.sh
 BACKLOG_FILE="$BACKLOG"
 source "$SCRIPT_DIR/lib/chore-commit.sh"
+# shellcheck source=lib/backlog-yaml.sh
+[[ -z "${_BACKLOG_YAML_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/backlog-yaml.sh" && _BACKLOG_YAML_SH_SOURCED=1
 NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
 WEBHOOK_SECRET="${GAAI_DAEMON_WEBHOOK_SECRET:-}"
 
@@ -358,35 +360,23 @@ scan_and_track_escalated_failed() {
   backlog_content=$(fetch_and_read_backlog)
   [[ -z "$backlog_content" ]] && return 0
 
-  local escalated_failed_ids
-  escalated_failed_ids=$(echo "$backlog_content" | python3 -c "
-import sys
-content = sys.stdin.read()
-current_id = None
-for line in content.splitlines():
-    stripped = line.strip()
-    if stripped.startswith('- id:'):
-        current_id = stripped.split(':', 1)[1].strip()
-    elif current_id and stripped.startswith('status:'):
-        # Quote-tolerant : strip surrounding quotes so 'status: "escalated"'
-        # and 'status: escalated' both parse to 'escalated'. Defensive against
-        # writer asymmetry producing quoted output invisible to naive
-        # split().strip() readers.
-        status = stripped.split(':', 1)[1].strip().strip('\"').strip(\"'\")
-        if status in ('escalated', 'failed'):
-            print(current_id + '|' + status)
-        current_id = None
-" 2>/dev/null) || return 0
+  local _bl_tmp1; _bl_tmp1=$(mktemp)
+  printf '%s\n' "$backlog_content" > "$_bl_tmp1"
+  local esc_ids failed_ids
+  esc_ids=$(backlog_ids_by_status "escalated" "$_bl_tmp1" 2>/dev/null || true)
+  failed_ids=$(backlog_ids_by_status "failed" "$_bl_tmp1" 2>/dev/null || true)
+  rm -f "$_bl_tmp1"
 
-  [[ -z "$escalated_failed_ids" ]] && return 0
+  [[ -z "$esc_ids" && -z "$failed_ids" ]] && return 0
 
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    local sid sstatus
-    sid="${line%%|*}"
-    sstatus="${line##*|}"
-    track_for_resolution "$sid" "$sstatus"
-  done <<< "$escalated_failed_ids"
+  while IFS= read -r _sid; do
+    [[ -z "$_sid" ]] && continue
+    track_for_resolution "$_sid" "escalated"
+  done <<< "$esc_ids"
+  while IFS= read -r _sid; do
+    [[ -z "$_sid" ]] && continue
+    track_for_resolution "$_sid" "failed"
+  done <<< "$failed_ids"
 }
 
 check_resolution_notifications() {
@@ -404,6 +394,9 @@ check_resolution_notifications() {
     tracked_entries+=("$entry")
   done < "$RESOLUTION_TRACKING"
 
+  local _bl_tmp2; _bl_tmp2=$(mktemp)
+  printf '%s\n' "$backlog_content" > "$_bl_tmp2"
+
   local entry
   for entry in "${tracked_entries[@]}"; do
     local tracked_id tracked_prior
@@ -413,20 +406,7 @@ check_resolution_notifications() {
 
     # Extract current status for this story from backlog
     local current_status
-    current_status=$(echo "$backlog_content" | python3 -c "
-import sys
-content = sys.stdin.read()
-current_id = None
-for line in content.splitlines():
-    stripped = line.strip()
-    if stripped.startswith('- id:'):
-        current_id = stripped.split(':', 1)[1].strip()
-    elif current_id and stripped.startswith('status:'):
-        if current_id == '${tracked_id}':
-            print(stripped.split(':', 1)[1].strip())
-            break
-        current_id = None
-" 2>/dev/null) || current_status=""
+    current_status=$(backlog_status "$tracked_id" "$_bl_tmp2" 2>/dev/null || true)
 
     [[ -z "$current_status" ]] && continue
     [[ "$current_status" != "done" ]] && continue
@@ -454,6 +434,7 @@ for line in content.splitlines():
     notify_resolution "$tracked_id" "$tracked_prior" "$pr_url"
     untrack_resolved "$tracked_id"
   done
+  rm -f "$_bl_tmp2"
 }
 
 # ── Parse CLI args ────────────────────────────────────────────────────────
@@ -767,54 +748,26 @@ exceeded_stories() {
 # ── Staleness detection ──────────────────────────────────────────────────
 # Detects stories stuck in in_progress for longer than STALENESS_THRESHOLD.
 # Uses git log to find when the story was marked in_progress.
-# Phase-aware: recoverable phases (qa_passed, implemented, qa_failed, planned+plan)
-# are re-launched via the existing recovery primitive instead of being marked failed.
-# Genuinely stuck stories (not_started, empty phase) keep the mark-failed behavior.
-# A per-story retry counter prevents infinite resume loops on repeat-crashing wrappers.
+# If stale and no local lock exists → mark as failed on staging.
 check_stale_in_progress() {
   local backlog_content
   backlog_content=$(fetch_and_read_backlog)
   [[ -z "$backlog_content" ]] && return 0
 
-  # Extract sid|phase_status pairs for stories with status: in_progress
-  local in_progress_pairs
-  in_progress_pairs=$(echo "$backlog_content" | python3 -c '
-import sys
-content = sys.stdin.read()
-cur_id = None
-cur_status = None
-cur_phase = None
-def emit():
-    if cur_id and cur_status == "in_progress":
-        print(cur_id + "|" + (cur_phase or ""))
-for line in content.splitlines():
-    stripped = line.strip()
-    if stripped.startswith("- id:"):
-        emit()
-        cur_id = stripped.split(":", 1)[1].strip()
-        cur_status = None
-        cur_phase = None
-    elif cur_id and stripped.startswith("status:"):
-        # Quote-tolerant strip via chr() : strips both quote types. The chr()
-        # form is required because this Python code is embedded in a bash
-        # single-quoted heredoc where a literal quote char would prematurely
-        # close the outer bash string.
-        cur_status = stripped.split(":", 1)[1].strip().strip(chr(34)+chr(39))
-    elif cur_id and stripped.startswith("phase_status:"):
-        cur_phase = stripped.split(":", 1)[1].strip().strip(chr(34)+chr(39))
-emit()
-' 2>/dev/null) || return 0
+  # Extract story IDs with status: in_progress
+  local _bl_tmp3; _bl_tmp3=$(mktemp)
+  printf '%s\n' "$backlog_content" > "$_bl_tmp3"
+  local in_progress_ids
+  in_progress_ids=$(backlog_in_progress_ids "$_bl_tmp3" 2>/dev/null || true)
+  rm -f "$_bl_tmp3"
 
-  [[ -z "$in_progress_pairs" ]] && return 0
+  [[ -z "$in_progress_ids" ]] && return 0
 
   local now
   now=$(date +%s)
 
-  while IFS= read -r pair; do
-    [[ -z "$pair" ]] && continue
-    local sid ps
-    sid="${pair%%|*}"
-    ps="${pair##*|}"
+  while IFS= read -r sid; do
+    [[ -z "$sid" ]] && continue
 
     # Skip if we have an active local lock (delivery is running on this machine)
     if is_locked "$sid"; then
@@ -838,88 +791,9 @@ emit()
       log "${RED}STALE: $sid has been in_progress for ${age_min}min (threshold: $(( STALENESS_THRESHOLD / 60 ))min)${NC}"
 
       if $DRY_RUN; then
-        log "${YELLOW}[DRY RUN] Would apply phase-aware staleness recovery for $sid (phase=${ps:-empty})${NC}"
+        log "${YELLOW}[DRY RUN] Would mark $sid as failed${NC}"
         continue
       fi
-
-      # ── Phase-aware dispatch ─────────────────────────────────────────────
-      # Recoverable phases resume via the existing recovery primitive.
-      # Genuinely stuck phases (not_started/empty) fall through to mark-failed.
-      local worktree_path_inloop
-      worktree_path_inloop=$(_recovery_resolve_worktree "$sid")
-
-      local _inloop_trace_id
-      _inloop_trace_id=$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \
-        || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
-        || echo "recovery-$(date +%s)-$$-$RANDOM")
-
-      local _inloop_retry_file _inloop_retry_count _inloop_retry_max
-      _inloop_retry_file="${LOCK_DIR}/.recovery-attempts-${sid}"
-      _inloop_retry_count=0
-      if [[ -f "$_inloop_retry_file" ]]; then
-        _inloop_retry_count=$(cat "$_inloop_retry_file" 2>/dev/null || echo 0)
-        [[ "$_inloop_retry_count" =~ ^[0-9]+$ ]] || _inloop_retry_count=0
-      fi
-      _inloop_retry_max="${GAAI_INLOOP_RECOVERY_MAX:-3}"
-
-      case "$ps" in
-        qa_passed|implemented|qa_failed)
-          if (( _inloop_retry_count >= _inloop_retry_max )); then
-            rm -f "$_inloop_retry_file" 2>/dev/null || true
-            log "${RED}[STALE] $sid recovery cap reached (${_inloop_retry_count}/${_inloop_retry_max}) — marking failed${NC}"
-            _emit_routing_record "$sid" "$_inloop_trace_id" "recovery" "error" \
-              "recovery_cap_exhausted:${ps}" 2>/dev/null || true
-            # fall through to existing mark-failed block below
-          else
-            _inloop_retry_count=$(( _inloop_retry_count + 1 ))
-            local _inloop_retry_tmp="${_inloop_retry_file}.tmp.$$"
-            printf '%s\n' "$_inloop_retry_count" > "$_inloop_retry_tmp" 2>/dev/null \
-              && mv "$_inloop_retry_tmp" "$_inloop_retry_file" 2>/dev/null \
-              || rm -f "$_inloop_retry_tmp" 2>/dev/null
-            _emit_routing_record "$sid" "$_inloop_trace_id" "recovery" "daemon-bash" \
-              "recovery_relaunch_in_loop:${ps}:${_inloop_retry_count}_of_${_inloop_retry_max}" 2>/dev/null || true
-            log "${GREEN}[STALE] $sid phase=$ps — re-launching (attempt ${_inloop_retry_count}/${_inloop_retry_max})${NC}"
-            _recovery_relaunch "$sid" || true
-            continue
-          fi
-          ;;
-        planned)
-          local _plan_path_inloop="${worktree_path_inloop}/.gaai/project/contexts/artefacts/plans/${sid}.execution-plan.md"
-          if [[ -s "$_plan_path_inloop" ]]; then
-            if (( _inloop_retry_count >= _inloop_retry_max )); then
-              rm -f "$_inloop_retry_file" 2>/dev/null || true
-              log "${RED}[STALE] $sid recovery cap reached (${_inloop_retry_count}/${_inloop_retry_max}) — marking failed${NC}"
-              _emit_routing_record "$sid" "$_inloop_trace_id" "recovery" "error" \
-                "recovery_cap_exhausted:${ps}" 2>/dev/null || true
-              # fall through to existing mark-failed block below
-            else
-              _inloop_retry_count=$(( _inloop_retry_count + 1 ))
-              local _inloop_retry_tmp_p="${_inloop_retry_file}.tmp.$$"
-              printf '%s\n' "$_inloop_retry_count" > "$_inloop_retry_tmp_p" 2>/dev/null \
-                && mv "$_inloop_retry_tmp_p" "$_inloop_retry_file" 2>/dev/null \
-                || rm -f "$_inloop_retry_tmp_p" 2>/dev/null
-              _emit_routing_record "$sid" "$_inloop_trace_id" "recovery" "daemon-bash" \
-                "recovery_relaunch_in_loop:${ps}:${_inloop_retry_count}_of_${_inloop_retry_max}" 2>/dev/null || true
-              log "${GREEN}[STALE] $sid phase=planned (plan present) — re-launching (attempt ${_inloop_retry_count}/${_inloop_retry_max})${NC}"
-              _recovery_relaunch "$sid" || true
-              continue
-            fi
-          else
-            log "${YELLOW}[STALE] $sid phase=planned but no execution-plan — reverting to refined${NC}"
-            if _recovery_revert_refined "$sid" true "missing-plan"; then
-              increment_retry "$sid"
-            fi
-            continue
-          fi
-          ;;
-        done|failed|escalated|qa_escalated)
-          # Terminal phase — no-op; status reconciliation handled by crash_recovery_scan at startup.
-          continue
-          ;;
-        *)
-          # not_started or empty — genuinely stuck; fall through to mark-failed.
-          ;;
-      esac
 
       # Mark as failed on staging
       log "${YELLOW}Marking $sid as failed (stale in_progress)...${NC}"
@@ -963,7 +837,7 @@ RSTEOF
         log "${RED}Could not mark $sid as failed — manual intervention needed${NC}"
       fi
     fi
-  done <<< "$in_progress_pairs"
+  done <<< "$in_progress_ids"
 }
 
 # ── OSS-5 : Crash-recovery scan ──────────────────────────────────────────
@@ -1004,54 +878,22 @@ crash_recovery_scan() {
   backlog_content=$(fetch_and_read_backlog)
   [[ -z "$backlog_content" ]] && return 0
 
-  # AC1: Read working-tree backlog for per-story drift comparison (before any relaunch).
-  # Parses id|status|phase_status for all stories. Empty on python3 failure (graceful degrade).
-  local wt_all_status=""
-  if [[ -f "$BACKLOG" ]]; then
-    wt_all_status=$(python3 -c '
-import sys
-content = open(sys.argv[1]).read()
-cur_id = None; cur_status = None; cur_phase = None
-def emit():
-    if cur_id:
-        print(cur_id + "|" + (cur_status or "") + "|" + (cur_phase or ""))
-for line in content.splitlines():
-    s = line.strip()
-    if s.startswith("- id:"): emit(); cur_id = s.split(":",1)[1].strip(); cur_status = None; cur_phase = None
-    elif cur_id and s.startswith("status:"): cur_status = s.split(":",1)[1].strip().strip(chr(34)+chr(39))  # quote-tolerant
-    elif cur_id and s.startswith("phase_status:"): cur_phase = s.split(":",1)[1].strip().strip(chr(34)+chr(39))  # quote-tolerant
-emit()
-' "$BACKLOG" 2>/dev/null) || wt_all_status=""
+  # Extract (id|phase_status) pairs for status:in_progress stories using helper.
+  local in_progress_pairs=""
+  local _bl_tmp5; _bl_tmp5=$(mktemp)
+  printf '%s\n' "$backlog_content" > "$_bl_tmp5"
+  local _ip_ids
+  _ip_ids=$(backlog_in_progress_ids "$_bl_tmp5" 2>/dev/null || true)
+  if [[ -n "$_ip_ids" ]]; then
+    while IFS= read -r _ip_sid; do
+      [[ -z "$_ip_sid" ]] && continue
+      local _ip_ps
+      _ip_ps=$(backlog_phase_status "$_ip_sid" "$_bl_tmp5" 2>/dev/null || true)
+      in_progress_pairs+="${_ip_sid}|${_ip_ps:-}"$'\n'
+    done <<< "$_ip_ids"
+    in_progress_pairs="${in_progress_pairs%$'\n'}"  # trim trailing newline
   fi
-
-  # Extract (id|phase_status) pairs for status:in_progress stories in one pass.
-  local in_progress_pairs
-  in_progress_pairs=$(echo "$backlog_content" | python3 -c '
-import sys
-content = sys.stdin.read()
-cur_id = None
-cur_status = None
-cur_phase = None
-def emit():
-    if cur_id and cur_status == "in_progress":
-        print(cur_id + "|" + (cur_phase or ""))
-for line in content.splitlines():
-    stripped = line.strip()
-    if stripped.startswith("- id:"):
-        emit()
-        cur_id = stripped.split(":", 1)[1].strip()
-        cur_status = None
-        cur_phase = None
-    elif cur_id and stripped.startswith("status:"):
-        # Quote-tolerant strip via chr() : strips both quote types. The chr()
-        # form is required because this Python code is embedded in a bash
-        # single-quoted heredoc where any literal quote char would prematurely
-        # close the outer bash string.
-        cur_status = stripped.split(":", 1)[1].strip().strip(chr(34)+chr(39))
-    elif cur_id and stripped.startswith("phase_status:"):
-        cur_phase = stripped.split(":", 1)[1].strip().strip(chr(34)+chr(39))
-emit()
-' 2>/dev/null) || return 0
+  rm -f "$_bl_tmp5"
 
   [[ -z "$in_progress_pairs" ]] && {
     log "${CYAN}[RECOVERY] No in_progress stories to evaluate${NC}"
@@ -1072,13 +914,11 @@ emit()
     # HEAD says in_progress; compare WT status/phase_status. Only checks stories that
     # are already in in_progress_pairs (HEAD status == in_progress). Benign edits on
     # draft/deferred/refined stories do NOT freeze recovery for the whole backlog.
-    if [[ -n "$wt_all_status" ]]; then
-      local wt_row wt_status wt_ps
-      wt_row=$(printf '%s\n' "$wt_all_status" | grep "^${sid}|" | head -1)
-      wt_status="${wt_row#*|}"
-      wt_status="${wt_status%%|*}"
-      wt_ps="${wt_row##*|}"
-      if [[ -n "$wt_row" ]] && ( [[ "$wt_status" != "in_progress" ]] || [[ "$wt_ps" != "$ps" ]] ); then
+    if [[ -f "$BACKLOG" ]]; then
+      local wt_status wt_ps
+      wt_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
+      wt_ps=$(backlog_phase_status "$sid" "$BACKLOG" 2>/dev/null || true)
+      if [[ -n "$wt_status" ]] && ( [[ "$wt_status" != "in_progress" ]] || [[ "$wt_ps" != "$ps" ]] ); then
         log "${YELLOW}[RECOVERY] $sid : working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) — skipping relaunch this scan${NC}"
         _write_drift_marker "scan" "drift-$sid"
         drift_detected=1
@@ -1335,16 +1175,7 @@ _recovery_relaunch() {
   # a reset between the case "$ps" branch and this function call).
   local wt_recheck_status=""
   if [[ -f "$BACKLOG" ]]; then
-    wt_recheck_status=$(python3 -c "
-import sys, os
-content = open('$BACKLOG').read() if os.path.isfile('$BACKLOG') else ''
-cur_id = None; cur_status = None
-for line in content.splitlines():
-    s = line.strip()
-    if s.startswith('- id:'): cur_id = s.split(':',1)[1].strip(); cur_status = None
-    elif cur_id == '${sid}' and s.startswith('status:'): cur_status = s.split(':',1)[1].strip().strip('\"').strip(\"'\"); break  # quote-tolerant
-print(cur_status or '')
-" 2>/dev/null) || wt_recheck_status=""
+    wt_recheck_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
   fi
   if [[ -n "$wt_recheck_status" && "$wt_recheck_status" != "in_progress" ]]; then
     log "${YELLOW}[RECOVERY] $sid : status changed to $wt_recheck_status mid-scan — skipping relaunch${NC}"
@@ -1458,29 +1289,37 @@ watch_pr_merge_status() {
     return 0
   }
 
-  # Parse in_progress stories with pr_url set → "sid|pr_url" pairs
-  local story_pr_pairs
-  story_pr_pairs=$(printf '%s\n' "$backlog_content" | python3 -c "
+  # Get in_progress IDs via helper (status filtering — AC1 migration)
+  local _bl_tmp7; _bl_tmp7=$(mktemp)
+  printf '%s\n' "$backlog_content" > "$_bl_tmp7"
+  local _ip_ids_for_pr
+  _ip_ids_for_pr=$(backlog_in_progress_ids "$_bl_tmp7" 2>/dev/null || true)
+  rm -f "$_bl_tmp7"
+
+  # For each in_progress story, extract pr_url (non-status field — out of helper scope)
+  local story_pr_pairs=""
+  if [[ -n "$_ip_ids_for_pr" ]]; then
+    while IFS= read -r _pr_sid; do
+      [[ -z "$_pr_sid" ]] && continue
+      local _pr_url
+      _pr_url=$(printf '%s\n' "$backlog_content" | python3 -c "
 import sys
-lines = sys.stdin.read().splitlines()
-stories = []
-cur = {}
-for line in lines:
+content = sys.stdin.read()
+sid = '${_pr_sid}'
+in_story = False
+for line in content.splitlines():
     s = line.strip()
     if s.startswith('- id:'):
-        if cur.get('id'):
-            stories.append(cur)
-        cur = {'id': s.split(':',1)[1].strip(), 'status': None, 'pr_url': None}
-    elif cur and s.startswith('status:'):
-        cur['status'] = s.split(':',1)[1].strip().strip('\"').strip(\"'\")  # quote-tolerant
-    elif cur and s.startswith('pr_url:'):
-        cur['pr_url'] = s.split(':',1)[1].strip().strip('\"').strip(\"'\")
-if cur.get('id'):
-    stories.append(cur)
-for st in stories:
-    if st.get('status') == 'in_progress' and st.get('pr_url'):
-        print('{}|{}'.format(st['id'], st['pr_url']))
+        in_story = s.split(':',1)[1].strip() == sid
+    elif in_story and s.startswith('pr_url:'):
+        val = s.split(':',1)[1].strip().strip('\"').strip(\"'\")
+        if val: print(val)
+        break
 " 2>/dev/null || true)
+      [[ -n "$_pr_url" ]] && story_pr_pairs+="${_pr_sid}|${_pr_url}"$'\n'
+    done <<< "$_ip_ids_for_pr"
+    story_pr_pairs="${story_pr_pairs%$'\n'}"
+  fi
 
   # Clear stale .pr-abandoned.emitted.<sid> flags for stories no longer tracked
   for emitted_flag in "$LOCK_DIR"/.pr-abandoned.emitted.*; do
@@ -1557,18 +1396,7 @@ _reconcile_merged_pr() {
   # MEDIUM-F4: concurrent pre-check — re-read working-tree status before chore-commit
   local current_status=""
   if [[ -f "$BACKLOG" ]]; then
-    current_status=$(python3 -c "
-import sys, os
-content = open('$BACKLOG').read() if os.path.isfile('$BACKLOG') else ''
-cur_id = None
-for line in content.splitlines():
-    s = line.strip()
-    if s.startswith('- id:') and s.split(':',1)[1].strip() == '$sid':
-        cur_id = True
-    elif cur_id and s.startswith('status:'):
-        print(s.split(':',1)[1].strip())
-        break
-" 2>/dev/null || echo "")
+    current_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
   fi
   if [[ "$current_status" == "done" ]]; then
     log "${CYAN}[PR-WATCHER] $sid : already reconciled by concurrent path, skipping${NC}"
@@ -1817,6 +1645,8 @@ TARGET_BRANCH="$TARGET_BRANCH"
 SCHEDULER="$SCHEDULER"
 # shellcheck source=lib/chore-commit.sh
 source "$PROJECT_DIR/.gaai/core/scripts/lib/chore-commit.sh"
+# shellcheck source=lib/backlog-yaml.sh
+source "$PROJECT_DIR/.gaai/core/scripts/lib/backlog-yaml.sh"
 
 capture_metadata() {
   # Capture delivery metadata directly from delivery log + git log.
@@ -2154,7 +1984,7 @@ on_exit() {
   cd "$PROJECT_DIR"
   git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
   local current_status
-  current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
+  current_status=\$(backlog_status '$story_id' '$BACKLOG' 2>/dev/null || true)
 
   if [[ "\$current_status" == "done" ]]; then
     # Story done — capture delivery metadata (stop hook doesn't fire in -p mode)
@@ -2411,6 +2241,8 @@ TARGET_BRANCH="$TARGET_BRANCH"
 SCHEDULER="$SCHEDULER"
 # shellcheck source=lib/chore-commit.sh
 source "$PROJECT_DIR/.gaai/core/scripts/lib/chore-commit.sh"
+# shellcheck source=lib/backlog-yaml.sh
+source "$PROJECT_DIR/.gaai/core/scripts/lib/backlog-yaml.sh"
 
 capture_metadata() {
   # Capture delivery metadata directly from delivery log + git log.
@@ -2740,7 +2572,7 @@ on_exit() {
   cd "$PROJECT_DIR"
   git pull origin '$TARGET_BRANCH' --ff-only --quiet 2>&1 || true
   local current_status
-  current_status=\$(grep -A 8 'id: $story_id' '$BACKLOG' | grep 'status:' | head -1 | sed 's/.*status: *//')
+  current_status=\$(backlog_status '$story_id' '$BACKLOG' 2>/dev/null || true)
 
   if [[ "\$current_status" == "done" ]]; then
     echo "[WRAPPER] Story $story_id done. Capturing metadata..."
@@ -3026,7 +2858,7 @@ cleanup() {
       _reconcile_yaml_status_on_exit "$story_id"
     fi
   fi
-  rm -f "\$LOCK_FILE" "\$HEARTBEAT_FILE" "${LOCK_DIR}/.recovery-attempts-${story_id}"
+  rm -f "\$LOCK_FILE" "\$HEARTBEAT_FILE"
   # NB: do NOT remove \$INTERRUPTED_FILE — OSS-5 (crash_recovery_scan) reads
   # it at the next daemon start to differentiate graceful daemon-start.sh --stop from
   # crash. The recovery scan removes it after reverting status:refined.
