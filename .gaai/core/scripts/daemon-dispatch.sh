@@ -24,6 +24,14 @@ GAAI_TIMEOUT_COMMIT_SEC="${GAAI_TIMEOUT_COMMIT_SEC:-600}"  # 10 min (commit-phas
 # Distinct exit code for wall-clock timeout (vs 124 loop-breaker).
 GAAI_TIMEOUT_RC=137
 
+[[ -z "${_BACKLOG_YAML_SH_SOURCED:-}" ]] && {
+  _DISPATCH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+  [[ -f "${_DISPATCH_LIB_DIR}/lib/backlog-yaml.sh" ]] && \
+    source "${_DISPATCH_LIB_DIR}/lib/backlog-yaml.sh" && \
+    _BACKLOG_YAML_SH_SOURCED=1
+  unset _DISPATCH_LIB_DIR
+}
+
 # Resolve the available timeout binary. Linux ships `timeout`, macOS coreutils
 # ships `gtimeout`. Empty string when neither is present — callers must then
 # fall back to the in-process watchdog.
@@ -324,18 +332,7 @@ _run_claude_with_loop_breaker() {
 
 get_phase_status() {
   local id="$1"
-  awk -v id="$id" '
-    $0 == "- id: " id { found=1; next }
-    found && /^- id:/ { exit }
-    found && /^[[:space:]]+phase_status:/ {
-      gsub(/^[[:space:]]+phase_status:[[:space:]]*/, "")
-      gsub(/[[:space:]]+#.*$/, "")  # strip YAML inline comment (defensive — `#` after whitespace)
-      gsub(/[[:space:]]*$/, "")
-      gsub(/^"|"$/, "")
-      print
-      exit
-    }
-  ' "$BACKLOG_FILE"
+  backlog_phase_status "$id" "$BACKLOG_FILE" 2>/dev/null || true
 }
 
 get_delivery_pipeline() {
@@ -1788,17 +1785,7 @@ _reconcile_yaml_status_on_exit() {
   drift_marker="${LOCK_DIR}/.drift-detected.audit"
 
   # Idempotent guard: read current top-level status
-  current_status=$(awk -v id="$story_id" '
-    $0 == "- id: " id { found=1; next }
-    found && /^- id:/ { exit }
-    found && /^[[:space:]]+status:/ {
-      gsub(/^[[:space:]]+status:[[:space:]]*/, "")
-      gsub(/[[:space:]]+#.*$/, "")
-      gsub(/[[:space:]]*$/, "")
-      gsub(/^"|"$/, "")
-      print; exit
-    }
-  ' "$BACKLOG_FILE" 2>/dev/null)
+  current_status=$(backlog_status "$story_id" "$BACKLOG_FILE" 2>/dev/null || true)
 
   if [[ "$current_status" == "$target_status" ]]; then
     echo "[WRAPPER-RECONCILE] $story_id : status already $target_status — no-op"

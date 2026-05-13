@@ -174,6 +174,13 @@ if ! command -v python3 &>/dev/null; then
   exit 3
 fi
 
+_SCHED_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+[[ -f "${_SCHED_DIR}/lib/backlog-yaml.sh" ]] && \
+  [[ -z "${_BACKLOG_YAML_SH_SOURCED:-}" ]] && \
+  source "${_SCHED_DIR}/lib/backlog-yaml.sh" && \
+  _BACKLOG_YAML_SH_SOURCED=1
+unset _SCHED_DIR
+
 # ── set-status mode: modify file in-place ────────────────────
 if [[ "$MODE" == "set-status" ]]; then
   python3 -c "
@@ -366,6 +373,13 @@ fi
 
 # ── reset mode: atomically reset status + phase_status + started_at ─────────
 if [[ "$MODE" == "reset" ]]; then
+  # Bash pre-check: skip Python entirely when already in target state
+  _rst_s=$(backlog_status "$RESET_ID" "$BACKLOG_FILE" 2>/dev/null || true)
+  _rst_ps=$(backlog_phase_status "$RESET_ID" "$BACKLOG_FILE" 2>/dev/null || true)
+  if [[ "$_rst_s" == "refined" && "$_rst_ps" == "not_started" ]]; then
+    echo "${RESET_ID} already status:refined + phase_status:not_started — no-op" >&2
+    exit 0
+  fi
   python3 -c "
 import sys, re, os
 
@@ -391,23 +405,6 @@ for i, line in enumerate(lines):
 if block_start < 0:
     print(f'Error: story {target_id} not found in backlog', file=sys.stderr)
     sys.exit(1)
-
-block = lines[block_start:block_end]
-
-# Idempotency check
-cur_status       = None
-cur_phase_status = None
-for bl in block:
-    ms = re.match(r'^\s+status:\s+(\S+)', bl)
-    if ms:
-        cur_status = ms.group(1).strip()
-    mp = re.match(r'^\s+phase_status:\s+(\S+)', bl)
-    if mp:
-        cur_phase_status = mp.group(1).strip()
-
-if cur_status == 'refined' and cur_phase_status == 'not_started':
-    print(f'{target_id} already status:refined + phase_status:not_started — no-op', file=sys.stderr)
-    sys.exit(0)
 
 # Apply atomic edits
 status_done = False
@@ -599,26 +596,15 @@ fi
 
 ARCHIVED_DONE_IDS=""
 if [[ -n "$DONE_DIR" && -d "$DONE_DIR" ]]; then
-  ARCHIVED_DONE_IDS=$(python3 -c "
-import sys, re, os, glob
-
-done_dir = sys.argv[1]
-ids = set()
-for f in glob.glob(os.path.join(done_dir, '*.yaml')):
-    with open(f) as fh:
-        current_id = None
-        for line in fh:
-            stripped = line.strip()
-            if stripped.startswith('- id:'):
-                current_id = stripped.split(':', 1)[1].strip()
-            elif current_id and stripped.startswith('status:'):
-                status = stripped.split(':', 1)[1].strip().strip('\"\\\"')
-                if status in ('done', 'cancelled', 'superseded'):
-                    ids.add(current_id)
-                current_id = None
-for i in sorted(ids):
-    print(i)
-" "$DONE_DIR" 2>/dev/null) || ARCHIVED_DONE_IDS=""
+  for _df in "$DONE_DIR"/*.yaml; do
+    [[ -f "$_df" ]] || continue
+    for _ds in done cancelled superseded; do
+      _did=$(backlog_ids_by_status "$_ds" "$_df" 2>/dev/null || true)
+      [[ -n "$_did" ]] && ARCHIVED_DONE_IDS="${ARCHIVED_DONE_IDS}
+${_did}"
+    done
+  done
+  ARCHIVED_DONE_IDS=$(printf '%s\n' "$ARCHIVED_DONE_IDS" | sort -u | grep -v '^$' || true)
 fi
 
 # ── Python parser + all read modes ───────────────────────────
