@@ -507,14 +507,13 @@ if block_start < 0:
 # snake_case identifiers stay bare (in_progress, refined, qa_passed, done...),
 # everything else gets quoted.
 #
-# Why bare identifiers matter (2026-05-13 bug RCA — DEC-103 / E148S01 ghost
-# incident): naive readers across delivery-daemon.sh use
+# Why bare identifiers matter: naive readers elsewhere in the daemon use
 # .split(':',1)[1].strip() without quote-stripping. Quoted values like
 # 'status: \"in_progress\"' compare-mismatch against unquoted Python literals
-# 'in_progress', making the story invisible to crash_recovery_scan. Symmetric
-# fix: writer emits canonical bare for simple identifiers (matches what
-# --set-status produces + matches what yq -i + manual edits produce), reader
-# strips quotes defensively. Postel's law applied to YAML.
+# 'in_progress', making the item invisible to the crash-recovery scan.
+# Symmetric fix: writer emits canonical bare for simple identifiers (matches
+# what --set-status produces + matches what yq -i + manual edits produce);
+# readers strip quotes defensively. Postel's law applied to YAML.
 try:
     float(field_value)
     formatted = field_value
