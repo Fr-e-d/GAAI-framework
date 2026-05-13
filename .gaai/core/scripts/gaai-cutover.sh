@@ -31,6 +31,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 GAAI_CORE_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 PROJECT_DIR="$(cd "$GAAI_CORE_DIR/../.." && pwd -P)"
 
+# shellcheck source=/dev/null
+[[ -f "$SCRIPT_DIR/lib/backlog-yaml.sh" ]] && source "$SCRIPT_DIR/lib/backlog-yaml.sh"
+
 LOCAL_DIR="$PROJECT_DIR/.gaai/local"
 CUTOVER_LOCK="$LOCAL_DIR/.cutover-in-progress.lock"
 DISPATCH_LIB="$SCRIPT_DIR/daemon-dispatch.sh"
@@ -201,80 +204,62 @@ with open(file_path, 'w') as f:
 # Returns 0 if no blockers, 1 if any BLOCKED items exist.
 check_readiness() {
   local file_path="$1"
-  python3 -c "
-import sys, re
+  local has_blocked=false
 
-file_path = sys.argv[1]
+  while IFS= read -r id_line; do
+    local sid
+    sid="${id_line#*- id: }"
+    sid="${sid%%[[:space:]]*}"
+    sid="${sid#\'}" ; sid="${sid%\'}"
+    sid="${sid#\"}" ; sid="${sid%\"}"
+    [[ -z "$sid" ]] && continue
 
-with open(file_path) as f:
-    content = f.read()
+    local status phase_status delivery_pipeline
+    status=$(backlog_status "$sid" "$file_path" 2>/dev/null) || status=""
+    [[ "$status" != "in_progress" && "$status" != "refined" ]] && continue
 
-# Parse items list
-items = []
-current = {}
-for line in content.splitlines():
-    stripped = line.strip()
-    if stripped.startswith('- id:'):
-        if current:
-            items.append(current)
-        current = {'id': stripped.split(':', 1)[1].strip()}
-    elif current:
-        if stripped.startswith('status:'):
-            current['status'] = stripped.split(':', 1)[1].strip()
-        elif stripped.startswith('delivery_pipeline:'):
-            current['delivery_pipeline'] = stripped.split(':', 1)[1].strip()
-        elif stripped.startswith('phase_status:'):
-            current['phase_status'] = stripped.split(':', 1)[1].strip()
-if current:
-    items.append(current)
+    phase_status=$(backlog_phase_status "$sid" "$file_path" 2>/dev/null) || phase_status=""
 
-has_blocked = False
-for item in items:
-    sid      = item.get('id', '')
-    status   = item.get('status', '')
-    pipeline = item.get('delivery_pipeline', '')
-    ps       = item.get('phase_status', '')
+    # delivery_pipeline is not a status/phase_status field — inline extraction
+    delivery_pipeline=$(awk -v id="$sid" '
+      /^- id:/{
+        if(in_block) exit
+        val=$0; sub(/^- id:[[:space:]]*/,"",val); gsub(/'"'"'|"/,"",val); gsub(/[[:space:]].*/,"",val)
+        in_block=(val==id); next
+      }
+      in_block && /^[^[:space:]-]/{ exit }
+      in_block && /delivery_pipeline:/{
+        val=$0; sub(/.*delivery_pipeline:[[:space:]]*/,"",val); gsub(/'"'"'|"[[:space:]]*/,"",val)
+        print val; exit
+      }
+    ' "$file_path")
 
-    # Only non-terminal items matter
-    if status not in ('in_progress', 'refined'):
-        continue
+    if [[ "$delivery_pipeline" == "legacy" && "$status" == "in_progress" ]]; then
+      echo "BLOCKED $sid legacy story in_progress"
+      has_blocked=true
+    elif [[ "$delivery_pipeline" == "3phase" ]]; then
+      case "$phase_status" in
+        planned|impl_done|qa_passed)
+          echo "BLOCKED $sid 3phase story mid-pipeline at $phase_status"
+          has_blocked=true ;;
+        qa_failed|qa_escalated|failed)
+          echo "STALLED $sid stalled at $phase_status — flip allowed with warning" ;;
+      esac
+    fi
+  done < <(grep "^- id:" "$file_path")
 
-    # Classification per AC2 tuple (delivery_pipeline, phase_status)
-    if pipeline == 'legacy' and status == 'in_progress':
-        # legacy in_progress: always block (phase_status irrelevant for legacy)
-        print(f'BLOCKED {sid} legacy story in_progress')
-        has_blocked = True
-    elif pipeline == '3phase':
-        if ps in ('planned', 'impl_done', 'qa_passed'):
-            print(f'BLOCKED {sid} 3phase story mid-pipeline at {ps}')
-            has_blocked = True
-        elif ps in ('qa_failed', 'qa_escalated', 'failed'):
-            print(f'STALLED {sid} stalled at {ps} — flip allowed with warning')
-        # not_started and other states: no block (story not yet dispatched)
-    # status==refined: not yet in_progress, not a blocker
-
-sys.exit(1 if has_blocked else 0)
-" "$file_path"
+  $has_blocked && return 1 || return 0
 }
 
 # Count in-progress stories
 count_in_progress() {
-  python3 -c "
-import sys
-file_path = sys.argv[1]
-count = 0
-with open(file_path) as f:
-    cur_status = ''
-    for line in f:
-        stripped = line.strip()
-        if stripped.startswith('- id:'):
-            cur_status = ''
-        elif stripped.startswith('status:'):
-            cur_status = stripped.split(':', 1)[1].strip()
-            if cur_status == 'in_progress':
-                count += 1
-print(count)
-" "$BACKLOG_FILE"
+  local ids
+  ids=$(backlog_in_progress_ids "$BACKLOG_FILE" 2>/dev/null) || ids=""
+  if [[ -z "$ids" ]]; then
+    echo 0
+  else
+    echo "$ids" | grep -c '[^[:space:]]'
+  fi
 }
 
 # Detect operator identity (git user.name or whoami)
