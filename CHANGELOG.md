@@ -7,14 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.33.0] - 2026-05-14
 
 ### Changed
+- feat(daemon): flip GAAI_AUTO_MERGE_POLICY default off → staging_only [DEC-76 v5 §11 amended]
 - Revert "feat(E155S08): extract blueprint + tool-adapter + capability provider packages + LLM Routing (#670)"
 - fix(daemon): add flock to Option A fallback — serialize concurrent wrapper close-outs
 - chore(E134S18b): done [manual recovery] — daemon-staleness with state corruption
 - fix(daemon): phase-aware in-loop staleness check — resume recoverable phases via _recovery_relaunch
 - fix(daemon): durable + robust YAML serialization symmetry (ghost-in_progress RCA)
+
 
 ## [2.32.0] - 2026-05-13
 

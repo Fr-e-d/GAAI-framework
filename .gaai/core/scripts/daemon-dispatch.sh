@@ -1464,7 +1464,7 @@ ${qa_snippet}"
     auto_merge_skipped_reason="story_override"
   else
     # inherit → workspace toggle (D1 stub: env var fallback per V1 design)
-    local workspace_policy="${GAAI_AUTO_MERGE_POLICY:-off}"
+    local workspace_policy="${GAAI_AUTO_MERGE_POLICY:-staging_only}"
     if [[ "$workspace_policy" == "on" ]]; then
       auto_merge_applied=true; auto_merge_skipped_reason="null"
     elif [[ "$workspace_policy" == "staging_only" ]]; then
