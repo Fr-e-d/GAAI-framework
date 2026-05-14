@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Revert "feat(E155S08): extract blueprint + tool-adapter + capability provider packages + LLM Routing (#670)"
 - fix(daemon): add flock to Option A fallback — serialize concurrent wrapper close-outs
 - chore(E134S18b): done [manual recovery] — daemon-staleness with state corruption
 - fix(daemon): phase-aware in-loop staleness check — resume recoverable phases via _recovery_relaunch
