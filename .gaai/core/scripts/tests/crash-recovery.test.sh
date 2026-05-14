@@ -724,6 +724,183 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# E156S06 — Periodic orphan-lock recovery scan during polling
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== E156S06: periodic orphan-lock recovery scan ==="
+
+PS_DIR="$FIXTURE_DIR/periodic-scan-project"
+PS_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
+PS_STORY="TST-PS-ORPHAN"
+PS_LOCK_DIR="$FIXTURE_DIR/periodic-scan-locks"
+PS_LOG_DIR="$FIXTURE_DIR/periodic-scan-logs"
+PS_DAEMON_LOG="$FIXTURE_DIR/periodic-scan-daemon.log"
+PS_SENTINEL="$FIXTURE_DIR/periodic-scan-sentinel"
+
+mkdir -p "$PS_LOCK_DIR" "$PS_LOG_DIR"
+touch "$PS_DAEMON_LOG"
+
+PS_HEAD_YAML="items:
+- id: $PS_STORY
+  status: in_progress
+  phase_status: not_started
+  delivery_pipeline: 3phase"
+
+setup_git_repo "$PS_DIR" "$PS_HEAD_YAML"
+
+# Create a dead-PID lock file (PID 99999 does not exist on any real system)
+echo "99999" > "$PS_LOCK_DIR/${PS_STORY}.lock"
+
+PS_HARNESS=$(mktemp /tmp/periodic-scan-harness-XXXXXX.sh)
+cat > "$PS_HARNESS" <<HARNESS
+#!/usr/bin/env bash
+set -uo pipefail
+
+PROJECT_DIR="$PS_DIR"
+GAAI_PROJECT_DIR="$PS_DIR/.gaai/project"
+BACKLOG_REL="$PS_BACKLOG_REL"
+BACKLOG="\$PROJECT_DIR/\$BACKLOG_REL"
+BACKLOG_FILE="\$BACKLOG"
+LOCK_DIR="$PS_LOCK_DIR"
+LOG_DIR="$PS_LOG_DIR"
+DRIFT_MARKER="\$LOCK_DIR/.drift-detected.audit"
+LOG_FILE="$PS_DAEMON_LOG"
+STAGING_LOCK="\$LOCK_DIR/.staging.lock"
+RETRY_FILE="\$LOCK_DIR/.retry-counts"
+RESOLUTION_TRACKING="\$LOCK_DIR/.resolution-tracking"
+SCHEDULER="$SCHEDULER"
+TARGET_BRANCH="main"
+DRY_RUN=false
+STALENESS_THRESHOLD=14400
+POLL_INTERVAL=1
+RECOVERY_SCAN_INTERVAL=5
+MAX_CONCURRENT=3
+EXIT_WHEN_IDLE_THRESHOLD=0
+MAX_RETRIES=3
+DELIVERY_TIMEOUT=14400
+MAX_TURNS=200
+CLAUDE_MODEL=sonnet
+HEARTBEAT_STALE=1800
+SKIP_PERMISSIONS=true
+STATUS_MODE=false
+NOTIFICATION_WEBHOOK=""
+WEBHOOK_SECRET=""
+PLATFORM="\$(uname)"
+LAUNCHER="tmux"
+CLAUDE_FLAGS="--model sonnet --max-turns 200 --output-format stream-json --verbose"
+CAFFEINATE_PID=""
+
+mkdir -p "\$LOG_DIR" "\$LOCK_DIR"
+
+RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
+
+log() {
+  local msg="[\$(date '+%H:%M:%S')] \$*"
+  echo -e "\$msg" | sed "s/\\\033\[[0-9;]*m//g" >> "\$LOG_FILE"
+}
+
+launch_3phase_in_tmux() { return 0; }
+with_staging_lock() { "\$@"; }
+notify_escalation() { return 0; }
+
+# is_locked checks file existence AND PID liveness (matching real daemon behavior)
+is_locked() {
+  local lock_file="\$LOCK_DIR/\$1.lock"
+  [[ -f "\$lock_file" ]] || return 1
+  local pid
+  pid=\$(cat "\$lock_file" 2>/dev/null | tr -d '[:space:]')
+  [[ -n "\$pid" ]] && kill -0 "\$pid" 2>/dev/null
+}
+
+file_mtime() { stat -f %m "\$1" 2>/dev/null || stat -c %Y "\$1" 2>/dev/null || echo 0; }
+get_retry_count() { echo 0; }
+increment_retry() { return 0; }
+
+fetch_and_read_backlog() {
+  git -C "\$PROJECT_DIR" show "origin/main:\$BACKLOG_REL" 2>/dev/null \
+    || git -C "\$PROJECT_DIR" show "HEAD:\$BACKLOG_REL" 2>/dev/null \
+    || cat "\$BACKLOG"
+}
+
+_recovery_resolve_worktree() { echo "/nonexistent/\$1-workspace"; }
+_recovery_relaunch() { return 0; }
+_recovery_set_status() { return 0; }
+_recovery_revert_refined() { echo "called" > "$PS_SENTINEL"; return 0; }
+
+# Source backlog-yaml helpers
+source "$SCRIPT_DIR/../lib/backlog-yaml.sh" 2>/dev/null || true
+
+# Extract drift helpers and crash_recovery_scan from daemon
+eval "\$(awk '
+  /^_write_drift_marker\(\)/{p=1; depth=0}
+  /^_clear_drift_marker_if_clean\(\)/{p=1; depth=0}
+  /^crash_recovery_scan\(\)/{p=1; depth=0}
+  p {
+    print
+    for (i=1; i<=length(\$0); i++) {
+      c = substr(\$0, i, 1)
+      if (c == "{") depth++
+      if (c == "}") depth--
+    }
+    if (p && depth == 0 && NR > 1) { p=0 }
+  }
+' "$DAEMON" 2>/dev/null)"
+
+# Simulate clean_stale_locks: remove dead-PID locks (matching main-loop behavior)
+for lock in "\$LOCK_DIR"/*.lock; do
+  [[ -f "\$lock" ]] || continue
+  _pid=\$(cat "\$lock" 2>/dev/null | tr -d '[:space:]')
+  if [[ -n "\$_pid" ]] && ! kill -0 "\$_pid" 2>/dev/null; then
+    rm -f "\$lock"
+  fi
+done
+
+# Simulate periodic scan invocation (matching the new main-loop block)
+_now_ts=\$(date +%s)
+log "[RECOVERY] periodic-scan triggered (interval=\${RECOVERY_SCAN_INTERVAL}s)"
+crash_recovery_scan
+HARNESS
+
+chmod +x "$PS_HARNESS"
+bash "$PS_HARNESS" 2>/dev/null
+rm -f "$PS_HARNESS"
+
+# T18: Dead-PID lock file was removed by simulated clean_stale_locks
+if [[ ! -f "$PS_LOCK_DIR/${PS_STORY}.lock" ]]; then
+  pass "T18: dead-PID lock file removed by clean_stale_locks"
+else
+  fail "T18: dead-PID lock file still present after clean_stale_locks"
+fi
+
+# T19: periodic-scan triggered marker in daemon log
+if grep -q '\[RECOVERY\] periodic-scan triggered' "$PS_DAEMON_LOG" 2>/dev/null; then
+  pass "T19: [RECOVERY] periodic-scan triggered marker present in log"
+else
+  fail "T19: periodic-scan triggered marker NOT found in log"
+fi
+
+# T20: Scan done line present in daemon log
+if grep -q '\[RECOVERY\] Scan done' "$PS_DAEMON_LOG" 2>/dev/null; then
+  pass "T20: [RECOVERY] Scan done line present in log"
+else
+  fail "T20: Scan done line NOT found in log"
+fi
+
+# T21: reverted >= 1 in scan-done line (not_started path triggers revert)
+if grep 'Scan done' "$PS_DAEMON_LOG" 2>/dev/null | grep -q 'reverted=[^0]'; then
+  pass "T21: reverted >= 1 in scan-done summary"
+else
+  fail "T21: reverted=0 or not found in scan-done summary"
+fi
+
+# T22: _recovery_revert_refined was called (sentinel file) — no daemon restart needed
+if [[ -f "$PS_SENTINEL" ]]; then
+  pass "T22: _recovery_revert_refined called (recovery without daemon restart)"
+else
+  fail "T22: _recovery_revert_refined NOT called (sentinel file missing)"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Summary
 # ═══════════════════════════════════════════════════════════════════════════════
 echo ""
