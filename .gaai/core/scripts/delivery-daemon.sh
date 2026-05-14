@@ -125,6 +125,7 @@ MAX_TURNS="${GAAI_MAX_TURNS:-200}"                    # primary safety net
 CLAUDE_MODEL="${GAAI_CLAUDE_MODEL:-sonnet}"           # model (sonnet = cost-effective)
 HEARTBEAT_STALE="${GAAI_HEARTBEAT_STALE:-1800}"       # 30min no output = stuck (allows long MCP calls like deep research)
 STALENESS_THRESHOLD="${GAAI_STALENESS_THRESHOLD:-}"   # auto-computed below
+RECOVERY_SCAN_INTERVAL="${GAAI_RECOVERY_SCAN_INTERVAL:-$(( POLL_INTERVAL * 10 ))}"
 DRY_RUN=false
 STATUS_MODE=false
 
@@ -3061,6 +3062,7 @@ crash_recovery_scan || true
 # reaches EXIT_WHEN_IDLE_THRESHOLD (and that threshold is > 0), the daemon
 # logs an auto-stop marker and exits 0 cleanly.
 empty_idle_polls=0
+last_recovery_scan_ts=0
 
 while true; do
   clean_stale_locks
@@ -3084,6 +3086,14 @@ while true; do
 
   # Fire resolution notifications for stories that transitioned to done (AC1-AC6)
   check_resolution_notifications || true
+
+  # V1.5 promotion: periodic orphan-lock recovery scan (OSS-5 during-life)
+  _now_ts=$(date +%s)
+  if (( _now_ts - last_recovery_scan_ts >= RECOVERY_SCAN_INTERVAL )); then
+    log "${CYAN}[RECOVERY] periodic-scan triggered (interval=${RECOVERY_SCAN_INTERVAL}s)${NC}"
+    crash_recovery_scan || true
+    last_recovery_scan_ts=$(date +%s)
+  fi
 
   # Find stories ready for delivery (via git fetch + scheduler)
   ready_stories=$(find_ready_stories || true)

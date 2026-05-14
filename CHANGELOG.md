@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.33.0] - 2026-05-15
+
+### Changed
+- fix(daemon): periodic orphan-lock detection during polling (V1.5 recovery hardening)
+- chore: bump local VERSION to v2.33.0 [sync]
+- feat(daemon): flip GAAI_AUTO_MERGE_POLICY default off → staging_only [DEC-76 v5 §11 amended]
+- Revert "feat(E155S08): extract blueprint + tool-adapter + capability provider packages + LLM Routing (#670)"
+
+
 ## [2.33.0] - 2026-05-14
 
 ### Changed
