@@ -361,7 +361,12 @@ do_start() {
     [[ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_AUTH_TOKEN=${GAAI_IMPL_AUTH_TOKEN}")
     [[ -n "${GAAI_IMPL_MODEL:-}"      ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL=${GAAI_IMPL_MODEL}")
     [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
-    # Auto-merge policy (DEC-76 v4 §11) — values : on / staging_only / off (default off)
+    # Auto-merge policy (DEC-76 v5 §11 amended 2026-05-14) — values : on / staging_only / off (default staging_only).
+    # Default flipped from off → staging_only because autonomous multi-story delivery (DEC-105 Wave 2)
+    # requires staging tip to advance between dependent story claims — otherwise daemon wrappers branch
+    # from stale staging baseline and produce divergent codebases. See E155 retrospective.
+    # Trust-arc preserved : staging_only NEVER auto-merges to main/prod. Per-PR override via
+    # `gaai:no-auto-merge` commit trailer + per-story `auto_merge: false` backlog field.
     [[ -n "${GAAI_AUTO_MERGE_POLICY:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_POLICY=${GAAI_AUTO_MERGE_POLICY}")
     # Admin fallback (free-tier opt-in) — when --auto fails branch_protection_missing,
     # fall back to gh pr merge --admin --squash. Trust-arc opt-in, default off.

@@ -1238,11 +1238,12 @@ sweep_cleanup_pending() {
 
 # PR merge watcher — polls GitHub for merged PRs on every daemon cycle.
 # Daemon is sole coordinator: phase_status transitions are daemon-owned, never agent-owned.
-# Watcher is read-only: observes operator merges, never auto-merges (trust arc — manual review default).
+# Watcher is read-only: observes operator merges, never auto-merges itself (trust arc).
+# Auto-merge IS active for staging_only by default (DEC-76 v5 §11 amended 2026-05-14) ; main/prod stay manual.
 # Requires chore-commit infrastructure; falls back to inline scheduler if lib/chore-commit.sh absent.
 #
 # @see governance:3-phase-pipeline — phase_status semantics, daemon owns transitions.
-# @see governance:trust-arc-auto-merge — auto-merge OFF baseline ; watcher observes manual merges only.
+# @see governance:trust-arc-auto-merge — staging_only baseline (DEC-76 v5 §11 amended) ; main/prod stay manual ; watcher observes operator merges.
 watch_pr_merge_status() {
   # AC4: opt-out env var
   if [[ "${GAAI_PR_WATCHER_DISABLED:-}" == "1" ]]; then
@@ -2896,7 +2897,7 @@ export GAAI_IMPL_BASE_URL="${GAAI_IMPL_BASE_URL:-}"
 export GAAI_IMPL_AUTH_TOKEN="${GAAI_IMPL_AUTH_TOKEN:-}"
 export GAAI_IMPL_MODEL="${GAAI_IMPL_MODEL:-}"
 export GAAI_IMPL_MODEL_FALLBACK="${GAAI_IMPL_MODEL_FALLBACK:-}"
-export GAAI_AUTO_MERGE_POLICY="${GAAI_AUTO_MERGE_POLICY:-off}"
+export GAAI_AUTO_MERGE_POLICY="${GAAI_AUTO_MERGE_POLICY:-staging_only}"
 export GAAI_AUTO_MERGE_ADMIN_FALLBACK="${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-false}"
 
 # Source dispatch helpers (function definitions only — no top-level work).
