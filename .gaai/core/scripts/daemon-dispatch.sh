@@ -588,7 +588,7 @@ _emit_cutover_routing_record() {
     2>/dev/null || true
 }
 
-# ── Worktree dependency installer (E156S11) ────────────────────────────────
+# ── Worktree dependency installer ──────────────────────────────────────────
 # Ensures node_modules are populated before the PLAN phase agent spawns.
 # Idempotent: checks the @cloudflare/workers-types marker dir (empirically
 # verified path where pnpm installs this dep for workers/gaai-cloud/api).
@@ -698,7 +698,7 @@ handle_plan_phase() {
     fi
   fi
 
-  # ── Ensure worktree node_modules are populated (E156S11) ─────────────────
+  # ── Ensure worktree node_modules are populated ───────────────────────────
   if ! ensure_wt_dependencies_installed "$story_id" "$trace_id" "$worktree_path"; then
     return 1
   fi
