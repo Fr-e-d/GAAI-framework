@@ -630,7 +630,7 @@ while true; do
       log_path=$(resolve_3phase_log "$story_id")
       if [[ "$log_path" == "[no log yet]" || "$log_path" == "[?]" ]]; then
         # No log yet — render minimal header (parse_log won't run on missing file)
-        local _title
+        # Note: NOT inside a function here (we're in main script body) — no `local` keyword
         _title=$(awk -v id="$story_id" '
           $0 == "- id: " id { found=1; next }
           found && /^- id:/ { exit }
