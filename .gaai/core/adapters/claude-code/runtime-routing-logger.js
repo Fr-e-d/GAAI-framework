@@ -104,6 +104,8 @@ export function logPhase(params) {
     'context_size_at_spawn', 'compact_events_count', 'retry_429_count',
     'nested_session_completed', 'pipeline', 'pr_url', 'auto_merge_applied',
     'cutover_from', 'cutover_to', 'forced', 'operator_id', 'pre_flip_in_progress_count',
+    // E156S07: auto-resolve audit fields (additive optional, DEC-65 append-only)
+    'resolution_strategy', 'conflicting_files_count', 'auto_resolve_attempts',
   ];
   for (const f of TELEMETRY_FIELDS) {
     if (f in params) entry[f] = params[f];
@@ -147,6 +149,9 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const forcedArg         = argValue('--forced');
   const operatorIdArg     = argValue('--operator-id');
   const preFlipCountArg   = argValue('--pre-flip-in-progress-count');
+  const resolutionStrategyArg    = argValue('--resolution-strategy');
+  const conflictingFilesCountArg = argValue('--conflicting-files-count');
+  const autoResolveAttemptsArg   = argValue('--auto-resolve-attempts');
 
   // --log-path overrides default log path (useful for testing without internal _setLogPath)
   if (logPathArg) _setLogPath(logPathArg);
@@ -173,6 +178,15 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     if (forcedArg !== undefined)       phaseParams.forced = forcedArg === 'true';
     if (operatorIdArg !== undefined)   phaseParams.operator_id = operatorIdArg;
     if (preFlipCountArg !== undefined) phaseParams.pre_flip_in_progress_count = Number(preFlipCountArg);
+    if (resolutionStrategyArg !== undefined && resolutionStrategyArg !== 'null') {
+      try { phaseParams.resolution_strategy = JSON.parse(resolutionStrategyArg); } catch { /* ignore */ }
+    }
+    if (conflictingFilesCountArg !== undefined) {
+      phaseParams.conflicting_files_count = Number(conflictingFilesCountArg);
+    }
+    if (autoResolveAttemptsArg !== undefined) {
+      phaseParams.auto_resolve_attempts = Number(autoResolveAttemptsArg);
+    }
     logPhase(phaseParams);
     process.stdout.write(formatPhaseStdout(phase, provider, model, fallbackReason));
   } catch (err) {
