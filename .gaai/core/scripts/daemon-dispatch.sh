@@ -588,6 +588,76 @@ _emit_cutover_routing_record() {
     2>/dev/null || true
 }
 
+# ── Worktree dependency installer (E156S11) ────────────────────────────────
+# Ensures node_modules are populated before the PLAN phase agent spawns.
+# Idempotent: checks the @cloudflare/workers-types marker dir (empirically
+# verified path where pnpm installs this dep for workers/gaai-cloud/api).
+# Called on EVERY handle_plan_phase entry (fresh + resumed worktrees).
+ensure_wt_dependencies_installed() {
+  local story_id="$1" trace_id="$2" worktree_path="$3"
+  local timeout_s marker_dir ts t_start t_end duration_ms install_exit timeout_cmd
+
+  timeout_s="${GAAI_PNPM_INSTALL_TIMEOUT:-120}"
+  marker_dir="${worktree_path}/workers/gaai-cloud/api/node_modules/@cloudflare/workers-types"
+  ts=$(date '+%H:%M:%S')
+
+  if [[ -d "$marker_dir" ]]; then
+    echo "[${ts}] ${story_id} ${trace_id} [wt-deps] wt_deps_check marker_present=true"
+    return 0
+  fi
+
+  echo "[${ts}] ${story_id} ${trace_id} [wt-deps] wt_deps_check marker_present=false"
+  ts=$(date '+%H:%M:%S')
+  echo "[${ts}] ${story_id} ${trace_id} [wt-deps] wt_deps_install_started timeout_s=${timeout_s}"
+
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    t_start=$(( ${EPOCHREALTIME/./} / 1000 ))
+  else
+    t_start=$(( $(date +%s) * 1000 ))
+  fi
+
+  timeout_cmd=$(_resolve_timeout_cmd)
+  install_exit=0
+  if [[ -n "$timeout_cmd" ]]; then
+    (cd "$worktree_path" && "$timeout_cmd" "$timeout_s" pnpm install --frozen-lockfile --silent) \
+      || install_exit=$?
+  else
+    (cd "$worktree_path" && pnpm install --frozen-lockfile --silent) &
+    local install_pid=$!
+    local waited=0
+    while kill -0 "$install_pid" 2>/dev/null; do
+      if (( waited >= timeout_s )); then
+        kill "$install_pid" 2>/dev/null || true
+        wait "$install_pid" 2>/dev/null || true
+        install_exit=124
+        break
+      fi
+      sleep 1
+      (( waited++ )) || true
+    done
+    if [[ $install_exit -eq 0 ]]; then
+      wait "$install_pid" 2>/dev/null || install_exit=$?
+    fi
+  fi
+
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    t_end=$(( ${EPOCHREALTIME/./} / 1000 ))
+  else
+    t_end=$(( $(date +%s) * 1000 ))
+  fi
+  duration_ms=$(( t_end - t_start ))
+  ts=$(date '+%H:%M:%S')
+
+  if [[ $install_exit -eq 0 ]]; then
+    echo "[${ts}] ${story_id} ${trace_id} [wt-deps] wt_deps_install_completed duration_ms=${duration_ms}"
+    return 0
+  fi
+
+  echo "[${ts}] ${story_id} ${trace_id} [wt-deps] wt_deps_install_failed duration_ms=${duration_ms} exit_code=${install_exit}"
+  _emit_plan_routing_record "$story_id" "$trace_id" "error" "PNPM_INSTALL_FAILED" "${duration_ms}"
+  return 1
+}
+
 # ── Phase handlers ────────────────────────────────────────────────────────
 
 handle_plan_phase() {
@@ -626,6 +696,11 @@ handle_plan_phase() {
       _emit_plan_routing_record "$story_id" "$trace_id" "error" "WORKTREE_CREATE_FAILED" "0"
       return 1
     fi
+  fi
+
+  # ── Ensure worktree node_modules are populated (E156S11) ─────────────────
+  if ! ensure_wt_dependencies_installed "$story_id" "$trace_id" "$worktree_path"; then
+    return 1
   fi
 
   # ── Propagate project's .mcp.json into worktree (workspace-scoped URL fix) ──
@@ -1218,191 +1293,6 @@ handle_qa_phase() {
   esac
 }
 
-# ── Auto-resolve routing record (E156S07) ────────────────────────────────────
-# Arguments: story_id trace_id fallback_reason pr_url \
-#            conflicting_files_count resolution_strategy_json auto_resolve_attempts
-_emit_auto_resolve_routing_record() {
-  local story_id="$1" trace_id="$2" fallback_reason="$3" pr_url="${4:-}"
-  local conflicting_files_count="${5:-0}" resolution_strategy_json="${6:-null}"
-  local auto_resolve_attempts="${7:-0}"
-  local impl_tag
-  impl_tag=$(get_impl_model_tag "$story_id")
-  local log_path_args=()
-  if [[ -n "${ROUTING_LOG_PATH:-}" ]]; then
-    log_path_args=(--log-path "$ROUTING_LOG_PATH")
-  fi
-  node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \
-    --trace-id                    "$trace_id" \
-    --story-id                    "$story_id" \
-    --phase                       "commit" \
-    --provider                    "daemon-bash" \
-    --model                       "n/a" \
-    --duration-ms                 0 \
-    --fallback-reason             "$fallback_reason" \
-    --impl-model-tag              "$impl_tag" \
-    --pipeline                    "3phase" \
-    --pr-url                      "$pr_url" \
-    --auto-merge-applied          "false" \
-    --conflicting-files-count     "$conflicting_files_count" \
-    --resolution-strategy         "$resolution_strategy_json" \
-    --auto-resolve-attempts       "$auto_resolve_attempts" \
-    ${log_path_args[@]+"${log_path_args[@]}"} \
-    2>/dev/null || true
-}
-
-# ── Auto-resolve PR conflicts (E156S07) ──────────────────────────────────────
-# Deterministic file-classification merge for staging-drift conflicts.
-# Returns 0 on SUCCESS (conflict resolved + pushed), 1 on ABORT or exhaustion.
-# No LLM inference (DEC-13). Does NOT enter with_staging_lock (follows lock-free
-# precedent of existing handle_commit_phase push step).
-_auto_resolve_pr_conflicts() {
-  local pr_url="$1" branch_name="$2" worktree_path="$3" story_id="$4" trace_id="$5"
-  local resolve_attempt=0 resolve_max=3
-  local backoff_seconds=(0 30 60)   # before attempt 1/2/3
-
-  while [[ $resolve_attempt -lt $resolve_max ]]; do
-    local wait_s="${backoff_seconds[$resolve_attempt]}"
-    [[ "$wait_s" -gt 0 ]] && sleep "$wait_s"
-    resolve_attempt=$(( resolve_attempt + 1 ))
-
-    local pre_merge_head
-    pre_merge_head=$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null || echo "")
-
-    if ! git -C "$worktree_path" fetch origin staging 2>/dev/null; then
-      echo "[WARN] ${story_id} auto-resolve attempt=${resolve_attempt}/${resolve_max} fetch failed"
-      continue
-    fi
-
-    git -C "$worktree_path" merge origin/staging --no-commit --no-ff 2>/dev/null || true
-
-    local conflicting_files_raw
-    conflicting_files_raw=$(git -C "$worktree_path" diff --name-only --diff-filter=U 2>/dev/null || echo "")
-    local conflicting_files_count
-    conflicting_files_count=$(printf '%s\n' "$conflicting_files_raw" | grep -c . 2>/dev/null || echo 0)
-
-    echo "[INFO] ${story_id} auto-resolve attempt=${resolve_attempt}/${resolve_max} pr=${pr_url} conflicting_files=${conflicting_files_count}"
-    _emit_auto_resolve_routing_record "$story_id" "$trace_id" \
-      "auto_merge_conflict_detected" "$pr_url" "$conflicting_files_count" "null" "$resolve_attempt"
-
-    if [[ "$conflicting_files_count" -eq 0 ]]; then
-      git -C "$worktree_path" commit --no-edit 2>/dev/null || \
-        git -C "$worktree_path" commit -m "chore(merge): integrate staging drift (auto-resolve)" 2>/dev/null || true
-      if _auto_resolve_push "$worktree_path" "$branch_name" "$pre_merge_head" "$story_id"; then
-        _emit_auto_resolve_routing_record "$story_id" "$trace_id" \
-          "auto_merge_resolved" "$pr_url" "0" \
-          '{"theirs_count":0,"ours_count":0,"auto_section_count":0}' "$resolve_attempt"
-        echo "[INFO] ${story_id} auto-resolve resolved attempt=${resolve_attempt} strategy=theirs:0,ours:0,auto_section:0"
-        return 0
-      else
-        continue
-      fi
-    fi
-
-    local theirs_count=0 ours_count=0 auto_section_count=0
-    local abort_reason="" abort_files=""
-    local all_resolved=true
-
-    while IFS= read -r cf; do
-      [[ -z "$cf" ]] && continue
-      local resolved=false
-
-      if [[ "$cf" == *"worker-configuration.d.ts" ]]; then
-        git -C "$worktree_path" checkout --theirs -- "$cf" 2>/dev/null && \
-          git -C "$worktree_path" add -- "$cf" 2>/dev/null && \
-          theirs_count=$(( theirs_count + 1 )) && resolved=true
-
-      elif [[ "$cf" == *"pnpm-lock.yaml" ]]; then
-        git -C "$worktree_path" checkout --theirs -- "$cf" 2>/dev/null && \
-          git -C "$worktree_path" add -- "$cf" 2>/dev/null && \
-          theirs_count=$(( theirs_count + 1 )) && resolved=true
-
-      elif [[ "$cf" == *"active.backlog.yaml" ]]; then
-        if grep -q '^<<<<<<<' "${worktree_path}/${cf}" 2>/dev/null; then
-          abort_reason="backlog_yaml_markers_remain"
-          abort_files="${abort_files:+${abort_files} }${cf}"
-          all_resolved=false
-          break
-        else
-          git -C "$worktree_path" add -- "$cf" 2>/dev/null && \
-            auto_section_count=$(( auto_section_count + 1 )) && resolved=true
-        fi
-
-      elif [[ "$cf" =~ contexts/artefacts/(stories|qa-reports|impl-reports|execution-plans)/.*"${story_id}".* ]]; then
-        git -C "$worktree_path" checkout --ours -- "$cf" 2>/dev/null && \
-          git -C "$worktree_path" add -- "$cf" 2>/dev/null && \
-          ours_count=$(( ours_count + 1 )) && resolved=true
-
-      else
-        abort_reason="hand_coded_conflict"
-        abort_files="${abort_files:+${abort_files} }${cf}"
-        all_resolved=false
-        break
-      fi
-
-      if [[ "$resolved" != "true" ]]; then
-        abort_reason="classification_error"
-        abort_files="${abort_files:+${abort_files} }${cf}"
-        all_resolved=false
-        break
-      fi
-    done <<< "$conflicting_files_raw"
-
-    if [[ "$all_resolved" != "true" ]]; then
-      git -C "$worktree_path" merge --abort 2>/dev/null || true
-      echo "[WARN] ${story_id} auto-resolve aborted reason=${abort_reason} files=${abort_files}"
-      _emit_auto_resolve_routing_record "$story_id" "$trace_id" \
-        "auto_merge_aborted" "$pr_url" "$conflicting_files_count" \
-        "{\"abort_reason\":\"${abort_reason}\",\"files\":\"${abort_files}\"}" "$resolve_attempt"
-      return 1
-    fi
-
-    git -C "$worktree_path" commit --no-edit 2>/dev/null || \
-      git -C "$worktree_path" commit -m "chore(merge): integrate staging drift (auto-resolve)" 2>/dev/null || true
-
-    if ! _auto_resolve_push "$worktree_path" "$branch_name" "$pre_merge_head" "$story_id"; then
-      git -C "$worktree_path" reset --hard HEAD~1 2>/dev/null || true
-      continue
-    fi
-
-    local resolution_strategy_json
-    resolution_strategy_json="{\"theirs_count\":${theirs_count},\"ours_count\":${ours_count},\"auto_section_count\":${auto_section_count}}"
-    echo "[INFO] ${story_id} auto-resolve resolved attempt=${resolve_attempt} strategy=theirs:${theirs_count},ours:${ours_count},auto_section:${auto_section_count}"
-    _emit_auto_resolve_routing_record "$story_id" "$trace_id" \
-      "auto_merge_resolved" "$pr_url" "$conflicting_files_count" \
-      "$resolution_strategy_json" "$resolve_attempt"
-    return 0
-  done
-
-  echo "[ERROR] ${story_id} auto-resolve exhausted attempts=3"
-  _emit_auto_resolve_routing_record "$story_id" "$trace_id" \
-    "auto_merge_retry_exhausted" "$pr_url" "0" \
-    "{\"attempts\":3}" "$resolve_max"
-  return 1
-}
-
-# Push helper for auto-resolve (AC4 — conditional GAAI_SKIP_OSS_REFCHECK)
-_auto_resolve_push() {
-  local worktree_path="$1" branch_name="$2" pre_merge_head="$3" story_id="$4"
-  local push_env=""
-  if [[ -n "$pre_merge_head" ]] && \
-     git -C "$worktree_path" diff --name-only "${pre_merge_head}..HEAD" 2>/dev/null \
-     | grep -q '^\.gaai/core/'; then
-    push_env="GAAI_SKIP_OSS_REFCHECK=1"
-  fi
-  local push_stderr push_exit
-  if [[ -n "$push_env" ]]; then
-    push_stderr=$(env GAAI_SKIP_OSS_REFCHECK=1 git -C "$worktree_path" push origin "$branch_name" 2>&1)
-  else
-    push_stderr=$(git -C "$worktree_path" push origin "$branch_name" 2>&1)
-  fi
-  push_exit=$?
-  if [[ "$push_exit" -ne 0 ]]; then
-    echo "[WARN] ${story_id} auto-resolve push failed: ${push_stderr: -200}"
-    return 1
-  fi
-  return 0
-}
-
 handle_commit_phase() {
   local story_id="$1" trace_id="$2"
   local ts t_start_ms t_end_ms duration_ms
@@ -1706,34 +1596,9 @@ ${qa_snippet}"
       [[ $merge_attempt -lt $merge_max ]] && sleep 3
     done
     if [[ "$merge_exit" -ne 0 ]]; then
-      # Probe for CONFLICTING/DIRTY — attempt deterministic auto-resolve before escalating
-      if [[ -n "$pr_url" ]] && gh pr view "$pr_url" --json mergeable,mergeStateStatus 2>/dev/null \
-           | grep -qE '"mergeable":"CONFLICTING"|"mergeStateStatus":"DIRTY"'; then
-        if _auto_resolve_pr_conflicts "$pr_url" "$branch" "$worktree_path" "$story_id" "$trace_id"; then
-          # Resolved: one more gh pr merge --auto attempt (DEC-76 §11 gates remain active)
-          local resolve_merge_out resolve_merge_exit
-          resolve_merge_out=$(gh pr merge --auto --squash "$pr_url" 2>&1)
-          resolve_merge_exit=$?
-          if [[ "$resolve_merge_exit" -eq 0 ]] || \
-             printf '%s\n' "$resolve_merge_out" | grep -qi "already enabled\|already queued"; then
-            merge_exit=0  # fall through to post-merge path below
-          else
-            echo "[ERROR] ${story_id} handle_commit_phase: gh pr merge --auto failed after resolve: ${resolve_merge_out: -200} [class=AUTO_MERGE_FAILED]"
-            _emit_commit_routing_record "$story_id" "$trace_id" "error" "AUTO_MERGE_FAILED" "0" "$pr_url" "false"
-            return 1
-          fi
-        else
-          # auto-resolve aborted or exhausted: escalate (NOT failed)
-          "$SCHEDULER" --set-phase-status "$story_id" escalated "$BACKLOG_FILE" 2>/dev/null || true
-          return 1
-        fi
-      fi
-      if [[ "$merge_exit" -ne 0 ]]; then
-        # Non-conflict failure (network, rate-limit, branch-protection) — original path unchanged
-        echo "[ERROR] ${story_id} handle_commit_phase: gh pr merge --auto failed after ${merge_max} attempts [class=AUTO_MERGE_FAILED]"
-        _emit_commit_routing_record "$story_id" "$trace_id" "error" "AUTO_MERGE_FAILED" "0" "$pr_url" "false"
-        return 1
-      fi
+      echo "[ERROR] ${story_id} handle_commit_phase: gh pr merge --auto failed after ${merge_max} attempts [class=AUTO_MERGE_FAILED]"
+      _emit_commit_routing_record "$story_id" "$trace_id" "error" "AUTO_MERGE_FAILED" "0" "$pr_url" "false"
+      return 1
     fi
   fi
 
