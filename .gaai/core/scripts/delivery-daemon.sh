@@ -61,6 +61,13 @@ set -euo pipefail
 #   GAAI_IMPL_BASE_URL=<url>         secondary impl provider base URL (DEC-72)
 #   GAAI_IMPL_AUTH_TOKEN=<token>     secondary impl provider auth token (DEC-72)
 #   GAAI_IMPL_MODEL=<model>          secondary impl provider model name (DEC-72)
+#   GAAI_MCP_AUTH_TOKEN=<token>      OAuth Bearer token for GAAI Cloud MCP server (E150S10)
+#                                    Used in inline --mcp-config JSON at spawn (DEC-109 §3.4)
+#                                    Fallback: parsed from PROJECT_DIR/.mcp.json GAAI-cloud entry
+#                                    If absent: spawns without Authorization header (MCP server
+#                                    will reject at tool-call time with 401, not at spawn time)
+#   GAAI_MCP_URL=<url>               Override GAAI Cloud MCP URL (default: https://mcp.gaai.cloud/mcp)
+#                                    Set to staging URL for non-prod test runs
 #   Subprocess fallback: if env unresolved after hint read, E99S05 AC5 surfaces
 #   "session binding unresolved" to the user (daemon itself never aborts — AC5).
 #
