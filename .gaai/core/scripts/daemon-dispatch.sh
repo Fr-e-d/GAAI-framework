@@ -1728,13 +1728,13 @@ ${qa_snippet}"
     if [[ "$workspace_policy" == "on" ]]; then
       auto_merge_applied=true; auto_merge_skipped_reason="null"
     elif [[ "$workspace_policy" == "staging_only" ]]; then
-      # NOTE 2026-05-19 : the policy check evaluates the PR TARGET branch (where
-      # the merge lands), not the story HEAD branch. Story branches are always
-      # `story/EXXXSXX` ; comparing them to "staging" never matched, so
+      # NOTE : the policy check evaluates the PR TARGET branch (where the merge
+      # lands), not the story HEAD branch. Story branches are always
+      # `story/{STORY_ID}` ; comparing them to "staging" never matched, so
       # `staging_only` policy silently devolved to `branch_excluded` for every
-      # delivery — defeating the whole point of the policy and accumulating
-      # un-merged PRs. The PR base is the daemon's TARGET_BRANCH (`--base
-      # $TARGET_BRANCH` at gh-pr-create), which defaults to "staging".
+      # delivery — defeating the policy and accumulating un-merged PRs.
+      # The PR base is the daemon's TARGET_BRANCH (`--base $TARGET_BRANCH` at
+      # gh-pr-create), which defaults to "staging".
       local _target="${TARGET_BRANCH:-staging}"
       if [[ "$_target" == "staging" ]]; then
         auto_merge_applied=true; auto_merge_skipped_reason="null"
