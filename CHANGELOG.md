@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(daemon-start): stop monitor terminal stealing keyboard focus on restart
 - fix(daemon-dispatch): AC5 workspace_scope guard detects GAAI MCP server presence (not bare .mcp.json existence)
 - chore(daemon-catchup): S10 plan done
 - fix(daemon-dispatch): wire notify_escalation_inline on handle_qa_phase ESCALATE path (GAP D)
