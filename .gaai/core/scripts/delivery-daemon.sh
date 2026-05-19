@@ -125,6 +125,8 @@ MAX_TURNS="${GAAI_MAX_TURNS:-200}"                    # primary safety net
 CLAUDE_MODEL="${GAAI_CLAUDE_MODEL:-sonnet}"           # model (sonnet = cost-effective)
 HEARTBEAT_STALE="${GAAI_HEARTBEAT_STALE:-1800}"       # 30min no output = stuck (allows long MCP calls like deep research)
 STALENESS_THRESHOLD="${GAAI_STALENESS_THRESHOLD:-}"   # auto-computed below
+AGENT_HANG_THRESHOLD_SEC="${GAAI_AGENT_HANG_THRESHOLD_SEC:-480}"
+if (( AGENT_HANG_THRESHOLD_SEC < 60 )); then AGENT_HANG_THRESHOLD_SEC=60; fi
 RECOVERY_SCAN_INTERVAL="${GAAI_RECOVERY_SCAN_INTERVAL:-$(( POLL_INTERVAL * 10 ))}"
 ORPHAN_SCAN_INTERVAL_TICKS="${GAAI_ORPHAN_SCAN_INTERVAL_TICKS:-10}"
 ORPHAN_SCAN_MAX_DURATION_SEC="${GAAI_ORPHAN_SCAN_MAX_DURATION_SEC:-30}"
@@ -138,6 +140,7 @@ SCHEDULER="$SCRIPT_DIR/backlog-scheduler.sh"
 LOCK_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-locks"
 DRIFT_MARKER="$LOCK_DIR/.drift-detected.audit"
 REBASE_CONFLICT_MARKER="$LOCK_DIR/.rebase-conflict.audit"
+AGENT_HANG_AUDIT="$LOCK_DIR/.agent-hang.audit"
 LOG_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-logs"
 STAGING_LOCK="$LOCK_DIR/.staging.lock"
 RETRY_FILE="$LOCK_DIR/.retry-counts"
@@ -780,6 +783,105 @@ check_heartbeats() {
     # No heartbeat, no log — wrapper is past grace and produced nothing.
     log "${RED}HEARTBEAT: $sid has no heartbeat or log after ${lock_age}s — killing PID $pid${NC}"
     kill -TERM "$pid" 2>/dev/null || true
+  done
+}
+
+# ── Agent-activity stale detector (E160S07) ──────────────────────────────
+# Complementary to check_heartbeats: heartbeat proves wrapper alive, but does
+# NOT prove claude -p is making progress. This function checks impl.log mtime.
+# If mtime stale > AGENT_HANG_THRESHOLD_SEC AND heartbeat is fresh → agent hung
+# in a synchronous tool call (e.g. infinite bash loop, blocked gh command).
+# Composes with E160S01 stale-race mutex: skips if reconcile-in-progress fresh.
+check_agent_activity_stale() {
+  local now
+  now=$(date +%s)
+
+  for lock in "$LOCK_DIR"/*.lock; do
+    [[ -f "$lock" ]] || continue
+    local sid pid
+    sid=$(basename "$lock" .lock)
+    pid=$(head -1 "$lock" 2>/dev/null || echo "")
+    [[ -z "$pid" || "$pid" == "pending" ]] && continue
+
+    # Only act on live wrappers (dead ones handled by clean_stale_locks)
+    kill -0 "$pid" 2>/dev/null || continue
+
+    # Grace period: skip if lock younger than threshold (wrapper still bootstrapping)
+    local lock_age=$(( now - $(file_mtime "$lock") ))
+    (( lock_age < AGENT_HANG_THRESHOLD_SEC )) && continue
+
+    # AC6: skip if reconcile-in-progress marker is fresh (wrapper in EXIT trap)
+    local _rip_marker="$LOCK_DIR/${sid}.reconcile-in-progress"
+    local _rip_ttl="${GAAI_RECONCILE_GRACE_SEC:-90}"
+    if [[ -f "$_rip_marker" ]]; then
+      local _rip_mtime
+      _rip_mtime=$(file_mtime "$_rip_marker")
+      local _rip_age=$(( now - _rip_mtime ))
+      if (( _rip_age <= _rip_ttl )); then
+        continue
+      fi
+    fi
+
+    # AC6: skip if heartbeat is stale — check_heartbeats owns that case
+    local hb_file="$LOCK_DIR/${sid}.heartbeat"
+    [[ -f "$hb_file" ]] || continue
+    local hb_age=$(( now - $(file_mtime "$hb_file") ))
+    (( hb_age > HEARTBEAT_STALE )) && continue
+
+    # Resolve impl.log path (mirrors handle_impl_phase in daemon-dispatch.sh)
+    local worktree_path
+    worktree_path=$(_recovery_resolve_worktree "$sid")
+    local impl_log="${worktree_path}/.delivery-logs/${sid}.impl.log"
+
+    # Check for resolved hang: previous marker + log now fresh
+    local hang_marker="$LOCK_DIR/${sid}.agent-hang.marker"
+    if [[ -f "$hang_marker" && -f "$impl_log" ]]; then
+      local _fresh_mtime
+      _fresh_mtime=$(file_mtime "$impl_log")
+      if (( _fresh_mtime > 0 )); then
+        local _fresh_age=$(( now - _fresh_mtime ))
+        if (( _fresh_age < AGENT_HANG_THRESHOLD_SEC )); then
+          log "[AGENT_HANG_RESOLVED] $sid"
+          rm -f "$hang_marker" 2>/dev/null || true
+          continue
+        fi
+      fi
+    fi
+
+    # No impl.log yet: impl phase hasn't started — skip
+    [[ -f "$impl_log" ]] || continue
+
+    local _log_mtime
+    _log_mtime=$(file_mtime "$impl_log")
+    (( _log_mtime == 0 )) && continue  # stat failure, skip to avoid false-positive
+
+    local log_age=$(( now - _log_mtime ))
+
+    # Agent healthy: log updated recently
+    (( log_age <= AGENT_HANG_THRESHOLD_SEC )) && continue
+
+    # Hang detected
+    local log_size=0
+    log_size=$(wc -c < "$impl_log" 2>/dev/null | tr -d ' ' || echo 0)
+
+    log "${RED}[AGENT_HANG_DETECTED] $sid — log-mtime stale ($(( log_age / 60 ))min) heartbeat-fresh ($(( hb_age / 60 ))min) — SIGTERM PID $pid${NC}"
+
+    # AC4: append JSON audit record
+    local _audit_ts
+    _audit_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    printf '{"event":"agent_hang_detected","ts":"%s","story_id":"%s","wrapper_pid":%s,"log_mtime_age_sec":%s,"heartbeat_age_sec":%s,"last_log_size_bytes":%s}\n' \
+      "$_audit_ts" "$sid" "$pid" "$log_age" "$hb_age" "$log_size" \
+      >> "$AGENT_HANG_AUDIT" 2>/dev/null || true
+
+    # Write hang marker so AGENT_HANG_RESOLVED can be emitted on recovery
+    touch "$hang_marker" 2>/dev/null || true
+
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 30
+    if kill -0 "$pid" 2>/dev/null; then
+      log "${RED}[AGENT_HANG_SIGKILL] $sid PID $pid did not respond to SIGTERM${NC}"
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
   done
 }
 
@@ -3237,6 +3339,9 @@ while true; do
 
   # Detect stale in_progress stories (orphaned by crashed sessions)
   check_stale_in_progress || true
+
+  # Detect agent-hang: wrapper alive (heartbeat fresh) but claude -p stalled (E160S07)
+  check_agent_activity_stale || true
 
   # Track escalated/failed stories for resolution notification (AC5/AC6)
   scan_and_track_escalated_failed || true
