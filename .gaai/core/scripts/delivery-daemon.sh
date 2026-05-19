@@ -153,6 +153,8 @@ source "$SCRIPT_DIR/lib/chore-commit.sh"
 [[ -z "${_BACKLOG_YAML_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/backlog-yaml.sh" && _BACKLOG_YAML_SH_SOURCED=1
 # shellcheck source=lib/worktree-integrity.sh
 [[ -z "${_WORKTREE_INTEGRITY_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/worktree-integrity.sh" && _WORKTREE_INTEGRITY_SH_SOURCED=1
+# shellcheck source=lib/stuck-classifier.sh
+[[ -z "${_STUCK_CLASSIFIER_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/stuck-classifier.sh" && _STUCK_CLASSIFIER_SH_SOURCED=1
 NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
 WEBHOOK_SECRET="${GAAI_DAEMON_WEBHOOK_SECRET:-}"
 
@@ -1180,8 +1182,14 @@ crash_recovery_scan() {
         ((skipped++))
         ;;
       *)
-        log "${RED}[RECOVERY] $sid : unknown phase_status='$ps' — skipping (manual review)${NC}"
-        ((skipped++))
+        # E160S04: stuck-story classifier — final layer when no existing recovery path matched
+        local _cls_rc=0
+        classify_stuck_story "$sid" "$ps" || _cls_rc=$?
+        case "$_cls_rc" in
+          0) ((resumed++)) ;;  # auto-recovered
+          2) ((skipped++)) ;;  # no-op (S02/S03 already handled, or prior successful recovery)
+          *) ((skipped++)) ;;  # 1=escalated, or unexpected — incident report written
+        esac
         ;;
     esac
   done <<< "$in_progress_pairs"
