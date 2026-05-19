@@ -121,52 +121,6 @@ except Exception:
 " 2>/dev/null
 }
 
-# ── Inline MCP config builder (DEC-109 §3.4, E150S10) ───────────────────
-# Builds the --mcp-config JSON for autonomous daemon spawns so no .mcp.json
-# filesystem copy is needed in the worktree (AC1, AC2, AC3).
-#
-# Args: $1 = story_id (for error/warn messages), $2 = phase (plan|impl|qa)
-# Outputs: compact JSON string to stdout (pass directly to --mcp-config flag)
-# Returns: 0 on success, 1 if GAAI_WORKSPACE_ID is missing (AC5 — caller
-#          must check the return code and refuse the spawn if non-zero)
-_gaai_build_mcp_config_inline() {
-  local story_id="${1:-unknown}" phase="${2:-unknown}"
-
-  local workspace_id="${GAAI_WORKSPACE_ID:-}"
-  if [[ -z "$workspace_id" ]]; then
-    echo "[ERROR] DEC-109 invariant: workspace_scope required for autonomous spawn. Story ${story_id} missing workspace_id in backlog." >&2
-    return 1
-  fi
-
-  # Auth token: env var → fallback: parse from PROJECT_DIR/.mcp.json GAAI-cloud entry
-  local auth_token="${GAAI_MCP_AUTH_TOKEN:-}"
-  if [[ -z "$auth_token" ]] && [[ -f "${PROJECT_DIR}/.mcp.json" ]]; then
-    auth_token=$(python3 -c "
-import json, sys
-try:
-    data = json.load(open('${PROJECT_DIR}/.mcp.json'))
-    for srv in data.get('mcpServers', {}).values():
-        hdr = srv.get('headers', {})
-        if 'Authorization' in hdr:
-            v = hdr['Authorization']
-            print(v[len('Bearer '):] if v.startswith('Bearer ') else v)
-            break
-except: pass
-" 2>/dev/null || true)
-  fi
-
-  local mcp_url="${GAAI_MCP_URL:-https://mcp.gaai.cloud/mcp}"
-
-  if [[ -n "$auth_token" ]]; then
-    printf '{"mcpServers":{"GAAI-cloud":{"type":"http","url":"%s","headers":{"Authorization":"Bearer %s","X-GAAI-Workspace-Scope":"%s","X-GAAI-Session-Mode":"autonomous"}}}}' \
-      "$mcp_url" "$auth_token" "$workspace_id"
-  else
-    echo "[WARN] ${story_id} phase=${phase}: GAAI_MCP_AUTH_TOKEN not set and not found in .mcp.json — spawning without Authorization header" >&2
-    printf '{"mcpServers":{"GAAI-cloud":{"type":"http","url":"%s","headers":{"X-GAAI-Workspace-Scope":"%s","X-GAAI-Session-Mode":"autonomous"}}}}' \
-      "$mcp_url" "$workspace_id"
-  fi
-}
-
 # ── Loop-breaker wrapper around `claude -p` ──────────────────────────────
 # Replaces the synchronous `claude -p ... | tee -a "$log_path"` pattern with
 # a streaming reader that:
@@ -749,17 +703,15 @@ handle_plan_phase() {
     return 1
   fi
 
-  # ── Build inline MCP config (DEC-109 §3.4 — no .mcp.json in worktree required) ──
-  local _plan_mcp_config
-  if ! _plan_mcp_config=$(_gaai_build_mcp_config_inline "$story_id" "plan"); then
-    chore_commit_multi_field "$story_id" status failed phase_status failed \
-      "chore($story_id): failed [plan-phase:missing-workspace-id]" 2>/dev/null || true
-    return 1
-  fi
-  # AC4: audit log — workspace_id + session_mode for traceability
-  echo "[INFO] ${story_id} phase=plan spawn workspace_id=${GAAI_WORKSPACE_ID:-} session_mode=autonomous"
-  if [[ -f "${worktree_path}/.mcp.json" ]] && grep -q 'X-GAAI-WorkspaceBinding' "${worktree_path}/.mcp.json" 2>/dev/null; then
-    echo "[WARN] ${story_id} phase=plan: legacy .mcp.json with X-GAAI-WorkspaceBinding found in worktree — ignored (DEC-109 §3.4 inline config takes precedence; 30-day grace)" >&2
+  # ── Propagate project's .mcp.json into worktree (workspace-scoped URL fix) ──
+  # The worktree's claude -p subprocess reads .mcp.json at boot to know which
+  # MCP server (and workspace, encoded in URL path per RFC 8707) to connect to.
+  # If the host project's .mcp.json is gitignored (per /gaai:setup guidance), it
+  # won't be in the worktree by default — copy it explicitly so daemon-spawned
+  # claude -p inherits the same workspace binding without an interactive picker.
+  # Idempotent + outside the worktree-create block so resumed worktrees also get it.
+  if [[ -f "${PROJECT_DIR}/.mcp.json" ]]; then
+    cp "${PROJECT_DIR}/.mcp.json" "${worktree_path}/.mcp.json"
   fi
 
   # ── Resolve artefact paths ────────────────────────────────────────────────
@@ -816,7 +768,6 @@ handle_plan_phase() {
   GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
     _run_claude_with_loop_breaker \
       "$story_id" "plan" "$log_path" "$prompt_file" "$worktree_path" \
-      --mcp-config "$_plan_mcp_config" \
       --model sonnet \
       --max-turns 60 \
       --output-format stream-json \
@@ -910,13 +861,11 @@ handle_impl_phase() {
     worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
-  # ── Build inline MCP config (DEC-109 §3.4) ────────────────────────────────
-  local _impl_mcp_config
-  if ! _impl_mcp_config=$(_gaai_build_mcp_config_inline "$story_id" "impl"); then
-    return 1
+  # Refresh .mcp.json in worktree (idempotent — covers daemon upgrades mid-flight).
+  # Defensive: covers daemon upgrades where plan-phase ran without copying.
+  if [[ -f "${PROJECT_DIR}/.mcp.json" ]]; then
+    cp "${PROJECT_DIR}/.mcp.json" "${worktree_path}/.mcp.json" 2>/dev/null || true
   fi
-  # AC4: audit log
-  echo "[INFO] ${story_id} phase=impl spawn workspace_id=${GAAI_WORKSPACE_ID:-} session_mode=autonomous"
 
   # ── Resolve artefact paths ────────────────────────────────────────────────
   local story_path plan_path impl_report_path log_path
@@ -1077,8 +1026,6 @@ handle_impl_phase() {
         --impl-model-tag "$impl_tag" \
         --log-file       "$log_path" \
         --worktree-path  "$worktree_path" \
-        --extra-arg      "--mcp-config" \
-        --extra-arg      "$_impl_mcp_config" \
         2>>"$log_path"
   )
   spawn_rc=$?
@@ -1154,14 +1101,10 @@ handle_qa_phase() {
     worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
-  # ── Build inline MCP config (DEC-109 §3.4) ────────────────────────────────
-  local _qa_mcp_config
-  if ! _qa_mcp_config=$(_gaai_build_mcp_config_inline "$story_id" "qa"); then
-    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "0"
-    return 1
+  # Refresh .mcp.json in worktree (idempotent — covers daemon upgrades mid-flight).
+  if [[ -f "${PROJECT_DIR}/.mcp.json" ]]; then
+    cp "${PROJECT_DIR}/.mcp.json" "${worktree_path}/.mcp.json" 2>/dev/null || true
   fi
-  # AC4: audit log
-  echo "[INFO] ${story_id} phase=qa spawn workspace_id=${GAAI_WORKSPACE_ID:-} session_mode=autonomous"
 
   # ── Resolve artefact paths (AC2) ──────────────────────────────────────────
   local story_path plan_path impl_report_path qa_report_path memory_delta_path log_path
@@ -1260,7 +1203,6 @@ handle_qa_phase() {
   GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
     _run_claude_with_loop_breaker \
       "$story_id" "qa" "$log_path" "$prompt_file" "$worktree_path" \
-      --mcp-config "$_qa_mcp_config" \
       --model sonnet \
       --max-turns 30 \
       --output-format stream-json \
@@ -1336,7 +1278,13 @@ handle_qa_phase() {
         return 1
       fi
       _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_VERDICT:FAIL" "$duration_ms"
-      return 1
+      # Retry-loop convention : phase_status:qa_failed is the failure signal,
+      # NOT this function's exit code. Return 0 so the wrapper outer loop
+      # iterates and dispatch_3phase_story's qa_failed case (the retry-loop
+      # at lines below) fires. Returning 1 here exits the wrapper before the
+      # retry-loop can rewind to planned + re-spawn IMPL — making the entire
+      # retry-loop unreachable.
+      return 0
       ;;
     ESCALATE)
       echo "[ERROR] ${story_id} handle_qa_phase: QA verdict=ESCALATE [class=QA_VERDICT:ESCALATE]"
@@ -2016,6 +1964,13 @@ dispatch_3phase_story() {
           _emit_routing_record "$story_id" "$trace_id" "qa" "error" "QA_RETRY_EXHAUSTED" 2>/dev/null || true
         else
           echo "[ERROR] ${story_id} dispatch: scheduler --set-phase-status qa_escalated failed"
+        fi
+        # Wire the escalation to the existing notification machinery (terminal bell +
+        # macOS osascript + webhook+HMAC). Helper is best-effort, never blocks.
+        if declare -F notify_escalation_inline >/dev/null 2>&1; then
+          notify_escalation_inline "$story_id" \
+            "QA retry cap reached (${_qa_retry_count}/${_qa_retry_max})" \
+            "Review .gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-report.md and either fix manually or re-refine the story"
         fi
         rm -f "$_qa_retry_file" 2>/dev/null || true
         return 0
