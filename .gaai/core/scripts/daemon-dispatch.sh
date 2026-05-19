@@ -1294,6 +1294,17 @@ handle_qa_phase() {
         return 1
       fi
       _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_VERDICT:ESCALATE" "$duration_ms"
+      # Surface the QA-agent ESCALATE verdict to the operator via the existing
+      # notification machinery (terminal bell + macOS osascript + webhook+HMAC).
+      # Symmetry with the retry-cap-exhausted path in dispatch_3phase_story's
+      # qa_failed branch — operator MUST be notified on every qa_escalated
+      # transition regardless of whether the daemon (cap reached) or the QA
+      # agent (architectural / scope verdict) initiated it.
+      if declare -F notify_escalation_inline >/dev/null 2>&1; then
+        notify_escalation_inline "$story_id" \
+          "QA agent verdict=ESCALATE (beyond auto-fix)" \
+          "Review .gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-report.md — likely AC/scope decision required"
+      fi
       return 1
       ;;
   esac
