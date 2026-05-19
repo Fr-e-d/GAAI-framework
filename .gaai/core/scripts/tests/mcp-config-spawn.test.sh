@@ -2,7 +2,7 @@
 # E150S10 — mcp-config-spawn.test.sh
 # Tests _gaai_build_mcp_config_inline() function (AC6):
 #   (a) valid workspace_id → JSON contains X-GAAI-Workspace-Scope + Session-Mode: autonomous
-#   (b) missing workspace_id → returns 1 + structured DEC-109 error message
+#   (b) missing workspace_id → returns 1 + structured workspace_scope error message
 #   (c) two parallel calls with different workspace_ids → no shared state contamination
 #
 # Usage: bash .gaai/core/scripts/tests/mcp-config-spawn.test.sh
@@ -23,7 +23,7 @@ export PROJECT_DIR="$PROJECT_DIR_STUB"
 # script, avoiding sourcing the full library (which requires BACKLOG_FILE etc.)
 _EXTRACTED_FN="$(sed -n '/^_gaai_build_mcp_config_inline()/,/^}/p' "$DISPATCH_SCRIPT")"
 
-echo "E150S10 — mcp-config-spawn tests"
+echo "mcp-config-spawn tests — _gaai_build_mcp_config_inline()"
 echo ""
 
 # ── T1: valid workspace_id + auth token → JSON includes all 3 required headers ──
@@ -54,8 +54,8 @@ assert 'Authorization' in h, 'missing auth'
   fi
 }
 
-# ── T2: missing workspace_id → returns 1 + DEC-109 structured error ──────────
-echo "T2: missing workspace_id → returns 1 + DEC-109 structured error"
+# ── T2: missing workspace_id → returns 1 + structured error ──────────────────
+echo "T2: missing workspace_id → returns 1 + structured workspace_scope error"
 {
   ERR_OUT=$(bash -c "
 PROJECT_DIR='$PROJECT_DIR_STUB'
@@ -64,10 +64,10 @@ unset GAAI_WORKSPACE_ID
 _gaai_build_mcp_config_inline 'E150TEST' 'plan' && echo 'SHOULD_NOT_REACH'
 " 2>&1 || true)
 
-  if echo "$ERR_OUT" | grep -q 'DEC-109 invariant'; then
-    pass "structured DEC-109 error emitted on missing workspace_id"
+  if echo "$ERR_OUT" | grep -q 'workspace_scope required'; then
+    pass "structured workspace_scope error emitted on missing workspace_id"
   else
-    fail "expected DEC-109 error; got: $ERR_OUT"
+    fail "expected workspace_scope error; got: $ERR_OUT"
   fi
 
   RC=0
