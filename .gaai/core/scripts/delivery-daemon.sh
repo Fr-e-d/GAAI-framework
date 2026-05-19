@@ -149,6 +149,8 @@ BACKLOG_FILE="$BACKLOG"
 source "$SCRIPT_DIR/lib/chore-commit.sh"
 # shellcheck source=lib/backlog-yaml.sh
 [[ -z "${_BACKLOG_YAML_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/backlog-yaml.sh" && _BACKLOG_YAML_SH_SOURCED=1
+# shellcheck source=lib/worktree-integrity.sh
+[[ -z "${_WORKTREE_INTEGRITY_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/worktree-integrity.sh" && _WORKTREE_INTEGRITY_SH_SOURCED=1
 NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
 WEBHOOK_SECRET="${GAAI_DAEMON_WEBHOOK_SECRET:-}"
 
@@ -1038,6 +1040,12 @@ crash_recovery_scan() {
           increment_retry "$sid"
           ((reverted++))
         fi
+        ;;
+      worktree_recovery_failed)
+        # E160S05: environment problem detected pre-spawn — do not re-launch
+        # operator must inspect worktree + stash, then re-refine if needed
+        log "${YELLOW}[RECOVERY] $sid : phase_status=worktree_recovery_failed — environment problem, not re-launching (operator must resolve)${NC}"
+        ((skipped++))
         ;;
       *)
         log "${RED}[RECOVERY] $sid : unknown phase_status='$ps' — skipping (manual review)${NC}"
@@ -3167,6 +3175,33 @@ while true; do
     fi
 
     increment_retry "$story_id"
+
+    # ── Pre-spawn worktree integrity check (E160S05) ──────────────────────────
+    # Run only when a worktree already exists (resumption path). First-spawn
+    # worktrees don't exist yet — _check_worktree_integrity returns 0 immediately.
+    _wt_pre_path="$(_recovery_resolve_worktree "$story_id")"
+    if [[ -d "$_wt_pre_path" ]] && declare -f _check_worktree_integrity >/dev/null 2>&1; then
+      _check_worktree_integrity "$_wt_pre_path" "$TARGET_BRANCH" "$story_id"
+      _wt_check_rc=$?
+      if [[ "$_wt_check_rc" -ge 1 ]]; then
+        if [[ "$_wt_check_rc" -eq 1 ]] && declare -f _recover_worktree_safe_base >/dev/null 2>&1; then
+          log "${YELLOW}$story_id — worktree corruption suspected, attempting safe-base recovery...${NC}"
+          _recover_worktree_safe_base "$story_id" "$_wt_pre_path" "$TARGET_BRANCH"
+          _wt_check_rc=$?
+        fi
+        if [[ "$_wt_check_rc" -ne 0 ]]; then
+          _wt_recover_type="unrecoverable"
+          [[ "$_wt_check_rc" -eq 1 ]] && _wt_recover_type="conflicts"
+          chore_commit_field "$story_id" phase_status worktree_recovery_failed \
+            "chore($story_id): worktree_recovery_failed [daemon]" 2>/dev/null || true
+          notify_escalation "$story_id" \
+            "worktree_corruption_${_wt_recover_type}" \
+            "Inspect worktree at ${_wt_pre_path}; legitimate commits in stash; manual cherry-pick may be required"
+          continue
+        fi
+        log "${GREEN}$story_id — worktree recovery succeeded, proceeding with spawn${NC}"
+      fi
+    fi
 
     # ── Route: 3phase dispatch OR legacy wrapper ─────────────────────────────
     # Per-story delivery_pipeline takes precedence over cutover default.
