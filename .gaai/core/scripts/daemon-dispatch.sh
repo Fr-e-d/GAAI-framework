@@ -121,20 +121,20 @@ except Exception:
 " 2>/dev/null
 }
 
-# ── Inline MCP config builder ────────────────────────────────────────────
+# ── Inline MCP config builder (DEC-109 §3.4, E150S10) ───────────────────
 # Builds the --mcp-config JSON for autonomous daemon spawns so no .mcp.json
-# filesystem copy is needed in the worktree.
+# filesystem copy is needed in the worktree (AC1, AC2, AC3).
 #
 # Args: $1 = story_id (for error/warn messages), $2 = phase (plan|impl|qa)
 # Outputs: compact JSON string to stdout (pass directly to --mcp-config flag)
-# Returns: 0 on success, 1 if GAAI_WORKSPACE_ID is missing (caller must
-#          check the return code and refuse the spawn if non-zero)
+# Returns: 0 on success, 1 if GAAI_WORKSPACE_ID is missing (AC5 — caller
+#          must check the return code and refuse the spawn if non-zero)
 _gaai_build_mcp_config_inline() {
   local story_id="${1:-unknown}" phase="${2:-unknown}"
 
   local workspace_id="${GAAI_WORKSPACE_ID:-}"
   if [[ -z "$workspace_id" ]]; then
-    echo "[ERROR] Autonomous spawn safety invariant: workspace_scope required for daemon spawn. Story ${story_id} missing workspace_id in backlog." >&2
+    echo "[ERROR] DEC-109 invariant: workspace_scope required for autonomous spawn. Story ${story_id} missing workspace_id in backlog." >&2
     return 1
   fi
 
@@ -749,7 +749,7 @@ handle_plan_phase() {
     return 1
   fi
 
-  # ── Build inline MCP config (no .mcp.json in worktree required) ──────────
+  # ── Build inline MCP config (DEC-109 §3.4 — no .mcp.json in worktree required) ──
   local _plan_mcp_config
   if ! _plan_mcp_config=$(_gaai_build_mcp_config_inline "$story_id" "plan"); then
     chore_commit_multi_field "$story_id" status failed phase_status failed \
@@ -759,7 +759,7 @@ handle_plan_phase() {
   # AC4: audit log — workspace_id + session_mode for traceability
   echo "[INFO] ${story_id} phase=plan spawn workspace_id=${GAAI_WORKSPACE_ID:-} session_mode=autonomous"
   if [[ -f "${worktree_path}/.mcp.json" ]] && grep -q 'X-GAAI-WorkspaceBinding' "${worktree_path}/.mcp.json" 2>/dev/null; then
-    echo "[WARN] ${story_id} phase=plan: legacy .mcp.json with X-GAAI-WorkspaceBinding found in worktree — ignored (inline --mcp-config takes precedence; 30-day grace)" >&2
+    echo "[WARN] ${story_id} phase=plan: legacy .mcp.json with X-GAAI-WorkspaceBinding found in worktree — ignored (DEC-109 §3.4 inline config takes precedence; 30-day grace)" >&2
   fi
 
   # ── Resolve artefact paths ────────────────────────────────────────────────
@@ -910,7 +910,7 @@ handle_impl_phase() {
     worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
-  # ── Build inline MCP config ───────────────────────────────────────────────
+  # ── Build inline MCP config (DEC-109 §3.4) ────────────────────────────────
   local _impl_mcp_config
   if ! _impl_mcp_config=$(_gaai_build_mcp_config_inline "$story_id" "impl"); then
     return 1
@@ -1154,7 +1154,7 @@ handle_qa_phase() {
     worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
-  # ── Build inline MCP config ───────────────────────────────────────────────
+  # ── Build inline MCP config (DEC-109 §3.4) ────────────────────────────────
   local _qa_mcp_config
   if ! _qa_mcp_config=$(_gaai_build_mcp_config_inline "$story_id" "qa"); then
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "0"
