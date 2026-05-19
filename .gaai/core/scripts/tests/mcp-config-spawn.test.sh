@@ -29,7 +29,7 @@ echo ""
 # ── T1: valid workspace_id + auth token → JSON includes all 3 required headers ──
 echo "T1: valid workspace_id + auth token → JSON includes X-GAAI-Workspace-Scope + Session-Mode"
 {
-  WS_UUID="a3bb189e-8bf9-3888-9912-ace4e6543002"
+  WS_UUID="test-workspace-scope-value-t1"
   AUTH_TOK="test-oauth-token-abc123"
   OUT=$(bash -c "
 PROJECT_DIR='$PROJECT_DIR_STUB'
@@ -87,8 +87,8 @@ _gaai_build_mcp_config_inline 'E150TEST' 'plan'
 # ── T3: two parallel calls with different workspace_ids → no shared state ─────
 echo "T3: two parallel calls with different workspace_ids → each gets its own scope"
 {
-  WS_A="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-  WS_B="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+  WS_A="test-workspace-scope-value-alpha"
+  WS_B="test-workspace-scope-value-bravo"
 
   JSON_A=$(bash -c "
 PROJECT_DIR='$PROJECT_DIR_STUB'
