@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(daemon-dispatch): auto-merge staging_only policy check evaluates TARGET_BRANCH, not story HEAD
 - fix(daemon-monitor): remove 'local' outside function (line 633)
 - fix(daemon): auto-resolve PR conflicts post-create (OSS — E156S07)
 

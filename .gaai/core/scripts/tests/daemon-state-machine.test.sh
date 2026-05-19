@@ -176,8 +176,6 @@ chmod +x "$DISPATCH_SHIM_DIR/gh"
 # ── Impl-phase fixture worktrees for T5 and T7 ───────────────────────────────
 # handle_impl_phase resolves worktrees as: $GAAI_WORKTREES_BASE/{story_id}-workspace
 export GAAI_WORKTREES_BASE="$DISPATCH_FIXTURE_DIR"
-# E150S10: all 3 phases now require GAAI_WORKSPACE_ID for inline --mcp-config (DEC-109 §3.4)
-export GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-test-workspace-dispatch}"
 
 for _impl_id in E134S01 TST-3PHASE-PLANNED; do
   _wt="$DISPATCH_FIXTURE_DIR/${_impl_id}-workspace"
