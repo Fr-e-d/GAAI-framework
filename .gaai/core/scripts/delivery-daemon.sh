@@ -1182,7 +1182,7 @@ crash_recovery_scan() {
         ((skipped++))
         ;;
       *)
-        # E160S04: stuck-story classifier — final layer when no existing recovery path matched
+        # Stuck-story classifier — final layer when no existing recovery path matched
         local _cls_rc=0
         classify_stuck_story "$sid" "$ps" || _cls_rc=$?
         case "$_cls_rc" in
