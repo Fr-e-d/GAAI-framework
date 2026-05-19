@@ -786,12 +786,12 @@ check_heartbeats() {
   done
 }
 
-# ── Agent-activity stale detector (E160S07) ──────────────────────────────
+# ── Agent-activity stale detector ─────────────────────────────────────────
 # Complementary to check_heartbeats: heartbeat proves wrapper alive, but does
 # NOT prove claude -p is making progress. This function checks impl.log mtime.
 # If mtime stale > AGENT_HANG_THRESHOLD_SEC AND heartbeat is fresh → agent hung
 # in a synchronous tool call (e.g. infinite bash loop, blocked gh command).
-# Composes with E160S01 stale-race mutex: skips if reconcile-in-progress fresh.
+# Composes with the reconcile-in-progress mutex: skips if reconcile marker fresh.
 check_agent_activity_stale() {
   local now
   now=$(date +%s)
@@ -3340,7 +3340,7 @@ while true; do
   # Detect stale in_progress stories (orphaned by crashed sessions)
   check_stale_in_progress || true
 
-  # Detect agent-hang: wrapper alive (heartbeat fresh) but claude -p stalled (E160S07)
+  # Detect agent-hang: wrapper alive (heartbeat fresh) but claude -p stalled
   check_agent_activity_stale || true
 
   # Track escalated/failed stories for resolution notification (AC5/AC6)
