@@ -37,7 +37,7 @@ _resolve_timeout_cmd() {
   fi
 }
 
-# ── Worktree integrity helper ──────────────────────────────────
+# ── Worktree integrity helper (E160S05) ──────────────────────────────────
 # Sourced here so dispatch's handle_commit_phase can run pre-push checks.
 # PROJECT_DIR must be set by caller before sourcing (same requirement as SCHEDULER).
 _DISPATCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -716,6 +716,95 @@ ensure_wt_dependencies_installed() {
   echo "[${ts}] ${story_id} ${trace_id} [wt-deps] wt_deps_install_failed duration_ms=${duration_ms} exit_code=${install_exit}"
   _emit_plan_routing_record "$story_id" "$trace_id" "error" "PNPM_INSTALL_FAILED" "${duration_ms}"
   return 1
+}
+
+# ── Worktree deps freshness guard ────────────────────────────────
+# Compares pnpm-lock.yaml sha256 against a marker file in the worktree.
+# On match → skip install (idempotent fast path).
+# On mismatch / absent → pnpm install --frozen-lockfile + update marker.
+_ensure_worktree_deps_fresh() {
+  local story_id="$1" worktree_path="$2"
+  local timeout_s marker_path lockfile_path current_hash stored_hash hash_short
+  local timeout_cmd install_exit t_start_ms t_end_ms duration_s
+
+  timeout_s="${GAAI_PNPM_INSTALL_TIMEOUT_SEC:-300}"
+  marker_path="${worktree_path}/.gaai-pnpm-install-marker"
+  lockfile_path="${worktree_path}/pnpm-lock.yaml"
+
+  # No lockfile → nothing to guard (e.g. non-pnpm repo)
+  [[ ! -f "$lockfile_path" ]] && return 0
+
+  # Compute hash (sha256sum on Linux, shasum -a 256 on macOS)
+  current_hash=$(sha256sum < "$lockfile_path" 2>/dev/null | awk '{print $1}')
+  if [[ -z "$current_hash" ]]; then
+    current_hash=$(shasum -a 256 < "$lockfile_path" 2>/dev/null | awk '{print $1}')
+  fi
+  # Hash tool unavailable → treat as fresh (no regression)
+  [[ -z "$current_hash" ]] && return 0
+
+  hash_short="${current_hash:0:8}"
+  echo "[COMMIT-PHASE] ${story_id} : checking worktree deps freshness (lockfile hash=${hash_short})"
+
+  stored_hash=""
+  [[ -f "$marker_path" ]] && stored_hash=$(cat "$marker_path" 2>/dev/null)
+
+  if [[ "$current_hash" == "$stored_hash" ]]; then
+    echo "[COMMIT-PHASE] ${story_id} : worktree deps fresh (marker hash matches) — skipping install"
+    return 0
+  fi
+
+  echo "[COMMIT-PHASE] ${story_id} : worktree deps stale or absent — running pnpm install --frozen-lockfile"
+
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    t_start_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+  else
+    t_start_ms=$(( $(date +%s) * 1000 ))
+  fi
+
+  timeout_cmd=$(_resolve_timeout_cmd)
+  install_exit=0
+  if [[ -n "$timeout_cmd" ]]; then
+    (cd "$worktree_path" && "$timeout_cmd" "$timeout_s" pnpm install --frozen-lockfile) \
+      || install_exit=$?
+  else
+    (cd "$worktree_path" && pnpm install --frozen-lockfile) &
+    local install_pid=$!
+    local waited=0
+    while kill -0 "$install_pid" 2>/dev/null; do
+      if (( waited >= timeout_s )); then
+        kill "$install_pid" 2>/dev/null || true
+        wait "$install_pid" 2>/dev/null || true
+        install_exit=124
+        break
+      fi
+      sleep 1
+      (( waited++ )) || true
+    done
+    if [[ $install_exit -eq 0 ]]; then
+      wait "$install_pid" 2>/dev/null || install_exit=$?
+    fi
+  fi
+
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+  else
+    t_end_ms=$(( $(date +%s) * 1000 ))
+  fi
+  duration_s=$(( (t_end_ms - t_start_ms) / 1000 ))
+
+  if [[ $install_exit -eq 124 ]]; then
+    echo "[COMMIT-PHASE] ${story_id} : pnpm install timed out after ${timeout_s}s — surfacing error to dispatch"
+    return 1
+  fi
+
+  if [[ $install_exit -ne 0 ]]; then
+    return 1
+  fi
+
+  # Success — write marker
+  printf '%s\n' "$current_hash" > "$marker_path"
+  echo "[COMMIT-PHASE] ${story_id} : pnpm install completed in ${duration_s}s, marker updated"
+  return 0
 }
 
 # ── Phase handlers ────────────────────────────────────────────────────────
@@ -1627,6 +1716,19 @@ handle_commit_phase() {
     worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
+  # ── Ensure worktree deps are fresh before git push ──────────────
+  # Pre-push typecheck hook requires node_modules; guard here before any git push.
+  if ! _ensure_worktree_deps_fresh "$story_id" "$worktree_path"; then
+    "$SCHEDULER" --set-field "$story_id" phase_status commit_failed "$BACKLOG_FILE" 2>/dev/null || true
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "pnpm_install_failed" "0" "" "false"
+    if declare -F notify_escalation_inline >/dev/null 2>&1; then
+      notify_escalation_inline "$story_id" \
+        "pnpm_install_failed" \
+        "cd ${worktree_path} && pnpm install --frozen-lockfile"
+    fi
+    return 1
+  fi
+
   # ── Resolve artefact paths ────────────────────────────────────────────────
   local story_path qa_report_path
   story_path="${worktree_path}/.gaai/project/contexts/artefacts/stories/${story_id}.story.md"
@@ -1733,7 +1835,7 @@ ${qa_snippet}"
     fi
   fi
 
-  # ── Pre-push worktree integrity check (AC1) ──────────────────────
+  # ── Pre-push worktree integrity check (E160S05 AC1) ──────────────────────
   if declare -f _check_worktree_integrity >/dev/null 2>&1; then
     _check_worktree_integrity "$worktree_path" "${TARGET_BRANCH:-staging}" "$story_id"
     _wt_pp_rc=$?
@@ -2146,11 +2248,18 @@ dispatch_3phase_story() {
       echo "[$(date '+%H:%M:%S')] ${story_id} dispatch: QA FAIL — retry ${_qa_retry_count}/${_qa_retry_max} (IMPL will re-spawn with qa-report context: ${GAAI_QA_REPORT_PATH})"
       return 0
       ;;
+    commit_failed)
+      _write_active_marker "$story_id" "commit"
+      handle_commit_phase "$story_id" "$trace_id"
+      local _commit_rc=$?
+      _remove_active_marker "$story_id" "commit"
+      [[ $_commit_rc -ne 0 ]] && return 1
+      ;;
     done|failed|escalated|qa_escalated)
       return 0
       ;;
     *)
-      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated done failed escalated worktree_recovery_failed[intermediate]"
+      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated commit_failed done failed escalated worktree_recovery_failed[intermediate]"
       _emit_routing_record "$story_id" "$trace_id" "plan" "error" "invalid_phase_status:${ps}"
       return 1
       ;;
@@ -2166,6 +2275,15 @@ _reconcile_yaml_status_on_exit() {
 
   # Null-guards: all required exports must be set by the wrapper
   [[ -z "${BACKLOG_FILE:-}" || -z "${PROJECT_DIR:-}" || -z "${SCHEDULER:-}" || -z "${LOCK_DIR:-}" ]] && return 0
+
+  # AC1: Create reconcile-in-progress marker before any YAML read or chore-commit.
+  # Daemon's check_stale_in_progress honors this marker to skip staleness verdict during reconcile.
+  # AC3: Fail-safe — if touch fails (disk full, read-only LOCK_DIR), log warning and
+  # proceed without race protection. Degradation = same behavior as pre-feature. No crash.
+  local _rip_marker="${LOCK_DIR}/${story_id}.reconcile-in-progress"
+  if ! touch "$_rip_marker" 2>/dev/null; then
+    echo "[WRAPPER-RECONCILE] $story_id : warning — could not create reconcile-in-progress marker (touch failed) — proceeding without race protection"
+  fi
 
   local phase_status target_status current_status
 
@@ -2215,10 +2333,16 @@ _reconcile_yaml_status_on_exit() {
       qa_escalated) target_status="escalated" ;;
       qa_failed)
         # No-op: retry-loop owns this transition
+        rm -f "$_rip_marker" 2>/dev/null || true
+        return 0
+        ;;
+      commit_failed)
+        # No-op: commit-phase retry path — story stays in_progress
         return 0
         ;;
       *)
         # Unknown or empty phase_status — no-op
+        rm -f "$_rip_marker" 2>/dev/null || true
         return 0
         ;;
     esac
@@ -2245,6 +2369,7 @@ _reconcile_yaml_status_on_exit() {
 
   if [[ "$current_status" == "$target_status" ]]; then
     echo "[WRAPPER-RECONCILE] $story_id : status already $target_status — no-op"
+    rm -f "$_rip_marker" 2>/dev/null || true
     return 0
   fi
 
@@ -2262,12 +2387,14 @@ _reconcile_yaml_status_on_exit() {
     printf '%s|commit|wrapper-reconcile-drift-%s\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" "$story_id" \
       > "$drift_marker" 2>/dev/null || true
+    rm -f "$_rip_marker" 2>/dev/null || true
     return 0
   fi
 
   # Update YAML status field
   if ! "$SCHEDULER" --set-status "$story_id" "$target_status" "$BACKLOG_FILE" 2>/dev/null; then
     echo "[WRAPPER-RECONCILE] $story_id : scheduler --set-status failed — daemon will reconcile"
+    rm -f "$_rip_marker" 2>/dev/null || true
     return 0
   fi
 
@@ -2275,6 +2402,7 @@ _reconcile_yaml_status_on_exit() {
 
   # Idempotent: skip if nothing staged
   if git diff --cached --quiet 2>/dev/null; then
+    rm -f "$_rip_marker" 2>/dev/null || true
     return 0
   fi
 
@@ -2290,6 +2418,7 @@ _reconcile_yaml_status_on_exit() {
 
   if [[ $commit_rc -ne 0 ]]; then
     echo "[WRAPPER-RECONCILE] $story_id : commit failed (rc=$commit_rc) — daemon will reconcile"
+    rm -f "$_rip_marker" 2>/dev/null || true
     return 0
   fi
 
@@ -2305,4 +2434,6 @@ _reconcile_yaml_status_on_exit() {
       rm -f "${LOCK_DIR}/.qa-retries-${story_id}" 2>/dev/null || true
       ;;
   esac
+
+  rm -f "$_rip_marker" 2>/dev/null || true
 }
