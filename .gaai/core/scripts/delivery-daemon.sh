@@ -796,6 +796,28 @@ check_stale_in_progress() {
         continue
       fi
 
+      # AC2/AC4 (E160S01): Stale-race mutex — check reconcile-in-progress marker written by
+      # wrapper EXIT trap (_reconcile_yaml_status_on_exit). Typical reconcile window = 1-5s;
+      # TTL default 90s = 18× safety margin. Prevents false-positive daemon-staleness verdict
+      # during the narrow window between wrapper terminal phase_status and chore-commit push.
+      local _rip_marker="$LOCK_DIR/${sid}.reconcile-in-progress"
+      local _rip_ttl="${GAAI_RECONCILE_GRACE_SEC:-90}"
+      if [[ -f "$_rip_marker" ]]; then
+        local _rip_mtime=0
+        if [[ "$(uname)" == "Darwin" ]]; then
+          _rip_mtime=$(stat -f %m "$_rip_marker" 2>/dev/null || echo 0)
+        else
+          _rip_mtime=$(stat -c %Y "$_rip_marker" 2>/dev/null || echo 0)
+        fi
+        local _rip_age=$(( now - _rip_mtime ))
+        if (( _rip_age <= _rip_ttl )); then
+          log "[STALE-CHECK] $sid : reconcile-in-progress marker fresh (age=${_rip_age}s, ttl=${_rip_ttl}s) — skipping (will recheck next tick)"
+          continue
+        else
+          log "[STALE-CHECK] $sid : reconcile-in-progress marker stale (age=${_rip_age}s > ttl=${_rip_ttl}s) — proceeding with normal verdict"
+        fi
+      fi
+
       # Mark as failed on staging
       log "${YELLOW}Marking $sid as failed (stale in_progress)...${NC}"
       local reset_script
