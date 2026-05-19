@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- chore(daemon-catchup): S10 plan done
 - fix(daemon-dispatch): wire notify_escalation_inline on handle_qa_phase ESCALATE path (GAP D)
 - fix(daemon-dispatch): unblock DEC-89 §1.2 retry-loop + wire escalation notification
 - fix(daemon-dispatch): auto-merge staging_only policy check evaluates TARGET_BRANCH, not story HEAD

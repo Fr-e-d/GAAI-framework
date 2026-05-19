@@ -320,38 +320,6 @@ _run_claude_with_loop_breaker() {
   return "$claude_exit"
 }
 
-# ── DEC-109 §3.4 + E150S10: Inline MCP workspace-scope helpers ───────────────
-
-# Extracts the OAuth bearer token (without "Bearer " prefix) from a .mcp.json file.
-# Args: $1 = path to .mcp.json
-# Stdout: token string or empty
-_extract_mcp_oauth_token() {
-  local mcp_json="$1"
-  [[ ! -f "$mcp_json" ]] && echo "" && return
-  python3 - "$mcp_json" <<'PYEOF' 2>/dev/null || echo ""
-import json, sys
-try:
-  d = json.load(open(sys.argv[1]))
-  for s in d.get('mcpServers', {}).values():
-    a = s.get('headers', {}).get('Authorization', '')
-    if a.startswith('Bearer '):
-      print(a[7:], end='')
-      sys.exit(0)
-except Exception: pass
-print('', end='')
-PYEOF
-}
-
-# Builds inline --mcp-config JSON for daemon-spawned claude -p processes.
-# Per DEC-109 §3.4: X-GAAI-Workspace-Scope + X-GAAI-Session-Mode: autonomous.
-# Args: $1 = workspace_id (UUID), $2 = oauth_token (raw, no "Bearer " prefix)
-# Stdout: JSON string
-_build_daemon_mcp_config() {
-  local workspace_id="$1" oauth_token="$2"
-  printf '{"mcpServers":{"GAAI-cloud":{"type":"http","url":"https://mcp.gaai.cloud/mcp","headers":{"Authorization":"Bearer %s","X-GAAI-Workspace-Scope":"%s","X-GAAI-Session-Mode":"autonomous"}}}}' \
-    "$oauth_token" "$workspace_id"
-}
-
 # ── Field extractors (AC1 — verbatim per story AC1 specification) ─────────
 
 get_phase_status() {
@@ -735,26 +703,15 @@ handle_plan_phase() {
     return 1
   fi
 
-  # ── DEC-109 §3.4 (E150S10): Inline MCP workspace scope ───────────────────
-  # AC5: Refuse spawn if GAAI Cloud configured but workspace_id is missing.
-  if [[ -f "${PROJECT_DIR}/.mcp.json" && -z "${GAAI_WORKSPACE_ID:-}" ]]; then
-    echo "[ERROR] DEC-109 invariant: workspace_scope required for autonomous spawn. Story ${story_id} missing workspace_id in backlog." >&2
-    "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
-    _emit_plan_routing_record "$story_id" "$trace_id" "error" "WORKSPACE_SCOPE_MISSING" "0"
-    return 1
-  fi
-  # Build --mcp-config args (AC1-AC3). No filesystem .mcp.json copy needed (AC2).
-  local _plan_oauth _plan_mcp_json _plan_mcp_args=()
-  _plan_oauth=$(_extract_mcp_oauth_token "${PROJECT_DIR}/.mcp.json")
-  if [[ -n "$_plan_oauth" && -n "${GAAI_WORKSPACE_ID:-}" ]]; then
-    _plan_mcp_json=$(_build_daemon_mcp_config "${GAAI_WORKSPACE_ID}" "$_plan_oauth")
-    _plan_mcp_args=(--mcp-config "$_plan_mcp_json")
-    # AC4: spawn audit log
-    echo "[$(date '+%H:%M:%S')] ${story_id} plan-spawn: workspace_id=${GAAI_WORKSPACE_ID} session_mode=autonomous"
-  fi
-  # Legacy warning: detect worktree .mcp.json with deprecated X-GAAI-WorkspaceBinding header
-  if grep -q 'X-GAAI-WorkspaceBinding' "${worktree_path}/.mcp.json" 2>/dev/null; then
-    echo "[WARN] ${story_id}: legacy X-GAAI-WorkspaceBinding in worktree .mcp.json (DEC-109 30-day grace — informational)"
+  # ── Propagate project's .mcp.json into worktree (workspace-scoped URL fix) ──
+  # The worktree's claude -p subprocess reads .mcp.json at boot to know which
+  # MCP server (and workspace, encoded in URL path per RFC 8707) to connect to.
+  # If the host project's .mcp.json is gitignored (per /gaai:setup guidance), it
+  # won't be in the worktree by default — copy it explicitly so daemon-spawned
+  # claude -p inherits the same workspace binding without an interactive picker.
+  # Idempotent + outside the worktree-create block so resumed worktrees also get it.
+  if [[ -f "${PROJECT_DIR}/.mcp.json" ]]; then
+    cp "${PROJECT_DIR}/.mcp.json" "${worktree_path}/.mcp.json"
   fi
 
   # ── Resolve artefact paths ────────────────────────────────────────────────
@@ -815,8 +772,7 @@ handle_plan_phase() {
       --max-turns 60 \
       --output-format stream-json \
       --verbose \
-      --dangerously-skip-permissions \
-      ${_plan_mcp_args[@]+"${_plan_mcp_args[@]}"}
+      --dangerously-skip-permissions
   claude_exit=$?
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
@@ -905,22 +861,10 @@ handle_impl_phase() {
     worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
-  # ── DEC-109 §3.4 (E150S10): Inline MCP workspace scope ───────────────────
-  if [[ -f "${PROJECT_DIR}/.mcp.json" && -z "${GAAI_WORKSPACE_ID:-}" ]]; then
-    echo "[ERROR] DEC-109 invariant: workspace_scope required for autonomous spawn. Story ${story_id} missing workspace_id in backlog." >&2
-    "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
-    return 1
-  fi
-  local _impl_oauth _impl_mcp_json _impl_mcp_extra=()
-  _impl_oauth=$(_extract_mcp_oauth_token "${PROJECT_DIR}/.mcp.json")
-  if [[ -n "$_impl_oauth" && -n "${GAAI_WORKSPACE_ID:-}" ]]; then
-    _impl_mcp_json=$(_build_daemon_mcp_config "${GAAI_WORKSPACE_ID}" "$_impl_oauth")
-    _impl_mcp_extra=(--extra-arg --mcp-config --extra-arg "$_impl_mcp_json")
-    # AC4: spawn audit log
-    echo "[$(date '+%H:%M:%S')] ${story_id} impl-spawn: workspace_id=${GAAI_WORKSPACE_ID} session_mode=autonomous"
-  fi
-  if grep -q 'X-GAAI-WorkspaceBinding' "${worktree_path}/.mcp.json" 2>/dev/null; then
-    echo "[WARN] ${story_id}: legacy X-GAAI-WorkspaceBinding in worktree .mcp.json (DEC-109 30-day grace — informational)"
+  # Refresh .mcp.json in worktree (idempotent — covers daemon upgrades mid-flight).
+  # Defensive: covers daemon upgrades where plan-phase ran without copying.
+  if [[ -f "${PROJECT_DIR}/.mcp.json" ]]; then
+    cp "${PROJECT_DIR}/.mcp.json" "${worktree_path}/.mcp.json" 2>/dev/null || true
   fi
 
   # ── Resolve artefact paths ────────────────────────────────────────────────
@@ -1082,7 +1026,6 @@ handle_impl_phase() {
         --impl-model-tag "$impl_tag" \
         --log-file       "$log_path" \
         --worktree-path  "$worktree_path" \
-        ${_impl_mcp_extra[@]+"${_impl_mcp_extra[@]}"} \
         2>>"$log_path"
   )
   spawn_rc=$?
@@ -1158,23 +1101,9 @@ handle_qa_phase() {
     worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
-  # ── DEC-109 §3.4 (E150S10): Inline MCP workspace scope ───────────────────
-  if [[ -f "${PROJECT_DIR}/.mcp.json" && -z "${GAAI_WORKSPACE_ID:-}" ]]; then
-    echo "[ERROR] DEC-109 invariant: workspace_scope required for autonomous spawn. Story ${story_id} missing workspace_id in backlog." >&2
-    "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
-    _emit_qa_routing_record "$story_id" "$trace_id" "error" "WORKSPACE_SCOPE_MISSING" "0"
-    return 1
-  fi
-  local _qa_oauth _qa_mcp_json _qa_mcp_args=()
-  _qa_oauth=$(_extract_mcp_oauth_token "${PROJECT_DIR}/.mcp.json")
-  if [[ -n "$_qa_oauth" && -n "${GAAI_WORKSPACE_ID:-}" ]]; then
-    _qa_mcp_json=$(_build_daemon_mcp_config "${GAAI_WORKSPACE_ID}" "$_qa_oauth")
-    _qa_mcp_args=(--mcp-config "$_qa_mcp_json")
-    # AC4: spawn audit log
-    echo "[$(date '+%H:%M:%S')] ${story_id} qa-spawn: workspace_id=${GAAI_WORKSPACE_ID} session_mode=autonomous"
-  fi
-  if grep -q 'X-GAAI-WorkspaceBinding' "${worktree_path}/.mcp.json" 2>/dev/null; then
-    echo "[WARN] ${story_id}: legacy X-GAAI-WorkspaceBinding in worktree .mcp.json (DEC-109 30-day grace — informational)"
+  # Refresh .mcp.json in worktree (idempotent — covers daemon upgrades mid-flight).
+  if [[ -f "${PROJECT_DIR}/.mcp.json" ]]; then
+    cp "${PROJECT_DIR}/.mcp.json" "${worktree_path}/.mcp.json" 2>/dev/null || true
   fi
 
   # ── Resolve artefact paths (AC2) ──────────────────────────────────────────
@@ -1278,8 +1207,7 @@ handle_qa_phase() {
       --max-turns 30 \
       --output-format stream-json \
       --verbose \
-      --dangerously-skip-permissions \
-      ${_qa_mcp_args[@]+"${_qa_mcp_args[@]}"}
+      --dangerously-skip-permissions
   claude_exit=$?
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
