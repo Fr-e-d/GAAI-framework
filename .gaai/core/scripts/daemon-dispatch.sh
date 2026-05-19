@@ -37,7 +37,7 @@ _resolve_timeout_cmd() {
   fi
 }
 
-# ── Worktree integrity helper (E160S05) ──────────────────────────────────
+# ── Worktree integrity helper ──────────────────────────────────
 # Sourced here so dispatch's handle_commit_phase can run pre-push checks.
 # PROJECT_DIR must be set by caller before sourcing (same requirement as SCHEDULER).
 _DISPATCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1835,7 +1835,7 @@ ${qa_snippet}"
     fi
   fi
 
-  # ── Pre-push worktree integrity check (E160S05 AC1) ──────────────────────
+  # ── Pre-push worktree integrity check (AC1) ──────────────────────
   if declare -f _check_worktree_integrity >/dev/null 2>&1; then
     _check_worktree_integrity "$worktree_path" "${TARGET_BRANCH:-staging}" "$story_id"
     _wt_pp_rc=$?

@@ -1174,7 +1174,7 @@ crash_recovery_scan() {
         fi
         ;;
       worktree_recovery_failed)
-        # E160S05: environment problem detected pre-spawn — do not re-launch
+        # environment problem detected pre-spawn — do not re-launch
         # operator must inspect worktree + stash, then re-refine if needed
         log "${YELLOW}[RECOVERY] $sid : phase_status=worktree_recovery_failed — environment problem, not re-launching (operator must resolve)${NC}"
         ((skipped++))
@@ -3317,7 +3317,7 @@ while true; do
 
     increment_retry "$story_id"
 
-    # ── Pre-spawn worktree integrity check (E160S05) ──────────────────────────
+    # ── Pre-spawn worktree integrity check ──────────────────────────
     # Run only when a worktree already exists (resumption path). First-spawn
     # worktrees don't exist yet — _check_worktree_integrity returns 0 immediately.
     _wt_pre_path="$(_recovery_resolve_worktree "$story_id")"

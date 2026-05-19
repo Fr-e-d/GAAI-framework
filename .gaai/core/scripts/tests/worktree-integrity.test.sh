@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# worktree-integrity.test.sh — regression suite for E160S05
+# worktree-integrity.test.sh — regression suite for worktree integrity
 # Tests: T1 clean, T2 commits-ahead, T3 phantom-deletes, T4 cherry-pick conflicts, T5 fsck failure
 set -uo pipefail
 
