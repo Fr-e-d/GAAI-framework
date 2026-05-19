@@ -19,7 +19,7 @@ git -C "$REPO" config user.email "test@gaai.test"
 git -C "$REPO" config user.name "GAAI Test"
 mkdir -p "$REPO/.github"
 # Write fake sync log (pre-existing content to simulate append path)
-echo "[2026-05-19 00:00:00] [test] SYNC_START" > "$REPO/.github/.sync-log"
+echo "[2026-01-01T00:00:00] [test] SYNC_START" > "$REPO/.github/.sync-log"
 echo "v2.0.0:abc123" > "$REPO/.github/.last-auto-bump"
 # Stage + commit initial state
 git -C "$REPO" add .github
@@ -28,7 +28,7 @@ git -C "$REPO" commit -q -m "chore: initial state"
 # Simulate marker update (as the sync script would do just before the block)
 PENDING_MARKER="2.1.0:def456"
 echo "$PENDING_MARKER" > "$REPO/.github/.last-auto-bump"
-echo "[2026-05-19 01:00:00] [test] MARKER_PERSISTED:${PENDING_MARKER}" >> "$REPO/.github/.sync-log"
+echo "[2026-01-01T01:00:00] [test] MARKER_PERSISTED:${PENDING_MARKER}" >> "$REPO/.github/.sync-log"
 
 # ── Mock post-commit hook for Assert 3 ───────────────────────────────────────
 mkdir -p "$REPO/.git/hooks"
