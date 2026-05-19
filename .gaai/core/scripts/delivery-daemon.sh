@@ -126,6 +126,8 @@ CLAUDE_MODEL="${GAAI_CLAUDE_MODEL:-sonnet}"           # model (sonnet = cost-eff
 HEARTBEAT_STALE="${GAAI_HEARTBEAT_STALE:-1800}"       # 30min no output = stuck (allows long MCP calls like deep research)
 STALENESS_THRESHOLD="${GAAI_STALENESS_THRESHOLD:-}"   # auto-computed below
 RECOVERY_SCAN_INTERVAL="${GAAI_RECOVERY_SCAN_INTERVAL:-$(( POLL_INTERVAL * 10 ))}"
+ORPHAN_SCAN_INTERVAL_TICKS="${GAAI_ORPHAN_SCAN_INTERVAL_TICKS:-10}"
+ORPHAN_SCAN_MAX_DURATION_SEC="${GAAI_ORPHAN_SCAN_MAX_DURATION_SEC:-30}"
 DRY_RUN=false
 STATUS_MODE=false
 
@@ -149,8 +151,6 @@ BACKLOG_FILE="$BACKLOG"
 source "$SCRIPT_DIR/lib/chore-commit.sh"
 # shellcheck source=lib/backlog-yaml.sh
 [[ -z "${_BACKLOG_YAML_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/backlog-yaml.sh" && _BACKLOG_YAML_SH_SOURCED=1
-# shellcheck source=lib/worktree-integrity.sh
-[[ -z "${_WORKTREE_INTEGRITY_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/worktree-integrity.sh" && _WORKTREE_INTEGRITY_SH_SOURCED=1
 NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
 WEBHOOK_SECRET="${GAAI_DAEMON_WEBHOOK_SECRET:-}"
 
@@ -606,6 +606,108 @@ clean_stale_locks() {
   done
 }
 
+# ── Cycle-time orphan-lock scan (E160S02) ────────────────────────────────
+# Runs every ORPHAN_SCAN_INTERVAL_TICKS poll ticks, BEFORE clean_stale_locks.
+# Iterates ${LOCK_DIR}/*.lock, reads PID from first line, verifies liveness
+# via kill -0. For each dead PID:
+#   1. Removes the lock file (so is_locked() returns false for recovery scan)
+#   2. Invokes crash_recovery_scan --only-sid <sid> (YAML classification + revert)
+# Bridges clean_stale_locks (lock-file removal only) and crash_recovery_scan
+# (YAML-based, startup-plus-periodic) to close the overnight blind window.
+cycle_orphan_lock_scan() {
+  local scan_start_ts lock_count=0 detected=0 reverted=0 escalated=0 skipped=0
+  scan_start_ts=$(date +%s)
+
+  # Collect lock files — handle empty LOCK_DIR silently (AC3)
+  local lock
+  for lock in "$LOCK_DIR"/*.lock; do
+    [[ -f "$lock" ]] || continue
+    (( lock_count++ )) || true
+  done
+  if (( lock_count == 0 )); then
+    return 0
+  fi
+
+  log "${CYAN}[CYCLE-ORPHAN] scanning $lock_count lock files (interval=${ORPHAN_SCAN_INTERVAL_TICKS} ticks)${NC}"
+
+  for lock in "$LOCK_DIR"/*.lock; do
+    [[ -f "$lock" ]] || continue
+
+    # AC4: wall-clock cap
+    local now_ts
+    now_ts=$(date +%s)
+    if (( now_ts - scan_start_ts >= ORPHAN_SCAN_MAX_DURATION_SEC )); then
+      log "${YELLOW}[CYCLE-ORPHAN] scan exceeded ${ORPHAN_SCAN_MAX_DURATION_SEC}s — aborting this cycle, will retry next interval${NC}"
+      break
+    fi
+
+    local sid pid
+    sid=$(basename "$lock" .lock)
+    pid=$(head -1 "$lock" 2>/dev/null || echo "")
+
+    # AC3: empty or placeholder PID → skip (clean_stale_locks territory)
+    if [[ -z "$pid" || "$pid" == "pending" ]]; then
+      log "${YELLOW}[CYCLE-ORPHAN] $sid : lock file unreadable PID — skipping, will recheck next interval${NC}"
+      (( skipped++ )) || true
+      continue
+    fi
+    # AC3: non-numeric PID → skip
+    if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+      log "${YELLOW}[CYCLE-ORPHAN] $sid : lock file unreadable PID — skipping, will recheck next interval${NC}"
+      (( skipped++ )) || true
+      continue
+    fi
+
+    # Liveness check
+    if kill -0 "$pid" 2>/dev/null; then
+      continue  # PID alive — not an orphan
+    fi
+
+    # AC3: EPERM guard — process may exist but be owned by another user.
+    # kill -0 returns 1 for both ESRCH (no process) and EPERM (can't signal).
+    # If the process appears in ps, treat as alive (fail-safe).
+    if ps -p "$pid" > /dev/null 2>&1; then
+      log "${YELLOW}[CYCLE-ORPHAN] $sid : kill -0 $pid denied (EPERM?) — treating as alive, skipping${NC}"
+      (( skipped++ )) || true
+      continue
+    fi
+
+    # Dead PID confirmed — remove lock so crash_recovery_scan --only-sid sees no live lock
+    rm -f "$lock" 2>/dev/null || true
+    (( detected++ )) || true
+    log "${CYAN}[CYCLE-ORPHAN] $sid : dead PID $pid detected — invoking recovery classification${NC}"
+
+    # Read story status before recovery (for post-recovery log line)
+    local pre_status
+    pre_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
+
+    local rc=0
+    crash_recovery_scan --only-sid "$sid" || rc=$?
+
+    # AC3: non-zero from recovery scan → log and continue, do not crash daemon
+    if (( rc != 0 )); then
+      log "${YELLOW}[CYCLE-ORPHAN] $sid : recovery scan returned $rc — continuing to next lock${NC}"
+      (( skipped++ )) || true
+      continue
+    fi
+
+    # Post-recovery: read updated status for log line (AC5 line 3)
+    local post_status
+    post_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
+    log "${CYAN}[CYCLE-ORPHAN] $sid : recovery classified as orphan-lock — story status now ${post_status:-unknown}${NC}"
+
+    if [[ "$post_status" == "refined" ]]; then
+      (( reverted++ )) || true
+    elif [[ "$post_status" == "escalated" ]]; then
+      (( escalated++ )) || true
+    else
+      (( skipped++ )) || true
+    fi
+  done
+
+  log "${CYAN}[CYCLE-ORPHAN] scan complete : $detected orphans detected, $reverted reverted, $escalated escalated, $skipped skipped${NC}"
+}
+
 # ── Heartbeat monitoring ─────────────────────────────────────────────────
 # Liveness signal is decoupled from claude -p log output: the wrapper runs a
 # background loop that touches $LOCK_DIR/<sid>.heartbeat every 30s for the
@@ -877,6 +979,11 @@ RSTEOF
 #   phase_status == not_started or empty
 #     → revert refined + retry++
 crash_recovery_scan() {
+  local _only_sid=""
+  if [[ "${1:-}" == "--only-sid" ]]; then
+    _only_sid="${2:-}"
+    shift 2 2>/dev/null || true
+  fi
   local backlog_content
   backlog_content=$(fetch_and_read_backlog)
   [[ -z "$backlog_content" ]] && return 0
@@ -890,6 +997,7 @@ crash_recovery_scan() {
   if [[ -n "$_ip_ids" ]]; then
     while IFS= read -r _ip_sid; do
       [[ -z "$_ip_sid" ]] && continue
+      [[ -n "$_only_sid" && "$_ip_sid" != "$_only_sid" ]] && continue
       local _ip_ps
       _ip_ps=$(backlog_phase_status "$_ip_sid" "$_bl_tmp5" 2>/dev/null || true)
       in_progress_pairs+="${_ip_sid}|${_ip_ps:-}"$'\n'
@@ -1040,12 +1148,6 @@ crash_recovery_scan() {
           increment_retry "$sid"
           ((reverted++))
         fi
-        ;;
-      worktree_recovery_failed)
-        # E160S05: environment problem detected pre-spawn — do not re-launch
-        # operator must inspect worktree + stash, then re-refine if needed
-        log "${YELLOW}[RECOVERY] $sid : phase_status=worktree_recovery_failed — environment problem, not re-launching (operator must resolve)${NC}"
-        ((skipped++))
         ;;
       *)
         log "${RED}[RECOVERY] $sid : unknown phase_status='$ps' — skipping (manual review)${NC}"
@@ -3071,8 +3173,17 @@ crash_recovery_scan || true
 # logs an auto-stop marker and exits 0 cleanly.
 empty_idle_polls=0
 last_recovery_scan_ts=0
+_orphan_scan_tick=0
 
 while true; do
+  # Tick-based cycle orphan-lock scan (E160S02) — runs before clean_stale_locks
+  # so dead-PID locks are detected and recovery invoked at cycle time.
+  _orphan_scan_tick=$(( _orphan_scan_tick + 1 ))
+  if (( _orphan_scan_tick >= ORPHAN_SCAN_INTERVAL_TICKS )); then
+    cycle_orphan_lock_scan || true
+    _orphan_scan_tick=0
+  fi
+
   clean_stale_locks
   check_heartbeats || true
   watch_pr_merge_status || true
@@ -3175,33 +3286,6 @@ while true; do
     fi
 
     increment_retry "$story_id"
-
-    # ── Pre-spawn worktree integrity check (E160S05) ──────────────────────────
-    # Run only when a worktree already exists (resumption path). First-spawn
-    # worktrees don't exist yet — _check_worktree_integrity returns 0 immediately.
-    _wt_pre_path="$(_recovery_resolve_worktree "$story_id")"
-    if [[ -d "$_wt_pre_path" ]] && declare -f _check_worktree_integrity >/dev/null 2>&1; then
-      _check_worktree_integrity "$_wt_pre_path" "$TARGET_BRANCH" "$story_id"
-      _wt_check_rc=$?
-      if [[ "$_wt_check_rc" -ge 1 ]]; then
-        if [[ "$_wt_check_rc" -eq 1 ]] && declare -f _recover_worktree_safe_base >/dev/null 2>&1; then
-          log "${YELLOW}$story_id — worktree corruption suspected, attempting safe-base recovery...${NC}"
-          _recover_worktree_safe_base "$story_id" "$_wt_pre_path" "$TARGET_BRANCH"
-          _wt_check_rc=$?
-        fi
-        if [[ "$_wt_check_rc" -ne 0 ]]; then
-          _wt_recover_type="unrecoverable"
-          [[ "$_wt_check_rc" -eq 1 ]] && _wt_recover_type="conflicts"
-          chore_commit_field "$story_id" phase_status worktree_recovery_failed \
-            "chore($story_id): worktree_recovery_failed [daemon]" 2>/dev/null || true
-          notify_escalation "$story_id" \
-            "worktree_corruption_${_wt_recover_type}" \
-            "Inspect worktree at ${_wt_pre_path}; legitimate commits in stash; manual cherry-pick may be required"
-          continue
-        fi
-        log "${GREEN}$story_id — worktree recovery succeeded, proceeding with spawn${NC}"
-      fi
-    fi
 
     # ── Route: 3phase dispatch OR legacy wrapper ─────────────────────────────
     # Per-story delivery_pipeline takes precedence over cutover default.

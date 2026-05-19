@@ -37,14 +37,6 @@ _resolve_timeout_cmd() {
   fi
 }
 
-# ── Worktree integrity helper (E160S05) ──────────────────────────────────
-# Sourced here so dispatch's handle_commit_phase can run pre-push checks.
-# PROJECT_DIR must be set by caller before sourcing (same requirement as SCHEDULER).
-_DISPATCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[[ -z "${_WORKTREE_INTEGRITY_SH_SOURCED:-}" ]] && \
-  source "${_DISPATCH_SCRIPT_DIR}/lib/worktree-integrity.sh" 2>/dev/null && \
-  _WORKTREE_INTEGRITY_SH_SOURCED=1
-
 # ── Active-spawn marker directory (AC1) ──────────────────────────────────
 # LOCK_DIR is set by delivery-daemon.sh before sourcing this library.
 # Provide a fallback so this library is usable in tests without the full daemon env.
@@ -1733,32 +1725,6 @@ ${qa_snippet}"
     fi
   fi
 
-  # ── Pre-push worktree integrity check (E160S05 AC1) ──────────────────────
-  if declare -f _check_worktree_integrity >/dev/null 2>&1; then
-    _check_worktree_integrity "$worktree_path" "${TARGET_BRANCH:-staging}" "$story_id"
-    _wt_pp_rc=$?
-    if [[ "$_wt_pp_rc" -ge 1 ]]; then
-      if [[ "$_wt_pp_rc" -eq 1 ]] && declare -f _recover_worktree_safe_base >/dev/null 2>&1; then
-        echo "[WARN] ${story_id} handle_commit_phase: corruption suspected pre-push — attempting recovery"
-        _recover_worktree_safe_base "$story_id" "$worktree_path" "${TARGET_BRANCH:-staging}"
-        _wt_pp_rc=$?
-      fi
-      if [[ "$_wt_pp_rc" -ne 0 ]]; then
-        local _rtype="unrecoverable"
-        [[ "$_wt_pp_rc" -eq 1 ]] && _rtype="conflicts"
-        echo "[ERROR] ${story_id} handle_commit_phase: worktree recovery failed (${_rtype}) — aborting push [class=WORKTREE_CORRUPTION]"
-        "$SCHEDULER" --set-phase-status "$story_id" worktree_recovery_failed "$BACKLOG_FILE" 2>/dev/null || true
-        if declare -F notify_escalation_inline >/dev/null 2>&1; then
-          notify_escalation_inline "$story_id" "worktree_corruption_${_rtype}" \
-            "Inspect worktree at ${worktree_path}; manual cherry-pick may be required"
-        fi
-        _emit_commit_routing_record "$story_id" "$trace_id" "error" "WORKTREE_CORRUPTION" "0" "" "false"
-        return 1
-      fi
-      echo "[INFO] ${story_id} handle_commit_phase: worktree recovery succeeded — continuing with push"
-    fi
-  fi
-
   # ── git push with retry-backoff (AC1-iii + AC5-a) ────────────────────────
   # Note : stderr captured (NOT 2>/dev/null) so push errors are diagnosable.
   # Empirical : silent stderr previously hid stalls (auth prompts, network
@@ -2150,7 +2116,7 @@ dispatch_3phase_story() {
       return 0
       ;;
     *)
-      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated done failed escalated worktree_recovery_failed[E160S05-intermediate]"
+      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated done failed escalated"
       _emit_routing_record "$story_id" "$trace_id" "plan" "error" "invalid_phase_status:${ps}"
       return 1
       ;;
