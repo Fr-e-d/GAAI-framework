@@ -284,7 +284,7 @@ else
 fi
 
 if [[ "$T2_INC_RECOVERY" == "false" ]]; then
-  pass "T2: recovery_applicable=false (no E160S05 helper available)"
+  pass "T2: recovery_applicable=false (worktree-recovery helper not available)"
 else
   fail "T2: expected recovery_applicable=false, got '${T2_INC_RECOVERY:-?}'"
 fi

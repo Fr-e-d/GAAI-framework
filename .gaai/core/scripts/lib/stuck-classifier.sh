@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lib/stuck-classifier.sh — structured failure classifier for stuck stories (E160S04)
+# lib/stuck-classifier.sh — structured failure classifier for stuck stories
 #
 # classify_stuck_story <sid> [<current_phase_status>]
 #   Returns:
@@ -158,21 +158,21 @@ classify_stuck_story() {
     class="stale_race_residual"
     recovery_applicable="true"
     auto_action="_recovery_revert_refined"
-    class_rationale="Terminal phase_status '${current_ps}' with status=in_progress and no markers present. E160S01 should have resolved this at-source; classifier is second-layer defense."
+    class_rationale="Terminal phase_status '${current_ps}' with status=in_progress and no markers present. Stale-race resolution should have caught this at-source; classifier is second-layer defense."
 
-  # 2. orphan_lock_classified — E160S02 already handled
+  # 2. orphan_lock_classified — orphan-lock scan already handled
   elif [[ -f "$marker_orphan" ]]; then
     class="orphan_lock_classified"
     recovery_applicable="true"
     auto_action="no_op"
-    class_rationale="E160S02 orphan-classified marker present — S02 already processed this orphan. No additional action needed."
+    class_rationale="Orphan-classified marker present — orphan-lock scan already processed this story. No additional action needed."
 
-  # 3. pnpm_install_failed — E160S03 escalation path owns recovery
+  # 3. pnpm_install_failed — pnpm-guard escalation path owns recovery
   elif [[ "$current_ps" == "commit_failed" ]]; then
     class="pnpm_install_failed"
     recovery_applicable="true"
     auto_action="no_op"
-    class_rationale="phase_status=commit_failed set by E160S03 when pnpm install fails pre-commit. S03 escalation path owns recovery."
+    class_rationale="phase_status=commit_failed set by pnpm-guard when pnpm install fails pre-commit. pnpm-guard escalation path owns recovery."
 
   # 4. worktree_corruption_suspected
   elif (( phantom_deletes > _phantom_threshold )) || \
@@ -189,15 +189,15 @@ classify_stuck_story() {
     fi
     local _s05_available
     _s05_available=$(declare -F _recover_worktree_safe_base >/dev/null 2>&1 && echo yes || echo no)
-    class_rationale="Phantom deletes=${phantom_deletes} (threshold=${_phantom_threshold}) or git fsck error on worktree. E160S05 helper availability: ${_s05_available}."
+    class_rationale="Phantom deletes=${phantom_deletes} (threshold=${_phantom_threshold}) or git fsck error on worktree. worktree-recovery helper availability: ${_s05_available}."
 
-  # 5. qa_failed_orphan — retry cap exhausted per E159S01
+  # 5. qa_failed_orphan — retry cap exhausted by delivery retry-loop
   elif [[ -f "$qa_report" ]] \
        && echo "$log_tail_content" | grep -qE "(retry_cap_exhausted|max_retries.*exceeded|ESCALATE.*retry)" 2>/dev/null; then
     class="qa_failed_orphan"
     recovery_applicable="true"
     auto_action="notify_escalation"
-    class_rationale="qa-report present and log tail contains retry-cap-exhausted signal. E159S01 escalation path owns final disposition."
+    class_rationale="qa-report present and log tail contains retry-cap-exhausted signal. Retry-loop escalation path owns final disposition."
 
   # 6. pr_creation_silent_failure
   elif [[ -f "$deploy_log" ]] && [[ -f "$impl_report" ]] && [[ -f "$qa_report" ]] \
