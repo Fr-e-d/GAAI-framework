@@ -2133,15 +2133,6 @@ _reconcile_yaml_status_on_exit() {
   # Null-guards: all required exports must be set by the wrapper
   [[ -z "${BACKLOG_FILE:-}" || -z "${PROJECT_DIR:-}" || -z "${SCHEDULER:-}" || -z "${LOCK_DIR:-}" ]] && return 0
 
-  # AC1 (E160S01): Create reconcile-in-progress marker before any YAML read or chore-commit.
-  # Daemon's check_stale_in_progress honors this marker to skip staleness verdict during reconcile.
-  # AC3 (E160S01): Fail-safe — if touch fails (disk full, read-only LOCK_DIR), log warning and
-  # proceed without race protection. Degradation = same behavior as before E160S01. No crash.
-  local _rip_marker="${LOCK_DIR}/${story_id}.reconcile-in-progress"
-  if ! touch "$_rip_marker" 2>/dev/null; then
-    echo "[WRAPPER-RECONCILE] $story_id : warning — could not create reconcile-in-progress marker (touch failed) — proceeding without race protection"
-  fi
-
   local phase_status target_status current_status
 
   phase_status=$(get_phase_status "$story_id" 2>/dev/null)
@@ -2190,12 +2181,10 @@ _reconcile_yaml_status_on_exit() {
       qa_escalated) target_status="escalated" ;;
       qa_failed)
         # No-op: retry-loop owns this transition
-        rm -f "$_rip_marker" 2>/dev/null || true
         return 0
         ;;
       *)
         # Unknown or empty phase_status — no-op
-        rm -f "$_rip_marker" 2>/dev/null || true
         return 0
         ;;
     esac
@@ -2222,7 +2211,6 @@ _reconcile_yaml_status_on_exit() {
 
   if [[ "$current_status" == "$target_status" ]]; then
     echo "[WRAPPER-RECONCILE] $story_id : status already $target_status — no-op"
-    rm -f "$_rip_marker" 2>/dev/null || true
     return 0
   fi
 
@@ -2240,14 +2228,12 @@ _reconcile_yaml_status_on_exit() {
     printf '%s|commit|wrapper-reconcile-drift-%s\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" "$story_id" \
       > "$drift_marker" 2>/dev/null || true
-    rm -f "$_rip_marker" 2>/dev/null || true
     return 0
   fi
 
   # Update YAML status field
   if ! "$SCHEDULER" --set-status "$story_id" "$target_status" "$BACKLOG_FILE" 2>/dev/null; then
     echo "[WRAPPER-RECONCILE] $story_id : scheduler --set-status failed — daemon will reconcile"
-    rm -f "$_rip_marker" 2>/dev/null || true
     return 0
   fi
 
@@ -2255,7 +2241,6 @@ _reconcile_yaml_status_on_exit() {
 
   # Idempotent: skip if nothing staged
   if git diff --cached --quiet 2>/dev/null; then
-    rm -f "$_rip_marker" 2>/dev/null || true
     return 0
   fi
 
@@ -2271,7 +2256,6 @@ _reconcile_yaml_status_on_exit() {
 
   if [[ $commit_rc -ne 0 ]]; then
     echo "[WRAPPER-RECONCILE] $story_id : commit failed (rc=$commit_rc) — daemon will reconcile"
-    rm -f "$_rip_marker" 2>/dev/null || true
     return 0
   fi
 
@@ -2287,6 +2271,4 @@ _reconcile_yaml_status_on_exit() {
       rm -f "${LOCK_DIR}/.qa-retries-${story_id}" 2>/dev/null || true
       ;;
   esac
-
-  rm -f "$_rip_marker" 2>/dev/null || true
 }
