@@ -126,6 +126,8 @@ CLAUDE_MODEL="${GAAI_CLAUDE_MODEL:-sonnet}"           # model (sonnet = cost-eff
 HEARTBEAT_STALE="${GAAI_HEARTBEAT_STALE:-1800}"       # 30min no output = stuck (allows long MCP calls like deep research)
 STALENESS_THRESHOLD="${GAAI_STALENESS_THRESHOLD:-}"   # auto-computed below
 RECOVERY_SCAN_INTERVAL="${GAAI_RECOVERY_SCAN_INTERVAL:-$(( POLL_INTERVAL * 10 ))}"
+ORPHAN_SCAN_INTERVAL_TICKS="${GAAI_ORPHAN_SCAN_INTERVAL_TICKS:-10}"
+ORPHAN_SCAN_MAX_DURATION_SEC="${GAAI_ORPHAN_SCAN_MAX_DURATION_SEC:-30}"
 DRY_RUN=false
 STATUS_MODE=false
 
@@ -604,6 +606,108 @@ clean_stale_locks() {
   done
 }
 
+# ── Cycle-time orphan-lock scan (E160S02) ────────────────────────────────
+# Runs every ORPHAN_SCAN_INTERVAL_TICKS poll ticks, BEFORE clean_stale_locks.
+# Iterates ${LOCK_DIR}/*.lock, reads PID from first line, verifies liveness
+# via kill -0. For each dead PID:
+#   1. Removes the lock file (so is_locked() returns false for recovery scan)
+#   2. Invokes crash_recovery_scan --only-sid <sid> (YAML classification + revert)
+# Bridges clean_stale_locks (lock-file removal only) and crash_recovery_scan
+# (YAML-based, startup-plus-periodic) to close the overnight blind window.
+cycle_orphan_lock_scan() {
+  local scan_start_ts lock_count=0 detected=0 reverted=0 escalated=0 skipped=0
+  scan_start_ts=$(date +%s)
+
+  # Collect lock files — handle empty LOCK_DIR silently (AC3)
+  local lock
+  for lock in "$LOCK_DIR"/*.lock; do
+    [[ -f "$lock" ]] || continue
+    (( lock_count++ )) || true
+  done
+  if (( lock_count == 0 )); then
+    return 0
+  fi
+
+  log "${CYAN}[CYCLE-ORPHAN] scanning $lock_count lock files (interval=${ORPHAN_SCAN_INTERVAL_TICKS} ticks)${NC}"
+
+  for lock in "$LOCK_DIR"/*.lock; do
+    [[ -f "$lock" ]] || continue
+
+    # AC4: wall-clock cap
+    local now_ts
+    now_ts=$(date +%s)
+    if (( now_ts - scan_start_ts >= ORPHAN_SCAN_MAX_DURATION_SEC )); then
+      log "${YELLOW}[CYCLE-ORPHAN] scan exceeded ${ORPHAN_SCAN_MAX_DURATION_SEC}s — aborting this cycle, will retry next interval${NC}"
+      break
+    fi
+
+    local sid pid
+    sid=$(basename "$lock" .lock)
+    pid=$(head -1 "$lock" 2>/dev/null || echo "")
+
+    # AC3: empty or placeholder PID → skip (clean_stale_locks territory)
+    if [[ -z "$pid" || "$pid" == "pending" ]]; then
+      log "${YELLOW}[CYCLE-ORPHAN] $sid : lock file unreadable PID — skipping, will recheck next interval${NC}"
+      (( skipped++ )) || true
+      continue
+    fi
+    # AC3: non-numeric PID → skip
+    if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+      log "${YELLOW}[CYCLE-ORPHAN] $sid : lock file unreadable PID — skipping, will recheck next interval${NC}"
+      (( skipped++ )) || true
+      continue
+    fi
+
+    # Liveness check
+    if kill -0 "$pid" 2>/dev/null; then
+      continue  # PID alive — not an orphan
+    fi
+
+    # AC3: EPERM guard — process may exist but be owned by another user.
+    # kill -0 returns 1 for both ESRCH (no process) and EPERM (can't signal).
+    # If the process appears in ps, treat as alive (fail-safe).
+    if ps -p "$pid" > /dev/null 2>&1; then
+      log "${YELLOW}[CYCLE-ORPHAN] $sid : kill -0 $pid denied (EPERM?) — treating as alive, skipping${NC}"
+      (( skipped++ )) || true
+      continue
+    fi
+
+    # Dead PID confirmed — remove lock so crash_recovery_scan --only-sid sees no live lock
+    rm -f "$lock" 2>/dev/null || true
+    (( detected++ )) || true
+    log "${CYAN}[CYCLE-ORPHAN] $sid : dead PID $pid detected — invoking recovery classification${NC}"
+
+    # Read story status before recovery (for post-recovery log line)
+    local pre_status
+    pre_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
+
+    local rc=0
+    crash_recovery_scan --only-sid "$sid" || rc=$?
+
+    # AC3: non-zero from recovery scan → log and continue, do not crash daemon
+    if (( rc != 0 )); then
+      log "${YELLOW}[CYCLE-ORPHAN] $sid : recovery scan returned $rc — continuing to next lock${NC}"
+      (( skipped++ )) || true
+      continue
+    fi
+
+    # Post-recovery: read updated status for log line (AC5 line 3)
+    local post_status
+    post_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
+    log "${CYAN}[CYCLE-ORPHAN] $sid : recovery classified as orphan-lock — story status now ${post_status:-unknown}${NC}"
+
+    if [[ "$post_status" == "refined" ]]; then
+      (( reverted++ )) || true
+    elif [[ "$post_status" == "escalated" ]]; then
+      (( escalated++ )) || true
+    else
+      (( skipped++ )) || true
+    fi
+  done
+
+  log "${CYAN}[CYCLE-ORPHAN] scan complete : $detected orphans detected, $reverted reverted, $escalated escalated, $skipped skipped${NC}"
+}
+
 # ── Heartbeat monitoring ─────────────────────────────────────────────────
 # Liveness signal is decoupled from claude -p log output: the wrapper runs a
 # background loop that touches $LOCK_DIR/<sid>.heartbeat every 30s for the
@@ -796,28 +900,6 @@ check_stale_in_progress() {
         continue
       fi
 
-      # AC2/AC4 (E160S01): Stale-race mutex — check reconcile-in-progress marker written by
-      # wrapper EXIT trap (_reconcile_yaml_status_on_exit). Typical reconcile window = 1-5s;
-      # TTL default 90s = 18× safety margin. Prevents false-positive daemon-staleness verdict
-      # during the narrow window between wrapper terminal phase_status and chore-commit push.
-      local _rip_marker="$LOCK_DIR/${sid}.reconcile-in-progress"
-      local _rip_ttl="${GAAI_RECONCILE_GRACE_SEC:-90}"
-      if [[ -f "$_rip_marker" ]]; then
-        local _rip_mtime=0
-        if [[ "$(uname)" == "Darwin" ]]; then
-          _rip_mtime=$(stat -f %m "$_rip_marker" 2>/dev/null || echo 0)
-        else
-          _rip_mtime=$(stat -c %Y "$_rip_marker" 2>/dev/null || echo 0)
-        fi
-        local _rip_age=$(( now - _rip_mtime ))
-        if (( _rip_age <= _rip_ttl )); then
-          log "[STALE-CHECK] $sid : reconcile-in-progress marker fresh (age=${_rip_age}s, ttl=${_rip_ttl}s) — skipping (will recheck next tick)"
-          continue
-        else
-          log "[STALE-CHECK] $sid : reconcile-in-progress marker stale (age=${_rip_age}s > ttl=${_rip_ttl}s) — proceeding with normal verdict"
-        fi
-      fi
-
       # Mark as failed on staging
       log "${YELLOW}Marking $sid as failed (stale in_progress)...${NC}"
       local reset_script
@@ -897,6 +979,11 @@ RSTEOF
 #   phase_status == not_started or empty
 #     → revert refined + retry++
 crash_recovery_scan() {
+  local _only_sid=""
+  if [[ "${1:-}" == "--only-sid" ]]; then
+    _only_sid="${2:-}"
+    shift 2 2>/dev/null || true
+  fi
   local backlog_content
   backlog_content=$(fetch_and_read_backlog)
   [[ -z "$backlog_content" ]] && return 0
@@ -910,6 +997,7 @@ crash_recovery_scan() {
   if [[ -n "$_ip_ids" ]]; then
     while IFS= read -r _ip_sid; do
       [[ -z "$_ip_sid" ]] && continue
+      [[ -n "$_only_sid" && "$_ip_sid" != "$_only_sid" ]] && continue
       local _ip_ps
       _ip_ps=$(backlog_phase_status "$_ip_sid" "$_bl_tmp5" 2>/dev/null || true)
       in_progress_pairs+="${_ip_sid}|${_ip_ps:-}"$'\n'
@@ -3085,8 +3173,17 @@ crash_recovery_scan || true
 # logs an auto-stop marker and exits 0 cleanly.
 empty_idle_polls=0
 last_recovery_scan_ts=0
+_orphan_scan_tick=0
 
 while true; do
+  # Tick-based cycle orphan-lock scan (E160S02) — runs before clean_stale_locks
+  # so dead-PID locks are detected and recovery invoked at cycle time.
+  _orphan_scan_tick=$(( _orphan_scan_tick + 1 ))
+  if (( _orphan_scan_tick >= ORPHAN_SCAN_INTERVAL_TICKS )); then
+    cycle_orphan_lock_scan || true
+    _orphan_scan_tick=0
+  fi
+
   clean_stale_locks
   check_heartbeats || true
   watch_pr_merge_status || true
