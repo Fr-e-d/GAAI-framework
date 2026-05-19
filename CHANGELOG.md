@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.34.0] - 2026-05-19
 
 ### Changed
+- feat(oss-sync): self-commit .github/ marker + log to eliminate dirty-tree pause (E160S06)
 - fix(daemon-start): stop monitor terminal stealing keyboard focus on restart
 - fix(daemon-dispatch): AC5 workspace_scope guard detects GAAI MCP server presence (not bare .mcp.json existence)
 - chore(daemon-catchup): S10 plan done
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(daemon-dispatch): auto-merge staging_only policy check evaluates TARGET_BRANCH, not story HEAD
 - fix(daemon-monitor): remove 'local' outside function (line 633)
 - fix(daemon): auto-resolve PR conflicts post-create (OSS — E156S07)
+
 
 ## [2.33.0] - 2026-05-15
 
