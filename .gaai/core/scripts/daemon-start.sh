@@ -88,14 +88,15 @@ _print_help() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --start)    ACTION="start";   shift ;;
-    --stop)     ACTION="stop";    shift ;;
-    --status)   ACTION="status";  shift ;;
-    --monitor)  ACTION="status";  shift ;;
-    --restart)  ACTION="restart"; shift ;;
-    --no-drain) NO_DRAIN=true;    shift ;;
-    --help|-h)  _print_help; exit 0 ;;
-    *)          PASSTHROUGH_ARGS+=("$1"); shift ;;
+    --start)      ACTION="start";   shift ;;
+    --stop)       ACTION="stop";    shift ;;
+    --status)     ACTION="status";  shift ;;
+    --monitor)    ACTION="status";  shift ;;
+    --restart)    ACTION="restart"; shift ;;
+    --no-drain)   NO_DRAIN=true;    shift ;;
+    --no-monitor) NO_MONITOR=true;  shift ;;
+    --help|-h)    _print_help; exit 0 ;;
+    *)            PASSTHROUGH_ARGS+=("$1"); shift ;;
   esac
 done
 
@@ -104,14 +105,28 @@ done
 _launch_monitor() {
   local daemon_start_path="$SCRIPT_DIR/daemon-start.sh"
 
+  # Skip auto-launch when the operator has opted out — either by flag
+  # (--no-monitor) or env var (GAAI_DAEMON_NO_MONITOR=1). The default behaviour
+  # auto-opens a Terminal window which steals keyboard focus if the operator
+  # was mid-typing in another app — a real interruption cost for daemon
+  # restarts that happen frequently during dev. Operator can still attach
+  # manually via `bash daemon-start.sh --status` when needed.
+  if [[ "${NO_MONITOR:-}" == "true" || "${GAAI_DAEMON_NO_MONITOR:-}" == "1" ]]; then
+    echo "  Monitor: (auto-launch skipped — bash $daemon_start_path --status to attach manually)"
+    return 0
+  fi
+
   case "$(uname -s)" in
     Darwin)
-      # Uses `open -a Terminal` (LaunchServices) instead of osascript Apple
-      # Events, which requires explicit Automation permission that headless
-      # contexts (like Claude Code) typically lack.
+      # Uses `open -a Terminal -g` (LaunchServices, -g = background, no focus
+      # steal) instead of osascript Apple Events (requires explicit Automation
+      # permission that headless contexts like Claude Code typically lack).
+      # The -g flag is the key fix : without it, the Terminal window jumps to
+      # the foreground on every daemon restart, hijacking the operator's
+      # keyboard if they were typing elsewhere.
       local monitor_cmd="$SCRIPT_DIR/open-monitor.command"
-      open -a Terminal "$monitor_cmd" 2>/dev/null \
-        && echo "  Monitor: opened in new Terminal.app window" \
+      open -g -a Terminal "$monitor_cmd" 2>/dev/null \
+        && echo "  Monitor: opened in new Terminal.app window (background — focus preserved)" \
         || echo "  Monitor: bash $daemon_start_path --status"
       ;;
     *)
