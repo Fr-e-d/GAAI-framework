@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lib/worktree-integrity.sh — worktree corruption detection + safe-base re-fetch
+# lib/worktree-integrity.sh — worktree corruption detection + safe-base re-fetch (E160S05)
 #
 # Sourceable library. Two public functions:
 #   _check_worktree_integrity <worktree_path> <expected_base> [<sid>]
