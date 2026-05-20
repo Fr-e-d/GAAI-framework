@@ -536,6 +536,22 @@ if [[ "$LAUNCHER" == "tmux" ]] && ! command -v tmux &>/dev/null; then
   exit 1
 fi
 
+# ── tmux pipe-pane capability detection ──────────────────────────────────
+TMUX_PIPE_PANE_AVAILABLE=false
+if [[ "$LAUNCHER" == "tmux" ]] && command -v tmux &>/dev/null; then
+  _tmux_ver_raw=$(tmux -V 2>/dev/null || true)
+  _tmux_major=0; _tmux_minor=0
+  if [[ "$_tmux_ver_raw" =~ tmux[[:space:]]+([0-9]+)\.([0-9]+) ]]; then
+    _tmux_major="${BASH_REMATCH[1]}"
+    _tmux_minor="${BASH_REMATCH[2]}"
+  fi
+  if (( _tmux_major > 2 || ( _tmux_major == 2 && _tmux_minor >= 6 ) )); then
+    TMUX_PIPE_PANE_AVAILABLE=true
+  else
+    echo "[WARN] tmux_version_below_pipe_pane_threshold version=${_tmux_ver_raw} required=2.6 — wrapper_output_capture_disabled"
+  fi
+fi
+
 # ── Portable flock wrapper ───────────────────────────────────────────────
 # Uses flock on Linux, mkdir-based atomic lock on macOS
 with_staging_lock() {
@@ -1197,6 +1213,7 @@ crash_recovery_scan() {
     # ── Classify by phase_status ──────────────────────────────────────────
     case "$ps" in
       done)
+        rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
         log "${GREEN}[RECOVERY] $sid : phase_status=done — reconciling YAML status${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=done${NC}"
@@ -1208,6 +1225,7 @@ crash_recovery_scan() {
         fi
         ;;
       failed)
+        rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
         log "${YELLOW}[RECOVERY] $sid : phase_status=failed — reconciling YAML status${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=failed${NC}"
@@ -1219,6 +1237,7 @@ crash_recovery_scan() {
         fi
         ;;
       escalated|qa_escalated)
+        rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
         log "${YELLOW}[RECOVERY] $sid : phase_status=$ps — reconciling YAML status escalated${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=escalated${NC}"
@@ -1229,7 +1248,55 @@ crash_recovery_scan() {
           ((reconciled++))
         fi
         ;;
-      qa_passed|implemented|qa_failed)
+      commit_stalled)
+        log "${YELLOW}[RECOVERY] $sid : phase_status=commit_stalled — skipping relaunch, operator must inspect and reset${NC}"
+        ((skipped++))
+        ;;
+      qa_passed)
+        # Bounded-retry guard: count consecutive deaths where push did not succeed.
+        # Halts relaunch after threshold to prevent silent infinite retry loop.
+        _cd_file="$LOCK_DIR/.commit-deaths-${sid}"
+        _cd_head_file="${_cd_file}.head"
+        _cd_current=$(cat "$_cd_file" 2>/dev/null | tr -d '[:space:]' || echo 0)
+        _cd_current=$(( _cd_current > 1000 ? 1000 : _cd_current ))
+        _cd_head_now=$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null || echo "")
+        _cd_head_prev=$(cat "$_cd_head_file" 2>/dev/null | tr -d '[:space:]' || echo "")
+        if [[ -n "$_cd_head_now" && "$_cd_head_now" == "$_cd_head_prev" ]]; then
+          _cd_new=$(( _cd_current + 1 ))
+          _cd_new=$(( _cd_new > 1000 ? 1000 : _cd_new ))
+          printf '%s\n' "$_cd_new" > "${_cd_file}.tmp" && mv "${_cd_file}.tmp" "$_cd_file" 2>/dev/null || true
+        else
+          _cd_new=1
+          printf '%s\n' "$_cd_new" > "${_cd_file}.tmp" && mv "${_cd_file}.tmp" "$_cd_file" 2>/dev/null || true
+          printf '%s\n' "$_cd_head_now" > "${_cd_head_file}.tmp" && mv "${_cd_head_file}.tmp" "$_cd_head_file" 2>/dev/null || true
+        fi
+        if (( _cd_new >= 3 )); then
+          log "[$(date '+%Y-%m-%dT%H:%M:%SZ')] $sid COMMIT_PHASE_REPEATED_FAILURE deaths=${_cd_new} action=stall_set_commit_stalled"
+          if ! $DRY_RUN; then
+            "$SCHEDULER" --set-phase-status "$sid" commit_stalled "$BACKLOG" 2>/dev/null || true
+            if declare -f notify_escalation_inline >/dev/null 2>&1; then
+              notify_escalation_inline "$sid" "Commit-phase repeated failure — stalled" \
+                "Inspect worktree branch and push manually; then reset phase_status to qa_passed to retry"
+            fi
+          else
+            log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid commit_stalled${NC}"
+          fi
+          rm -f "$_cd_file" "$_cd_head_file" 2>/dev/null || true
+          ((skipped++))
+        else
+          log "${GREEN}[RECOVERY] $sid : phase_status=qa_passed deaths=${_cd_new} — re-launching wrapper${NC}"
+          if $DRY_RUN; then
+            log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
+            ((resumed++))
+            continue
+          fi
+          if _recovery_relaunch "$sid"; then
+            ((resumed++))
+          fi
+        fi
+        ;;
+      implemented|qa_failed)
+        rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
         log "${GREEN}[RECOVERY] $sid : phase_status=$ps — re-launching wrapper to resume${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
@@ -3185,7 +3252,7 @@ while true; do
   # for the YAML lifecycle (operator may still flip top-level status to
   # done/failed) but ARE terminal for this wrapper.
   case "\$_ps" in
-    done|failed|escalated|qa_escalated)
+    done|failed|escalated|qa_escalated|commit_stalled)
       echo "[\$(date '+%H:%M:%S')] $story_id — 3phase loop exit at phase_status='\$_ps'"
       break
       ;;
@@ -3205,6 +3272,19 @@ WRAPPER_EOF
   [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
 
   tmux new-session -d -s "gaai-deliver-${story_id}" "${tmux_env_args[@]}" "$wrapper"
+
+  # Pipe wrapper stdout/stderr to persistent log for post-mortem diagnosis.
+  # Non-fatal: log WARN on failure and continue.
+  if [[ "${TMUX_PIPE_PANE_AVAILABLE:-false}" == "true" ]]; then
+    local _wrapper_log="$LOG_DIR/${story_id}.wrapper.log"
+    local _launch_ps
+    _launch_ps=$(backlog_phase_status "$story_id" "$BACKLOG" 2>/dev/null || echo "")
+    if [[ "${_launch_ps:-}" == "not_started" || -z "${_launch_ps:-}" ]]; then
+      : > "$_wrapper_log" 2>/dev/null || true
+    fi
+    tmux pipe-pane -t "gaai-deliver-${story_id}" -o "cat >> ${_wrapper_log}" 2>/dev/null \
+      || log "[WARN] pipe_pane_failed story=${story_id} — wrapper output capture unavailable"
+  fi
 
   # Brief wait for lock file to appear (wrapper writes its PID)
   local i=0
