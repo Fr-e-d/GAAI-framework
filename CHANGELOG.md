@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- temp: verify oss-refcheck
 - fix(test): use generic ISO dates to satisfy oss-refcheck hook (E160S06)
 
 ## [2.34.0] - 2026-05-19
