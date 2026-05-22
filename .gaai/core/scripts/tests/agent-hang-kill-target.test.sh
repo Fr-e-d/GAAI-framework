@@ -204,14 +204,20 @@ echo "T6: Sidecar present but agent dead → fallback kills wrapper"
 
 T6_SID="HKT-T6"
 
+# Defensive: ensure dirs exist even if prior test had side-effects
+mkdir -p "$LOCK_DIR" "$WORKTREE/.delivery-logs"
+
 sleep 300 &
 T6_WRAPPER_PID=$!
 
 echo "$T6_WRAPPER_PID" > "$LOCK_DIR/${T6_SID}.lock"
 backdate_file "$LOCK_DIR/${T6_SID}.lock" 10
 
-# Write a dead PID to sidecar (no such process)
-echo "99999999" > "$LOCK_DIR/${T6_SID}.agent.pid"
+# Write a dead PID to sidecar: immediately-exiting subshell, collected before write.
+( exit 0 ) &
+_t6_dead=$!
+wait "$_t6_dead" 2>/dev/null || true
+echo "$_t6_dead" > "$LOCK_DIR/${T6_SID}.agent.pid"
 
 touch "$LOCK_DIR/${T6_SID}.heartbeat"
 
@@ -240,6 +246,7 @@ fi
 echo "T7: Kill agent → fifo unblocks → wrapper EXIT trap runs"
 
 T7_SID="HKT-T7"
+mkdir -p "$LOCK_DIR" "$WORKTREE/.delivery-logs"
 T7_FIFO="$TMPDIR_TEST/t7-fifo"
 mkfifo "$T7_FIFO"
 T7_MARKER="$TMPDIR_TEST/t7-exit-trap-ran"
@@ -263,6 +270,7 @@ backdate_file "$LOCK_DIR/${T7_SID}.lock" 10
 echo "$T7_AGENT_PID" > "$LOCK_DIR/${T7_SID}.agent.pid"
 touch "$LOCK_DIR/${T7_SID}.heartbeat"
 
+mkdir -p "$WORKTREE/.delivery-logs"
 echo '{}' > "$WORKTREE/.delivery-logs/${T7_SID}.impl.log"
 backdate_file "$WORKTREE/.delivery-logs/${T7_SID}.impl.log" 10
 
