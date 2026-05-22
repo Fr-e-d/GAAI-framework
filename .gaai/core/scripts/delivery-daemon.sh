@@ -127,6 +127,19 @@ HEARTBEAT_STALE="${GAAI_HEARTBEAT_STALE:-1800}"       # 30min no output = stuck 
 STALENESS_THRESHOLD="${GAAI_STALENESS_THRESHOLD:-}"   # auto-computed below
 AGENT_HANG_THRESHOLD_SEC="${GAAI_AGENT_HANG_THRESHOLD_SEC:-480}"
 if (( AGENT_HANG_THRESHOLD_SEC < 60 )); then AGENT_HANG_THRESHOLD_SEC=60; fi
+# Suspend/resume robustness: a poll cycle whose wall-clock gap exceeds this is
+# treated as a host suspend (or daemon pause), not a normal tick. Liveness
+# detectors (heartbeat staleness, agent-activity staleness) measure
+# now-minus-mtime in wall-clock seconds; after a long suspend those ages are
+# inflated by the suspend duration, not by real inactivity, so killing on them
+# is a false positive. On a detected jump the daemon grants a grace window
+# during which both detectors stand down, letting wrappers prove liveness again.
+SUSPEND_JUMP_THRESHOLD_SEC="${GAAI_SUSPEND_JUMP_THRESHOLD_SEC:-300}"
+if (( SUSPEND_JUMP_THRESHOLD_SEC < 120 )); then SUSPEND_JUMP_THRESHOLD_SEC=120; fi
+POST_RESUME_GRACE_SEC="${GAAI_POST_RESUME_GRACE_SEC:-$AGENT_HANG_THRESHOLD_SEC}"
+# Epoch until which liveness kills are suppressed after a detected time jump.
+# Updated by the main loop; read by check_heartbeats + check_agent_activity_stale.
+SUSPEND_GRACE_UNTIL=0
 RECOVERY_SCAN_INTERVAL="${GAAI_RECOVERY_SCAN_INTERVAL:-$(( POLL_INTERVAL * 10 ))}"
 ORPHAN_SCAN_INTERVAL_TICKS="${GAAI_ORPHAN_SCAN_INTERVAL_TICKS:-10}"
 ORPHAN_SCAN_MAX_DURATION_SEC="${GAAI_ORPHAN_SCAN_MAX_DURATION_SEC:-30}"
@@ -745,6 +758,14 @@ check_heartbeats() {
   local now
   now=$(date +%s)
 
+  # Post-resume grace: after a detected host suspend / daemon pause, heartbeat
+  # mtimes are stale purely because wall-clock advanced during the freeze. The
+  # wrapper's heartbeat loop re-touches within its interval; stand down until
+  # then so we don't SIGTERM a live wrapper on a suspend artifact.
+  if (( now < SUSPEND_GRACE_UNTIL )); then
+    return 0
+  fi
+
   for lock in "$LOCK_DIR"/*.lock; do
     [[ -f "$lock" ]] || continue
     local sid pid
@@ -811,6 +832,14 @@ check_heartbeats() {
 check_agent_activity_stale() {
   local now
   now=$(date +%s)
+
+  # Post-resume grace: after a detected host suspend / daemon pause, impl.log
+  # mtime age is inflated by the freeze duration (the agent was not running),
+  # so the stale-log heuristic would mis-fire. Stand down for the grace window;
+  # a genuinely hung agent is still caught on the next normal cycle.
+  if (( now < SUSPEND_GRACE_UNTIL )); then
+    return 0
+  fi
 
   for lock in "$LOCK_DIR"/*.lock; do
     [[ -f "$lock" ]] || continue
@@ -1552,6 +1581,89 @@ sweep_cleanup_pending() {
   else
     mv "$tmp_remaining" "$marker" 2>/dev/null || rm -f "$tmp_remaining" 2>/dev/null || true
   fi
+}
+
+# Reconciliation sweep: removes worktrees of done+merged stories.
+# Targets the residual gap: story status flips to done at PR-creation time (before the
+# operator merges), so watch_pr_merge_status() no longer tracks it by the time the merge
+# lands. This sweep detects the merge post-hoc via git branch --merged.
+# Idempotent: safe to run N times with the same outcome as once.
+reconcile_done_merged_worktrees() {
+  local done_ids
+  done_ids=$(backlog_ids_by_status done "$BACKLOG" 2>/dev/null || true)
+  [[ -z "$done_ids" ]] && return 0
+
+  local effective_target="${TARGET_BRANCH:-staging}"
+
+  # Fetch origin to keep the merged check current (otherwise at most 1 cycle stale).
+  git -C "$PROJECT_DIR" fetch origin "$effective_target" --quiet 2>/dev/null || true
+
+  while IFS= read -r sid; do
+    [[ -z "$sid" ]] && continue
+
+    local wt_path
+    if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+      wt_path="${GAAI_WORKTREES_BASE}/${sid}-workspace"
+    else
+      local repo_name
+      repo_name=$(basename "$PROJECT_DIR")
+      wt_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
+    fi
+
+    # Skip if worktree directory does not exist (already cleaned — idempotent no-op).
+    [[ -d "$wt_path" ]] || continue
+
+    # Safety guard: never remove PROJECT_DIR itself.
+    local wt_real proj_real
+    wt_real=$(realpath "$wt_path" 2>/dev/null || echo "$wt_path")
+    proj_real=$(realpath "$PROJECT_DIR" 2>/dev/null || echo "$PROJECT_DIR")
+    if [[ "$wt_real" == "$proj_real" ]]; then
+      log "[RECONCILE-SWEEP] $sid: skipped:safety-guard path=$wt_path (resolved to PROJECT_DIR)"
+      continue
+    fi
+
+    # Merged signal: story/sid branch must be an ancestor of origin/$effective_target.
+    local branch_name="story/$sid"
+    local is_merged
+    is_merged=$(git -C "$PROJECT_DIR" branch --merged "origin/${effective_target}" \
+                    --list "$branch_name" 2>/dev/null || echo "")
+    if [[ -z "$is_merged" ]]; then
+      log "[RECONCILE-SWEEP] $sid: skipped:unmerged path=$wt_path (${branch_name} not in --merged origin/${effective_target})"
+      continue
+    fi
+
+    # Dirty check: do NOT remove if any modification is present (AC2 — data safety).
+    local porcelain_out git_status_rc
+    porcelain_out=$(git -C "$wt_path" status --porcelain 2>/dev/null)
+    git_status_rc=$?
+    if [[ $git_status_rc -ne 0 ]]; then
+      log "[WARN][RECONCILE-SWEEP] $sid: skipped:dirty path=$wt_path (git status failed rc=$git_status_rc — safe)"
+      continue
+    fi
+    if [[ -n "$porcelain_out" ]]; then
+      log "[WARN][RECONCILE-SWEEP] $sid: skipped:dirty path=$wt_path — worktree has uncommitted/untracked content:"
+      local _line_count=0
+      while IFS= read -r _dirty_line && (( _line_count < 5 )); do
+        log "  [RECONCILE-SWEEP]   ${_dirty_line}"
+        (( _line_count++ )) || true
+      done <<< "$porcelain_out"
+      continue
+    fi
+
+    # Remove the worktree (AC1). --force required: branch still exists in git's ref store.
+    if git -C "$PROJECT_DIR" worktree remove --force "$wt_path" 2>/dev/null; then
+      log "[INFO][RECONCILE-SWEEP] $sid: removed path=$wt_path (done+merged into ${effective_target}, clean)"
+      # AC4: update pr_status=merged for audit-attribution closure (best-effort).
+      chore_commit_field "$sid" pr_status merged \
+        "chore($sid): pr_status=merged [reconcile-sweep]" 2>/dev/null \
+        || log "[WARN][RECONCILE-SWEEP] $sid: pr_status update skipped (chore-commit unavailable/drift)"
+    else
+      log "[WARN][RECONCILE-SWEEP] $sid: remove failed path=$wt_path (git lock contention?) — will retry next cycle"
+    fi
+
+  done <<< "$done_ids"
+
+  git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
 }
 
 # PR merge watcher — polls GitHub for merged PRs on every daemon cycle.
@@ -2468,39 +2580,6 @@ node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
 # Strip YAML frontmatter (--+\n...\n--+) — claude -p treats leading dashes as a CLI option
 DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
-# ── Mint binding JWT for X-GAAI-Authorized-Workspaces header ────────────────
-_gaai_mint_binding_jwt() {
-  local workspace_id="\$1"
-  if [[ -z "\${GAAI_CLOUD_URL:-}" || -z "\${GAAI_CLOUD_TOKEN:-}" ]]; then
-    echo "[gaai-daemon] GAAI_CLOUD_URL or GAAI_CLOUD_TOKEN not set — spawning without binding JWT" >&2
-    echo ""
-    return 0
-  fi
-  local response
-  response=\$(curl -s -X POST "\${GAAI_CLOUD_URL}/api/mcp-binding" \
-    -H "Authorization: Bearer \${GAAI_CLOUD_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "{\"workspace_ids\":[\"\\${workspace_id}\"]}" \
-    --max-time 10 2>/dev/null) || true
-  local jwt
-  jwt=\$(echo "\${response}" | grep -o '"binding_jwt":"[^"]*"' | cut -d'"' -f4 2>/dev/null || true)
-  if [[ "\${jwt}" == *'"'* ]]; then
-    echo "[gaai-daemon] binding JWT contains unexpected character — rejecting" >&2
-    echo ""; return 0
-  fi
-  if [[ -z "\${jwt}" ]]; then
-    echo "[gaai-daemon] binding JWT mint failed — spawning without JWT" >&2
-    echo ""; return 0
-  fi
-  echo "\${jwt}"
-}
-
-_BINDING_JWT=\$(_gaai_mint_binding_jwt "\${GAAI_WORKSPACE_ID:-}")
-_MCP_HEADER_ARGS=()
-if [[ -n "\${_BINDING_JWT}" ]]; then
-  _MCP_HEADER_ARGS=(--header "X-GAAI-Authorized-Workspaces:\${_BINDING_JWT}")
-fi
-
 # --output-format stream-json streams NDJSON events in real-time, so:
 #   - tee updates the log file continuously (natural heartbeat for daemon monitor)
 #   - tail -f shows progress in real-time
@@ -2511,7 +2590,7 @@ if command -v gtimeout &>/dev/null; then
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
+  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -2522,7 +2601,7 @@ elif command -v timeout &>/dev/null; then
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
+  timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -2533,7 +2612,7 @@ else
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
+  claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -3086,39 +3165,6 @@ node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
 # See: https://code.claude.com/docs/en/headless
 DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
-# ── Mint binding JWT for X-GAAI-Authorized-Workspaces header ────────────────
-_gaai_mint_binding_jwt() {
-  local workspace_id="\$1"
-  if [[ -z "\${GAAI_CLOUD_URL:-}" || -z "\${GAAI_CLOUD_TOKEN:-}" ]]; then
-    echo "[gaai-daemon] GAAI_CLOUD_URL or GAAI_CLOUD_TOKEN not set — spawning without binding JWT" >&2
-    echo ""
-    return 0
-  fi
-  local response
-  response=\$(curl -s -X POST "\${GAAI_CLOUD_URL}/api/mcp-binding" \
-    -H "Authorization: Bearer \${GAAI_CLOUD_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "{\"workspace_ids\":[\"\\${workspace_id}\"]}" \
-    --max-time 10 2>/dev/null) || true
-  local jwt
-  jwt=\$(echo "\${response}" | grep -o '"binding_jwt":"[^"]*"' | cut -d'"' -f4 2>/dev/null || true)
-  if [[ "\${jwt}" == *'"'* ]]; then
-    echo "[gaai-daemon] binding JWT contains unexpected character — rejecting" >&2
-    echo ""; return 0
-  fi
-  if [[ -z "\${jwt}" ]]; then
-    echo "[gaai-daemon] binding JWT mint failed — spawning without JWT" >&2
-    echo ""; return 0
-  fi
-  echo "\${jwt}"
-}
-
-_BINDING_JWT=\$(_gaai_mint_binding_jwt "\${GAAI_WORKSPACE_ID:-}")
-_MCP_HEADER_ARGS=()
-if [[ -n "\${_BINDING_JWT}" ]]; then
-  _MCP_HEADER_ARGS=(--header "X-GAAI-Authorized-Workspaces:\${_BINDING_JWT}")
-fi
-
 # Print mode (-p): claude processes the prompt and exits, freeing the daemon slot.
 # --dangerously-skip-permissions handles tool approval (required for headless).
 # --output-format stream-json streams NDJSON events in real-time, so:
@@ -3132,7 +3178,7 @@ if command -v gtimeout &>/dev/null; then
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
+  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -3143,7 +3189,7 @@ else
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
+  claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -3460,8 +3506,23 @@ crash_recovery_scan || true
 empty_idle_polls=0
 last_recovery_scan_ts=0
 _orphan_scan_tick=0
+_last_loop_ts=$(date +%s)
 
 while true; do
+  # Suspend/resume detection: a normal iteration spans roughly POLL_INTERVAL
+  # plus a few seconds of work. A gap far larger than that means the host was
+  # suspended (laptop sleep) or the daemon process was paused. When that
+  # happens, grant a grace window during which the liveness detectors stand
+  # down — their now-minus-mtime ages are inflated by the freeze, not by real
+  # inactivity, so killing on them would terminate healthy in-flight wrappers.
+  _loop_now=$(date +%s)
+  _loop_gap=$(( _loop_now - _last_loop_ts ))
+  if (( _loop_gap > SUSPEND_JUMP_THRESHOLD_SEC )); then
+    SUSPEND_GRACE_UNTIL=$(( _loop_now + POST_RESUME_GRACE_SEC ))
+    log "${YELLOW}[SUSPEND_DETECTED] poll gap ${_loop_gap}s > ${SUSPEND_JUMP_THRESHOLD_SEC}s (host suspend or daemon pause) — liveness kills suppressed for ${POST_RESUME_GRACE_SEC}s${NC}"
+  fi
+  _last_loop_ts=$_loop_now
+
   # Tick-based cycle orphan-lock scan — runs before clean_stale_locks
   # so dead-PID locks are detected and recovery invoked at cycle time.
   _orphan_scan_tick=$(( _orphan_scan_tick + 1 ))
@@ -3657,6 +3718,12 @@ while true; do
   # `git worktree prune` only removes entries whose directory is gone — it
   # never deletes a live worktree. Cheap, safe, runs once per cycle.
   git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
+
+  # ── Reconciliation sweep: remove worktrees of done+merged stories ─────────
+  # Complements watch_pr_merge_status(): that watcher only tracks in_progress
+  # stories; by the time a manual merge lands, the story is already done.
+  # This sweep detects integrated worktrees post-hoc via git branch --merged.
+  reconcile_done_merged_worktrees || true
 
   sleep "$POLL_INTERVAL"
 done
