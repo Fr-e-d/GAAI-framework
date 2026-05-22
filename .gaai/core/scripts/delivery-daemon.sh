@@ -909,23 +909,38 @@ check_agent_activity_stale() {
     local log_size=0
     log_size=$(wc -c < "$impl_log" 2>/dev/null | tr -d ' ' || echo 0)
 
-    log "${RED}[AGENT_HANG_DETECTED] $sid — log-mtime stale ($(( log_age / 60 ))min) heartbeat-fresh ($(( hb_age / 60 ))min) — SIGTERM PID $pid${NC}"
+    # AC2 (E160S11): prefer killing agent subprocess over wrapper.
+    # Sidecar written by daemon-dispatch.sh at agent spawn time.
+    # Fallback: kill wrapper if sidecar absent or agent already dead.
+    local _agent_pid_sidecar="$LOCK_DIR/${sid}.agent.pid"
+    local _kill_pid="$pid"
+    local _pid_kind="wrapper"
+    if [[ -f "$_agent_pid_sidecar" ]]; then
+      local _agent_pid
+      _agent_pid=$(head -1 "$_agent_pid_sidecar" 2>/dev/null || echo "")
+      if [[ -n "$_agent_pid" ]] && kill -0 "$_agent_pid" 2>/dev/null; then
+        _kill_pid="$_agent_pid"
+        _pid_kind="agent"
+      fi
+    fi
 
-    # AC4: append JSON audit record
+    log "${RED}[AGENT_HANG_DETECTED] $sid — log-mtime stale ($(( log_age / 60 ))min) heartbeat-fresh ($(( hb_age / 60 ))min) — SIGTERM ${_pid_kind} PID ${_kill_pid}${NC}"
+
+    # AC4 (E160S11): extend audit with kill_pid + pid_kind
     local _audit_ts
     _audit_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    printf '{"event":"agent_hang_detected","ts":"%s","story_id":"%s","wrapper_pid":%s,"log_mtime_age_sec":%s,"heartbeat_age_sec":%s,"last_log_size_bytes":%s}\n' \
-      "$_audit_ts" "$sid" "$pid" "$log_age" "$hb_age" "$log_size" \
+    printf '{"event":"agent_hang_detected","ts":"%s","story_id":"%s","wrapper_pid":%s,"kill_pid":%s,"pid_kind":"%s","log_mtime_age_sec":%s,"heartbeat_age_sec":%s,"last_log_size_bytes":%s}\n' \
+      "$_audit_ts" "$sid" "$pid" "$_kill_pid" "$_pid_kind" "$log_age" "$hb_age" "$log_size" \
       >> "$AGENT_HANG_AUDIT" 2>/dev/null || true
 
     # Write hang marker so AGENT_HANG_RESOLVED can be emitted on recovery
     touch "$hang_marker" 2>/dev/null || true
 
-    kill -TERM "$pid" 2>/dev/null || true
+    kill -TERM "$_kill_pid" 2>/dev/null || true
     sleep 30
-    if kill -0 "$pid" 2>/dev/null; then
-      log "${RED}[AGENT_HANG_SIGKILL] $sid PID $pid did not respond to SIGTERM${NC}"
-      kill -KILL "$pid" 2>/dev/null || true
+    if kill -0 "$_kill_pid" 2>/dev/null; then
+      log "${RED}[AGENT_HANG_SIGKILL] $sid ${_pid_kind} PID ${_kill_pid} did not respond to SIGTERM${NC}"
+      kill -KILL "$_kill_pid" 2>/dev/null || true
     fi
   done
 }
@@ -1581,89 +1596,6 @@ sweep_cleanup_pending() {
   else
     mv "$tmp_remaining" "$marker" 2>/dev/null || rm -f "$tmp_remaining" 2>/dev/null || true
   fi
-}
-
-# Reconciliation sweep: removes worktrees of done+merged stories.
-# Targets the residual gap: story status flips to done at PR-creation time (before the
-# operator merges), so watch_pr_merge_status() no longer tracks it by the time the merge
-# lands. This sweep detects the merge post-hoc via git branch --merged.
-# Idempotent: safe to run N times with the same outcome as once.
-reconcile_done_merged_worktrees() {
-  local done_ids
-  done_ids=$(backlog_ids_by_status done "$BACKLOG" 2>/dev/null || true)
-  [[ -z "$done_ids" ]] && return 0
-
-  local effective_target="${TARGET_BRANCH:-staging}"
-
-  # Fetch origin to keep the merged check current (otherwise at most 1 cycle stale).
-  git -C "$PROJECT_DIR" fetch origin "$effective_target" --quiet 2>/dev/null || true
-
-  while IFS= read -r sid; do
-    [[ -z "$sid" ]] && continue
-
-    local wt_path
-    if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
-      wt_path="${GAAI_WORKTREES_BASE}/${sid}-workspace"
-    else
-      local repo_name
-      repo_name=$(basename "$PROJECT_DIR")
-      wt_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
-    fi
-
-    # Skip if worktree directory does not exist (already cleaned — idempotent no-op).
-    [[ -d "$wt_path" ]] || continue
-
-    # Safety guard: never remove PROJECT_DIR itself.
-    local wt_real proj_real
-    wt_real=$(realpath "$wt_path" 2>/dev/null || echo "$wt_path")
-    proj_real=$(realpath "$PROJECT_DIR" 2>/dev/null || echo "$PROJECT_DIR")
-    if [[ "$wt_real" == "$proj_real" ]]; then
-      log "[RECONCILE-SWEEP] $sid: skipped:safety-guard path=$wt_path (resolved to PROJECT_DIR)"
-      continue
-    fi
-
-    # Merged signal: story/sid branch must be an ancestor of origin/$effective_target.
-    local branch_name="story/$sid"
-    local is_merged
-    is_merged=$(git -C "$PROJECT_DIR" branch --merged "origin/${effective_target}" \
-                    --list "$branch_name" 2>/dev/null || echo "")
-    if [[ -z "$is_merged" ]]; then
-      log "[RECONCILE-SWEEP] $sid: skipped:unmerged path=$wt_path (${branch_name} not in --merged origin/${effective_target})"
-      continue
-    fi
-
-    # Dirty check: do NOT remove if any modification is present (AC2 — data safety).
-    local porcelain_out git_status_rc
-    porcelain_out=$(git -C "$wt_path" status --porcelain 2>/dev/null)
-    git_status_rc=$?
-    if [[ $git_status_rc -ne 0 ]]; then
-      log "[WARN][RECONCILE-SWEEP] $sid: skipped:dirty path=$wt_path (git status failed rc=$git_status_rc — safe)"
-      continue
-    fi
-    if [[ -n "$porcelain_out" ]]; then
-      log "[WARN][RECONCILE-SWEEP] $sid: skipped:dirty path=$wt_path — worktree has uncommitted/untracked content:"
-      local _line_count=0
-      while IFS= read -r _dirty_line && (( _line_count < 5 )); do
-        log "  [RECONCILE-SWEEP]   ${_dirty_line}"
-        (( _line_count++ )) || true
-      done <<< "$porcelain_out"
-      continue
-    fi
-
-    # Remove the worktree (AC1). --force required: branch still exists in git's ref store.
-    if git -C "$PROJECT_DIR" worktree remove --force "$wt_path" 2>/dev/null; then
-      log "[INFO][RECONCILE-SWEEP] $sid: removed path=$wt_path (done+merged into ${effective_target}, clean)"
-      # AC4: update pr_status=merged for audit-attribution closure (best-effort).
-      chore_commit_field "$sid" pr_status merged \
-        "chore($sid): pr_status=merged [reconcile-sweep]" 2>/dev/null \
-        || log "[WARN][RECONCILE-SWEEP] $sid: pr_status update skipped (chore-commit unavailable/drift)"
-    else
-      log "[WARN][RECONCILE-SWEEP] $sid: remove failed path=$wt_path (git lock contention?) — will retry next cycle"
-    fi
-
-  done <<< "$done_ids"
-
-  git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
 }
 
 # PR merge watcher — polls GitHub for merged PRs on every daemon cycle.
@@ -3718,12 +3650,6 @@ while true; do
   # `git worktree prune` only removes entries whose directory is gone — it
   # never deletes a live worktree. Cheap, safe, runs once per cycle.
   git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
-
-  # ── Reconciliation sweep: remove worktrees of done+merged stories ─────────
-  # Complements watch_pr_merge_status(): that watcher only tracks in_progress
-  # stories; by the time a manual merge lands, the story is already done.
-  # This sweep detects integrated worktrees post-hoc via git branch --merged.
-  reconcile_done_merged_worktrees || true
 
   sleep "$POLL_INTERVAL"
 done
