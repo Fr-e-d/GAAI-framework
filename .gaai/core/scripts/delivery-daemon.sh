@@ -2468,11 +2468,11 @@ node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
 # Strip YAML frontmatter (--+\n...\n--+) — claude -p treats leading dashes as a CLI option
 DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
-# ── DEC-111 §1: Mint binding JWT for X-GAAI-Authorized-Workspaces header ────
+# ── Mint binding JWT for X-GAAI-Authorized-Workspaces header ────────────────
 _gaai_mint_binding_jwt() {
   local workspace_id="\$1"
   if [[ -z "\${GAAI_CLOUD_URL:-}" || -z "\${GAAI_CLOUD_TOKEN:-}" ]]; then
-    echo "[DEC-111] GAAI_CLOUD_URL or GAAI_CLOUD_TOKEN not set — spawning without binding JWT" >&2
+    echo "[gaai-daemon] GAAI_CLOUD_URL or GAAI_CLOUD_TOKEN not set — spawning without binding JWT" >&2
     echo ""
     return 0
   fi
@@ -2485,11 +2485,11 @@ _gaai_mint_binding_jwt() {
   local jwt
   jwt=\$(echo "\${response}" | grep -o '"binding_jwt":"[^"]*"' | cut -d'"' -f4 2>/dev/null || true)
   if [[ "\${jwt}" == *'"'* ]]; then
-    echo "[DEC-111] binding JWT contains unexpected character — rejecting" >&2
+    echo "[gaai-daemon] binding JWT contains unexpected character — rejecting" >&2
     echo ""; return 0
   fi
   if [[ -z "\${jwt}" ]]; then
-    echo "[DEC-111] binding JWT mint failed — spawning without JWT" >&2
+    echo "[gaai-daemon] binding JWT mint failed — spawning without JWT" >&2
     echo ""; return 0
   fi
   echo "\${jwt}"
@@ -3086,11 +3086,11 @@ node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
 # See: https://code.claude.com/docs/en/headless
 DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
-# ── DEC-111 §1: Mint binding JWT for X-GAAI-Authorized-Workspaces header ────
+# ── Mint binding JWT for X-GAAI-Authorized-Workspaces header ────────────────
 _gaai_mint_binding_jwt() {
   local workspace_id="\$1"
   if [[ -z "\${GAAI_CLOUD_URL:-}" || -z "\${GAAI_CLOUD_TOKEN:-}" ]]; then
-    echo "[DEC-111] GAAI_CLOUD_URL or GAAI_CLOUD_TOKEN not set — spawning without binding JWT" >&2
+    echo "[gaai-daemon] GAAI_CLOUD_URL or GAAI_CLOUD_TOKEN not set — spawning without binding JWT" >&2
     echo ""
     return 0
   fi
@@ -3103,11 +3103,11 @@ _gaai_mint_binding_jwt() {
   local jwt
   jwt=\$(echo "\${response}" | grep -o '"binding_jwt":"[^"]*"' | cut -d'"' -f4 2>/dev/null || true)
   if [[ "\${jwt}" == *'"'* ]]; then
-    echo "[DEC-111] binding JWT contains unexpected character — rejecting" >&2
+    echo "[gaai-daemon] binding JWT contains unexpected character — rejecting" >&2
     echo ""; return 0
   fi
   if [[ -z "\${jwt}" ]]; then
-    echo "[DEC-111] binding JWT mint failed — spawning without JWT" >&2
+    echo "[gaai-daemon] binding JWT mint failed — spawning without JWT" >&2
     echo ""; return 0
   fi
   echo "\${jwt}"
