@@ -127,6 +127,19 @@ HEARTBEAT_STALE="${GAAI_HEARTBEAT_STALE:-1800}"       # 30min no output = stuck 
 STALENESS_THRESHOLD="${GAAI_STALENESS_THRESHOLD:-}"   # auto-computed below
 AGENT_HANG_THRESHOLD_SEC="${GAAI_AGENT_HANG_THRESHOLD_SEC:-480}"
 if (( AGENT_HANG_THRESHOLD_SEC < 60 )); then AGENT_HANG_THRESHOLD_SEC=60; fi
+# Suspend/resume robustness: a poll cycle whose wall-clock gap exceeds this is
+# treated as a host suspend (or daemon pause), not a normal tick. Liveness
+# detectors (heartbeat staleness, agent-activity staleness) measure
+# now-minus-mtime in wall-clock seconds; after a long suspend those ages are
+# inflated by the suspend duration, not by real inactivity, so killing on them
+# is a false positive. On a detected jump the daemon grants a grace window
+# during which both detectors stand down, letting wrappers prove liveness again.
+SUSPEND_JUMP_THRESHOLD_SEC="${GAAI_SUSPEND_JUMP_THRESHOLD_SEC:-300}"
+if (( SUSPEND_JUMP_THRESHOLD_SEC < 120 )); then SUSPEND_JUMP_THRESHOLD_SEC=120; fi
+POST_RESUME_GRACE_SEC="${GAAI_POST_RESUME_GRACE_SEC:-$AGENT_HANG_THRESHOLD_SEC}"
+# Epoch until which liveness kills are suppressed after a detected time jump.
+# Updated by the main loop; read by check_heartbeats + check_agent_activity_stale.
+SUSPEND_GRACE_UNTIL=0
 RECOVERY_SCAN_INTERVAL="${GAAI_RECOVERY_SCAN_INTERVAL:-$(( POLL_INTERVAL * 10 ))}"
 ORPHAN_SCAN_INTERVAL_TICKS="${GAAI_ORPHAN_SCAN_INTERVAL_TICKS:-10}"
 ORPHAN_SCAN_MAX_DURATION_SEC="${GAAI_ORPHAN_SCAN_MAX_DURATION_SEC:-30}"
@@ -745,6 +758,14 @@ check_heartbeats() {
   local now
   now=$(date +%s)
 
+  # Post-resume grace: after a detected host suspend / daemon pause, heartbeat
+  # mtimes are stale purely because wall-clock advanced during the freeze. The
+  # wrapper's heartbeat loop re-touches within its interval; stand down until
+  # then so we don't SIGTERM a live wrapper on a suspend artifact.
+  if (( now < SUSPEND_GRACE_UNTIL )); then
+    return 0
+  fi
+
   for lock in "$LOCK_DIR"/*.lock; do
     [[ -f "$lock" ]] || continue
     local sid pid
@@ -811,6 +832,14 @@ check_heartbeats() {
 check_agent_activity_stale() {
   local now
   now=$(date +%s)
+
+  # Post-resume grace: after a detected host suspend / daemon pause, impl.log
+  # mtime age is inflated by the freeze duration (the agent was not running),
+  # so the stale-log heuristic would mis-fire. Stand down for the grace window;
+  # a genuinely hung agent is still caught on the next normal cycle.
+  if (( now < SUSPEND_GRACE_UNTIL )); then
+    return 0
+  fi
 
   for lock in "$LOCK_DIR"/*.lock; do
     [[ -f "$lock" ]] || continue
@@ -3394,8 +3423,23 @@ crash_recovery_scan || true
 empty_idle_polls=0
 last_recovery_scan_ts=0
 _orphan_scan_tick=0
+_last_loop_ts=$(date +%s)
 
 while true; do
+  # Suspend/resume detection: a normal iteration spans roughly POLL_INTERVAL
+  # plus a few seconds of work. A gap far larger than that means the host was
+  # suspended (laptop sleep) or the daemon process was paused. When that
+  # happens, grant a grace window during which the liveness detectors stand
+  # down — their now-minus-mtime ages are inflated by the freeze, not by real
+  # inactivity, so killing on them would terminate healthy in-flight wrappers.
+  _loop_now=$(date +%s)
+  _loop_gap=$(( _loop_now - _last_loop_ts ))
+  if (( _loop_gap > SUSPEND_JUMP_THRESHOLD_SEC )); then
+    SUSPEND_GRACE_UNTIL=$(( _loop_now + POST_RESUME_GRACE_SEC ))
+    log "${YELLOW}[SUSPEND_DETECTED] poll gap ${_loop_gap}s > ${SUSPEND_JUMP_THRESHOLD_SEC}s (host suspend or daemon pause) — liveness kills suppressed for ${POST_RESUME_GRACE_SEC}s${NC}"
+  fi
+  _last_loop_ts=$_loop_now
+
   # Tick-based cycle orphan-lock scan — runs before clean_stale_locks
   # so dead-PID locks are detected and recovery invoked at cycle time.
   _orphan_scan_tick=$(( _orphan_scan_tick + 1 ))
