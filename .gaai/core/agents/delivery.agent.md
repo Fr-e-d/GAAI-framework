@@ -43,6 +43,28 @@ If an action requires writing code or producing a plan, it belongs to a sub-agen
 
 ---
 
+## OSS Substrate Phrasing Rule
+
+Files under the OSS framework substrate (`.gaai/core/`) MUST use generic phrasing.
+No project IDs, no operator names, no concrete dates, no SHAs.
+Preserve the WHY (design intent) — drop the WHEN, WHO, and WHERE.
+
+**Why this matters:** `.gaai/core/` is auto-synced to the public OSS repository via
+the post-commit hook. Any project-specific reference in a newly-added line becomes part
+of public OSS history — a public-exposure event, not a style preference.
+
+**Example pair:**
+
+| | Comment text |
+|---|---|
+| Non-compliant | `# composes with <E{epic}S{seq}> stale-race guard` |
+| Compliant | `# guards against stale-phase race` |
+
+The pre-push hook enforces this reactively. Writing generic phrasing on the first try
+avoids a blocked push, a silent wrapper restart, and manual rephrase overhead.
+
+---
+
 ## Execution Behavior
 
 ### Story Selection (Non-Negotiable)
