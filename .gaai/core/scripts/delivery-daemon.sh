@@ -1583,7 +1583,7 @@ sweep_cleanup_pending() {
   fi
 }
 
-# Reconciliation sweep: removes worktrees of done+merged stories (E160S10, AC1-AC5).
+# Reconciliation sweep: removes worktrees of done+merged stories.
 # Targets the residual gap: story status flips to done at PR-creation time (before the
 # operator merges), so watch_pr_merge_status() no longer tracks it by the time the merge
 # lands. This sweep detects the merge post-hoc via git branch --merged.
@@ -3722,7 +3722,7 @@ while true; do
   # ── Reconciliation sweep: remove worktrees of done+merged stories ─────────
   # Complements watch_pr_merge_status(): that watcher only tracks in_progress
   # stories; by the time a manual merge lands, the story is already done.
-  # This sweep detects integrated worktrees post-hoc (E160S10, AC1-AC5).
+  # This sweep detects integrated worktrees post-hoc via git branch --merged.
   reconcile_done_merged_worktrees || true
 
   sleep "$POLL_INTERVAL"
