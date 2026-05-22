@@ -237,8 +237,8 @@ _run_claude_with_loop_breaker() {
   ( cd "$worktree_path" && exec claude -p "$@" < "$prompt_file" > "$fifo" 2>&1 ) &
   local claude_pid=$!
 
-  # AC1 (E160S11): write agent subprocess PID sidecar so the daemon hang-detector
-  # can kill the agent instead of the wrapper, letting the wrapper's EXIT trap run.
+  # Write agent subprocess PID sidecar so the daemon hang-detector can kill the
+  # agent instead of the wrapper, letting the wrapper's EXIT trap run cleanly.
   local _agent_pid_file
   _agent_pid_file="$(_marker_dir)/${story_id}.agent.pid"
   echo "$claude_pid" > "$_agent_pid_file" 2>/dev/null || true

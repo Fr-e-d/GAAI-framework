@@ -909,8 +909,9 @@ check_agent_activity_stale() {
     local log_size=0
     log_size=$(wc -c < "$impl_log" 2>/dev/null | tr -d ' ' || echo 0)
 
-    # AC2 (E160S11): prefer killing agent subprocess over wrapper.
-    # Sidecar written by daemon-dispatch.sh at agent spawn time.
+    # Prefer killing agent subprocess over wrapper: killing the agent closes the
+    # fifo write-end, unblocking the wrapper's read loop so its EXIT reconcile
+    # trap runs. Sidecar written by daemon-dispatch.sh at agent spawn time.
     # Fallback: kill wrapper if sidecar absent or agent already dead.
     local _agent_pid_sidecar="$LOCK_DIR/${sid}.agent.pid"
     local _kill_pid="$pid"
@@ -926,7 +927,7 @@ check_agent_activity_stale() {
 
     log "${RED}[AGENT_HANG_DETECTED] $sid — log-mtime stale ($(( log_age / 60 ))min) heartbeat-fresh ($(( hb_age / 60 ))min) — SIGTERM ${_pid_kind} PID ${_kill_pid}${NC}"
 
-    # AC4 (E160S11): extend audit with kill_pid + pid_kind
+    # Extend audit record with kill_pid + pid_kind (additive — existing consumers unaffected)
     local _audit_ts
     _audit_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     printf '{"event":"agent_hang_detected","ts":"%s","story_id":"%s","wrapper_pid":%s,"kill_pid":%s,"pid_kind":"%s","log_mtime_age_sec":%s,"heartbeat_age_sec":%s,"last_log_size_bytes":%s}\n' \
