@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(daemon): extend suspend-grace to check_stale_in_progress (close gap from 00d6c444)
 - fix(E163S02b): remove project-private refs from delivery-daemon.sh for OSS sync
 
 ## [2.35.0] - 2026-05-23
