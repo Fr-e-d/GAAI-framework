@@ -2319,10 +2319,7 @@ dispatch_3phase_story() {
         rm -f "$_qa_retry_file" 2>/dev/null || true
         # Cross-cycle outcome metric — emit when escalated after cross-cycle route
         if [[ -n "${GAAI_QA_INJECT_PHASE_SNAPSHOT:-}" ]]; then
-          local _cc_cycle_n=0
-          if [[ -f "${LOCK_DIR}/.qa-retries-${story_id}" ]]; then
-            _cc_cycle_n=$(cat "${LOCK_DIR}/.qa-retries-${story_id}" 2>/dev/null || echo 0)
-          fi
+          local _cc_cycle_n=${_qa_retry_count:-0}
           local _cc_outcome_json="{\"sid\":\"${story_id}\",\"cycle_n\":${_cc_cycle_n},\"routed_phase\":\"${GAAI_QA_INJECT_PHASE_SNAPSHOT}\",\"outcome\":\"qa_escalated\",\"marker_honor_rate\":$(_compute_marker_honor_rate "$story_id" "${GAAI_WORKTREE_PATH:-${worktree_path}}" "${GAAI_QA_INJECT_PHASE_SNAPSHOT}")}"
           printf '%s\n' "$_cc_outcome_json" >> "${LOG_DIR}/cross-cycle-outcomes.jsonl" 2>/dev/null || true
         fi
@@ -2599,13 +2596,14 @@ _reconcile_yaml_status_on_exit() {
   # the happy path or a non-QA failure mode.
   case "$target_status" in
     done|failed|escalated)
+      # Read counter before cleanup so cycle_n captures actual retry count
+      local _cc_cycle_n=0
+      if [[ -f "${LOCK_DIR}/.qa-retries-${story_id}" ]]; then
+        _cc_cycle_n=$(cat "${LOCK_DIR}/.qa-retries-${story_id}" 2>/dev/null || echo 0)
+      fi
       rm -f "${LOCK_DIR}/.qa-retries-${story_id}" 2>/dev/null || true
       # Cross-cycle outcome metric — emit on terminal transition after cross-cycle route
       if [[ -n "${GAAI_QA_INJECT_PHASE_SNAPSHOT:-}" ]]; then
-        local _cc_cycle_n=0
-        if [[ -f "${LOCK_DIR}/.qa-retries-${story_id}" ]]; then
-          _cc_cycle_n=$(cat "${LOCK_DIR}/.qa-retries-${story_id}" 2>/dev/null || echo 0)
-        fi
         local _cc_outcome_json="{\"sid\":\"${story_id}\",\"cycle_n\":${_cc_cycle_n},\"routed_phase\":\"${GAAI_QA_INJECT_PHASE_SNAPSHOT}\",\"outcome\":\"${target_status}\",\"marker_honor_rate\":$(_compute_marker_honor_rate "$story_id" "${GAAI_WORKTREE_PATH:-${worktree_path}}" "${GAAI_QA_INJECT_PHASE_SNAPSHOT}")}"
         printf '%s\n' "$_cc_outcome_json" >> "${LOG_DIR}/cross-cycle-outcomes.jsonl" 2>/dev/null || true
       fi
