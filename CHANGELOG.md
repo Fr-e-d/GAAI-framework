@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix(daemon): add --delete-branch to gh pr merge calls
 - fix(daemon): cycle_n read-after-delete — reuse counter at escalation, reorder at reconcile
 
 ## [2.39.0] - 2026-05-24
