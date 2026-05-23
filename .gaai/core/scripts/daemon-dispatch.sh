@@ -916,7 +916,7 @@ handle_plan_phase() {
   prompt_file=$(mktemp "/tmp/gaai-plan-prompt-${story_id}-XXXXXX")
   cat "$agent_prompt_src" > "$prompt_file"
 
-  # ── Cross-cycle qa-report injection: PLAN route (DEC-89 §1.2) ────────────
+  # ── Cross-cycle qa-report injection: PLAN route (replan routing contract) ────
   # Appends prior qa-report + prior artefacts + delta-aware marker framing to
   # the PLAN prompt when GAAI_QA_INJECT_PHASE=plan (ESCALATE or FAIL+replan_required=true).
   if [[ "${GAAI_QA_INJECT_PHASE:-}" == "plan" && -n "${GAAI_QA_REPORT_PATH:-}" && -s "${GAAI_QA_REPORT_PATH}" ]]; then

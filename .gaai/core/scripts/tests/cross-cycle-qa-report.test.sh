@@ -389,7 +389,7 @@ run_t8() {
 
 # ── T9: E160S14 integration — qa-report absent after drift delete ──────────────
 run_t9() {
-  echo "T9: E160S14 integration — qa-report deleted (drift simulated)"
+  echo "T9: sibling-story integration — qa-report deleted (drift simulated)"
   local wt="$FIXTURE_DIR/t9-wt"
   mkdir -p "$wt"
 
