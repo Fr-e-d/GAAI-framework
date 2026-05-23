@@ -68,6 +68,8 @@ set -euo pipefail
 #   - python3 (macOS built-in, or apt install python3 on VPS)
 #   - claude CLI in PATH
 #   - Terminal.app (macOS) or tmux (VPS/headless)
+#   - gtimeout (macOS: brew install coreutils) — optional; preferred dispatch
+#     wall-clock timeout; falls back to BSD timeout, then MAX_TURNS + heartbeat watchdog.
 #
 # VPS setup:
 #   git clone <repo> && cd <repo>
@@ -127,6 +129,19 @@ HEARTBEAT_STALE="${GAAI_HEARTBEAT_STALE:-1800}"       # 30min no output = stuck 
 STALENESS_THRESHOLD="${GAAI_STALENESS_THRESHOLD:-}"   # auto-computed below
 AGENT_HANG_THRESHOLD_SEC="${GAAI_AGENT_HANG_THRESHOLD_SEC:-480}"
 if (( AGENT_HANG_THRESHOLD_SEC < 60 )); then AGENT_HANG_THRESHOLD_SEC=60; fi
+# Suspend/resume robustness: a poll cycle whose wall-clock gap exceeds this is
+# treated as a host suspend (or daemon pause), not a normal tick. Liveness
+# detectors (heartbeat staleness, agent-activity staleness) measure
+# now-minus-mtime in wall-clock seconds; after a long suspend those ages are
+# inflated by the suspend duration, not by real inactivity, so killing on them
+# is a false positive. On a detected jump the daemon grants a grace window
+# during which both detectors stand down, letting wrappers prove liveness again.
+SUSPEND_JUMP_THRESHOLD_SEC="${GAAI_SUSPEND_JUMP_THRESHOLD_SEC:-300}"
+if (( SUSPEND_JUMP_THRESHOLD_SEC < 120 )); then SUSPEND_JUMP_THRESHOLD_SEC=120; fi
+POST_RESUME_GRACE_SEC="${GAAI_POST_RESUME_GRACE_SEC:-$AGENT_HANG_THRESHOLD_SEC}"
+# Epoch until which liveness kills are suppressed after a detected time jump.
+# Updated by the main loop; read by check_heartbeats + check_agent_activity_stale.
+SUSPEND_GRACE_UNTIL=0
 RECOVERY_SCAN_INTERVAL="${GAAI_RECOVERY_SCAN_INTERVAL:-$(( POLL_INTERVAL * 10 ))}"
 ORPHAN_SCAN_INTERVAL_TICKS="${GAAI_ORPHAN_SCAN_INTERVAL_TICKS:-10}"
 ORPHAN_SCAN_MAX_DURATION_SEC="${GAAI_ORPHAN_SCAN_MAX_DURATION_SEC:-30}"
@@ -141,6 +156,7 @@ LOCK_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-locks"
 DRIFT_MARKER="$LOCK_DIR/.drift-detected.audit"
 REBASE_CONFLICT_MARKER="$LOCK_DIR/.rebase-conflict.audit"
 AGENT_HANG_AUDIT="$LOCK_DIR/.agent-hang.audit"
+CRASH_DRIFT_RECONCILE_AUDIT="$LOCK_DIR/.crash-drift-reconcile.audit"
 LOG_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-logs"
 STAGING_LOCK="$LOCK_DIR/.staging.lock"
 RETRY_FILE="$LOCK_DIR/.retry-counts"
@@ -745,6 +761,14 @@ check_heartbeats() {
   local now
   now=$(date +%s)
 
+  # Post-resume grace: after a detected host suspend / daemon pause, heartbeat
+  # mtimes are stale purely because wall-clock advanced during the freeze. The
+  # wrapper's heartbeat loop re-touches within its interval; stand down until
+  # then so we don't SIGTERM a live wrapper on a suspend artifact.
+  if (( now < SUSPEND_GRACE_UNTIL )); then
+    return 0
+  fi
+
   for lock in "$LOCK_DIR"/*.lock; do
     [[ -f "$lock" ]] || continue
     local sid pid
@@ -811,6 +835,14 @@ check_heartbeats() {
 check_agent_activity_stale() {
   local now
   now=$(date +%s)
+
+  # Post-resume grace: after a detected host suspend / daemon pause, impl.log
+  # mtime age is inflated by the freeze duration (the agent was not running),
+  # so the stale-log heuristic would mis-fire. Stand down for the grace window;
+  # a genuinely hung agent is still caught on the next normal cycle.
+  if (( now < SUSPEND_GRACE_UNTIL )); then
+    return 0
+  fi
 
   for lock in "$LOCK_DIR"/*.lock; do
     [[ -f "$lock" ]] || continue
@@ -880,23 +912,39 @@ check_agent_activity_stale() {
     local log_size=0
     log_size=$(wc -c < "$impl_log" 2>/dev/null | tr -d ' ' || echo 0)
 
-    log "${RED}[AGENT_HANG_DETECTED] $sid — log-mtime stale ($(( log_age / 60 ))min) heartbeat-fresh ($(( hb_age / 60 ))min) — SIGTERM PID $pid${NC}"
+    # Prefer killing agent subprocess over wrapper: killing the agent closes the
+    # fifo write-end, unblocking the wrapper's read loop so its EXIT reconcile
+    # trap runs. Sidecar written by daemon-dispatch.sh at agent spawn time.
+    # Fallback: kill wrapper if sidecar absent or agent already dead.
+    local _agent_pid_sidecar="$LOCK_DIR/${sid}.agent.pid"
+    local _kill_pid="$pid"
+    local _pid_kind="wrapper"
+    if [[ -f "$_agent_pid_sidecar" ]]; then
+      local _agent_pid
+      _agent_pid=$(head -1 "$_agent_pid_sidecar" 2>/dev/null || echo "")
+      if [[ -n "$_agent_pid" ]] && kill -0 "$_agent_pid" 2>/dev/null; then
+        _kill_pid="$_agent_pid"
+        _pid_kind="agent"
+      fi
+    fi
 
-    # AC4: append JSON audit record
+    log "${RED}[AGENT_HANG_DETECTED] $sid — log-mtime stale ($(( log_age / 60 ))min) heartbeat-fresh ($(( hb_age / 60 ))min) — SIGTERM ${_pid_kind} PID ${_kill_pid}${NC}"
+
+    # Extend audit record with kill_pid + pid_kind (additive — existing consumers unaffected)
     local _audit_ts
     _audit_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    printf '{"event":"agent_hang_detected","ts":"%s","story_id":"%s","wrapper_pid":%s,"log_mtime_age_sec":%s,"heartbeat_age_sec":%s,"last_log_size_bytes":%s}\n' \
-      "$_audit_ts" "$sid" "$pid" "$log_age" "$hb_age" "$log_size" \
+    printf '{"event":"agent_hang_detected","ts":"%s","story_id":"%s","wrapper_pid":%s,"kill_pid":%s,"pid_kind":"%s","log_mtime_age_sec":%s,"heartbeat_age_sec":%s,"last_log_size_bytes":%s}\n' \
+      "$_audit_ts" "$sid" "$pid" "$_kill_pid" "$_pid_kind" "$log_age" "$hb_age" "$log_size" \
       >> "$AGENT_HANG_AUDIT" 2>/dev/null || true
 
     # Write hang marker so AGENT_HANG_RESOLVED can be emitted on recovery
     touch "$hang_marker" 2>/dev/null || true
 
-    kill -TERM "$pid" 2>/dev/null || true
+    kill -TERM "$_kill_pid" 2>/dev/null || true
     sleep 30
-    if kill -0 "$pid" 2>/dev/null; then
-      log "${RED}[AGENT_HANG_SIGKILL] $sid PID $pid did not respond to SIGTERM${NC}"
-      kill -KILL "$pid" 2>/dev/null || true
+    if kill -0 "$_kill_pid" 2>/dev/null; then
+      log "${RED}[AGENT_HANG_SIGKILL] $sid ${_pid_kind} PID ${_kill_pid} did not respond to SIGTERM${NC}"
+      kill -KILL "$_kill_pid" 2>/dev/null || true
     fi
   done
 }
@@ -1174,10 +1222,34 @@ crash_recovery_scan() {
       wt_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
       wt_ps=$(backlog_phase_status "$sid" "$BACKLOG" 2>/dev/null || true)
       if [[ -n "$wt_status" ]] && ( [[ "$wt_status" != "in_progress" ]] || [[ "$wt_ps" != "$ps" ]] ); then
-        log "${YELLOW}[RECOVERY] $sid : working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) — skipping relaunch this scan${NC}"
-        _write_drift_marker "scan" "drift-$sid"
-        drift_detected=1
-        continue
+        # Crash-drift signature: in_progress status unchanged, phase_status advanced,
+        # no live lock, daemon marker present. Reconcile instead of skip.
+        local _hang_m="$LOCK_DIR/${sid}.agent-hang.marker"
+        local _int_m="$LOCK_DIR/${sid}.interrupted"
+        if [[ "$wt_status" == "in_progress" \
+           && -n "$wt_ps" && "$wt_ps" != "$ps" \
+           && ( -f "$_hang_m" || -f "$_int_m" ) ]] \
+           && ! is_locked "$sid"; then
+          log "${CYAN}[RECOVERY-CRASH-DRIFT] $sid : crash-drift signature detected — HEAD phase_status=${ps:-empty} WT=${wt_ps} — attempting auto-reconcile${NC}"
+          local _reconcile_rc=0
+          _recovery_reconcile_crash_drift "$sid" "$ps" "$wt_ps" || _reconcile_rc=$?
+          if [[ "$_reconcile_rc" -eq 0 ]]; then
+            ps="$wt_ps"
+            rm -f "$_hang_m" "$_int_m" 2>/dev/null || true
+            _clear_drift_marker_if_clean
+            # fall through to case classification with updated ps
+          else
+            log "${YELLOW}[RECOVERY-CRASH-DRIFT] $sid : reconcile failed (rc=$_reconcile_rc) — deferring to next scan${NC}"
+            _write_drift_marker "scan" "crash-drift-reconcile-failed-$sid"
+            drift_detected=1
+            continue
+          fi
+        else
+          log "${YELLOW}[RECOVERY] $sid : working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) — skipping relaunch this scan${NC}"
+          _write_drift_marker "scan" "drift-$sid"
+          drift_detected=1
+          continue
+        fi
       fi
     fi
 
@@ -1387,6 +1459,91 @@ _recovery_resolve_worktree() {
   fi
 }
 
+# ── E160S12 helper : reconcile crash-drift by committing WT phase_status ──
+# Called when crash_recovery_scan detects the crash-drift signature:
+# in_progress status + advanced WT phase_status + dead lock + daemon marker.
+# Commits the WT phase_status to HEAD with daemon attribution so the normal
+# classification case block can proceed without human intervention.
+# Args: sid, head_ps (HEAD phase_status), wt_ps (working-tree phase_status)
+# Exit codes: 0=committed, 1=failure (cross-story drift or git error)
+_recovery_reconcile_crash_drift() {
+  local sid="$1" head_ps="$2" wt_ps="$3"
+
+  # Cross-story drift guard — same awk heuristic as chore_commit_field.
+  # Refuse if the WT diff touches any story block other than the target.
+  local _csd_lines
+  _csd_lines=$(git -C "$PROJECT_DIR" diff -U0 HEAD -- "$BACKLOG_REL" 2>/dev/null \
+    | awk -v sid="$sid" '
+        /^@@/ { in_hunk=1; next }
+        in_hunk && /^[+-]- id: / {
+          gsub(/^[+-]- id: */, "")
+          gsub(/[[:space:]]+$/, "")
+          if ($0 != sid) print
+        }
+      ' | wc -l | tr -d '[:space:]' 2>/dev/null || echo "0")
+  if [[ "$_csd_lines" != "0" ]]; then
+    log "${YELLOW}[RECOVERY-CRASH-DRIFT] $sid : cross-story drift in WT ($_csd_lines other block(s)) — refusing reconcile, deferring to operator${NC}"
+    return 1
+  fi
+
+  log "${CYAN}[RECOVERY-CRASH-DRIFT] $sid : auto-reconciling — HEAD phase_status=${head_ps:-empty} → WT=${wt_ps}${NC}"
+
+  local _commit_subject="chore($sid): crash-drift-reconcile phase_status=$wt_ps [daemon]"
+  local _ts
+  _ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
+
+  local _script
+  _script=$(mktemp)
+  cat > "$_script" <<CDEOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$PROJECT_DIR"
+if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
+  git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
+  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
+    git rebase --abort --quiet 2>/dev/null || true
+    exit 1
+  fi
+fi
+git add "$BACKLOG_REL" 2>/dev/null
+if git diff --cached --quiet; then
+  exit 0
+fi
+if ! git commit -m "$_commit_subject" --quiet -- "$BACKLOG_REL" 2>/dev/null; then
+  git reset HEAD -- "$BACKLOG_REL" 2>/dev/null || true
+  exit 1
+fi
+if ! git push origin "$TARGET_BRANCH" --quiet 2>/dev/null; then
+  if git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null \
+    && git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null \
+    && git push origin "$TARGET_BRANCH" --quiet 2>/dev/null; then
+    exit 0
+  fi
+  git rebase --abort 2>/dev/null || true
+  git reset --soft HEAD~1 2>/dev/null || true
+  git reset HEAD -- "$BACKLOG_REL" 2>/dev/null || true
+  git checkout HEAD -- "$BACKLOG_REL" 2>/dev/null || true
+  exit 1
+fi
+CDEOF
+  chmod +x "$_script"
+  local _rc=0
+  with_staging_lock bash "$_script" 2>/dev/null || _rc=$?
+  rm -f "$_script"
+
+  # AC4: append JSON audit record (non-fatal — audit write failure does not fail reconcile)
+  local _hang_present=false _int_present=false
+  [[ -f "$LOCK_DIR/${sid}.agent-hang.marker" ]] && _hang_present=true
+  [[ -f "$LOCK_DIR/${sid}.interrupted" ]] && _int_present=true
+  local _outcome="committed"
+  [[ "$_rc" -ne 0 ]] && _outcome="failed"
+  printf '{"event":"crash_drift_reconciled","ts":"%s","story_id":"%s","head_phase_status":"%s","wt_phase_status":"%s","hang_marker":%s,"interrupted_marker":%s,"outcome":"%s","commit_subject":"%s"}\n' \
+    "$_ts" "$sid" "${head_ps:-}" "$wt_ps" "$_hang_present" "$_int_present" "$_outcome" "$_commit_subject" \
+    >> "$CRASH_DRIFT_RECONCILE_AUDIT" 2>/dev/null || true
+
+  return "$_rc"
+}
+
 # ── OSS-5 helper : revert YAML status to refined (cross-device pushed) ────
 # Args: sid, reset_phase_status (true|false), reason (log marker).
 # Pulls staging, sets status, optionally resets phase_status, commits with
@@ -1552,6 +1709,89 @@ sweep_cleanup_pending() {
   else
     mv "$tmp_remaining" "$marker" 2>/dev/null || rm -f "$tmp_remaining" 2>/dev/null || true
   fi
+}
+
+# Reconciliation sweep: removes worktrees of done+merged stories.
+# Targets the residual gap: story status flips to done at PR-creation time (before the
+# operator merges), so watch_pr_merge_status() no longer tracks it by the time the merge
+# lands. This sweep detects the merge post-hoc via git branch --merged.
+# Idempotent: safe to run N times with the same outcome as once.
+reconcile_done_merged_worktrees() {
+  local done_ids
+  done_ids=$(backlog_ids_by_status done "$BACKLOG" 2>/dev/null || true)
+  [[ -z "$done_ids" ]] && return 0
+
+  local effective_target="${TARGET_BRANCH:-staging}"
+
+  # Fetch origin to keep the merged check current (otherwise at most 1 cycle stale).
+  git -C "$PROJECT_DIR" fetch origin "$effective_target" --quiet 2>/dev/null || true
+
+  while IFS= read -r sid; do
+    [[ -z "$sid" ]] && continue
+
+    local wt_path
+    if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+      wt_path="${GAAI_WORKTREES_BASE}/${sid}-workspace"
+    else
+      local repo_name
+      repo_name=$(basename "$PROJECT_DIR")
+      wt_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
+    fi
+
+    # Skip if worktree directory does not exist (already cleaned — idempotent no-op).
+    [[ -d "$wt_path" ]] || continue
+
+    # Safety guard: never remove PROJECT_DIR itself.
+    local wt_real proj_real
+    wt_real=$(realpath "$wt_path" 2>/dev/null || echo "$wt_path")
+    proj_real=$(realpath "$PROJECT_DIR" 2>/dev/null || echo "$PROJECT_DIR")
+    if [[ "$wt_real" == "$proj_real" ]]; then
+      log "[RECONCILE-SWEEP] $sid: skipped:safety-guard path=$wt_path (resolved to PROJECT_DIR)"
+      continue
+    fi
+
+    # Merged signal: story/sid branch must be an ancestor of origin/$effective_target.
+    local branch_name="story/$sid"
+    local is_merged
+    is_merged=$(git -C "$PROJECT_DIR" branch --merged "origin/${effective_target}" \
+                    --list "$branch_name" 2>/dev/null || echo "")
+    if [[ -z "$is_merged" ]]; then
+      log "[RECONCILE-SWEEP] $sid: skipped:unmerged path=$wt_path (${branch_name} not in --merged origin/${effective_target})"
+      continue
+    fi
+
+    # Dirty check: do NOT remove if any modification is present (AC2 — data safety).
+    local porcelain_out git_status_rc
+    porcelain_out=$(git -C "$wt_path" status --porcelain 2>/dev/null)
+    git_status_rc=$?
+    if [[ $git_status_rc -ne 0 ]]; then
+      log "[WARN][RECONCILE-SWEEP] $sid: skipped:dirty path=$wt_path (git status failed rc=$git_status_rc — safe)"
+      continue
+    fi
+    if [[ -n "$porcelain_out" ]]; then
+      log "[WARN][RECONCILE-SWEEP] $sid: skipped:dirty path=$wt_path — worktree has uncommitted/untracked content:"
+      local _line_count=0
+      while IFS= read -r _dirty_line && (( _line_count < 5 )); do
+        log "  [RECONCILE-SWEEP]   ${_dirty_line}"
+        (( _line_count++ )) || true
+      done <<< "$porcelain_out"
+      continue
+    fi
+
+    # Remove the worktree (AC1). --force required: branch still exists in git's ref store.
+    if git -C "$PROJECT_DIR" worktree remove --force "$wt_path" 2>/dev/null; then
+      log "[INFO][RECONCILE-SWEEP] $sid: removed path=$wt_path (done+merged into ${effective_target}, clean)"
+      # AC4: update pr_status=merged for audit-attribution closure (best-effort).
+      chore_commit_field "$sid" pr_status merged \
+        "chore($sid): pr_status=merged [reconcile-sweep]" 2>/dev/null \
+        || log "[WARN][RECONCILE-SWEEP] $sid: pr_status update skipped (chore-commit unavailable/drift)"
+    else
+      log "[WARN][RECONCILE-SWEEP] $sid: remove failed path=$wt_path (git lock contention?) — will retry next cycle"
+    fi
+
+  done <<< "$done_ids"
+
+  git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
 }
 
 # PR merge watcher — polls GitHub for merged PRs on every daemon cycle.
@@ -2468,42 +2708,11 @@ node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
 # Strip YAML frontmatter (--+\n...\n--+) — claude -p treats leading dashes as a CLI option
 DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
-# ── Mint binding JWT for X-GAAI-Authorized-Workspaces header ────────────────
-_gaai_mint_binding_jwt() {
-  local workspace_id="\$1"
-  if [[ -z "\${GAAI_CLOUD_URL:-}" || -z "\${GAAI_CLOUD_TOKEN:-}" ]]; then
-    echo "[gaai-daemon] GAAI_CLOUD_URL or GAAI_CLOUD_TOKEN not set — spawning without binding JWT" >&2
-    echo ""
-    return 0
-  fi
-  local response
-  response=\$(curl -s -X POST "\${GAAI_CLOUD_URL}/api/mcp-binding" \
-    -H "Authorization: Bearer \${GAAI_CLOUD_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "{\"workspace_ids\":[\"\\${workspace_id}\"]}" \
-    --max-time 10 2>/dev/null) || true
-  local jwt
-  jwt=\$(echo "\${response}" | grep -o '"binding_jwt":"[^"]*"' | cut -d'"' -f4 2>/dev/null || true)
-  if [[ "\${jwt}" == *'"'* ]]; then
-    echo "[gaai-daemon] binding JWT contains unexpected character — rejecting" >&2
-    echo ""; return 0
-  fi
-  if [[ -z "\${jwt}" ]]; then
-    echo "[gaai-daemon] binding JWT mint failed — spawning without JWT" >&2
-    echo ""; return 0
-  fi
-  echo "\${jwt}"
-}
-
-_BINDING_JWT=\$(_gaai_mint_binding_jwt "\${GAAI_WORKSPACE_ID:-}")
-_MCP_HEADER_ARGS=()
-if [[ -n "\${_BINDING_JWT}" ]]; then
-  _MCP_HEADER_ARGS=(--header "X-GAAI-Authorized-Workspaces:\${_BINDING_JWT}")
-fi
-
 # --output-format stream-json streams NDJSON events in real-time, so:
 #   - tee updates the log file continuously (natural heartbeat for daemon monitor)
 #   - tail -f shows progress in real-time
+# Dispatch wall-clock cap: prefer gtimeout (macOS: brew install coreutils) → timeout (BSD) →
+# no binary = MAX_TURNS flag cap + daemon heartbeat watchdog are the liveness guards.
 if command -v gtimeout &>/dev/null; then
   GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
@@ -2511,7 +2720,7 @@ if command -v gtimeout &>/dev/null; then
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
+  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -2522,7 +2731,7 @@ elif command -v timeout &>/dev/null; then
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
+  timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -2533,7 +2742,7 @@ else
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
+  claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -3086,39 +3295,6 @@ node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
 # See: https://code.claude.com/docs/en/headless
 DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
-# ── Mint binding JWT for X-GAAI-Authorized-Workspaces header ────────────────
-_gaai_mint_binding_jwt() {
-  local workspace_id="\$1"
-  if [[ -z "\${GAAI_CLOUD_URL:-}" || -z "\${GAAI_CLOUD_TOKEN:-}" ]]; then
-    echo "[gaai-daemon] GAAI_CLOUD_URL or GAAI_CLOUD_TOKEN not set — spawning without binding JWT" >&2
-    echo ""
-    return 0
-  fi
-  local response
-  response=\$(curl -s -X POST "\${GAAI_CLOUD_URL}/api/mcp-binding" \
-    -H "Authorization: Bearer \${GAAI_CLOUD_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "{\"workspace_ids\":[\"\\${workspace_id}\"]}" \
-    --max-time 10 2>/dev/null) || true
-  local jwt
-  jwt=\$(echo "\${response}" | grep -o '"binding_jwt":"[^"]*"' | cut -d'"' -f4 2>/dev/null || true)
-  if [[ "\${jwt}" == *'"'* ]]; then
-    echo "[gaai-daemon] binding JWT contains unexpected character — rejecting" >&2
-    echo ""; return 0
-  fi
-  if [[ -z "\${jwt}" ]]; then
-    echo "[gaai-daemon] binding JWT mint failed — spawning without JWT" >&2
-    echo ""; return 0
-  fi
-  echo "\${jwt}"
-}
-
-_BINDING_JWT=\$(_gaai_mint_binding_jwt "\${GAAI_WORKSPACE_ID:-}")
-_MCP_HEADER_ARGS=()
-if [[ -n "\${_BINDING_JWT}" ]]; then
-  _MCP_HEADER_ARGS=(--header "X-GAAI-Authorized-Workspaces:\${_BINDING_JWT}")
-fi
-
 # Print mode (-p): claude processes the prompt and exits, freeing the daemon slot.
 # --dangerously-skip-permissions handles tool approval (required for headless).
 # --output-format stream-json streams NDJSON events in real-time, so:
@@ -3132,7 +3308,7 @@ if command -v gtimeout &>/dev/null; then
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
+  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -3143,7 +3319,7 @@ else
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
+  claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -3460,8 +3636,23 @@ crash_recovery_scan || true
 empty_idle_polls=0
 last_recovery_scan_ts=0
 _orphan_scan_tick=0
+_last_loop_ts=$(date +%s)
 
 while true; do
+  # Suspend/resume detection: a normal iteration spans roughly POLL_INTERVAL
+  # plus a few seconds of work. A gap far larger than that means the host was
+  # suspended (laptop sleep) or the daemon process was paused. When that
+  # happens, grant a grace window during which the liveness detectors stand
+  # down — their now-minus-mtime ages are inflated by the freeze, not by real
+  # inactivity, so killing on them would terminate healthy in-flight wrappers.
+  _loop_now=$(date +%s)
+  _loop_gap=$(( _loop_now - _last_loop_ts ))
+  if (( _loop_gap > SUSPEND_JUMP_THRESHOLD_SEC )); then
+    SUSPEND_GRACE_UNTIL=$(( _loop_now + POST_RESUME_GRACE_SEC ))
+    log "${YELLOW}[SUSPEND_DETECTED] poll gap ${_loop_gap}s > ${SUSPEND_JUMP_THRESHOLD_SEC}s (host suspend or daemon pause) — liveness kills suppressed for ${POST_RESUME_GRACE_SEC}s${NC}"
+  fi
+  _last_loop_ts=$_loop_now
+
   # Tick-based cycle orphan-lock scan — runs before clean_stale_locks
   # so dead-PID locks are detected and recovery invoked at cycle time.
   _orphan_scan_tick=$(( _orphan_scan_tick + 1 ))
@@ -3657,6 +3848,12 @@ while true; do
   # `git worktree prune` only removes entries whose directory is gone — it
   # never deletes a live worktree. Cheap, safe, runs once per cycle.
   git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
+
+  # ── Reconciliation sweep: remove worktrees of done+merged stories ─────────
+  # Complements watch_pr_merge_status(): that watcher only tracks in_progress
+  # stories; by the time a manual merge lands, the story is already done.
+  # This sweep detects integrated worktrees post-hoc via git branch --merged.
+  reconcile_done_merged_worktrees || true
 
   sleep "$POLL_INTERVAL"
 done
