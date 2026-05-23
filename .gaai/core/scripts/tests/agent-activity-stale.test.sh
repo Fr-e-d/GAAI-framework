@@ -132,33 +132,21 @@ check_agent_activity_stale() {
     local log_size=0
     log_size=$(wc -c < "$impl_log" 2>/dev/null | tr -d ' ' || echo 0)
 
-    local _agent_pid_sidecar="$LOCK_DIR/${sid}.agent.pid"
-    local _kill_pid="$pid"
-    local _pid_kind="wrapper"
-    if [[ -f "$_agent_pid_sidecar" ]]; then
-      local _agent_pid
-      _agent_pid=$(head -1 "$_agent_pid_sidecar" 2>/dev/null || echo "")
-      if [[ -n "$_agent_pid" ]] && kill -0 "$_agent_pid" 2>/dev/null; then
-        _kill_pid="$_agent_pid"
-        _pid_kind="agent"
-      fi
-    fi
-
-    log "${RED}[AGENT_HANG_DETECTED] $sid — log-mtime stale ($(( log_age / 60 ))min) heartbeat-fresh ($(( hb_age / 60 ))min) — SIGTERM ${_pid_kind} PID ${_kill_pid}${NC}"
+    log "${RED}[AGENT_HANG_DETECTED] $sid — log-mtime stale ($(( log_age / 60 ))min) heartbeat-fresh ($(( hb_age / 60 ))min) — SIGTERM PID $pid${NC}"
 
     local _audit_ts
     _audit_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    printf '{"event":"agent_hang_detected","ts":"%s","story_id":"%s","wrapper_pid":%s,"kill_pid":%s,"pid_kind":"%s","log_mtime_age_sec":%s,"heartbeat_age_sec":%s,"last_log_size_bytes":%s}\n' \
-      "$_audit_ts" "$sid" "$pid" "$_kill_pid" "$_pid_kind" "$log_age" "$hb_age" "$log_size" \
+    printf '{"event":"agent_hang_detected","ts":"%s","story_id":"%s","wrapper_pid":%s,"log_mtime_age_sec":%s,"heartbeat_age_sec":%s,"last_log_size_bytes":%s}\n' \
+      "$_audit_ts" "$sid" "$pid" "$log_age" "$hb_age" "$log_size" \
       >> "$AGENT_HANG_AUDIT" 2>/dev/null || true
 
     touch "$hang_marker" 2>/dev/null || true
 
-    kill -TERM "$_kill_pid" 2>/dev/null || true
+    kill -TERM "$pid" 2>/dev/null || true
     sleep 2
-    if kill -0 "$_kill_pid" 2>/dev/null; then
-      log "${RED}[AGENT_HANG_SIGKILL] $sid ${_pid_kind} PID ${_kill_pid} did not respond to SIGTERM${NC}"
-      kill -KILL "$_kill_pid" 2>/dev/null || true
+    if kill -0 "$pid" 2>/dev/null; then
+      log "${RED}[AGENT_HANG_SIGKILL] $sid PID $pid did not respond to SIGTERM${NC}"
+      kill -KILL "$pid" 2>/dev/null || true
     fi
   done
 }
@@ -170,19 +158,15 @@ echo "T1: Heartbeat fresh + log stale → AGENT_HANG_DETECTED, PID SIGTERM'd"
 
 T1_SID="TST-ACTIVE01"
 
-# Start mock agent subprocess (the process the hang-detector should kill)
+# Start a mock wrapper process
 sleep 300 &
-T1_AGENT_PID=$!
+T1_PID=$!
 
-# Start mock wrapper process (holds the lock; should survive the kill)
-sleep 300 &
-T1_WRAPPER_PID=$!
-
-# Lock file contains wrapper PID; sidecar contains agent PID
-echo "$T1_WRAPPER_PID" > "$LOCK_DIR/${T1_SID}.lock"
+# Create lock file with PID, backdated past grace period
+echo "$T1_PID" > "$LOCK_DIR/${T1_SID}.lock"
 backdate_file "$LOCK_DIR/${T1_SID}.lock" 10
-echo "$T1_AGENT_PID" > "$LOCK_DIR/${T1_SID}.agent.pid"
 
+# Fresh heartbeat
 touch "$LOCK_DIR/${T1_SID}.heartbeat"
 
 # Stale impl.log (10 min ago > 480s = 8min threshold)
@@ -195,46 +179,38 @@ T1_OUT=$(AGENT_HANG_THRESHOLD_SEC=480 HEARTBEAT_STALE=1800 check_agent_activity_
 # Give SIGTERM time to propagate
 sleep 1
 
-# T1.1: agent subprocess was killed (not the wrapper)
-if ! kill -0 "$T1_AGENT_PID" 2>/dev/null; then
-  pass "T1.1: agent subprocess was SIGTERM'd"
+# Check process was killed
+if ! kill -0 "$T1_PID" 2>/dev/null; then
+  pass "T1.1: mock wrapper process was SIGTERM'd"
 else
-  kill -9 "$T1_AGENT_PID" 2>/dev/null || true
-  fail "T1.1: agent subprocess still alive after hang detection"
-fi
-
-# T1.2: wrapper process survived (kill target was the agent, not the wrapper)
-if kill -0 "$T1_WRAPPER_PID" 2>/dev/null; then
-  pass "T1.2: wrapper process still alive (agent was the kill target)"
-  kill "$T1_WRAPPER_PID" 2>/dev/null || true
-else
-  fail "T1.2: wrapper process was killed — should have survived (agent was the target)"
+  kill -9 "$T1_PID" 2>/dev/null || true
+  fail "T1.1: mock wrapper process still alive after check"
 fi
 
 if echo "$T1_OUT" | grep -q "AGENT_HANG_DETECTED"; then
-  pass "T1.3: output contains AGENT_HANG_DETECTED"
+  pass "T1.2: output contains AGENT_HANG_DETECTED"
 else
-  fail "T1.3: expected AGENT_HANG_DETECTED in output, got: $(echo "$T1_OUT" | head -5)"
+  fail "T1.2: expected AGENT_HANG_DETECTED in output, got: $(echo "$T1_OUT" | head -5)"
 fi
 
 if echo "$T1_OUT" | grep -q "$T1_SID"; then
-  pass "T1.4: log line references correct story ID"
+  pass "T1.3: log line references correct story ID"
 else
-  fail "T1.4: expected story ID $T1_SID in output"
+  fail "T1.3: expected story ID $T1_SID in output"
 fi
 
-# T1.5: audit file written with pid_kind=agent
-if [[ -f "$AGENT_HANG_AUDIT" ]] && grep -q '"pid_kind":"agent"' "$AGENT_HANG_AUDIT"; then
-  pass "T1.5: audit file contains agent_hang_detected with pid_kind=agent"
+# Check audit file written
+if [[ -f "$AGENT_HANG_AUDIT" ]] && grep -q "agent_hang_detected" "$AGENT_HANG_AUDIT"; then
+  pass "T1.4: audit file contains agent_hang_detected event"
 else
-  fail "T1.5: audit file missing or does not contain pid_kind=agent"
+  fail "T1.4: audit file missing or does not contain event"
 fi
 
-# T1.6: hang marker written
+# Check hang marker written
 if [[ -f "$LOCK_DIR/${T1_SID}.agent-hang.marker" ]]; then
-  pass "T1.6: hang marker file created"
+  pass "T1.5: hang marker file created"
 else
-  fail "T1.6: hang marker file not created"
+  fail "T1.5: hang marker file not created"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -309,52 +285,7 @@ else
   fail "T3.2: AGENT_HANG_DETECTED emitted despite fresh reconcile marker"
 fi
 
-# ══════════════════════════════════════════════════════════════════════════════
-# T4: No sidecar → fallback kills wrapper (AC2 fallback)
-# ══════════════════════════════════════════════════════════════════════════════
-echo "T4: No sidecar → fallback kills wrapper"
-
-T4_SID="TST-ACTIVE04"
-
-sleep 300 &
-T4_WRAPPER_PID=$!
-
-echo "$T4_WRAPPER_PID" > "$LOCK_DIR/${T4_SID}.lock"
-backdate_file "$LOCK_DIR/${T4_SID}.lock" 10
-
-touch "$LOCK_DIR/${T4_SID}.heartbeat"
-
-echo '{"type":"tool_use"}' > "$WORKTREE/.delivery-logs/${T4_SID}.impl.log"
-backdate_file "$WORKTREE/.delivery-logs/${T4_SID}.impl.log" 10
-
-# No sidecar — testing fallback behavior
-
-T4_OUT=$(AGENT_HANG_THRESHOLD_SEC=480 HEARTBEAT_STALE=1800 check_agent_activity_stale 2>&1)
-sleep 1
-
-# T4.1: wrapper killed (fallback when sidecar absent)
-if ! kill -0 "$T4_WRAPPER_PID" 2>/dev/null; then
-  pass "T4.1: wrapper process killed (fallback — no sidecar present)"
-else
-  kill -9 "$T4_WRAPPER_PID" 2>/dev/null || true
-  fail "T4.1: wrapper process still alive (should have been killed as fallback)"
-fi
-
-# T4.2: AGENT_HANG_DETECTED emitted
-if echo "$T4_OUT" | grep -q "AGENT_HANG_DETECTED"; then
-  pass "T4.2: output contains AGENT_HANG_DETECTED"
-else
-  fail "T4.2: expected AGENT_HANG_DETECTED in output"
-fi
-
-# T4.3: pid_kind=wrapper in audit
-if [[ -f "$AGENT_HANG_AUDIT" ]] && grep -q '"pid_kind":"wrapper"' "$AGENT_HANG_AUDIT"; then
-  pass "T4.3: audit file contains pid_kind=wrapper (fallback)"
-else
-  fail "T4.3: audit file missing pid_kind=wrapper for fallback case"
-fi
-
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo ""
-echo "=== $PASS_COUNT/13 PASS ==="
+echo "=== $PASS_COUNT/9 PASS ==="
 exit $FAIL_COUNT
