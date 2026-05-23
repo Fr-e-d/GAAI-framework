@@ -2101,7 +2101,7 @@ ${qa_snippet}"
     local merge_exit=1 merge_attempt=0 merge_max=3 merge_stderr
     while [[ $merge_attempt -lt $merge_max ]]; do
       merge_attempt=$(( merge_attempt + 1 ))
-      merge_stderr=$(gh pr merge --auto --squash "$pr_url" 2>&1)
+      merge_stderr=$(gh pr merge --auto --squash --delete-branch "$pr_url" 2>&1)
       merge_exit=$?
       if [[ "$merge_exit" -eq 0 ]]; then
         # AC5-e: verify autoMergeRequest actually queued
@@ -2114,7 +2114,7 @@ ${qa_snippet}"
           if [[ "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-false}" == "true" ]]; then
             echo "[INFO] ${story_id} handle_commit_phase: branch protection unavailable, attempting admin fallback merge"
             local admin_stderr admin_exit
-            admin_stderr=$(gh pr merge --admin --squash "$pr_url" 2>&1)
+            admin_stderr=$(gh pr merge --admin --squash --delete-branch "$pr_url" 2>&1)
             admin_exit=$?
             if [[ "$admin_exit" -eq 0 ]]; then
               echo "[INFO] ${story_id} handle_commit_phase: admin fallback merge succeeded"
@@ -2145,7 +2145,7 @@ ${qa_snippet}"
         if _auto_resolve_pr_conflicts "$pr_url" "$branch" "$worktree_path" "$story_id" "$trace_id"; then
           # Resolved: one more gh pr merge --auto attempt (DEC-76 §11 gates remain active)
           local resolve_merge_out resolve_merge_exit
-          resolve_merge_out=$(gh pr merge --auto --squash "$pr_url" 2>&1)
+          resolve_merge_out=$(gh pr merge --auto --squash --delete-branch "$pr_url" 2>&1)
           resolve_merge_exit=$?
           if [[ "$resolve_merge_exit" -eq 0 ]] || \
              printf '%s\n' "$resolve_merge_out" | grep -qi "already enabled\|already queued"; then
