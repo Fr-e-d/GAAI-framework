@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.39.0] - 2026-05-24
 
 ### Changed
+- fix(daemon): AC5 observability — log format fields + marker_honor_rate computation
 - fix(daemon): remove DEC/story IDs from OSS comments to pass refcheck
+- feat(daemon): cross-cycle qa-report injection routed by DEC-89 §1.2 replan_required signal
+
 
 ## [2.38.0] - 2026-05-23
 

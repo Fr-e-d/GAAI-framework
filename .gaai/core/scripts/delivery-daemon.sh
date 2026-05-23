@@ -1658,62 +1658,6 @@ RSTEOF
   return $rc
 }
 
-# ── Pre-spawn story.md reconcile from origin/staging ──────────────────────────
-# Ensures wrapper reads operator amendments committed to staging but not yet in
-# the worktree branch. Also invalidates the prior cycle's qa-report when
-# story.md drifts, preventing cross-cycle injection against stale AC numbers.
-# Args : <sid> <wt_path>
-# Returns : 0 (in-sync, no action), 1 (refreshed + qa-report deleted), 2 (staging missing → skip spawn)
-_reconcile_story_file_from_staging() {
-  local sid="$1"
-  local wt_path="$2"
-  local story_path=".gaai/project/contexts/artefacts/stories/${sid}.story.md"
-  local abs_story="${wt_path}/${story_path}"
-  local qa_report="${wt_path}/.gaai/project/contexts/artefacts/qa-reports/${sid}.qa-report.md"
-  local tag="[STORY-FILE-RECONCILE]"
-
-  log "${tag} ${sid} : checking story.md against origin/staging (wt=${wt_path})"
-
-  # Fetch (best-effort — failure is non-fatal, proceed with cached ref)
-  if ! git -C "$wt_path" fetch origin staging --quiet 2>/dev/null; then
-    log "${tag} ${sid} : fetch failed, proceeding with cached origin/staging"
-  fi
-
-  # Overwrite WT file + stage atomically; capture stderr to detect missing-file error
-  local checkout_err
-  if ! checkout_err=$(git -C "$wt_path" checkout origin/staging -- "$story_path" 2>&1); then
-    log "${tag} ${sid} : staging copy MISSING — escalating, skipping spawn"
-    return 2
-  fi
-
-  # Treat zero-byte result as missing (defensive guard)
-  if [[ ! -s "$abs_story" ]]; then
-    log "${tag} ${sid} : staging copy MISSING (empty file) — escalating, skipping spawn"
-    return 2
-  fi
-
-  # Compare staged content to HEAD — exit 0 means no diff (in-sync)
-  if git -C "$wt_path" diff --cached --quiet -- "$story_path" 2>/dev/null; then
-    log "${tag} ${sid} : in-sync (no drift detected)"
-    return 0
-  fi
-
-  # Drift detected — commit only the story.md path, preserve HEAD pointer on story/<sid>
-  local commit_sha
-  git -C "$wt_path" commit \
-    -m "chore(${sid}): refresh story.md from staging [daemon-recovery:story-file-drift]" \
-    -- "$story_path" 2>/dev/null
-  commit_sha=$(git -C "$wt_path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-  log "${tag} ${sid} : DRIFT DETECTED — refreshed via git checkout, commit=${commit_sha} on story/${sid}"
-
-  # Invalidate prior qa-report so cross-cycle injection silent-skips instead of
-  # injecting against potentially-renumbered ACs (joint contract with qa-report injection helper)
-  rm -f "$qa_report" 2>/dev/null || true
-  log "${tag} ${sid} : prior qa-report deleted at ${qa_report} (joint contract with cross-cycle qa-report injection)"
-
-  return 1
-}
-
 # ── OSS-5 helper : re-launch a 3phase wrapper for an in_progress story ────
 # Skips pre_launch_mark_in_progress — story is already status:in_progress in
 # YAML (we're resuming, not initiating). Generates a fresh trace_id.
@@ -2248,6 +2192,39 @@ PLEOF
       return 1
       ;;
   esac
+}
+
+# ── Cross-cycle qa-report resolver ─────────────────────────────────────
+# Checks whether a prior qa-report exists for <sid> in the worktree at <wt_path>.
+# Parses Verdict and replan_required per the replan routing contract.
+# Outputs exactly two lines on injection: <absolute-path>\n<phase>
+# Outputs nothing on no-injection (absent, unreadable, empty, or PASS verdict).
+# Caller exports GAAI_QA_REPORT_PATH + GAAI_QA_INJECT_PHASE conditionally.
+_resolve_cross_cycle_qa_report() {
+  local sid="$1" wt_path="$2"
+  local qa_report="${wt_path}/.gaai/project/contexts/artefacts/qa-reports/${sid}.qa-report.md"
+
+  [[ ! -f "$qa_report" || ! -s "$qa_report" ]] && return 0
+
+  local verdict
+  verdict=$(grep -m 1 -iE '^[[:space:]]*Verdict:[[:space:]]*(PASS|FAIL|ESCALATE)\b' "$qa_report" 2>/dev/null \
+    | sed -E 's/^[[:space:]]*Verdict:[[:space:]]*//' | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]' || true)
+
+  [[ -z "$verdict" ]] && return 0
+  [[ "$verdict" == "PASS" ]] && return 0
+
+  local phase="impl"
+  if [[ "$verdict" == "ESCALATE" ]]; then
+    phase="plan"
+  elif [[ "$verdict" == "FAIL" ]]; then
+    local replan
+    replan=$(grep -m 1 -iE '^[[:space:]]*replan_required:[[:space:]]*(true|false)\b' "$qa_report" 2>/dev/null \
+      | sed -E 's/^[[:space:]]*replan_required:[[:space:]]*//' | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]' || true)
+    [[ "$replan" == "true" ]] && phase="plan"
+  fi
+
+  local _replan_val="${replan:-absent}"
+  printf '%s\n%s\n%s\n%s\n' "$qa_report" "$phase" "$verdict" "$_replan_val"
 }
 
 # ── Launch delivery (tmux — VPS/headless) ────────────────────────────────
@@ -2867,21 +2844,28 @@ WRAPPER_EOF
 
   chmod +x "$wrapper"
 
-  # ── Pre-spawn story.md reconcile from staging ────────────────────────────
-  local _sfr_wt
-  _sfr_wt=$(_recovery_resolve_worktree "$story_id")
-  if declare -f _reconcile_story_file_from_staging >/dev/null 2>&1; then
-    local _sfr_rc=0
-    _reconcile_story_file_from_staging "$story_id" "$_sfr_wt" || _sfr_rc=$?
-    if [[ "$_sfr_rc" -eq 2 ]]; then
-      notify_escalation_inline "$story_id" \
-        "story_file_missing_on_staging" \
-        "Verify story.md exists at .gaai/project/contexts/artefacts/stories/${story_id}.story.md on origin/staging — daemon will not spawn wrapper until resolved"
-      return
-    fi
+  # ── Cross-cycle qa-report env setup ────────────────────────────────
+  local _cc_legacy_wt_path
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    _cc_legacy_wt_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
+  else
+    _cc_legacy_wt_path="$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd)/.gaai-worktrees/$(basename "$PROJECT_DIR")/${story_id}-workspace"
+  fi
+  local _cc_legacy_out _cc_legacy_args=()
+  _cc_legacy_out=$(_resolve_cross_cycle_qa_report "$story_id" "$_cc_legacy_wt_path" 2>/dev/null || true)
+  if [[ -n "$_cc_legacy_out" ]]; then
+    local _cc_legacy_path _cc_legacy_phase _cc_legacy_verdict _cc_legacy_replan
+    _cc_legacy_path=$(printf '%s' "$_cc_legacy_out" | head -1)
+    _cc_legacy_phase=$(printf '%s' "$_cc_legacy_out" | sed -n '2p')
+    _cc_legacy_verdict=$(printf '%s' "$_cc_legacy_out" | sed -n '3p')
+    _cc_legacy_replan=$(printf '%s' "$_cc_legacy_out" | sed -n '4p')
+    log "[CROSS-CYCLE-QA-INJECT] ${story_id}: verdict=${_cc_legacy_verdict} replan_required=${_cc_legacy_replan} phase=${_cc_legacy_phase} path=${_cc_legacy_path}"
+    _cc_legacy_args+=(-e "GAAI_QA_REPORT_PATH=${_cc_legacy_path}" -e "GAAI_QA_INJECT_PHASE=${_cc_legacy_phase}")
+  else
+    unset GAAI_QA_REPORT_PATH GAAI_QA_INJECT_PHASE 2>/dev/null || true
   fi
 
-  tmux new-session -d -s "gaai-deliver-${story_id}" "$wrapper"
+  tmux new-session -d -s "gaai-deliver-${story_id}" "${_cc_legacy_args[@]}" "$wrapper"
 
   sleep 2
 
@@ -3615,6 +3599,9 @@ export GAAI_IMPL_MODEL="${GAAI_IMPL_MODEL:-}"
 export GAAI_IMPL_MODEL_FALLBACK="${GAAI_IMPL_MODEL_FALLBACK:-}"
 export GAAI_AUTO_MERGE_POLICY="${GAAI_AUTO_MERGE_POLICY:-staging_only}"
 export GAAI_AUTO_MERGE_ADMIN_FALLBACK="${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-false}"
+export GAAI_QA_REPORT_PATH="${GAAI_QA_REPORT_PATH:-}"
+export GAAI_QA_INJECT_PHASE="${GAAI_QA_INJECT_PHASE:-}"
+export GAAI_QA_INJECT_PHASE_SNAPSHOT="${GAAI_QA_INJECT_PHASE:-}"
 
 # Source dispatch helpers (function definitions only — no top-level work).
 # Plain source, no pipe : pipe creates subshell which loses function defs.
@@ -3660,20 +3647,6 @@ WRAPPER_EOF
 
   chmod +x "$wrapper"
 
-  # ── Pre-spawn story.md reconcile from staging ────────────────────────────
-  local _sfr_wt
-  _sfr_wt=$(_recovery_resolve_worktree "$story_id")
-  if declare -f _reconcile_story_file_from_staging >/dev/null 2>&1; then
-    local _sfr_rc=0
-    _reconcile_story_file_from_staging "$story_id" "$_sfr_wt" || _sfr_rc=$?
-    if [[ "$_sfr_rc" -eq 2 ]]; then
-      notify_escalation_inline "$story_id" \
-        "story_file_missing_on_staging" \
-        "Verify story.md exists at .gaai/project/contexts/artefacts/stories/${story_id}.story.md on origin/staging — daemon will not spawn wrapper until resolved"
-      return
-    fi
-  fi
-
   # Forward critical env vars into tmux session so child phases see them
   local tmux_env_args=()
   [[ -n "${GAAI_IMPL_BASE_URL:-}"   ]] && tmux_env_args+=(-e "GAAI_IMPL_BASE_URL=${GAAI_IMPL_BASE_URL}")
@@ -3682,6 +3655,27 @@ WRAPPER_EOF
   [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
   [[ -n "${GAAI_AUTO_MERGE_POLICY:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_POLICY=${GAAI_AUTO_MERGE_POLICY}")
   [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
+
+  # ── Cross-cycle qa-report env setup ────────────────────────────────
+  local _cc_3p_wt_path
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    _cc_3p_wt_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
+  else
+    _cc_3p_wt_path="$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd)/.gaai-worktrees/$(basename "$PROJECT_DIR")/${story_id}-workspace"
+  fi
+  local _cc_3p_out
+  _cc_3p_out=$(_resolve_cross_cycle_qa_report "$story_id" "$_cc_3p_wt_path" 2>/dev/null || true)
+  if [[ -n "$_cc_3p_out" ]]; then
+    local _cc_3p_path _cc_3p_phase _cc_3p_verdict _cc_3p_replan
+    _cc_3p_path=$(printf '%s' "$_cc_3p_out" | head -1)
+    _cc_3p_phase=$(printf '%s' "$_cc_3p_out" | sed -n '2p')
+    _cc_3p_verdict=$(printf '%s' "$_cc_3p_out" | sed -n '3p')
+    _cc_3p_replan=$(printf '%s' "$_cc_3p_out" | sed -n '4p')
+    log "[CROSS-CYCLE-QA-INJECT] ${story_id}: verdict=${_cc_3p_verdict} replan_required=${_cc_3p_replan} phase=${_cc_3p_phase} path=${_cc_3p_path}"
+    tmux_env_args+=(-e "GAAI_QA_REPORT_PATH=${_cc_3p_path}" -e "GAAI_QA_INJECT_PHASE=${_cc_3p_phase}")
+  else
+    unset GAAI_QA_REPORT_PATH GAAI_QA_INJECT_PHASE 2>/dev/null || true
+  fi
 
   tmux new-session -d -s "gaai-deliver-${story_id}" "${tmux_env_args[@]}" "$wrapper"
 
