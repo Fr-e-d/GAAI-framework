@@ -916,6 +916,92 @@ handle_plan_phase() {
   prompt_file=$(mktemp "/tmp/gaai-plan-prompt-${story_id}-XXXXXX")
   cat "$agent_prompt_src" > "$prompt_file"
 
+  # ── Cross-cycle qa-report injection: PLAN route (DEC-89 §1.2) ────────────
+  # Appends prior qa-report + prior artefacts + delta-aware marker framing to
+  # the PLAN prompt when GAAI_QA_INJECT_PHASE=plan (ESCALATE or FAIL+replan_required=true).
+  if [[ "${GAAI_QA_INJECT_PHASE:-}" == "plan" && -n "${GAAI_QA_REPORT_PATH:-}" && -s "${GAAI_QA_REPORT_PATH}" ]]; then
+    local _cc_qa_content _cc_qa_bytes _cc_plan_content _cc_plan_bytes _cc_impl_content _cc_impl_bytes
+    _cc_qa_bytes=$(wc -c < "$GAAI_QA_REPORT_PATH" 2>/dev/null || echo 0)
+    if (( _cc_qa_bytes > 51200 )); then
+      _cc_qa_content="$(head -c 51200 "$GAAI_QA_REPORT_PATH" 2>/dev/null)
+
+(... truncated at 50KB, full content at ${GAAI_QA_REPORT_PATH})"
+    else
+      _cc_qa_content="$(cat "$GAAI_QA_REPORT_PATH" 2>/dev/null || echo "(not available)")"
+    fi
+
+    local _cc_plan_path="${GAAI_WORKTREE_PATH:-${worktree_path}}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
+    if [[ -s "$_cc_plan_path" ]]; then
+      _cc_plan_bytes=$(wc -c < "$_cc_plan_path" 2>/dev/null || echo 0)
+      if (( _cc_plan_bytes > 51200 )); then
+        _cc_plan_content="$(head -c 51200 "$_cc_plan_path" 2>/dev/null)
+
+(... truncated at 50KB, full content at ${_cc_plan_path})"
+      else
+        _cc_plan_content="$(cat "$_cc_plan_path" 2>/dev/null || echo "(not available)")"
+      fi
+    else
+      local _cc_plan_git
+      _cc_plan_git=$(git -C "${GAAI_WORKTREE_PATH:-${worktree_path}}" show "story/${story_id}:.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md" 2>/dev/null || true)
+      if [[ -n "$_cc_plan_git" ]]; then
+        _cc_plan_content="$_cc_plan_git"
+        _cc_plan_bytes=$(printf '%s' "$_cc_plan_git" | wc -c)
+      else
+        _cc_plan_content="(prior execution-plan not available — produce a fresh plan informed by qa-report only)"
+        _cc_plan_bytes=0
+      fi
+    fi
+
+    local _cc_impl_path="${GAAI_WORKTREE_PATH:-${worktree_path}}/.gaai/project/contexts/artefacts/impl-reports/${story_id}.impl-report.md"
+    if [[ -s "$_cc_impl_path" ]]; then
+      _cc_impl_bytes=$(wc -c < "$_cc_impl_path" 2>/dev/null || echo 0)
+      if (( _cc_impl_bytes > 51200 )); then
+        _cc_impl_content="$(head -c 51200 "$_cc_impl_path" 2>/dev/null)
+
+(... truncated at 50KB, full content at ${_cc_impl_path})"
+      else
+        _cc_impl_content="$(cat "$_cc_impl_path" 2>/dev/null || echo "(not available)")"
+      fi
+    else
+      local _cc_impl_git
+      _cc_impl_git=$(git -C "${GAAI_WORKTREE_PATH:-${worktree_path}}" show "story/${story_id}:.gaai/project/contexts/artefacts/impl-reports/${story_id}.impl-report.md" 2>/dev/null || true)
+      if [[ -n "$_cc_impl_git" ]]; then
+        _cc_impl_content="$_cc_impl_git"
+        _cc_impl_bytes=$(printf '%s' "$_cc_impl_git" | wc -c)
+      else
+        _cc_impl_content="(prior impl-report not available)"
+        _cc_impl_bytes=0
+      fi
+    fi
+
+    # Append prior-findings block (best-effort — non-fatal on write failure).
+    # Use printf '%s' to avoid shell interpolation of qa-report content containing $var.
+    if {
+      printf '\n## Prior cycle QA findings\n\n%s\n' "$_cc_qa_content"
+      printf '\n## Prior execution-plan\n\n%s\n' "$_cc_plan_content"
+      printf '\n## Prior impl-report\n\n%s\n' "$_cc_impl_content"
+      printf '%s\n' '
+## Delta-aware planning instruction
+
+You are re-planning after a prior cycle that partially implemented this story.
+The qa-report above identifies what failed. Mark each step in your plan with
+EXACTLY ONE of the following markers:
+
+  ✓ KEEP    — Prior step implemented correctly and qa-report verified the AC.
+               Do NOT touch those files. Assert they are unchanged.
+  ↻ REVISE  — Prior step was implemented but the qa-report identified a defect.
+               Specify the corrective action in one line.
+  + NEW     — Additional step required (gap found during re-plan).
+               Implement from scratch.
+
+Justify each marker in one line. Err toward REVISE over KEEP when uncertain.'
+    } >> "$prompt_file" 2>/dev/null; then
+      echo "[CROSS-CYCLE-QA-PLAN-APPEND] ${story_id}: delta-block appended (qa=${_cc_qa_bytes}B plan=${_cc_plan_bytes:-0}B impl=${_cc_impl_bytes:-0}B)"
+    else
+      echo "[WARN] [CROSS-CYCLE-QA-PLAN-APPEND] ${story_id}: append failed — proceeding without prior-findings block"
+    fi
+  fi
+
   # ── Spawn claude -p (AC1) ─────────────────────────────────────────────────
   # Duration measurement (AC4) — bash 5+ EPOCHREALTIME (microseconds); fallback date +%s
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
@@ -1004,6 +1090,12 @@ handle_plan_phase() {
 
   # ── Emit success routing record (AC4) ────────────────────────────────────
   _emit_plan_routing_record "$story_id" "$trace_id" "primary" "null" "$duration_ms"
+
+  # ── Post-PLAN env cleanup: unconditional when phase=plan ─────────────────
+  if [[ "${GAAI_QA_INJECT_PHASE:-}" == "plan" ]]; then
+    unset GAAI_QA_INJECT_PHASE GAAI_QA_REPORT_PATH 2>/dev/null || true
+    echo "[CROSS-CYCLE-QA-UNSET] ${story_id}: phase=plan complete — env cleared before IMPL spawn"
+  fi
 
   # ── Worktree-scope audit (advisory) ──────────────────────────────────────
   _run_worktree_audit "$story_id" "plan" "$log_path" "$worktree_path"
@@ -2219,6 +2311,11 @@ dispatch_3phase_story() {
             "Review .gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-report.md and either fix manually or re-refine the story"
         fi
         rm -f "$_qa_retry_file" 2>/dev/null || true
+        # Cross-cycle outcome metric — emit when escalated after cross-cycle route
+        if [[ -n "${GAAI_QA_INJECT_PHASE_SNAPSHOT:-}" ]]; then
+          local _cc_outcome_json="{\"sid\":\"${story_id}\",\"routed_phase\":\"${GAAI_QA_INJECT_PHASE_SNAPSHOT}\",\"outcome\":\"qa_escalated\",\"marker_honor_rate\":null}"
+          printf '%s\n' "$_cc_outcome_json" >> "${LOG_DIR}/cross-cycle-outcomes.jsonl" 2>/dev/null || true
+        fi
         return 0
       fi
       # Increment counter via atomic temp-rename (no sed dependency, no shared helper).
@@ -2439,6 +2536,11 @@ _reconcile_yaml_status_on_exit() {
   case "$target_status" in
     done|failed|escalated)
       rm -f "${LOCK_DIR}/.qa-retries-${story_id}" 2>/dev/null || true
+      # Cross-cycle outcome metric — emit on terminal transition after cross-cycle route
+      if [[ -n "${GAAI_QA_INJECT_PHASE_SNAPSHOT:-}" ]]; then
+        local _cc_outcome_json="{\"sid\":\"${story_id}\",\"routed_phase\":\"${GAAI_QA_INJECT_PHASE_SNAPSHOT}\",\"outcome\":\"${target_status}\",\"marker_honor_rate\":null}"
+        printf '%s\n' "$_cc_outcome_json" >> "${LOG_DIR}/cross-cycle-outcomes.jsonl" 2>/dev/null || true
+      fi
       ;;
   esac
 

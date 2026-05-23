@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.38.0] - 2026-05-23
 
 ### Changed
+- feat(daemon): cross-cycle qa-report injection routed by DEC-89 §1.2 replan_required signal
 - fix(daemon): grant startup grace to liveness + staleness detectors
 - fix(daemon): hang detector tracks max mtime across plan/impl/qa logs (not just impl)
+
 
 ## [2.37.0] - 2026-05-23
 

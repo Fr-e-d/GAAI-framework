@@ -2194,6 +2194,38 @@ PLEOF
   esac
 }
 
+# ── Cross-cycle qa-report resolver ─────────────────────────────────────
+# Checks whether a prior qa-report exists for <sid> in the worktree at <wt_path>.
+# Parses Verdict and replan_required per DEC-89 §1.2.
+# Outputs exactly two lines on injection: <absolute-path>\n<phase>
+# Outputs nothing on no-injection (absent, unreadable, empty, or PASS verdict).
+# Caller exports GAAI_QA_REPORT_PATH + GAAI_QA_INJECT_PHASE conditionally.
+_resolve_cross_cycle_qa_report() {
+  local sid="$1" wt_path="$2"
+  local qa_report="${wt_path}/.gaai/project/contexts/artefacts/qa-reports/${sid}.qa-report.md"
+
+  [[ ! -f "$qa_report" || ! -s "$qa_report" ]] && return 0
+
+  local verdict
+  verdict=$(grep -m 1 -iE '^[[:space:]]*Verdict:[[:space:]]*(PASS|FAIL|ESCALATE)\b' "$qa_report" 2>/dev/null \
+    | sed -E 's/^[[:space:]]*Verdict:[[:space:]]*//' | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]' || true)
+
+  [[ -z "$verdict" ]] && return 0
+  [[ "$verdict" == "PASS" ]] && return 0
+
+  local phase="impl"
+  if [[ "$verdict" == "ESCALATE" ]]; then
+    phase="plan"
+  elif [[ "$verdict" == "FAIL" ]]; then
+    local replan
+    replan=$(grep -m 1 -iE '^[[:space:]]*replan_required:[[:space:]]*(true|false)\b' "$qa_report" 2>/dev/null \
+      | sed -E 's/^[[:space:]]*replan_required:[[:space:]]*//' | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]' || true)
+    [[ "$replan" == "true" ]] && phase="plan"
+  fi
+
+  printf '%s\n%s\n' "$qa_report" "$phase"
+}
+
 # ── Launch delivery (tmux — VPS/headless) ────────────────────────────────
 launch_delivery_tmux() {
   local story_id="$1"
@@ -2811,7 +2843,26 @@ WRAPPER_EOF
 
   chmod +x "$wrapper"
 
-  tmux new-session -d -s "gaai-deliver-${story_id}" "$wrapper"
+  # ── Cross-cycle qa-report env setup ────────────────────────────────
+  local _cc_legacy_wt_path
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    _cc_legacy_wt_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
+  else
+    _cc_legacy_wt_path="$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd)/.gaai-worktrees/$(basename "$PROJECT_DIR")/${story_id}-workspace"
+  fi
+  local _cc_legacy_out _cc_legacy_args=()
+  _cc_legacy_out=$(_resolve_cross_cycle_qa_report "$story_id" "$_cc_legacy_wt_path" 2>/dev/null || true)
+  if [[ -n "$_cc_legacy_out" ]]; then
+    local _cc_legacy_path _cc_legacy_phase
+    _cc_legacy_path=$(printf '%s' "$_cc_legacy_out" | head -1)
+    _cc_legacy_phase=$(printf '%s' "$_cc_legacy_out" | sed -n '2p')
+    log "[CROSS-CYCLE-QA-INJECT] ${story_id}: verdict-routed phase=${_cc_legacy_phase} path=${_cc_legacy_path}"
+    _cc_legacy_args+=(-e "GAAI_QA_REPORT_PATH=${_cc_legacy_path}" -e "GAAI_QA_INJECT_PHASE=${_cc_legacy_phase}")
+  else
+    unset GAAI_QA_REPORT_PATH GAAI_QA_INJECT_PHASE 2>/dev/null || true
+  fi
+
+  tmux new-session -d -s "gaai-deliver-${story_id}" "${_cc_legacy_args[@]}" "$wrapper"
 
   sleep 2
 
@@ -3545,6 +3596,9 @@ export GAAI_IMPL_MODEL="${GAAI_IMPL_MODEL:-}"
 export GAAI_IMPL_MODEL_FALLBACK="${GAAI_IMPL_MODEL_FALLBACK:-}"
 export GAAI_AUTO_MERGE_POLICY="${GAAI_AUTO_MERGE_POLICY:-staging_only}"
 export GAAI_AUTO_MERGE_ADMIN_FALLBACK="${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-false}"
+export GAAI_QA_REPORT_PATH="${GAAI_QA_REPORT_PATH:-}"
+export GAAI_QA_INJECT_PHASE="${GAAI_QA_INJECT_PHASE:-}"
+export GAAI_QA_INJECT_PHASE_SNAPSHOT="${GAAI_QA_INJECT_PHASE:-}"
 
 # Source dispatch helpers (function definitions only — no top-level work).
 # Plain source, no pipe : pipe creates subshell which loses function defs.
@@ -3598,6 +3652,25 @@ WRAPPER_EOF
   [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
   [[ -n "${GAAI_AUTO_MERGE_POLICY:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_POLICY=${GAAI_AUTO_MERGE_POLICY}")
   [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
+
+  # ── Cross-cycle qa-report env setup ────────────────────────────────
+  local _cc_3p_wt_path
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    _cc_3p_wt_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
+  else
+    _cc_3p_wt_path="$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd)/.gaai-worktrees/$(basename "$PROJECT_DIR")/${story_id}-workspace"
+  fi
+  local _cc_3p_out
+  _cc_3p_out=$(_resolve_cross_cycle_qa_report "$story_id" "$_cc_3p_wt_path" 2>/dev/null || true)
+  if [[ -n "$_cc_3p_out" ]]; then
+    local _cc_3p_path _cc_3p_phase
+    _cc_3p_path=$(printf '%s' "$_cc_3p_out" | head -1)
+    _cc_3p_phase=$(printf '%s' "$_cc_3p_out" | sed -n '2p')
+    log "[CROSS-CYCLE-QA-INJECT] ${story_id}: verdict-routed phase=${_cc_3p_phase} path=${_cc_3p_path}"
+    tmux_env_args+=(-e "GAAI_QA_REPORT_PATH=${_cc_3p_path}" -e "GAAI_QA_INJECT_PHASE=${_cc_3p_phase}")
+  else
+    unset GAAI_QA_REPORT_PATH GAAI_QA_INJECT_PHASE 2>/dev/null || true
+  fi
 
   tmux new-session -d -s "gaai-deliver-${story_id}" "${tmux_env_args[@]}" "$wrapper"
 
