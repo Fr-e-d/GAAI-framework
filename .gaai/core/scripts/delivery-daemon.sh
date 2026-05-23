@@ -1707,7 +1707,7 @@ _reconcile_story_file_from_staging() {
   log "${tag} ${sid} : DRIFT DETECTED — refreshed via git checkout, commit=${commit_sha} on story/${sid}"
 
   # Invalidate prior qa-report so cross-cycle injection silent-skips instead of
-  # injecting against potentially-renumbered ACs (joint contract with E160S13)
+  # injecting against potentially-renumbered ACs (joint contract with qa-report injection helper)
   rm -f "$qa_report" 2>/dev/null || true
   log "${tag} ${sid} : prior qa-report deleted at ${qa_report} (joint contract with cross-cycle qa-report injection)"
 

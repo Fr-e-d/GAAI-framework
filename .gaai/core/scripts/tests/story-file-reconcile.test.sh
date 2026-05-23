@@ -438,9 +438,9 @@ run_T6() {
   # If absent → silent-skip (no injection)
   local qa_path="$wt/.gaai/project/contexts/artefacts/qa-reports/${sid}.qa-report.md"
   if [[ ! -f "$qa_path" ]]; then
-    pass "T6: E160S13 stub confirms qa-report absent → silent-skip (joint contract verified)"
+    pass "T6: cross-cycle qa-report stub confirms file absent → silent-skip (joint contract verified)"
   else
-    fail "T6: E160S13 stub would find qa-report — joint contract broken"
+    fail "T6: cross-cycle qa-report stub would find file — joint contract broken"
   fi
 
   # Verify the story.md content is the amended version (S05 + S14 ordering correct)
@@ -464,7 +464,7 @@ run_T6() {
 
 # ── Run all tests ──────────────────────────────────────────────────────────────
 echo "================================================================"
-echo " story-file-reconcile.test.sh — E160S14 regression tests"
+echo " story-file-reconcile.test.sh — regression tests"
 echo "================================================================"
 
 run_T1
