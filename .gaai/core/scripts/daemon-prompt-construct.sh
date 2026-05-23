@@ -333,7 +333,7 @@ fi
 # defects rather than re-implementing from scratch. The qa-report's verdict
 # is FAIL (or this code path would not run). Iterations are capped by
 # GAAI_QA_RETRY_MAX at the dispatcher level — this section only delivers context.
-if [[ -n "${GAAI_QA_REPORT_PATH:-}" && -f "$GAAI_QA_REPORT_PATH" && -s "$GAAI_QA_REPORT_PATH" && "${GAAI_QA_INJECT_PHASE:-impl}" == "impl" ]]; then
+if [[ -n "${GAAI_QA_REPORT_PATH:-}" && -f "$GAAI_QA_REPORT_PATH" && -s "$GAAI_QA_REPORT_PATH" ]]; then
   if [[ "$SECONDARY_ROUTE" == "true" ]]; then
     cat <<QA_FINDINGS_REF
 === PRIOR QA FINDINGS — RETRY-LOOP RE-SPAWN ===
