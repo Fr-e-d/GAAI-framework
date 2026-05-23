@@ -2728,6 +2728,39 @@ node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
 # Strip YAML frontmatter (--+\n...\n--+) — claude -p treats leading dashes as a CLI option
 DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
+# ── Mint binding JWT for X-GAAI-Authorized-Workspaces header ────────────────
+_gaai_mint_binding_jwt() {
+  local workspace_id="\$1"
+  if [[ -z "\${GAAI_CLOUD_URL:-}" || -z "\${GAAI_CLOUD_TOKEN:-}" ]]; then
+    echo "[gaai-daemon] GAAI_CLOUD_URL or GAAI_CLOUD_TOKEN not set — spawning without binding JWT" >&2
+    echo ""
+    return 0
+  fi
+  local response
+  response=\$(curl -s -X POST "\${GAAI_CLOUD_URL}/api/mcp-binding" \
+    -H "Authorization: Bearer \${GAAI_CLOUD_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{\"workspace_ids\":[\"\\${workspace_id}\"]}" \
+    --max-time 10 2>/dev/null) || true
+  local jwt
+  jwt=\$(echo "\${response}" | grep -o '"binding_jwt":"[^"]*"' | cut -d'"' -f4 2>/dev/null || true)
+  if [[ "\${jwt}" == *'"'* ]]; then
+    echo "[gaai-daemon] binding JWT contains unexpected character — rejecting" >&2
+    echo ""; return 0
+  fi
+  if [[ -z "\${jwt}" ]]; then
+    echo "[gaai-daemon] binding JWT mint failed — spawning without JWT" >&2
+    echo ""; return 0
+  fi
+  echo "\${jwt}"
+}
+
+_BINDING_JWT=\$(_gaai_mint_binding_jwt "\${GAAI_WORKSPACE_ID:-}")
+_MCP_HEADER_ARGS=()
+if [[ -n "\${_BINDING_JWT}" ]]; then
+  _MCP_HEADER_ARGS=(--header "X-GAAI-Authorized-Workspaces:\${_BINDING_JWT}")
+fi
+
 # --output-format stream-json streams NDJSON events in real-time, so:
 #   - tee updates the log file continuously (natural heartbeat for daemon monitor)
 #   - tail -f shows progress in real-time
@@ -2740,7 +2773,7 @@ if command -v gtimeout &>/dev/null; then
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
+  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -2751,7 +2784,7 @@ elif command -v timeout &>/dev/null; then
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
+  timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -2762,7 +2795,7 @@ else
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
+  claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -3315,6 +3348,39 @@ node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \\
 # See: https://code.claude.com/docs/en/headless
 DELIVERY_PROMPT=\$(awk 'BEGIN{s=0} NR==1 && /^--+\$/{s=1; next} s==1 && /^--+\$/{s=0; next} s==0' "$PROJECT_DIR/.claude/commands/gaai-deliver.md")
 
+# ── Mint binding JWT for X-GAAI-Authorized-Workspaces header ────────────────
+_gaai_mint_binding_jwt() {
+  local workspace_id="\$1"
+  if [[ -z "\${GAAI_CLOUD_URL:-}" || -z "\${GAAI_CLOUD_TOKEN:-}" ]]; then
+    echo "[gaai-daemon] GAAI_CLOUD_URL or GAAI_CLOUD_TOKEN not set — spawning without binding JWT" >&2
+    echo ""
+    return 0
+  fi
+  local response
+  response=\$(curl -s -X POST "\${GAAI_CLOUD_URL}/api/mcp-binding" \
+    -H "Authorization: Bearer \${GAAI_CLOUD_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{\"workspace_ids\":[\"\\${workspace_id}\"]}" \
+    --max-time 10 2>/dev/null) || true
+  local jwt
+  jwt=\$(echo "\${response}" | grep -o '"binding_jwt":"[^"]*"' | cut -d'"' -f4 2>/dev/null || true)
+  if [[ "\${jwt}" == *'"'* ]]; then
+    echo "[gaai-daemon] binding JWT contains unexpected character — rejecting" >&2
+    echo ""; return 0
+  fi
+  if [[ -z "\${jwt}" ]]; then
+    echo "[gaai-daemon] binding JWT mint failed — spawning without JWT" >&2
+    echo ""; return 0
+  fi
+  echo "\${jwt}"
+}
+
+_BINDING_JWT=\$(_gaai_mint_binding_jwt "\${GAAI_WORKSPACE_ID:-}")
+_MCP_HEADER_ARGS=()
+if [[ -n "\${_BINDING_JWT}" ]]; then
+  _MCP_HEADER_ARGS=(--header "X-GAAI-Authorized-Workspaces:\${_BINDING_JWT}")
+fi
+
 # Print mode (-p): claude processes the prompt and exits, freeing the daemon slot.
 # --dangerously-skip-permissions handles tool approval (required for headless).
 # --output-format stream-json streams NDJSON events in real-time, so:
@@ -3328,7 +3394,7 @@ if command -v gtimeout &>/dev/null; then
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
+  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -3339,7 +3405,7 @@ else
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
   GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  claude $CLAUDE_FLAGS -p "\${DELIVERY_PROMPT}
+  claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
 
 Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
   EXIT_CODE=\${PIPESTATUS[0]}
@@ -3657,6 +3723,20 @@ empty_idle_polls=0
 last_recovery_scan_ts=0
 _orphan_scan_tick=0
 _last_loop_ts=$(date +%s)
+# Startup grace: treat a fresh daemon launch the same as a post-suspend resume.
+# Rationale: across a daemon restart (operator --restart, after a stop/start
+# cycle, or after a host suspend that exceeded the previous daemon's lifetime),
+# every in_progress story has a chore-in_progress git commit whose %at is stale
+# by wall-clock — but those stories may still be deliverable, awaiting either a
+# wrapper resume from phase=implemented/qa_passed/qa_failed/planned or a fresh
+# launch. Letting the staleness sweep brute-force them to failed at t=0 is the
+# observed dominant false-positive on this axis. Granting the same grace window
+# the suspend-jump detector uses lets recovery + the launch loop produce fresh
+# chore-in_progress commits within the window, refreshing the staleness clock
+# for genuinely-deliverable stories. Genuinely orphaned stale stories are still
+# caught after the window expires.
+SUSPEND_GRACE_UNTIL=$(( _last_loop_ts + POST_RESUME_GRACE_SEC ))
+log "${CYAN}[STARTUP_GRACE] liveness/staleness kills suppressed for ${POST_RESUME_GRACE_SEC}s after daemon start${NC}"
 
 while true; do
   # Suspend/resume detection: a normal iteration spans roughly POLL_INTERVAL
