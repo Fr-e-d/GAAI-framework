@@ -1672,6 +1672,20 @@ _reconcile_story_file_from_staging() {
   local qa_report="${wt_path}/.gaai/project/contexts/artefacts/qa-reports/${sid}.qa-report.md"
   local tag="[STORY-FILE-RECONCILE]"
 
+  # Pre-flight : worktree may not exist yet on fresh-pickup dispatch path.
+  # The worktree is created by handle_plan_phase inside the wrapper, which
+  # runs AFTER this reconcile call. In that case there is no local copy that
+  # could be stale — the wrapper will populate the worktree from the
+  # story/<sid> branch (itself based on staging), so story.md is in-sync at
+  # branch-creation time. Without this guard, `git -C <missing-dir>` calls
+  # fail silently (2>/dev/null) and surface misleading "fetch failed" +
+  # "staging copy MISSING" messages, triggering spurious escalations that
+  # block delivery of every fresh story.
+  if [[ ! -d "$wt_path" ]]; then
+    log "${tag} ${sid} : worktree not yet created (fresh pickup) — skip reconcile, wrapper will populate from story/${sid} branch"
+    return 0
+  fi
+
   log "${tag} ${sid} : checking story.md against origin/staging (wt=${wt_path})"
 
   # Fetch (best-effort — failure is non-fatal, proceed with cached ref)

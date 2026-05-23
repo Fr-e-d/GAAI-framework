@@ -9,6 +9,9 @@
 # T5: git fetch fails (offline) → helper proceeds with cached origin/staging ref
 # T6: joint contract — after T2 refresh + qa-report deleted, E160S13 stub finds
 #     no qa-report → silent-skip → no injection
+# T7: worktree directory does not exist (fresh-pickup dispatch path) → helper
+#     returns 0 silently with explanatory log (no misleading "fetch failed" /
+#     "staging copy MISSING" → no spurious escalation)
 #
 # Usage: bash .gaai/core/scripts/tests/story-file-reconcile.test.sh
 
@@ -462,6 +465,61 @@ run_T6() {
   fi
 }
 
+# ── T7: worktree directory missing → return 0 silently (fresh-pickup case) ────
+run_T7() {
+  echo ""
+  echo "── T7: worktree not yet created (fresh-pickup dispatch) ────"
+
+  local sid="ETEST007"
+  _TEST_LOG_FILE="$FIXTURE_DIR/t7.log"
+  : > "$_TEST_LOG_FILE"
+
+  # Compute a worktree path that DOES NOT exist (the dispatch flow's
+  # _recovery_resolve_worktree returns this exact pattern, before
+  # handle_plan_phase creates the actual directory).
+  local wt="$FIXTURE_DIR/wt-missing-${sid}-$$"
+  rm -rf "$wt"
+
+  if [[ -d "$wt" ]]; then
+    fail "T7 setup: expected wt path absent, but exists"
+    return
+  fi
+
+  ESCALATION_REASON=""
+  local rc=0
+  _reconcile_story_file_from_staging "$sid" "$wt" || rc=$?
+
+  if [[ "$rc" -eq 0 ]]; then
+    pass "T7: return code is 0 (skipped — fresh pickup, no drift possible)"
+  else
+    fail "T7: expected return 0, got $rc"
+  fi
+
+  if grep -q "worktree not yet created" "$_TEST_LOG_FILE" 2>/dev/null; then
+    pass "T7: log explains the skip ('worktree not yet created')"
+  else
+    fail "T7: log missing fresh-pickup skip message"
+  fi
+
+  if grep -q "fetch failed" "$_TEST_LOG_FILE" 2>/dev/null; then
+    fail "T7: log contains misleading 'fetch failed' — pre-flight guard not applied"
+  else
+    pass "T7: log does not contain misleading 'fetch failed'"
+  fi
+
+  if grep -q "staging copy MISSING" "$_TEST_LOG_FILE" 2>/dev/null; then
+    fail "T7: log contains misleading 'staging copy MISSING' — pre-flight guard not applied"
+  else
+    pass "T7: log does not contain misleading 'staging copy MISSING'"
+  fi
+
+  if [[ -z "$ESCALATION_REASON" ]]; then
+    pass "T7: no escalation triggered"
+  else
+    fail "T7: unexpected escalation — reason='$ESCALATION_REASON'"
+  fi
+}
+
 # ── Run all tests ──────────────────────────────────────────────────────────────
 echo "================================================================"
 echo " story-file-reconcile.test.sh — regression tests"
@@ -473,6 +531,7 @@ run_T3
 run_T4
 run_T5
 run_T6
+run_T7
 
 echo ""
 echo "================================================================"
