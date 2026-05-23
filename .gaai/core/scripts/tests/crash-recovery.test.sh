@@ -901,10 +901,10 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# E160S12 — Crash-drift self-heal regression
+# Crash-drift self-heal regression
 # ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== E160S12: crash-drift self-heal regression ==="
+echo "=== crash-drift self-heal regression ==="
 
 CD_DIR="$FIXTURE_DIR/crash-drift-project"
 CD_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"

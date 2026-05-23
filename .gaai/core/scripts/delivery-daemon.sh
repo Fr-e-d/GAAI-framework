@@ -1459,7 +1459,7 @@ _recovery_resolve_worktree() {
   fi
 }
 
-# ── E160S12 helper : reconcile crash-drift by committing WT phase_status ──
+# ── recovery helper : reconcile crash-drift by committing WT phase_status ──
 # Called when crash_recovery_scan detects the crash-drift signature:
 # in_progress status + advanced WT phase_status + dead lock + daemon marker.
 # Commits the WT phase_status to HEAD with daemon attribution so the normal
