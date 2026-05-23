@@ -2196,7 +2196,7 @@ PLEOF
 
 # ── Cross-cycle qa-report resolver ─────────────────────────────────────
 # Checks whether a prior qa-report exists for <sid> in the worktree at <wt_path>.
-# Parses Verdict and replan_required per DEC-89 §1.2.
+# Parses Verdict and replan_required per the replan routing contract.
 # Outputs exactly two lines on injection: <absolute-path>\n<phase>
 # Outputs nothing on no-injection (absent, unreadable, empty, or PASS verdict).
 # Caller exports GAAI_QA_REPORT_PATH + GAAI_QA_INJECT_PHASE conditionally.
