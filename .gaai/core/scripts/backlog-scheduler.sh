@@ -662,6 +662,7 @@ for line in content.splitlines():
             "priority": "low",
             "complexity": 1,
             "depends_on": [],
+            "epic": "",
         }
         item_indent = indent
         field_indent = indent + 2
@@ -690,6 +691,11 @@ for line in content.splitlines():
         except ValueError:
             pass
         in_depends = False
+    elif stripped.startswith("epic:"):
+        # Extracted so is_ready() can detect epic self-references (id == epic)
+        # and skip epic rows from delivery queues.
+        current["epic"] = stripped.split(":", 1)[1].strip().strip("\"'")
+        in_depends = False
     elif stripped.startswith("depends_on:") or stripped.startswith("dependencies:"):
         val = stripped.split(":", 1)[1].strip()
         if val and val not in ("[]", ""):
@@ -717,6 +723,13 @@ if archived_done_ids_raw:
 
 def is_ready(item):
     if item.get("status") not in ("refined", "ready"):
+        return False
+    # Skip epics. An epic's row is detected by self-reference (id == epic) and
+    # is a container, never a delivery unit. Previously the daemon would pick
+    # the epic row up as a "ready story", fail to spawn a wrapper, increment
+    # the retry counter, and eventually spam "exceeded 3 retries. Skipping
+    # (restart daemon to reset)" every poll cycle.
+    if item.get("id") and item.get("id") == item.get("epic"):
         return False
     return all(d in done_ids for d in item.get("depends_on", []) if d)
 
