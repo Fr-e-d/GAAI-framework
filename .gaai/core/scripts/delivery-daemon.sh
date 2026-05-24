@@ -1747,6 +1747,18 @@ _recovery_relaunch() {
     return 1
   fi
 
+  # Cap-respect : recovery relaunch must honour MAX_CONCURRENT just like the
+  # main dispatch loop. Without this, the recovery scan can launch a wrapper
+  # while 3/3 slots are already held by live deliveries, producing 4/3
+  # over-dispatch observed empirically when a zombie in_progress story is
+  # re-detected mid-cycle.
+  local _active_now
+  _active_now=$(active_count)
+  if (( _active_now >= MAX_CONCURRENT )); then
+    log "${YELLOW}[RECOVERY] $sid : skipping relaunch — slots full (${_active_now}/${MAX_CONCURRENT}), will retry next scan${NC}"
+    return 1
+  fi
+
   local trace_id
   trace_id=$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \
     || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
