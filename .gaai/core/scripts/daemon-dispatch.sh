@@ -2050,11 +2050,42 @@ ${qa_snippet}"
   fi
 
   # ── Persist pr_url + pr_number (AC2) ─────────────────────────────────────
+  # MUST commit + push to staging BEFORE auto-merge (line 2104 deletes the
+  # branch with --delete-branch). The original implementation used `scheduler
+  # --set-field` which only writes to the worktree YAML ; once auto-merge
+  # deleted the branch, those writes were lost forever, the PR watcher
+  # (which only tracks stories whose origin/staging YAML carries pr_url)
+  # could not see the merged PR, and the story stayed in_progress
+  # indefinitely. Reconcile commit 9549df1e fixed the 3 stuck stories from
+  # that incident (E164S01/S02/S03) ; this code path prevents recurrence.
   if [[ -n "$pr_url" ]]; then
-    "$SCHEDULER" --set-field "$story_id" pr_url "$pr_url" "$BACKLOG_FILE" 2>/dev/null || true
     local pr_number
     pr_number=$(gh pr view "$branch" --json number --jq .number 2>/dev/null || true)
-    [[ -n "$pr_number" ]] && "$SCHEDULER" --set-field "$story_id" pr_number "$pr_number" "$BACKLOG_FILE" 2>/dev/null || true
+    local _pr_commit_rc=0
+    if declare -f chore_commit_multi_field >/dev/null 2>&1 && [[ -n "$pr_number" ]]; then
+      chore_commit_multi_field "$story_id" pr_url "$pr_url" pr_number "$pr_number" \
+        "chore($story_id): pr_url=$pr_url pr_number=$pr_number [commit-phase]" \
+        || _pr_commit_rc=$?
+    elif declare -f chore_commit_field >/dev/null 2>&1; then
+      chore_commit_field "$story_id" pr_url "$pr_url" \
+        "chore($story_id): pr_url=$pr_url [commit-phase]" \
+        || _pr_commit_rc=$?
+      if [[ "$_pr_commit_rc" -eq 0 && -n "$pr_number" ]]; then
+        chore_commit_field "$story_id" pr_number "$pr_number" \
+          "chore($story_id): pr_number=$pr_number [commit-phase]" \
+          || _pr_commit_rc=$?
+      fi
+    else
+      _pr_commit_rc=127
+    fi
+    if [[ "$_pr_commit_rc" -ne 0 ]]; then
+      # Best-effort fallback : write to the worktree YAML so cross-cycle
+      # resumption (if the wrapper retries this phase) still sees the PR
+      # metadata. Branch lifetime is short post-merge ; this is mostly defensive.
+      echo "[WARN] ${story_id} handle_commit_phase: chore_commit_field(pr_url/pr_number) failed (rc=${_pr_commit_rc}) — falling back to worktree-only set-field; PR watcher may not track this story"
+      "$SCHEDULER" --set-field "$story_id" pr_url "$pr_url" "$BACKLOG_FILE" 2>/dev/null || true
+      [[ -n "$pr_number" ]] && "$SCHEDULER" --set-field "$story_id" pr_number "$pr_number" "$BACKLOG_FILE" 2>/dev/null || true
+    fi
   fi
 
   # ── Trailer killswitch verification (AC3-i) ───────────────────────────────
