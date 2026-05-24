@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: export SCHEDULER in PR-watcher + sweep liveness check
 - fix: require liveness signal (tmux OR marker) before display
 - fix: infer in-flight phase from phase_status when marker absent
 - fix: skip epic rows from --ready-ids and --next
