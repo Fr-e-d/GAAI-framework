@@ -131,7 +131,12 @@ resolve_3phase_log() {
   done
 
   if [[ -z "$active_phase" ]]; then
-    # No active marker: derive last relevant phase from phase_status
+    # No marker — infer the in-flight phase from phase_status. phase_status names
+    # the LAST COMPLETED phase (planned = Plan done, Impl in flight ; implemented
+    # = Impl done, QA in flight ; qa_passed = QA done, commit in flight). Without
+    # this inference, a missing marker during Impl hand-off pointed the log
+    # resolver at .plan.log and the display showed "IDLE @ planned" while the
+    # nested-claude-spawn was busy writing to .impl.log.
     local ps
     ps=$(awk -v id="$story_id" '
       $0 == "- id: " id { found=1; next }
@@ -143,9 +148,9 @@ resolve_3phase_log() {
     ' "$BACKLOG" 2>/dev/null || true)
     case "$ps" in
       not_started)            active_phase="plan"   ;;
-      planned)                active_phase="plan"   ;;
-      implemented)            active_phase="impl"   ;;
-      qa_passed)              active_phase="qa"     ;;
+      planned)                active_phase="impl"   ;;
+      implemented)            active_phase="qa"     ;;
+      qa_passed)              active_phase="commit" ;;
       done)                   active_phase="commit" ;;
       qa_failed|qa_escalated) active_phase="qa"     ;;
       failed|escalated)       active_phase="impl"   ;;
@@ -191,13 +196,18 @@ detect_phase_3phase() {
     }
   ' "$BACKLOG" 2>/dev/null || true)
 
+  # phase_status names the LAST COMPLETED phase — the IN-FLIGHT phase is the
+  # next one. Without this, "phase_status: planned" rendered as "IDLE @ planned"
+  # while the nested-claude-spawn was busy in Impl on the secondary route.
   case "$ps" in
     done)                   echo "DONE"              ;;
     failed|escalated)       echo "FAILED"            ;;
     qa_failed)              echo "QA_FAILED"         ;;
     qa_escalated)           echo "QA_ESCALATED"      ;;
-    not_started|planned|implemented|qa_passed)
-                            echo "IDLE @ ${ps}"      ;;
+    not_started)            echo "PLAN"              ;;
+    planned)                echo "IMPL"              ;;
+    implemented)            echo "QA"                ;;
+    qa_passed)              echo "COMMIT"            ;;
     "")                     echo "[?]"               ;;
     *)                      echo "[?]"               ;;
   esac
