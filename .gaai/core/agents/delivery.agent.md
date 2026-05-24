@@ -175,7 +175,7 @@ After loading memory and before spawning sub-agents, the Orchestrator MUST valid
 3. **Include constraining DECs in the context bundle** sent to the Planning Sub-Agent. The Planning Sub-Agent must verify that the execution plan complies with each listed DEC.
 4. **If the plan contradicts a DEC**: STOP. Do not proceed. Mark the story `blocked` with an explicit violation report: which DEC, which plan step, what the contradiction is. Escalate to Discovery for resolution (the DEC may need amendment, or the plan needs revision).
 
-**Rationale:** On 2026-02-28, 6 stories introduced synchronous `sendEmail()` calls despite DEC-11 explicitly prohibiting them. Neither Discovery (no cross-reference step) nor Delivery (no validation gate) caught the violation. 12 inline calls accumulated over 17 days before detection during a production incident. This gate ensures DECs are enforced at delivery time, not just documented at discovery time.
+**Rationale:** A past project incident saw multiple stories introduce a synchronous call pattern that a previously-active DEC had explicitly prohibited. Neither Discovery (no cross-reference step at the time) nor Delivery (no validation gate at the time) caught the violation. The pattern accumulated across the codebase over several weeks before detection during a production incident. This gate ensures DECs are enforced at delivery time, not just documented at discovery time.
 
 ---
 

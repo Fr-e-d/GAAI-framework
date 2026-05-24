@@ -39,13 +39,13 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
    **CRITICAL — Decision Cross-Reference (MUST execute before writing any story):**
    - **a)** Extract keywords from the Epic scope and each story's intent (e.g., "email", "billing", "booking", "auth", "cron", "queue", "GCal", "GDPR").
    - **b)** Scan the Decision Registry in `contexts/memory/index.md` for DECs whose `domain`, `title`, or `tags` match these keywords. Use `grep` on `contexts/memory/decisions/` if the registry table is insufficient.
-   - **c)** For each matching DEC, read the decision file and assess whether it **constrains** the story's implementation (e.g., DEC-11 constrains how emails are sent, DEC-44 constrains reminder behavior).
-   - **d)** List constraining DECs in the story's `related_decs` frontmatter field. If a DEC imposes a specific implementation pattern (e.g., "all email via queues"), add an explicit AC referencing it (e.g., "AC-N: Email sent via CF Queue per DEC-11 — no synchronous sendEmail() calls").
+   - **c)** For each matching DEC, read the decision file and assess whether it **constrains** the story's implementation (e.g., a DEC may dictate how emails are sent, or how a recurring job is scheduled).
+   - **d)** List constraining DECs in the story's `related_decs` frontmatter field. If a DEC imposes a specific implementation pattern (e.g., "all email via queues"), add an explicit AC referencing it (e.g., "AC-N: Email sent via queue per <DEC-id> — no synchronous sendEmail() calls").
    - **e)** If no DECs match, set `related_decs: []` explicitly — never leave the field empty by omission.
-   - **Rationale:** On 2026-02-28, E06S39 created a synchronous `sendEmail()` utility despite DEC-11 (2026-02-19) explicitly prohibiting synchronous email calls. 6 subsequent stories reused it, creating 12 violations undetected for 17 days. The DEC was never referenced in any of the 6 stories because no cross-reference step existed.
+   - **Rationale:** In a past project incident, a story created a synchronous helper despite a previously-active DEC explicitly prohibiting that pattern. Subsequent stories reused the helper, accumulating violations that went undetected for weeks because no cross-reference step existed between Epic intent and the active DEC registry.
 
    **CRITICAL — Collision Guard (MUST execute before writing any file):**
-   - **a)** Scan `contexts/backlog/active.backlog.yaml` for any existing entries with the same Epic ID prefix. If entries exist, determine the **next available story number** (e.g., if E52S01–E52S05 exist, start at E52S06).
+   - **a)** Scan `contexts/backlog/active.backlog.yaml` for any existing entries with the same Epic ID prefix. If entries exist, determine the **next available story number** (e.g., if E01S01–E01S05 exist, start at E01S06).
    - **b)** For each story file to be created, **check if the file already exists** on disk at `contexts/artefacts/stories/{id}.story.md`. If the file exists and its `id` frontmatter matches a **different** epic or title, **STOP immediately** — this means an ID collision between two epics. Surface the conflict to the human and do not proceed.
    - **c)** If the file exists and its content matches the current Epic (same epic ID, same intent), treat it as an update — read the existing content first and preserve any human edits.
    - **Rationale:** In a past incident, two concurrent sessions assigned the same Epic ID to different epics. The second session overwrote story files without checking, destroying existing stories. This guard prevents recurrence.
@@ -127,7 +127,7 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
 13. **MANDATORY — Commit & push to staging (ATOMIC).** After all story files are written and registered in the backlog, commit all generated/modified files **and push to `staging` in the same step**. Commit without push is a violation — Delivery cannot pick up stories that exist only locally.
     - Stage: story files (`contexts/artefacts/stories/*.story.md`), backlog (`contexts/backlog/active.backlog.yaml`), and any other modified GAAI context files (memory, decisions, etc.)
     - Commit message format: `chore(discovery): generate stories {id_range} for Epic {epic_id}`
-      - Example: `chore(discovery): generate stories E06S46–E06S50 for Epic E06`
+      - Example: `chore(discovery): generate stories E01S01–E01S05 for Epic E01`
     - Push to `staging` branch **immediately after commit — never wait for human to request the push**
     - **Rationale:** In a past incident, Discovery committed a story but did not push. The human had to explicitly request the push. The commit and push are a single atomic operation — separating them defeats the purpose of this step.
 

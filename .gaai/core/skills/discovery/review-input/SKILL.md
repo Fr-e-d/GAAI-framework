@@ -91,7 +91,7 @@ todo | cleanup | housekeeping
 ### B. Potential targets (state mutation candidates)
 
 Inspect the input for references to :
-- Active DEC IDs (DEC-1 through DEC-79 ; check `memory/index.md` for current registry)
+- Active DEC IDs (consult `memory/index.md` for your project's current registry)
 - `strategic-frame.md` sections (Non-Goals §3, OT §6, Decision Filters §5)
 - Files in `memory/architecture/`, `memory/strategy/`, `patterns/`
 - `base.rules.md`, `orchestration.rules.md`, agent definitions
@@ -155,17 +155,17 @@ Then load **domain-specific** anchors per Phase 1 detection :
 
 | Detected domain | Mandatory reads |
 |---|---|
-| strategy | `strategy/mission-and-v1-wedge.md`, `strategy/pareto-product-philosophy.md` |
+| strategy | your project's strategy docs (mission / wedge / product philosophy) |
 | architecture | `architecture/<relevant>.md` + cited DECs (read DEC files, check status field) |
 | patterns | `patterns/conventions.md` + the existing pattern being amended |
-| governance | `orchestration.rules.md`, `decisions/DEC-69.md`, `decisions/DEC-20.md` |
-| security | `decisions/DEC-65.md`, `decisions/DEC-66.md`, `project/security-compliance-requirements.md` |
-| product_ux | `strategy/positioning-layered-naming.md`, `project/brand-identity.md`, `patterns/conventions.md` |
-| pricing | `decisions/DEC-71.md`, `decisions/DEC-77.md` (candidate) |
-| content_marketing | `strategy/competitor-*.md`, `project/brand-identity.md`, `domains/content-production/voice-guide.md` |
-| data_model | `architecture/cf-bindings-audit.md`, `decisions/DEC-3.md`, `decisions/DEC-18.md` |
-| ops_infra | `decisions/DEC-3.md`, `decisions/DEC-23.md`, `decisions/DEC-64.md`, `decisions/DEC-78.md` |
-| tooling | `decisions/DEC-34.md`, `architecture/claude-cli-dependency-analysis.md` |
+| governance | `orchestration.rules.md` + the DECs that codify your governance rules |
+| security | the DECs that codify your security/compliance posture |
+| product_ux | your project's positioning + brand-identity docs + `patterns/conventions.md` |
+| pricing | the DEC(s) that codify your pricing model (active + any candidate) |
+| content_marketing | your project's competitor analysis + brand-identity + voice guide |
+| data_model | `architecture/<storage-bindings>.md` + the DECs that codify your data layer |
+| ops_infra | the DECs that codify your ops/infra/runtime choices |
+| tooling | the DEC(s) that codify your tooling stack + dependency analyses |
 
 If domain unknown → ask the human, do not invent governance docs.
 
@@ -226,10 +226,10 @@ For each filter from `strategic-frame.md §5`, output PASS / FAIL / N/A + 1-line
 
 - **5.1 Pareto 90-day** — will a paying customer see value within 90 days, directly or as enabler ?
 - **5.2 Non-goal check** — does input violate any Non-Goal in §3 ? Cite §.
-- **5.3 Complexity budget** — does input exceed 1/5-day solo founder capacity (DEC-69 C-1) ?
+- **5.3 Complexity budget** — does input exceed the capacity envelope set by your governance (e.g. a solo-founder 1/5-day budget) ?
 - **5.4 ICP alignment** — serves V1 wedge or explicitly-declared V2+ upsell ?
 - **5.5 Assumption disclosure** — input treats unvalidated assumption as fact ?
-- **5.6 Competitor differentiation** — if Devin / Factory / Cursor bg / Claude Code Skills can do it, why GAAI ?
+- **5.6 Competitor differentiation** — if a known competitor in your space can do it, what makes your offering distinct ?
 
 If `intent = pivot`, treat Non-Goals as **artefacts to interrogate**, not constraints to enforce. The question shifts from "violates ?" to "does the pivot WARRANT amending the Non-Goal ?".
 

@@ -45,7 +45,7 @@ Use cases:
 
 Search YAML frontmatter fields across `decisions/DEC-*.md` files.
 
-1. Accept query as field-value pairs: `{domain: "infrastructure", level: "operational"}` and/or `{tags: ["connection-pooling"]}` and/or `{related_to: ["DEC-5"]}` and/or `{status: "active"}`
+1. Accept query as field-value pairs: `{domain: "infrastructure", level: "operational"}` and/or `{tags: ["connection-pooling"]}` and/or `{related_to: ["<DEC-id>"]}` and/or `{status: "active"}`
 2. Grep frontmatter blocks (between `---` delimiters) of all `decisions/DEC-*.md` files
 3. Match files where ALL specified fields match (AND logic)
 4. Extract `id`, `title`, and matched field values from each hit

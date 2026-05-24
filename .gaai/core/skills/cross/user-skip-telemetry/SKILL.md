@@ -320,4 +320,4 @@ This skill MUST NOT:
 - Capture answer content or question text in the metrics record (privacy invariant)
 - Prompt for skip reason on `"user_abort"` or `"per_question_only"` skip types
 - Invoke `abort-safe-handler` or `qa-loop-ui` (this skill is post-loop only)
-- Make governance decisions based on skip patterns (observe, not decide — DEC-82 Principle 1)
+- Make governance decisions based on skip patterns (observe, not decide — per the active bootstrap-telemetry DEC, if any)

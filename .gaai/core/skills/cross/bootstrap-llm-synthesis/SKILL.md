@@ -74,7 +74,7 @@ Log: `[bootstrap-llm-synthesis] context assembled — AST: {available}, Q&A: {av
 
 ### Step 2 — Build synthesis prompt
 
-Construct the prompt using the template below. Apply `cache_control: {type: "ephemeral"}` on the system prompt block (DEC-82 Principle 11 — prompt caching at static prefixes).
+Construct the prompt using the template below. Apply `cache_control: {type: "ephemeral"}` on the system prompt block (prompt caching at static prefixes — a standard cost-optimization for repeated LLM calls).
 
 **System prompt (static — cache this block):**
 

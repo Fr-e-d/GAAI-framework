@@ -41,7 +41,7 @@ Do NOT use for trivial steps, implementation details, brainstorming, or reversib
    - Load the specific `decisions/DEC-{ID}.md` files for decisions in the affected domain(s)
    - Verify the proposed decision does NOT contradict any active decision
    - If contradiction found: either explicitly supersede (set `superseded_by` in old file + `supersedes` in new file) with rationale, or STOP and escalate to human.
-     <!-- E39S07: Impact list added before escalation to give the human full ripple-effect context
+     <!-- Impact list added before escalation to give the human full ripple-effect context
           at decision time. Prevents escalations that lack scope — the human needs to know what
           else references the contradicted decision before resolving it. Drift prevention. -->
      **When escalating due to contradiction:** before surfacing the escalation, grep

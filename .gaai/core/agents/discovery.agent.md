@@ -173,7 +173,7 @@ The brief captures **7 categories** of session intelligence — not just "decisi
 | **Hypotheses** | Unvalidated assumptions that shaped the plan | "Premium tier is a test — do not invest heavily until signal" |
 | **Trade-offs & Rationale** | Why option A was chosen over option B | "Per-seat pricing rejected — usage-based is simpler for solo users" |
 | **Scope Boundaries** | What's in, what's out, and in what order | "API docs first (zero competition), tutorials second" |
-| **Constraints** | Non-negotiable technical or business limits | "DEC-5: EN only", "No social media promotion pre-launch" |
+| **Constraints** | Non-negotiable technical or business limits | "<DEC-id>: EN only", "No social media promotion pre-launch" |
 | **Qualitative Preferences** | Tone, positioning, quality expectations | "Painkiller not vitamin — quantify cost of inaction", "Error messages must be actionable, not generic" |
 
 **Critical distinction:** These are NOT DECs. DECs are formal, persistent, versioned decisions in `.gaai/project/contexts/memory/decisions/`. The Session Brief is ephemeral — it captures the conversation-level intelligence that shapes artefacts within THIS session only. If something is important enough to persist across sessions, it should become a DEC separately.
@@ -280,8 +280,8 @@ The brief captures **7 categories** of session intelligence — not just "decisi
    S-3: Blog on own domain (not just Medium/Substack) for SEO authority
 
    CONSTRAINTS
-   C-1: DEC-5 — EN only
-   C-2: DEC-8 — every public-facing page must pass readability audit
+   C-1: <DEC-id> — EN only
+   C-2: <DEC-id> — every public-facing page must pass readability audit
    C-3: No paid advertising pre-launch (budget constraint)
 
    QUALITATIVE PREFERENCES
