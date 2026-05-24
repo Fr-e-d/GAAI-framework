@@ -132,6 +132,48 @@ detect_active_stories() {
   fi
 }
 
+# Returns story IDs — one per line — for stuck deliveries: backlog status=in_progress
+# + delivery_pipeline=3phase + no per-phase .active marker + no gaai-deliver-<id>
+# tmux session. These were marked in_progress by pre_launch_mark_in_progress but
+# never reached (or have left) an active phase, so the human cannot see them in
+# the live Active Deliveries panel. Surfacing them is the operator-visibility fix
+# for the daemon-abort-leaves-residue class of bug (E164S01 evening 2026-05-23).
+detect_stuck_stories() {
+  # Walk the backlog YAML once, emitting (sid, status, dp) tuples for each item.
+  awk '
+    /^- id:/ {
+      if (sid != "" && status == "in_progress" && dp == "3phase") print sid
+      gsub(/^- id:[[:space:]]*/, "")
+      sid=$0; status=""; dp=""
+      next
+    }
+    /^[[:space:]]+status:/ {
+      v=$0; gsub(/^[[:space:]]+status:[[:space:]]*"?/, "", v); gsub(/"[[:space:]]*$/, "", v); gsub(/[[:space:]]*$/, "", v)
+      status=v; next
+    }
+    /^[[:space:]]+delivery_pipeline:/ {
+      v=$0; gsub(/^[[:space:]]+delivery_pipeline:[[:space:]]*"?/, "", v); gsub(/"[[:space:]]*$/, "", v); gsub(/[[:space:]]*$/, "", v)
+      dp=v; next
+    }
+    END {
+      if (sid != "" && status == "in_progress" && dp == "3phase") print sid
+    }
+  ' "$BACKLOG" 2>/dev/null | while IFS= read -r _sid; do
+    [[ -z "$_sid" ]] && continue
+    # Exclude live deliveries — anything with an .active phase marker
+    local _has_marker=0
+    for _ph in plan impl qa commit; do
+      [[ -f "${LOCK_DIR}/${_sid}.${_ph}.active" ]] && _has_marker=1 && break
+    done
+    [[ $_has_marker -eq 1 ]] && continue
+    # Exclude legacy tmux deliveries
+    if tmux has-session -t "gaai-deliver-${_sid}" 2>/dev/null; then
+      continue
+    fi
+    echo "$_sid"
+  done
+}
+
 # Returns the canonical log path for the current active phase of a 3phase story.
 # AC2: per-phase log at {worktree}/.delivery-logs/{id}.{phase}.log
 # Falls back to [no log yet] sentinel string when log does not exist.
@@ -606,7 +648,14 @@ while true; do
     [[ -n "$_id" ]] && active_ids+=("$_id")
   done < <(detect_active_stories)
 
-  if [[ ${#active_ids[@]} -eq 0 ]]; then
+  # Read stuck stories (in_progress + 3phase + no .active marker + no tmux session).
+  # Operator-visibility surface for the daemon-abort-leaves-residue class of bug.
+  stuck_ids=()
+  while IFS= read -r _id; do
+    [[ -n "$_id" ]] && stuck_ids+=("$_id")
+  done < <(detect_stuck_stories)
+
+  if [[ ${#active_ids[@]} -eq 0 && ${#stuck_ids[@]} -eq 0 ]]; then
     echo -e "  ${DIM}No active deliveries. Use /gaai-discover to create stories for the backlog.${NC}"
     sleep 5
     continue
@@ -659,6 +708,44 @@ while true; do
     fi
     echo ""
   done
+
+  # ── Stuck stories panel ─────────────────────────────────────────────────
+  # Render after active deliveries — these are operator-attention items, not
+  # currently-running work. Backlog status=in_progress but no .active phase
+  # marker (daemon aborted post-mark-in-progress, or operator intervened).
+  if [[ ${#stuck_ids[@]} -gt 0 ]]; then
+    echo -e "${RED}── Stuck (in_progress without active phase marker) ──${NC}"
+    echo ""
+    for sid in "${stuck_ids[@]}"; do
+      _stuck_title=$(awk -v id="$sid" '
+        $0 == "- id: " id { found=1; next }
+        found && /^- id:/ { exit }
+        found && /^[[:space:]]+title:/ {
+          gsub(/^[[:space:]]+title:[[:space:]]*"?/, "")
+          gsub(/"[[:space:]]*$/, "")
+          gsub(/[[:space:]]*$/, "")
+          print; exit
+        }
+      ' "$BACKLOG" 2>/dev/null || true)
+      _stuck_ps=$(awk -v id="$sid" '
+        $0 == "- id: " id { found=1; next }
+        found && /^- id:/ { exit }
+        found && /^[[:space:]]+phase_status:/ {
+          gsub(/^[[:space:]]+phase_status:[[:space:]]*"?/, "")
+          gsub(/"[[:space:]]*$/, "")
+          gsub(/[[:space:]]*$/, "")
+          print; exit
+        }
+      ' "$BACKLOG" 2>/dev/null || true)
+      if [[ -n "$_stuck_title" ]]; then
+        printf '  %bSTUCK%b %b%s%b — %s\n' "$RED" "$NC" "$CYAN" "$sid" "$NC" "$_stuck_title"
+      else
+        printf '  %bSTUCK%b %b%s%b\n' "$RED" "$NC" "$CYAN" "$sid" "$NC"
+      fi
+      printf '    %bphase_status: %s — no .active marker, no tmux session%b\n' "$DIM" "${_stuck_ps:-unknown}" "$NC"
+    done
+    echo ""
+  fi
 
   sleep 5
 done
