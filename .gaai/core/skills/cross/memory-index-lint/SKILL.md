@@ -72,7 +72,7 @@ When the agent is on a surface without shell access, or when invoking the script
    - `archived_to: archive/superseded-decisions.archive.md`
    - `archived_at:` is a date string
 
-4. **Path stability.** Every DEC referenced in active index OR archive index has its file at `decisions/DEC-XX.md` on disk. Exception: `DEC-80` is a reserved-no-file ID (DEC-79 contingency pivot reservation).
+4. **Path stability.** Every DEC referenced in active index OR archive index has its file at `decisions/DEC-XX.md` on disk. Exception: a DEC ID may be reserved-no-file (declared in the index as such — e.g. a contingency pivot reservation that intentionally holds a slot without a body file).
 
 5. **Supersedeur backlink (V2 — soft check V1).** For every supersession edge `DEC-X → DEC-Y`, the supersedeur DEC-Y's frontmatter should declare `supersedes: [DEC-X, ...]`. Missing or asymmetric backlink = WARN (not FAIL in V1 ; promotes to FAIL in V2).
 

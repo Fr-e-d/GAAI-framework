@@ -72,7 +72,7 @@ Append a row to the table under `## Superseded DEC entries` in `archive/supersed
 
 `| Supersedee | Supersedeur | Chain (if any) | Date | Original rationale | What changed | Notes |`
 
-For chains : if the supersedee was itself a supersedeur of an earlier DEC (e.g. DEC-44 supersedes DEC-35 and is itself superseded by DEC-84), render the full chain `DEC-35 → DEC-44 → DEC-84`.
+For chains : if the supersedee was itself a supersedeur of an earlier DEC (e.g. <DEC-id> supersedes <DEC-earlier> and is itself superseded by <DEC-later>), render the full chain `<DEC-earlier> → <DEC-id> → <DEC-later>`.
 
 ### Step 4 — Remove rows from active index.md
 

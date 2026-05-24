@@ -146,7 +146,7 @@ If the user reports OAuth failure or cancellation, execute **Rollback: OAuth Fai
 Scan `.gaai/project/contexts/memory/` recursively. Collect every YAML or Markdown file that represents a memory entry.
 
 For each memory entry found:
-1. Parse the file to extract: `category`, `topic`, `content`, `tags` (preserve all fields verbatim — do not rename or remap — DEC-17).
+1. Parse the file to extract: `category`, `topic`, `content`, `tags` (preserve all fields verbatim — do not rename or remap, per the field-preservation rule in your governance).
 2. Call `gaai_memory_store` with these fields.
 3. If the call succeeds, add the file path to the **migration success list**.
 4. If the call fails, add the file path and error message to the **migration failure list**. Do not abort — continue to the next entry.
@@ -431,7 +431,7 @@ Call `gaai_backlog_list` to retrieve all backlog items.
 
 If the call returns a network or auth error, execute **Rollback: Export Failure** (AC15) and stop.
 
-Reconstruct `.gaai/project/contexts/backlog/active.backlog.yaml` from the returned items. Each item is written as a YAML entry preserving all fields verbatim — id, title, status, dependencies, tags (DEC-17). Example structure:
+Reconstruct `.gaai/project/contexts/backlog/active.backlog.yaml` from the returned items. Each item is written as a YAML entry preserving all fields verbatim — id, title, status, dependencies, tags. Example structure:
 
 ```yaml
 backlog:

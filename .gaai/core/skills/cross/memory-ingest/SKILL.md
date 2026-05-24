@@ -52,7 +52,7 @@ This guard prevents the silent data loss incident of 2026-03-17 where concurrent
 3. Create or update corresponding memory files using standard templates
 4. Register all new or modified entries in `contexts/memory/index.md` — this is mandatory, not optional. Any file not in the index is invisible to all other memory skills.
 5. **Domain dual-index rule:** When ingesting into a domain category (`domains/{domain}/`), also update the domain's own `index.md` (e.g., `domains/content-production/index.md`). Both the master index AND the domain index must reflect the new entry. Failure to update both causes silent drift — the domain sub-agent won't see entries missing from its domain index.
-<!-- E39S07: Impact Scan added to surface drift risk after ingest. Addresses the gap where ingested
+<!-- Impact Scan added to surface drift risk after ingest. Addresses the gap where ingested
      content can silently invalidate assumptions in related memory files. Provides informational
      ripple-effect visibility for OSS Discovery Agent (Cloud enforcement not required). -->
 6. **Impact Scan (post-write) (informational — does not block ingestion).** After writing new memory

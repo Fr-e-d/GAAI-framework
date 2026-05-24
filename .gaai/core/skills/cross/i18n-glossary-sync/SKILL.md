@@ -144,7 +144,7 @@ Ensure all domain-specific terms used in i18n translations are documented in the
         "es": "modo gratuito"
       },
       "usage_count": 3,
-      "recommendation": "Add to glossary (new term in E12S16 direct link pricing)"
+      "recommendation": "Add to glossary (new term in E01S01 direct link pricing)"
     },
     {
       "term": "spending limit",
@@ -163,7 +163,7 @@ Ensure all domain-specific terms used in i18n translations are documented in the
       "term": "matchable",
       "glossary_status": "active",
       "usage_count": 0,
-      "recommendation": "Remove from glossary — replaced by 'profil visible' (E12S13 milestone rename)"
+      "recommendation": "Remove from glossary — replaced by 'profil visible' (E01S02 milestone rename)"
     }
   ],
   "pluralization_analysis": {
@@ -206,7 +206,7 @@ Ensure all domain-specific terms used in i18n translations are documented in the
           "de": "kostenloser Modus",
           "es": "modo gratuito"
         },
-        "context": "Direct link feature (E12S16) — when spending limit exceeded",
+        "context": "Direct link feature (E01S01) — when spending limit exceeded",
         "source": "auto-discovered from locales/*/dashboard.json"
       }
     ],
@@ -224,13 +224,13 @@ Ensure all domain-specific terms used in i18n translations are documented in the
     "remove_terms": [
       {
         "term": "matchable",
-        "reason": "Replaced by 'profil visible' (milestone rename E12S13)",
+        "reason": "Replaced by 'profil visible' (milestone rename E01S02)",
         "deprecation_date": "2026-03-02"
       }
     ]
   },
   "recommendations": [
-    "Update glossary with 'free mode' (new term from E12S16)",
+    "Update glossary with 'free mode' (new term from E01S01)",
     "Fix FR inconsistency: change 'Mes Leads' → 'Mes prospects' in dashboard.leads.header",
     "Complete glossary translations for 'qualification_rate' (FR, DE, ES already used, just not in glossary)",
     "Consider using i18next pluralization plugin for robust lead/leads handling",
@@ -292,7 +292,7 @@ Status: All variants acceptable if consistent per context
 
 ### 4. **Deprecation Lifecycle**
 
-When renaming terms (e.g., milestone rename E12S13):
+When renaming terms (e.g., milestone rename E01S02):
 
 ```
 1. Add new term to glossary ("profil visible")

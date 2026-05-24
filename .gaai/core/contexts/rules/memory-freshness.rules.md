@@ -32,8 +32,8 @@ fields at the time of ingest:
 ```yaml
 depends_on:
   code_paths: ["workers/<worker-dir>/<source-tree>/"]  # git-trackable paths
-  decisions: [DEC-11, DEC-20]                            # DEC IDs referenced in content
-  epics: [E33, E34]                                      # epics whose completion may invalidate content
+  decisions: [<DEC-id>, <DEC-id>]                        # DEC IDs referenced in content
+  epics: [<EID>, <EID>]                                  # epics whose completion may invalidate content
 refresh_tier: 1  # 1=post-epic-hook, 2=read-time-check, 3=cadence, 4=stable
 ```
 
@@ -50,7 +50,7 @@ refresh_tier: 1  # 1=post-epic-hook, 2=read-time-check, 3=cadence, 4=stable
 
 ### 1.2 `depends_on.decisions`
 
-- Accepts DEC-N format strings (e.g., `DEC-11`, `DEC-20`)
+- Accepts DEC-N format strings (e.g., `<DEC-id>`)
 - Referenced DECs are validated during `memory-reconcile` — **not** at ingest time
   (DECs may not yet exist when a memory file is first written)
 - An empty list (`[]`) is valid
@@ -131,7 +131,7 @@ The schema is identical to memory files:
 ---
 depends_on:
   code_paths: ["src/"]      # directories or files this doc describes
-  decisions: [DEC-11]        # decisions referenced in the content
+  decisions: [<DEC-id>]      # decisions referenced in the content
   epics: []
 refresh_tier: 2
 ---
@@ -190,8 +190,8 @@ The `depends_on` schema is designed to map to GAAI Cloud knowledge graph edges:
 | `depends_on.epics` | Epic context edges — human-readable, informational in graph |
 
 This mapping is informational for the OSS layer. Cloud enforcement is an
-out-of-scope concern for this story (E41S01). Downstream stories (E41S04+) wire
-the local staleness check; Cloud graph enforcement is a separate track.
+out-of-scope concern for the local staleness check; Cloud graph enforcement
+is a separate track.
 
 ---
 

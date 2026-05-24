@@ -22,11 +22,11 @@ outputs:
 
 # Memory Reconcile
 
-> **Why this skill exists:** The OSS (file-based) GAAI runtime has no server-side enforcement. Drift between memory files and the decisions they reference accumulates silently between sessions. `memory-ingest` populates memory from validated outputs but does not cross-check existing entries for staleness or contradiction. `memory-reconcile` is the OSS counterpart of the Cloud `ReconciliationWorkflow` (E40S03) — it fills this gap by scanning existing memory for drift that `memory-ingest` misses. In Cloud, reconciliation is a server-side scheduled workflow. In OSS, the Discovery Agent triggers it manually (or via cron) by invoking this skill.
+> **Why this skill exists:** The OSS (file-based) GAAI runtime has no server-side enforcement. Drift between memory files and the decisions they reference accumulates silently between sessions. `memory-ingest` populates memory from validated outputs but does not cross-check existing entries for staleness or contradiction. `memory-reconcile` is the OSS counterpart of the Cloud `ReconciliationWorkflow` — it fills this gap by scanning existing memory for drift that `memory-ingest` misses. In Cloud, reconciliation is a server-side scheduled workflow. In OSS, the Discovery Agent triggers it manually (or via cron) by invoking this skill.
 >
-> **DEC-13** (LLM stays client-side): This skill executes locally in the OSS layer, consistent with DEC-13. No data leaves the local filesystem.
+> **Client-side LLM** (per the active "LLM stays client-side" DEC in your registry, if present): This skill executes locally in the OSS layer. No data leaves the local filesystem.
 >
-> **DEC-20** (three-layer governance enforcement): This skill feeds the soft and escalation governance layers by surfacing drift before it becomes a governance violation.
+> **Governance feed** (per any active "three-layer governance enforcement" DEC): This skill feeds the soft and escalation governance layers by surfacing drift before it becomes a governance violation.
 
 ## Purpose / When to Activate
 
@@ -187,6 +187,6 @@ This skill MUST NOT:
 - Trigger `memory-ingest` directly.
 - Delete or archive memory files.
 - Auto-correct superseded references without human review.
-- Run server-side — this skill is OSS, client-side only (DEC-13). The Cloud counterpart is E40S03.
+- Run server-side — this skill is OSS, client-side only. The Cloud counterpart is the server-side reconciliation workflow.
 
 **Identify drift. Never resolve it unilaterally. Discovery is the sole actor authorized to action the report.**

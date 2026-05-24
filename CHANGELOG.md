@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- chore: remove upstream-project narrative refs from skills + agents
 - fix: pre-flight skip _reconcile_story_file_from_staging on missing worktree
 - fix: add --delete-branch to gh pr merge calls
 - fix: cycle counter read-after-delete — reuse counter at escalation, reorder at reconcile

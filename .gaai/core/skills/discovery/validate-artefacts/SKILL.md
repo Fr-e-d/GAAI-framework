@@ -161,7 +161,7 @@ Stories:
 Skill Attestation (Base Rule #2):
 - E01: skills_invoked: [generate-epics] ✓ | MISSING ✗
 - S01: skills_invoked: [generate-stories] ✓ | MISSING ✗
-- S01: related_decs: [DEC-11] ✓ | MISSING ✗
+- S01: related_decs: [<DEC-id>] ✓ | MISSING ✗
 
 Governance:
 - rules respected: yes | no

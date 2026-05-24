@@ -56,7 +56,7 @@ ambiguity_feed: Array of insight objects, each:
 
 ### Step 1 — Pre-filter: exclude low-confidence insights (AC4 — CLIENT-SIDE, before LLM call)
 
-This is deterministic code, NOT a prompt instruction. It executes before the LLM call (DEC-13: client-side filter; DEC-48: orchestrator-enforced).
+This is deterministic code, NOT a prompt instruction. It executes before the LLM call (consistent with any active "client-side LLM" and "orchestrator-enforced instructions" DECs in your registry).
 
 ```
 eligible_insights = ambiguity_feed.filter(i => i.ambiguity_score >= 3)
@@ -72,7 +72,7 @@ if eligible_insights.length == 0:
 
 Construct the LLM prompt using only `eligible_insights` (the pre-filtered array).
 
-Apply `cache_control: {type: "ephemeral"}` on the system prompt block (DEC-82 Principle 11 — prompt caching at static prefixes).
+Apply `cache_control: {type: "ephemeral"}` on the system prompt block (prompt caching at static prefixes — a standard cost-optimization for repeated LLM calls).
 
 **System prompt (static — cache this block):**
 
@@ -125,7 +125,7 @@ Generate questions for the following project ambiguities.
 Produce at most {min(5, eligible_insights.length)} questions now.
 ```
 
-**Token budget estimate:** with ≤7 eligible insights (post pre-filter) and snippet lengths bounded to ~100 chars, prompt is well within 5k input token budget per DEC-82 Principle 2.
+**Token budget estimate:** with ≤7 eligible insights (post pre-filter) and snippet lengths bounded to ~100 chars, prompt is well within a 5k input token budget (a reasonable per-call ceiling for cost-bounded bootstrap calls).
 
 ### Step 3 — LLM call with failure handling (AC5)
 

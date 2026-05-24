@@ -187,7 +187,7 @@ For each story, produce a structured verdict:
 | # | Type | Severity | Brief Item | Story Element | Finding |
 |---|------|----------|-----------|---------------|---------|
 | 1 | CONTRADICTION | CRITICAL | **D-1** (Dashboard = admin-first) | AC1 | Story says "end-user-facing" — contradicts D-1 |
-| 2 | DEC_MISSING | HIGH | **C-1** (DEC-5: EN only) | related_decs | DEC-5 should be referenced — story has URL routing implications |
+| 2 | DEC_MISSING | HIGH | **C-1** (<DEC-id>: EN only) | related_decs | The EN-only DEC should be referenced — story has URL routing implications |
 | 3 | DOR_MISSING | HIGH | DoR: `error-handling` | No AC | No AC addresses error handling |
 | 4 | DRIFT | HIGH | **Q-2** (actionable errors) | AC5 | AC says "return error code" — Q-2 requires actionable guidance, not just codes |
 

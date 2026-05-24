@@ -33,7 +33,7 @@ Run `.gaai/core/scripts/context-bootstrap.sh` if available, then:
 
 Present a concise, human-readable summary. Flag anything that looks incomplete or missing.
 
-6. **GAAI Cloud subscription state (E114S01 AC2):**
+6. **GAAI Cloud subscription state:**
    - Run `cat .gaai/local/cloud-state.json 2>/dev/null` to read the cached subscription state.
    - If the file exists and is valid JSON with `tier` and `status` fields, display them as:
      ```

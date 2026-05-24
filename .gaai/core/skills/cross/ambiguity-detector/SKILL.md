@@ -28,7 +28,7 @@ Activate:
 - The bootstrap orchestrator filters `synthesis_result.entries[]` to `clarity: "open-question"` and passes them as `synthesis_entries`
 - When `synthesis_entries` is empty and `ast_signals` is null, the skill runs heuristic-only analysis on `surface_scan_result` and may still produce entries from language distribution
 
-This skill is **pure heuristic** — it makes no LLM calls. It scores ambiguities deterministically from structural signals. All scoring logic executes client-side before the Q&A stage (DEC-13 client-side principle, DEC-48 instructions-client).
+This skill is **pure heuristic** — it makes no LLM calls. It scores ambiguities deterministically from structural signals. All scoring logic executes client-side before the Q&A stage (consistent with any active "LLM stays client-side" and "instructions stay client-side" DECs in your registry).
 
 ---
 

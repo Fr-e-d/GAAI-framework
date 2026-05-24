@@ -26,7 +26,7 @@ skills_invoked:
 Activate:
 - As Stage 5 of the `/gaai:bootstrap` pipeline, **Cloud path only**
 - After `bootstrap-llm-synthesis` (Stage 3) has produced validated memory entries
-- When the workspace bootstrap_status is `in_progress` (set by the bootstrap orchestrator, E107S01)
+- When the workspace bootstrap_status is `in_progress` (set by the bootstrap orchestrator)
 - Do NOT activate if the workspace bootstrap_status is anything other than `in_progress` — the server gate will refuse all writes
 
 ## Pre-conditions
@@ -111,7 +111,7 @@ The HMAC-based dedup in `StructuredMemory.store()` treats a second write as an `
 ## Non-Goals (Out of Scope)
 
 - **LLM inference**: This skill does NOT call the LLM. Call `bootstrap-llm-synthesis` first.
-- **Consent gate**: This skill does NOT show the consent overlay. That is Stage 6 (E107S06).
+- **Consent gate**: This skill does NOT show the consent overlay. That is a later pipeline stage.
 - **Local OSS path**: This skill is Cloud-native only. For local-only bootstrap, entries are written to `.gaai/project/contexts/memory/` filesystem directly by the bootstrap orchestrator.
 - **Error recovery**: Per-entry errors are logged and skipped. No retry logic. If `fail_count > 0`, the operator should review the errors and re-run if needed.
-- **Status transition**: This skill does NOT change `bootstrap_status`. The orchestrator (E107S01) transitions `in_progress → done` after Stage 6.
+- **Status transition**: This skill does NOT change `bootstrap_status`. The orchestrator transitions `in_progress → done` after the consent stage.
