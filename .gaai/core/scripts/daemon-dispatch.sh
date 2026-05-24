@@ -2050,14 +2050,13 @@ ${qa_snippet}"
   fi
 
   # ── Persist pr_url + pr_number (AC2) ─────────────────────────────────────
-  # MUST commit + push to staging BEFORE auto-merge (line 2104 deletes the
-  # branch with --delete-branch). The original implementation used `scheduler
-  # --set-field` which only writes to the worktree YAML ; once auto-merge
-  # deleted the branch, those writes were lost forever, the PR watcher
-  # (which only tracks stories whose origin/staging YAML carries pr_url)
-  # could not see the merged PR, and the story stayed in_progress
-  # indefinitely. Reconcile commit 9549df1e fixed the 3 stuck stories from
-  # that incident (E164S01/S02/S03) ; this code path prevents recurrence.
+  # MUST commit + push to the target branch BEFORE auto-merge (below)
+  # deletes the story branch via --delete-branch. The earlier implementation
+  # used `scheduler --set-field` against the worktree YAML only ; once
+  # auto-merge deleted the branch, those writes were lost forever, the PR
+  # watcher (which only tracks stories whose origin-side YAML carries
+  # pr_url) could not see the merged PR, and the story stayed at
+  # status=in_progress indefinitely.
   if [[ -n "$pr_url" ]]; then
     local pr_number
     pr_number=$(gh pr view "$branch" --json number --jq .number 2>/dev/null || true)
