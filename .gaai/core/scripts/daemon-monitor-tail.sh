@@ -85,8 +85,15 @@ detect_active_stories() {
     fi
   done
 
-  # 3phase: enumerate by backlog status, not `.active` markers — markers can lag
-  # the wrapper→nested-claude-spawn hand-off and silently drop a live delivery.
+  # 3phase: enumerate by backlog status, then require ANY liveness signal
+  # (tmux session OR `.active` marker) before display. Backlog-status alone
+  # over-emits zombie stories whose wrapper exited without flipping status.
+  # Marker alone under-emits live deliveries during wrapper→nested-claude-spawn
+  # hand-off when the marker write was skipped. The OR is the honest gate.
+  local _live_tmux
+  _live_tmux=$(tmux list-sessions -F '#{session_name}' 2>/dev/null \
+    | grep '^gaai-deliver-' \
+    | sed 's/gaai-deliver-//' || true)
   awk '
     function emit() {
       if (current_id != "" && status == "in_progress" && dp == "3phase") {
@@ -110,6 +117,14 @@ detect_active_stories() {
     local _dup=0
     for _s in "${seen[@]:-}"; do [[ "$_s" == "$_sid" ]] && _dup=1 && break; done
     [[ $_dup -eq 1 ]] && continue
+    # Liveness gate: require tmux session OR any .active marker
+    local _has_tmux=0
+    if printf '%s\n' "$_live_tmux" | grep -qx "$_sid"; then _has_tmux=1; fi
+    local _has_marker=0
+    for _ph in plan impl qa commit; do
+      [[ -f "${LOCK_DIR}/${_sid}.${_ph}.active" ]] && _has_marker=1 && break
+    done
+    [[ $_has_tmux -eq 0 && $_has_marker -eq 0 ]] && continue
     echo "$_sid"
   done
 }
