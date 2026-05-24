@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: commit-through accumulated wrapper drift in option-A fallback
 - fix: persist pr_url to staging before auto-merge deletes branch
 - fix: persist pr_url to staging before auto-merge deletes branch
 - chore: remove upstream-project narrative refs from skills + agents

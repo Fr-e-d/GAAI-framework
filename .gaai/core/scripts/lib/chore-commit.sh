@@ -77,10 +77,45 @@ _chore_option_a_fallback() {
     return "$_rc"
   }
 
+  # ── Pre-commit drift sweep ─────────────────────────────────────────────
+  # Wrappers write phase_status to the shared backlog YAML via
+  # `scheduler --set-phase-status` (worktree-only, no commit). When several
+  # wrappers progress concurrently, that drift accumulates on disk. The
+  # original refuse-skip on ANY backlog drift then deadlocked every NEW
+  # mark-in-progress attempt — the daemon couldn't pick up new stories
+  # until each wrapper exited and ran its own reconcile (5-90 min later).
+  # Instead, commit the accumulated wrapper-progress drift as its own
+  # commit before applying our edit. The drift is legitimate state from
+  # other wrappers and needs to land on origin anyway. If THAT commit
+  # itself fails, fall back to the old refuse-skip (operator may have
+  # genuine uncommitted edits we don't want to silently absorb).
   if ! git diff --quiet HEAD -- "$backlog_rel" 2>/dev/null; then
-    echo "[CHORE-COMMIT] $story_id : working-tree drift — refuse-skip (Option A)" >&2
-    _chore_a_done 6
-    return $?
+    if git add "$backlog_rel" 2>/dev/null \
+       && git commit -m "chore(daemon): commit accumulated wrapper-progress writes [pre-mark $story_id]" --quiet -- "$backlog_rel" 2>/dev/null; then
+      if ! git push origin "$target_branch" --quiet 2>/dev/null; then
+        # Push race — try rebase-retry once
+        if git fetch origin "$target_branch" --quiet 2>/dev/null \
+          && git rebase "origin/$target_branch" --quiet 2>/dev/null \
+          && git push origin "$target_branch" --quiet 2>/dev/null; then
+          : # success
+        else
+          git rebase --abort 2>/dev/null || true
+          # Roll back our local sweep commit since we couldn't share it
+          git reset --hard "HEAD^" --quiet 2>/dev/null || true
+          echo "[CHORE-COMMIT] $story_id : pre-mark drift sweep push failed — refuse-skip" >&2
+          _chore_a_done 6
+          return $?
+        fi
+      fi
+      echo "[CHORE-COMMIT] $story_id : swept accumulated wrapper-progress drift before mark-in-progress" >&2
+    else
+      # add+commit itself failed — likely no diff content despite git diff
+      # signalling drift (e.g. mode-only change). Revert to old refuse-skip.
+      git reset HEAD -- "$backlog_rel" 2>/dev/null || true
+      echo "[CHORE-COMMIT] $story_id : pre-mark drift sweep commit failed — refuse-skip" >&2
+      _chore_a_done 6
+      return $?
+    fi
   fi
   while [[ $# -ge 2 ]]; do
     "${SCHEDULER:-}" --set-field "$story_id" "$1" "$2" "$backlog_file" 2>/dev/null || true
