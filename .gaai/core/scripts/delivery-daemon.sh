@@ -2073,6 +2073,7 @@ export BACKLOG="$BACKLOG"
 export BACKLOG_FILE="$BACKLOG"
 export BACKLOG_REL="$BACKLOG_REL"
 export TARGET_BRANCH="$TARGET_BRANCH"
+export SCHEDULER="$SCHEDULER"
 source "$chore_lib"
 chore_commit_field "$sid" status done "chore($sid): done [pr-watcher: PR #$pr_number merged $merged_at]"
 chore_commit_field "$sid" phase_status done "chore($sid): phase_status=done [pr-watcher]"
@@ -4097,14 +4098,22 @@ while true; do
   fi
 
   # ── Stale active-spawn marker cleanup (AC1) ──────────────────────────────
-  # Markers left behind by SIGKILL / daemon crash. A marker is stale when no
-  # in_progress story has that phase_status and the file is older than 10 min.
+  # Markers left behind by SIGKILL / daemon crash. mtime alone is insufficient
+  # — the marker is touch-ed once at phase start and never updated, so a
+  # legitimate 30 min Impl phase on the secondary route looks identical to a
+  # crashed wrapper. Skip removal when the wrapper tmux session still exists.
   if [[ -d "$LOCK_DIR" ]]; then
     _stale_now=$(date +%s)
     for _stale_marker in "$LOCK_DIR"/*.plan.active "$LOCK_DIR"/*.impl.active \
                          "$LOCK_DIR"/*.qa.active   "$LOCK_DIR"/*.commit.active; do
       [[ -f "$_stale_marker" ]] || continue
-      # mtime check: remove if older than 600s
+      _stale_basename=$(basename "$_stale_marker" .active)
+      _stale_sid="${_stale_basename%.*}"
+      # Skip removal when the wrapper tmux session still exists.
+      if tmux has-session -t "gaai-deliver-${_stale_sid}" 2>/dev/null; then
+        continue
+      fi
+      # No live wrapper — apply mtime grace (600s).
       if [[ "$(uname)" == "Darwin" ]]; then
         _stale_mtime=$(stat -f %m "$_stale_marker" 2>/dev/null || echo 0)
       else
