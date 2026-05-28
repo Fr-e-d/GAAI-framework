@@ -47,7 +47,7 @@ import sys, re
 _, sid, field_name, path = sys.argv
 
 FIELD_RE = re.compile(
-    r"^\s*(status|phase_status):\s*['\"]?([a-z_]+)['\"]?\s*(#.*)?$"
+    r"^\s*(status|phase_status|pr_status):\s*['\"]?([a-z0-9_]+)['\"]?\s*(#.*)?$"
 )
 
 try:
@@ -91,6 +91,14 @@ backlog_status() {
 backlog_phase_status() {
   local id="$1" backlog_path="$2"
   _backlog_get_field "$id" "phase_status" "$backlog_path"
+}
+
+# Reads pr_status field for an item. Common values include : merged,
+# closed_superseded, not_created_superseded, created, none.
+# Exit 1 if the field is absent (item exists but pr_status not set).
+backlog_pr_status() {
+  local id="$1" backlog_path="$2"
+  _backlog_get_field "$id" "pr_status" "$backlog_path"
 }
 
 backlog_in_progress_ids() {
