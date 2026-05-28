@@ -1852,14 +1852,46 @@ reconcile_done_merged_worktrees() {
       continue
     fi
 
-    # Merged signal: story/sid branch must be an ancestor of origin/$effective_target.
+    # Merged signal — two authoritative sources, in priority order :
+    #   1. backlog pr_status ∈ {merged, closed_superseded, not_created_superseded}
+    #      → PR-level reconciliation is the source of truth. The local story/sid
+    #        branch may carry orphan chore-only commits (daemon writes that were
+    #        never merged) — those are not load-bearing, the actual work is on
+    #        origin/$effective_target via the PR's own merge commit.
+    #   2. git branch --merged origin/$effective_target
+    #      → fallback when pr_status is absent or "none" (manual reconciliation,
+    #        no-PR flow, or legacy entries).
+    # Rate-limit the "skipped:unmerged" log to once per hour per story (was once
+    # per poll — spammed the log when chore-only branches lingered indefinitely).
     local branch_name="story/$sid"
-    local is_merged
-    is_merged=$(git -C "$PROJECT_DIR" branch --merged "origin/${effective_target}" \
-                    --list "$branch_name" 2>/dev/null || echo "")
-    if [[ -z "$is_merged" ]]; then
-      log "[RECONCILE-SWEEP] $sid: skipped:unmerged path=$wt_path (${branch_name} not in --merged origin/${effective_target})"
-      continue
+    local pr_status_val
+    pr_status_val=$(backlog_pr_status "$sid" "$BACKLOG" 2>/dev/null || echo "")
+
+    local pr_authoritative=0
+    case "$pr_status_val" in
+      merged|closed_superseded|not_created_superseded)
+        pr_authoritative=1
+        ;;
+    esac
+
+    if (( pr_authoritative == 0 )); then
+      local is_merged
+      is_merged=$(git -C "$PROJECT_DIR" branch --merged "origin/${effective_target}" \
+                      --list "$branch_name" 2>/dev/null || echo "")
+      if [[ -z "$is_merged" ]]; then
+        # Rate-limit : touch a marker file ; skip log if last log < 3600s ago.
+        local _unmerged_marker="$LOCK_DIR/.reconcile-sweep.unmerged.${sid}"
+        local _now_ts _last_ts _quiet_for
+        _now_ts=$(date +%s)
+        _last_ts=0
+        [[ -f "$_unmerged_marker" ]] && _last_ts=$(cat "$_unmerged_marker" 2>/dev/null || echo 0)
+        _quiet_for=$(( _now_ts - _last_ts ))
+        if (( _quiet_for >= 3600 )); then
+          log "[RECONCILE-SWEEP] $sid: skipped:unmerged path=$wt_path (${branch_name} not in --merged origin/${effective_target}, pr_status=${pr_status_val:-unset} — log throttled 1h)"
+          echo "$_now_ts" > "$_unmerged_marker"
+        fi
+        continue
+      fi
     fi
 
     # Dirty check: do NOT remove if any modification is present (AC2 — data safety).
@@ -1881,12 +1913,25 @@ reconcile_done_merged_worktrees() {
     fi
 
     # Remove the worktree (AC1). --force required: branch still exists in git's ref store.
+    local _auth_reason
+    if (( pr_authoritative == 1 )); then
+      _auth_reason="pr_status=${pr_status_val} authority"
+    else
+      _auth_reason="done+merged into ${effective_target}, clean"
+    fi
     if git -C "$PROJECT_DIR" worktree remove --force "$wt_path" 2>/dev/null; then
-      log "[INFO][RECONCILE-SWEEP] $sid: removed path=$wt_path (done+merged into ${effective_target}, clean)"
+      log "[INFO][RECONCILE-SWEEP] $sid: removed path=$wt_path (${_auth_reason})"
+      # Clear any rate-limit marker — story is now reconciled.
+      rm -f "$LOCK_DIR/.reconcile-sweep.unmerged.${sid}" 2>/dev/null || true
+      # Best-effort: also drop the local story branch (no longer needed — work is on staging via PR).
+      git -C "$PROJECT_DIR" branch -D "$branch_name" 2>/dev/null || true
       # AC4: update pr_status=merged for audit-attribution closure (best-effort).
-      chore_commit_field "$sid" pr_status merged \
-        "chore($sid): pr_status=merged [reconcile-sweep]" 2>/dev/null \
-        || log "[WARN][RECONCILE-SWEEP] $sid: pr_status update skipped (chore-commit unavailable/drift)"
+      # Skip if pr_status already authoritative (no-op).
+      if (( pr_authoritative == 0 )); then
+        chore_commit_field "$sid" pr_status merged \
+          "chore($sid): pr_status=merged [reconcile-sweep]" 2>/dev/null \
+          || log "[WARN][RECONCILE-SWEEP] $sid: pr_status update skipped (chore-commit unavailable/drift)"
+      fi
     else
       log "[WARN][RECONCILE-SWEEP] $sid: remove failed path=$wt_path (git lock contention?) — will retry next cycle"
     fi

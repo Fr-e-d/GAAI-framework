@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: reconcile-sweep uses pr_status authority + rate-limits unmerged log
 - fix: cap-respect in _recovery_relaunch to prevent over-dispatch
 - fix: export SCHEDULER in PR-watcher + sweep liveness check
 - fix: require liveness signal (tmux OR marker) before display
