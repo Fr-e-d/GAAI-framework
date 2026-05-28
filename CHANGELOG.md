@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.40.0] - 2026-05-28
 
 ### Changed
+- feat: memory-index-compact skill + writer-skill instruction tightening + strategic-frame.md changelog archive
 - fix: reconcile-sweep uses pr_status authority + rate-limits unmerged log
 - fix: cap-respect in _recovery_relaunch to prevent over-dispatch
 - fix: export SCHEDULER in PR-watcher + sweep liveness check
@@ -18,11 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix: skip epic rows from --ready-ids and --next
 - fix: commit-through accumulated wrapper drift in option-A fallback
 - fix: persist pr_url to staging before auto-merge deletes branch
-- fix: persist pr_url to staging before auto-merge deletes branch
 - chore: remove upstream-project narrative refs from skills + agents
 - fix: pre-flight skip _reconcile_story_file_from_staging on missing worktree
 - fix: add --delete-branch to gh pr merge calls
 - fix: cycle counter read-after-delete — reuse counter at escalation, reorder at reconcile
+
 
 ## [2.39.0] - 2026-05-24
 

@@ -2,8 +2,8 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md — core framework skills only
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-05-13
-total: 61
+generated_at: 2026-05-28
+total: 62
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -379,6 +379,15 @@ cross:
     tags: []
     updated_at: 2026-04-12
     path: core/skills/cross/memory-delta-triage/SKILL.md
+  - id: SKILL-MEMORY-INDEX-COMPACT-001
+    name: memory-index-compact
+    source: core
+    description: "Compact verbose memory index / registry files to pointer-only form. Activate when an index file (index.md, index-decisions.md, or any sibling registry table) breaches the file-size budget OR shows substance-duplication drift. Distinct from memory-compact (which targets content categories) and memory-archive-superseded (which migrates superseded rows to archive)."
+    category: cross
+    track: cross-cutting
+    tags: []
+    updated_at: 2026-05-28
+    path: core/skills/cross/memory-index-compact/SKILL.md
   - id: SKILL-MEMORY-INDEX-LINT-001
     name: memory-index-lint
     source: core
