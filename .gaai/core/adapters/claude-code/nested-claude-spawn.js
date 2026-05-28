@@ -249,13 +249,22 @@ function buildSpawnArgs(prompt, extraArgs, model = 'opus', includeFallbackModel 
   // (e.g. z.ai's /api/anthropic GLM compat layer), Claude Code's plugin/MCP
   // discovery payload at session init includes a `role:"system"` entry in
   // messages[] that OpenAI-style shims reject with HTTP 422 on the very first
-  // call. --strict-mcp-config limits MCP discovery to the explicit project
-  // config and avoids the rejected init payload. No-op when targeting
-  // anthropic.com directly.
+  // call. --strict-mcp-config limits MCP discovery to the explicit --mcp-config
+  // and avoids the rejected init payload. No-op when targeting anthropic.com.
+  //
+  // Mode contract:
+  //   OSS daemon (this default) — Impl operates on local backlog files, no MCP
+  //     required, so --strict-mcp-config without --mcp-config = no MCP servers,
+  //     which is the desired state.
+  //   GAAI-Cloud variant — Impl needs MCP to talk to the Workspace DO. Cloud
+  //     callers MUST set GAAI_NESTED_KEEP_MCP=1 to opt out of the strict flag
+  //     and preserve the inherited MCP discovery.
   const isNonAnthropicShim = Boolean(
     process.env.ANTHROPIC_BASE_URL &&
     !process.env.ANTHROPIC_BASE_URL.includes('anthropic.com')
   );
+  const keepMcp = process.env.GAAI_NESTED_KEEP_MCP === '1';
+  const injectStrictMcp = isNonAnthropicShim && !keepMcp;
   return [
     '-p', prompt,
     '--no-session-persistence',
@@ -264,7 +273,7 @@ function buildSpawnArgs(prompt, extraArgs, model = 'opus', includeFallbackModel 
     '--verbose',
     '--model', model,
     '--max-turns', String(MAX_TURNS),
-    ...(isNonAnthropicShim ? ['--strict-mcp-config'] : []),
+    ...(injectStrictMcp ? ['--strict-mcp-config'] : []),
     ...extraArgs,
     ...(includeFallbackModel && process.env.GAAI_IMPL_MODEL_FALLBACK ? ['--fallback-model', 'sonnet'] : []),
   ];
