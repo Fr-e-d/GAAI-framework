@@ -1713,7 +1713,7 @@ _auto_resolve_pr_conflicts() {
             auto_section_count=$(( auto_section_count + 1 )) && resolved=true
         fi
 
-      elif [[ "$cf" =~ contexts/artefacts/(stories|qa-reports|impl-reports|execution-plans)/.*"${story_id}".* ]]; then
+      elif [[ "$cf" =~ contexts/artefacts/(stories|qa-reports|impl-reports|plans|notes|memory-deltas)/.*"${story_id}".* ]]; then
         git -C "$worktree_path" checkout --ours -- "$cf" 2>/dev/null && \
           git -C "$worktree_path" add -- "$cf" 2>/dev/null && \
           ours_count=$(( ours_count + 1 )) && resolved=true
