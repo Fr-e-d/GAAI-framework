@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- chore: activate + scaffold E170 (gaai_admin → gaai_org_admin + gaai_ws_admin)
+
 ## [2.40.0] - 2026-05-28
 
 ### Changed
