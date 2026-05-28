@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: correct pr_watcher_tracked count — was always 0
 - fix: auto-resolve story-owned add/add conflicts on notes + memory-deltas + plans
 - chore: activate + scaffold E170 (gaai_admin → gaai_org_admin + gaai_ws_admin)
 
