@@ -245,6 +245,17 @@ function buildPrimaryChildEnv() {
  * @returns {string[]}
  */
 function buildSpawnArgs(prompt, extraArgs, model = 'opus', includeFallbackModel = true) {
+  // --strict-mcp-config: when ANTHROPIC_BASE_URL points to a non-Anthropic shim
+  // (e.g. z.ai's /api/anthropic GLM compat layer), Claude Code's plugin/MCP
+  // discovery payload at session init includes a `role:"system"` entry in
+  // messages[] that OpenAI-style shims reject with HTTP 422 on the very first
+  // call. --strict-mcp-config limits MCP discovery to the explicit project
+  // config and avoids the rejected init payload. No-op when targeting
+  // anthropic.com directly.
+  const isNonAnthropicShim = Boolean(
+    process.env.ANTHROPIC_BASE_URL &&
+    !process.env.ANTHROPIC_BASE_URL.includes('anthropic.com')
+  );
   return [
     '-p', prompt,
     '--no-session-persistence',
@@ -253,6 +264,7 @@ function buildSpawnArgs(prompt, extraArgs, model = 'opus', includeFallbackModel 
     '--verbose',
     '--model', model,
     '--max-turns', String(MAX_TURNS),
+    ...(isNonAnthropicShim ? ['--strict-mcp-config'] : []),
     ...extraArgs,
     ...(includeFallbackModel && process.env.GAAI_IMPL_MODEL_FALLBACK ? ['--fallback-model', 'sonnet'] : []),
   ];

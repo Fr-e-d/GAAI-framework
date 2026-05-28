@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: inject --strict-mcp-config on non-Anthropic shims to unblock GLM Impl
 - fix: refine pr_watcher_tracked — exclude merged PRs + restrict to active statuses
 - fix: correct pr_watcher_tracked count — was always 0
 - fix: correct pr_watcher_tracked count — was always 0
