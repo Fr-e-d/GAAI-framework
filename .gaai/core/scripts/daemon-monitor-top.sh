@@ -208,10 +208,10 @@ while true; do
   fi
   if [[ -f "$BACKLOG" ]]; then
     pr_watcher_tracked=$(awk '
+      /^- id:/ { if (has_pr && is_in_progress) count++; has_pr=0; is_in_progress=0 }
       /^[[:space:]]+pr_url:/ { has_pr=1 }
-      /^[[:space:]]+status:[[:space:]]*"?in_progress"?/ { if (has_pr) count++ }
-      /^- id:/ { has_pr=0 }
-      END { print count+0 }
+      /^[[:space:]]+status:[[:space:]]*"?in_progress"?/ { is_in_progress=1 }
+      END { if (has_pr && is_in_progress) count++; print count+0 }
     ' "$BACKLOG" 2>/dev/null || echo 0)
   fi
   echo -e "  ${CYAN}🔄 PR watcher : ${BOLD}${pr_watcher_tracked}${NC}${CYAN} stories tracked, last poll ${pr_watcher_last} [${pr_watcher_status}]${NC}"
