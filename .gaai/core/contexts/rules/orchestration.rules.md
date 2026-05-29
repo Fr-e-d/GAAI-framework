@@ -91,6 +91,21 @@ Sub-agents spawned by Delivery (Planning, Implementation, QA, Specialists) each 
 
 → Backlog state lifecycle, transition rules, and archiving rules are defined in `base.rules.md` (loaded at session startup, applies universally).
 
+### Backlog & Staging Write Coordination — Discovery ↔ Daemon (Claim Protocol)
+
+**Principle:** an interactive Discovery session and the Delivery Daemon both write the backlog and the `staging` branch. The daemon continuously `git reset --hard origin/staging` on its working tree, so **`origin/staging` is the only durable state** — any local edit that is not committed *and pushed* can be clobbered by a concurrent daemon reset/commit. Discovery MUST therefore claim writes under the **same staging lock the daemon uses**, never edit the live shared tree opportunistically.
+
+**The claim protocol (Discovery — every backlog/staging mutation):**
+
+1. **Hold the daemon's staging lock for the whole write-burst.** Wrap the burst in `scripts/gaai-claim.sh -- <command…>`, which acquires the identical lock primitive as the daemon's `with_staging_lock` (flock on Linux, atomic `mkdir` on macOS). While held, the daemon waits — no clobber, no push race.
+2. **Backlog mutations go through `scripts/backlog-scheduler.sh` only** (`--set-status` / `--set-field` / `--set-phase-status`). These are atomic, daemon-format-compatible, and **field-scoped** so a concurrent daemon status-write on a different field/entry rebases cleanly. **Raw whole-file rewrites of `active.backlog.yaml` (python/sed/`yaml.dump`/manual) are forbidden** — they cause clobbers and merge conflicts.
+3. **The burst commits AND pushes to `staging` inside the lock.** Once on `origin/staging` the daemon's reset preserves it. A commit that is not pushed is not durable.
+4. **Run on the primary working tree** (its installed dependencies let the pre-push hooks pass) — a throwaway worktree is the fallback only when the primary tree is unavailable, and it must still push to `origin/staging`.
+
+**Never trust the local working tree as state** — it is ephemeral under the daemon. To read true state, read `origin/staging` (`git show origin/staging:<path>`), not the working copy.
+
+**Why:** prior sessions edited the live shared tree with raw file/git operations while the daemon ran; the daemon's reset/`add -A`/clean cycles wiped untracked artefacts and reverted backlog promotions, producing repeated rework. The claim protocol makes Discovery a coordinated writer on the daemon's existing lock instead of an uncoordinated one.
+
 ### Independent Review Gate (Mandatory)
 
 **Principle:** Discovery must never be the sole evaluator of its own outputs. Every Discovery output must be independently reviewed by the Review Sub-Agent (SUB-AGENT-REVIEW-001) before reaching the human (for proposals/recommendations) or the backlog (for stories/epics).

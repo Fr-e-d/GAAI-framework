@@ -7,19 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.41.0] - 2026-05-29
 
 ### Changed
-- fix: make --strict-mcp-config opt-out via GAAI_NESTED_KEEP_MCP for Cloud variant
-- fix: make --strict-mcp-config opt-out via GAAI_NESTED_KEEP_MCP for Cloud variant
+- feat: Discovery claim protocol — gaai-claim.sh staging-lock wrapper + backlog/staging write-coordination rule
 - fix: make --strict-mcp-config opt-out via GAAI_NESTED_KEEP_MCP for Cloud variant
 - fix: inject --strict-mcp-config on non-Anthropic shims to unblock GLM Impl
 - fix: refine pr_watcher_tracked — exclude merged PRs + restrict to active statuses
 - fix: correct pr_watcher_tracked count — was always 0
-- fix: correct pr_watcher_tracked count — was always 0
-- fix: correct pr_watcher_tracked count — was always 0
 - fix: auto-resolve story-owned add/add conflicts on notes + memory-deltas + plans
 - chore: activate + scaffold E170 (gaai_admin → gaai_org_admin + gaai_ws_admin)
+
 
 ## [2.40.0] - 2026-05-28
 
