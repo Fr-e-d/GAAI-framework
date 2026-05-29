@@ -1821,6 +1821,23 @@ handle_commit_phase() {
     worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
+  # ── Deterministic branch + recover a pruned worktree ─────────────────────
+  # The story branch name is deterministic; never derive it from the worktree
+  # HEAD (which fails if the worktree was pruned between qa and commit — a race
+  # against the periodic `git worktree prune`). If the worktree dir is gone,
+  # recreate it from the story branch, which carries the qa_passed work already
+  # pushed, so the commit phase self-recovers instead of looping COMMIT_FAILED.
+  local branch="story/${story_id}"
+  if [[ ! -d "$worktree_path" ]]; then
+    echo "[WARN] ${story_id} handle_commit_phase: worktree absent ($worktree_path) — recreating from ${branch}"
+    git -C "$PROJECT_DIR" fetch origin "$branch" 2>/dev/null || true
+    if ! git -C "$PROJECT_DIR" worktree add "$worktree_path" "$branch" 2>/dev/null; then
+      echo "[ERROR] ${story_id} handle_commit_phase: cannot recreate worktree on ${branch} [class=COMMIT_FAILED]"
+      _emit_commit_routing_record "$story_id" "$trace_id" "error" "COMMIT_FAILED" "0" "" "false"
+      return 1
+    fi
+  fi
+
   # ── Ensure worktree deps are fresh before git push ──────────────
   # Pre-push typecheck hook requires node_modules; guard here before any git push.
   if ! _ensure_worktree_deps_fresh "$story_id" "$worktree_path"; then
@@ -1858,13 +1875,10 @@ handle_commit_phase() {
     related_decs_line=""
   fi
 
-  # ── Resolve branch name in worktree ──────────────────────────────────────
-  local branch
-  branch=$(git -C "$worktree_path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-  if [[ -z "$branch" ]] || [[ "$branch" == "HEAD" ]]; then
-    echo "[ERROR] ${story_id} handle_commit_phase: cannot resolve branch in $worktree_path (got '${branch}') [class=COMMIT_FAILED]"
-    _emit_commit_routing_record "$story_id" "$trace_id" "error" "COMMIT_FAILED" "0" "" "false"
-    return 1
+  # ── Branch resolved deterministically above (story/<id>); align HEAD if drifted ──
+  # The recreated (or surviving) worktree must be on the story branch before commit.
+  if [[ "$(git -C "$worktree_path" rev-parse --abbrev-ref HEAD 2>/dev/null)" != "$branch" ]]; then
+    git -C "$worktree_path" checkout "$branch" 2>/dev/null || true
   fi
 
   # ── Per-story auto_merge frontmatter (AC3-ii — awk fence-counter) ─────────
