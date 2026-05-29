@@ -15,7 +15,7 @@
 #
 # The command should be the full atomic burst, e.g.:
 #   gaai-claim.sh -- bash -c '
-#     "$SCHED" --set-status E01S01 refined "$BACKLOG" &&
+#     "$SCHED" --set-status {STORY_ID} refined "$BACKLOG" &&
 #     git add <files> && git commit -m "..." && git push origin "$BRANCH"
 #   '
 #
