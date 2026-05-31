@@ -47,6 +47,33 @@ Before writing `contexts/artefacts/plans/{id}.execution-plan.md` (or `{id}.plan-
   - If the existing content is identical or still valid → skip writing, report "no changes needed".
 This guard prevents the silent data loss incident of 2026-03-17 where concurrent sessions overwrote story files.
 
+### Phase 0 — Required Skills Contract Resolution
+
+Execute this phase FIRST, before any codebase mapping.
+
+0. Read the Story frontmatter `required_skills` field.
+   - If `required_skills` is absent or empty: record that no custom skills are contracted.
+     The plan MUST NOT include any step that invokes a custom skill.
+     Proceed directly to Phase 1.
+   - If `required_skills` contains one or more entries: for each entry X:
+     a. Resolve skill X: check that a SKILL.md file exists for X in the skill catalog
+        (`.gaai/core/skills/**` or `.gaai/project/skills/**`).
+        - If X cannot be resolved → STOP. Write `{id}.plan-blocked.md` at the plans output
+          path with: `PLAN BLOCKED: required_skills entry "${X}" cannot be resolved — no
+          matching SKILL.md found. Check the skill name and that the skill file exists.`
+          Exit non-zero. Do not proceed.
+     b. Identify the bound output AC co-declared with X in the story.
+        (A `required_skills` entry without a co-declared output AC is rejected by
+        `validate-artefacts` before the plan runs — treat its absence here as a STOP
+        condition identical to an unresolvable skill.)
+     c. Emit an explicit plan step: "Invoke skill X [path to SKILL.md] — satisfies bound
+        output AC: [AC text]".
+
+**Autonomy-never-originates invariant (hard constraint, no exceptions):** the plan MUST
+contain a contracted skill step for each `required_skills` entry and MUST NOT contain any
+custom skill step not present in `required_skills`. The planning agent may not discover,
+invent, or suggest a custom skill not declared by the human in Discovery.
+
 ### Phase 1 — Codebase Mapping
 
 1. Identify all files that will be created or modified
@@ -153,5 +180,6 @@ This skill must NOT:
 - Modify the Story's acceptance criteria or scope
 - Make architectural decisions not already implied by the high-level plan
 - Produce test code (only test checkpoints and assertions to verify)
+- Introduce any custom skill step not explicitly contracted via `required_skills` in the story frontmatter
 
 **A precise execution plan makes implementation mechanical. Mechanical is auditable. Auditable is governed.**

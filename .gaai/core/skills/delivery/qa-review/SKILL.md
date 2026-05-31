@@ -37,6 +37,14 @@ Activate after implementation is complete. This is a **hard quality gate**.
 - Parse Story YAML frontmatter
 - Extract acceptance criteria
 - Validate each criterion is demonstrably satisfied in code
+- **Required Skills AC verification**: if the story frontmatter contains `required_skills`,
+  for each entry X, identify its co-declared bound output AC. Verify that the bound output
+  AC is satisfied by inspecting the actual output or changed artefacts (file contents,
+  generated output, behaviour). Do NOT verify by checking invocation traces or logs — the
+  test is output-based only. If the bound output AC cannot be evaluated from output alone
+  (ambiguous) → FAIL with escalation note. If the bound output AC is unmet → FAIL
+  immediately with: `FAIL: bound output AC for required_skills entry "${X}" is not
+  satisfied — [AC text] not met in output. Inspect [relevant file/output].`
 - Any criterion unclear or unmet → FAIL immediately
 
 ### 2. Scope Integrity Check
