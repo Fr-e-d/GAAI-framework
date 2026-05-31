@@ -1932,7 +1932,7 @@ ${qa_snippet}"
 [skip-auto-merge]"
   fi
 
-  # ── Revert staging-owned governance/index files (E182S01 AC1/AC2) ────────
+  # ── Revert staging-owned governance/index files ──────────────────────────
   # active.backlog.yaml + skills-index.yaml are written by scheduler/hooks during
   # plan/impl/qa phases — they must NOT appear in the story-branch PR diff.
   # git restore --source=HEAD --staged --worktree clobbers both index and WD.
