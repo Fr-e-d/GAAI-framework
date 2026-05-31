@@ -59,13 +59,40 @@ if [[ -n "${DELTA_DIR_OVERRIDE:-}" ]]; then
   DELTA_DIR="$DELTA_DIR_OVERRIDE"
 fi
 
-if [[ ! -d "$DELTA_DIR" ]]; then
-  echo "Advisory: no memory-deltas directory found at $DELTA_DIR, nothing to validate."
-  exit 0
-fi
-
 failures=0
 total=0
+
+# ── Stray-delta placement guard ────────────────────────────────────────────
+# The schema checks below only scan the canonical DELTA_DIR (maxdepth 1), so a
+# memory-delta written OUTSIDE the canonical tree is invisible to them. A
+# delivery agent occasionally guesses a plausible-but-wrong path (e.g. under
+# contexts/memory/ instead of contexts/artefacts/memory-deltas/), which then
+# slips past this validator entirely. Scan the contexts tree and FAIL on any
+# *.memory-delta.md outside the canonical subtree, naming the file so it can be
+# relocated. Skipped under DELTA_DIR_OVERRIDE (test edge-cases relocate DELTA_DIR).
+if [[ -z "${DELTA_DIR_OVERRIDE:-}" ]]; then
+  CONTEXTS_DIR="$REPO_ROOT/.gaai/project/contexts"
+  if [[ -d "$CONTEXTS_DIR" ]]; then
+    while IFS= read -r stray; do
+      # Skip files inside the canonical tree (DELTA_DIR + its subdirs)
+      case "$stray" in "$DELTA_DIR"/*) continue ;; esac
+      stray_rel="${stray#"$REPO_ROOT/"}"
+      echo "FAIL: $stray_rel — misplaced memory-delta outside the canonical tree (expected under .gaai/project/contexts/artefacts/memory-deltas/). Move it there."
+      ((failures++)) || true
+    done < <(find "$CONTEXTS_DIR" -type f -name "*.memory-delta.md" 2>/dev/null | sort)
+  fi
+fi
+
+if [[ ! -d "$DELTA_DIR" ]]; then
+  echo "Advisory: no memory-deltas directory found at $DELTA_DIR — skipping canonical schema checks."
+  if [[ $failures -eq 0 ]]; then
+    echo "Total: 0 files checked, 0 failures."
+    exit 0
+  fi
+  echo ""
+  echo "Total: 0 files checked, $failures failure(s)."
+  exit 1
+fi
 
 # Advisory: log symlinks and non-regular files (AC3d)
 while IFS= read -r f; do
@@ -79,8 +106,13 @@ while IFS= read -r f; do
 done < <(find "$DELTA_DIR" -maxdepth 1 -type f -name "*.md" 2>/dev/null | sort)
 
 if [[ ${#files[@]} -eq 0 ]]; then
-  echo "Total: 0 files checked, 0 failures. All memory-deltas conform to canonical schema."
-  exit 0
+  if [[ $failures -eq 0 ]]; then
+    echo "Total: 0 files checked, 0 failures. All memory-deltas conform to canonical schema."
+    exit 0
+  fi
+  echo ""
+  echo "Total: 0 files checked, $failures failure(s)."
+  exit 1
 fi
 
 for f in "${files[@]}"; do

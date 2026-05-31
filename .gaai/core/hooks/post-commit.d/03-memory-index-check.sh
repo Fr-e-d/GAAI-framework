@@ -25,9 +25,10 @@ if git diff-tree --no-commit-id --name-only -r HEAD | grep -q 'contexts/memory/.
     UNREGISTERED=0
     while IFS= read -r file; do
         rel="${file#"$MEMORY_DIR"/}"
-        # Skip index itself, sibling indices, READMEs, archive, sessions, templates, example files
+        # Skip index itself, sibling indices, READMEs, archive, sessions, processed memory-deltas, templates, example files
+        # (memory-deltas/processed/ = triaged transient artefacts, like sessions/; raw memory-deltas/ stay flagged = "to triage" signal)
         case "$rel" in
-            index.md|index-*.md|README*|archive/*|sessions/*) continue ;;
+            index.md|index-*.md|README*|archive/*|sessions/*|memory-deltas/processed/*) continue ;;
             *_template*|*.example.md) continue ;;
         esac
         # Check if file is referenced in ANY registry file by:
