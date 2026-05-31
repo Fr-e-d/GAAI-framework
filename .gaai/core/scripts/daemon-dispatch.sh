@@ -1836,6 +1836,20 @@ handle_commit_phase() {
       _emit_commit_routing_record "$story_id" "$trace_id" "error" "COMMIT_FAILED" "0" "" "false"
       return 1
     fi
+    # AC3/AC6: seed marker only when recreated worktree has BOTH populated node_modules AND
+    # lockfile hash match — a hash-only seed would write a false-fresh marker (forbidden by AC6)
+    local _wt_marker_dir="${worktree_path}/workers/gaai-cloud/api/node_modules/@cloudflare/workers-types"
+    local _wt_marker_path="${worktree_path}/.gaai-pnpm-install-marker"
+    local _wt_lockfile="${worktree_path}/pnpm-lock.yaml"
+    if [[ -d "$_wt_marker_dir" ]] && [[ -f "$_wt_lockfile" ]]; then
+      local _wt_hash
+      _wt_hash=$(sha256sum < "$_wt_lockfile" 2>/dev/null | awk '{print $1}')
+      [[ -z "$_wt_hash" ]] && _wt_hash=$(shasum -a 256 < "$_wt_lockfile" 2>/dev/null | awk '{print $1}')
+      if [[ -n "$_wt_hash" ]]; then
+        printf '%s\n' "$_wt_hash" > "$_wt_marker_path"
+        echo "[INFO] ${story_id} handle_commit_phase: recreated worktree has populated node_modules — marker seeded (hash=${_wt_hash:0:8})"
+      fi
+    fi
   fi
 
   # ── Ensure worktree deps are fresh before git push ──────────────
@@ -1931,24 +1945,6 @@ ${qa_snippet}"
     trailer_block="${trailer_block}
 [skip-auto-merge]"
   fi
-
-  # ── Revert staging-owned governance/index files ──────────────────────────
-  # active.backlog.yaml + skills-index.yaml are written by scheduler/hooks during
-  # plan/impl/qa phases — they must NOT appear in the story-branch PR diff.
-  # git restore --source=HEAD --staged --worktree clobbers both index and WD.
-  # Non-fatal if a path is absent/untracked at HEAD (AC4).
-  local _governed_files=(
-    ".gaai/project/contexts/backlog/active.backlog.yaml"
-    ".gaai/core/skills/skills-index.yaml"
-    ".gaai/project/skills/skills-index.yaml"
-  )
-  for _gf in "${_governed_files[@]}"; do
-    if git -C "$worktree_path" restore --source=HEAD --staged --worktree -- "$_gf" 2>/dev/null; then
-      echo "[INFO] ${story_id} handle_commit_phase: reverted governed file ${_gf}"
-    else
-      echo "[INFO] ${story_id} handle_commit_phase: revert skipped for ${_gf} (absent or untracked at HEAD — AC4)"
-    fi
-  done
 
   # ── git add -A (AC1-iii) ─────────────────────────────────────────────────
   if ! git -C "$worktree_path" add -A 2>/dev/null; then
