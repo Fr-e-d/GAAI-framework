@@ -149,3 +149,15 @@ This skill must NOT:
 - Analyse code outside the Story's implementation footprint
 - Make product or architectural decisions
 - Block or modify the QA verdict
+
+---
+
+## Closed Grandfather List (one-time legacy exemption)
+
+The CI validator (`validate-memory-deltas.sh`, `LEGACY_GRANDFATHERED` array) exempts exactly 21 pre-canonical-schema delta files from the canonical-section-header check. These files predate the three canonical headers and use heterogeneous legacy formats with no single rename rule.
+
+**Policy (non-negotiable):**
+- The allowlist **MUST NOT grow** — every new delta produced by this skill MUST include at least one canonical section header (`## Confirmed Entries`, `## Contradicted Entries`, `## New Knowledge Candidates`).
+- Allowlist entries **MAY be removed** after the corresponding delta file is triaged by Discovery and moved to `processed/` (which the validator already excludes).
+
+*Authority: see project audit-intake for the originating finding and grandfathered basenames.*

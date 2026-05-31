@@ -38,6 +38,24 @@ Only proceed when all prerequisites are present and unambiguous.
 ## Process
 
 1. **Load context** — retrieve minimal memory, load applicable rules and constraints
+
+1a. **Check contracted skills from the plan** — If the execution plan contains a contracted
+    skill step (from `required_skills`):
+    - The platform delivery skills (implement, qa-review, etc.) remain authoritative and are
+      not replaced or overridden.
+    - Invoke the contracted skill step as specified in the plan, on top of the platform
+      backbone.
+    - Record in the implementation report which contracted skill was invoked and which bound
+      output AC it targets.
+    - If the plan contains no contracted skill step (because `required_skills` was
+      empty/absent), do NOT introduce any custom skill. The implementation proceeds on the
+      platform backbone only.
+
+    **Out-of-contract guard (hard, no exceptions):** IMPL MUST NOT introduce, discover, or
+    invoke any custom skill that was not contracted in the story's `required_skills` and
+    emitted as an explicit step in the plan. Introducing an out-of-contract custom skill is a
+    scope violation — QA will FAIL it.
+
 2. **Interpret acceptance criteria** — translate into specific expected behaviors, validate against plan
 3. **Map plan to implementation** — determine file paths, naming, modules per conventions; clarify dependency edges
 4. **Generate code** — write code per plan steps, annotate links to acceptance criteria, respect all style/architecture/quality rules
@@ -83,5 +101,6 @@ This skill must NOT:
 - Bypass governance rules
 - Guess missing requirements
 - Embed hidden context or implicit assumptions
+- Introduce, discover, or invoke any custom skill not contracted via `required_skills` and emitted as an explicit step in the execution plan
 
 **"I implement exactly what the plan defines, and I prove it."**

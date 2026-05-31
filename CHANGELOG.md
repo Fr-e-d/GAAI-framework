@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.42.0] - 2026-05-31
 
 ### Changed
+- fix: grandfather 21 pre-canonical memory-deltas (F24,)
+- feat: codify adversarial review loop termination rule (audit F23)
+- chore: stop leaking GAAI_IMPL_AUTH_TOKEN via tmux -e (ps-visible) — source 0600 env-file
+
+
+## [2.42.0] - 2026-05-31
+
+### Changed
 - chore: triage 4 NO-OP deltas → processed/ + skip *.draft.md in drift check
 - feat: codify adversarial review loop termination rule (audit F23)
 - chore: stop leaking GAAI_IMPL_AUTH_TOKEN via tmux -e (ps-visible) — source 0600 env-file
