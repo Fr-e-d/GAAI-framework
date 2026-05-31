@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.43.0] - 2026-06-01
+
+### Changed
+- feat: make commit phase robust to missing node_modules in worktree
+
+
 ## [2.44.0] - 2026-05-31
 
 ### Changed
