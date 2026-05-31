@@ -9,7 +9,7 @@ metadata:
   category: discovery
   track: discovery
   id: SKILL-GENERATE-STORIES-001
-  updated_at: 2026-03-10
+  updated_at: 2026-05-31
   status: stable
 inputs:
   - one_epic: contexts/artefacts/epics/{id}.epic.md (the parent Epic file)
@@ -56,6 +56,28 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
    - **c)** If a story is missing an AC for a mandatory category: add one. If the requirement is unclear, add a placeholder AC with `[REQUIRES CLARIFICATION]` and flag it to the human.
    - **d)** If the Epic has `mandatory_ac_categories: []` (empty), skip this step.
    - **Rationale:** In a past incident, stories omitted mandatory AC categories (e.g., i18n, copy-quality) despite existing DECs requiring them. The Epic did not declare mandatory AC categories, so the omission went undetected. This step ensures domain-critical requirements cannot be silently skipped.
+
+   **CRITICAL — Custom Skill Contract (MUST execute for any story involving a custom skill):**
+   - **a)** Before writing stories, check `.gaai/project/skills/skills-index.yaml` for
+     available custom skills. If that file is absent, scan `.gaai/project/skills/` directly
+     for files matching `*/SKILL.md` and extract the `name` frontmatter field from each.
+     Build a set of valid custom skill names.
+   - **b)** If a story's intent requires invoking a custom skill from that set, declare the
+     skill name(s) in the story's `required_skills` frontmatter field (YAML list, e.g.
+     `required_skills: [my-skill]`). Only reference skill names that exist in the set from
+     step (a). Do NOT declare a skill that is not found there — the daemon has no fallback
+     resolution for a missing custom skill.
+   - **c)** For each entry in `required_skills`, write **at least one AC** in the story body
+     that explicitly names that skill's expected **output** — the observable artifact or
+     state change the skill produces (not merely "the skill was invoked"). The AC is the
+     surface `qa-review` uses to verify the skill's contract was honored.
+   - **d)** If no custom skill is needed, omit `required_skills` entirely or set
+     `required_skills: []`. The absence of the field does not trigger validation.
+   - **Rationale:** Per the contract-carried delivery invariant, a custom skill may only enter
+     autonomous Delivery via an explicit story `required_skills` contract — autonomy never
+     selects a custom skill on its own. The bound output AC is the only QA-verifiable surface;
+     without it, `validate-artefacts` returns BLOCKED. Both this framework and the cloud
+     product enforce identical semantics independently.
 
 2. Read parent Epic domain. If Epic has a domain, set it as the story's default. Allow explicit override per story.
 3. Write from the user's perspective
