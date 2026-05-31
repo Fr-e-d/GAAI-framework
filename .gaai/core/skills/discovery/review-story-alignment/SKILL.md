@@ -221,6 +221,8 @@ The reviewer is **adversarial by design**. Its instruction set:
 
 **Calibration:** The reviewer should err on the side of strictness. 1-2 false positives per batch is acceptable. Zero false negatives is the target.
 
+**Severity calibration (founder-confirmed 2026-05-31):** MEDIUM (and lower) findings are advisory and non-blocking for a PASS verdict: a story may PASS with open MEDIUM findings provided they are recorded in the finding table. The adversarial "when in doubt, FAIL" stance applies to CRITICAL/HIGH judgments only — i.e. when uncertain whether something is CRITICAL/HIGH, treat it as such; do not inflate a genuine MEDIUM into a blocker.
+
 ---
 
 ## Quality Checks
