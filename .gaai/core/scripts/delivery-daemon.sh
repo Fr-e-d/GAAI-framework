@@ -3803,10 +3803,19 @@ WRAPPER_EOF
     fi
   fi
 
-  # Forward critical env vars into tmux session so child phases see them
+  # Forward critical env vars into tmux session so child phases see them.
+  # SECRET HANDLING: GAAI_IMPL_AUTH_TOKEN is written to a 0600 env-file and SOURCED inside the
+  # deliver session (see secrets_prefix below + the tmux new-session call), NOT passed via
+  # `tmux -e` — `-e KEY=VALUE` exposes the value in the tmux process argv (visible to `ps`).
+  local secrets_file="$LOCK_DIR/.daemon-secrets.env"
+  local secrets_prefix=""
+  if [[ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ]]; then
+    ( umask 077; printf 'export GAAI_IMPL_AUTH_TOKEN=%q\n' "${GAAI_IMPL_AUTH_TOKEN}" > "$secrets_file" )
+    secrets_prefix=". '$secrets_file'; "
+  fi
   local tmux_env_args=()
   [[ -n "${GAAI_IMPL_BASE_URL:-}"   ]] && tmux_env_args+=(-e "GAAI_IMPL_BASE_URL=${GAAI_IMPL_BASE_URL}")
-  [[ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_AUTH_TOKEN=${GAAI_IMPL_AUTH_TOKEN}")
+  # GAAI_IMPL_AUTH_TOKEN intentionally NOT forwarded via -e — sourced from secrets_file (above).
   [[ -n "${GAAI_IMPL_MODEL:-}"      ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL=${GAAI_IMPL_MODEL}")
   [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
   [[ -n "${GAAI_AUTO_MERGE_POLICY:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_POLICY=${GAAI_AUTO_MERGE_POLICY}")
@@ -3833,7 +3842,7 @@ WRAPPER_EOF
     unset GAAI_QA_REPORT_PATH GAAI_QA_INJECT_PHASE 2>/dev/null || true
   fi
 
-  tmux new-session -d -s "gaai-deliver-${story_id}" "${tmux_env_args[@]}" "$wrapper"
+  tmux new-session -d -s "gaai-deliver-${story_id}" "${tmux_env_args[@]}" "${secrets_prefix}$wrapper"
 
   # Pipe wrapper stdout/stderr to persistent log for post-mortem diagnosis.
   # Non-fatal: log WARN on failure and continue.
