@@ -87,7 +87,30 @@ Any error → FAIL. "Test files only" is not a mitigation: test files are part o
 
 ### 7. Memory Alignment (PASS only)
 
-On PASS verdict, the skill MUST invoke `memory-alignment-check` (SKILL-MEMORY-ALIGNMENT-CHECK-001) before returning. The canonical schema for `{id}.memory-delta.md` is defined authoritatively in `memory-alignment-check/SKILL.md` Outputs section (lines 85–116). QA MUST NOT write or modify `{id}.memory-delta.md` directly — only `memory-alignment-check` writes the delta.
+On PASS verdict, the skill MUST invoke `memory-alignment-check` (SKILL-MEMORY-ALIGNMENT-CHECK-001) before returning. QA MUST NOT improvise the delta — `memory-alignment-check` owns it.
+
+The delta MUST match this exact skeleton (authoritative source: `memory-alignment-check/SKILL.md` Outputs). Do NOT invent alternative section headers (e.g. `## Summary`, `## New facts delivered by this story`, `## Implementation Footprint`, `## No memory updates required`) and do NOT change the frontmatter field names — any deviation FAILs the `validate-memory-deltas` CI gate:
+
+```
+---
+artefact_type: memory-delta
+skill: memory-alignment-check
+story_id: {id}
+generated_at: YYYY-MM-DD
+verdict: ALIGNED | DRIFT_DETECTED | NEW_KNOWLEDGE_FOUND | DRIFT_AND_NEW_KNOWLEDGE
+---
+
+## Confirmed Entries
+# (list, or leave the section present with no items)
+
+## Contradicted Entries
+# (list, or leave the section present with no items)
+
+## New Knowledge Candidates
+# (list, or leave the section present with no items)
+```
+
+A "nothing changed" delta is still expressed in this schema (`verdict: ALIGNED`, the three sections present with no items) — NOT as free prose. The full field-level schema lives in `memory-alignment-check/SKILL.md` Outputs. The delta is written exclusively to `contexts/artefacts/memory-deltas/{id}.memory-delta.md` (canonical path — never under `contexts/memory/`).
 
 ---
 
