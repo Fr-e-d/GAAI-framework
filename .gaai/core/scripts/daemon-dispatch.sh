@@ -1836,6 +1836,20 @@ handle_commit_phase() {
       _emit_commit_routing_record "$story_id" "$trace_id" "error" "COMMIT_FAILED" "0" "" "false"
       return 1
     fi
+    # AC3/AC6: seed marker only when recreated worktree has BOTH populated node_modules AND
+    # lockfile hash match — a hash-only seed would write a false-fresh marker (forbidden by AC6)
+    local _wt_marker_dir="${worktree_path}/workers/gaai-cloud/api/node_modules/@cloudflare/workers-types"
+    local _wt_marker_path="${worktree_path}/.gaai-pnpm-install-marker"
+    local _wt_lockfile="${worktree_path}/pnpm-lock.yaml"
+    if [[ -d "$_wt_marker_dir" ]] && [[ -f "$_wt_lockfile" ]]; then
+      local _wt_hash
+      _wt_hash=$(sha256sum < "$_wt_lockfile" 2>/dev/null | awk '{print $1}')
+      [[ -z "$_wt_hash" ]] && _wt_hash=$(shasum -a 256 < "$_wt_lockfile" 2>/dev/null | awk '{print $1}')
+      if [[ -n "$_wt_hash" ]]; then
+        printf '%s\n' "$_wt_hash" > "$_wt_marker_path"
+        echo "[INFO] ${story_id} handle_commit_phase: recreated worktree has populated node_modules — marker seeded (hash=${_wt_hash:0:8})"
+      fi
+    fi
   fi
 
   # ── Ensure worktree deps are fresh before git push ──────────────
