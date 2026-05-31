@@ -31,24 +31,28 @@ CANONICAL_SECTIONS=(
   "## New Knowledge Candidates"
 )
 
-# One-time grandfather of pre-canonical-schema memory-delta files (audit finding F24, E164S29).
-# Context: 21 legacy deltas use heterogeneous non-canonical section headers with no single
+# One-time grandfather of pre-canonical-schema memory-delta files.
+# Context: legacy deltas use heterogeneous non-canonical section headers with no single
 # rename rule; normalizing them would risk distorting historical artefacts.
 # Policy: this list MUST NOT grow — new deltas MUST conform to canonical section headers.
 # Entries MAY be removed as the corresponding delta is triaged/normalized and moved to
 # processed/ (which this validator already excludes from checks).
-LEGACY_GRANDFATHERED=(
-  "E100S16"  "E163S08a" "E163S08c" "E163S23"  "E163S25"
-  "E171S01"  "E171S07"  "E171S08"  "E173S01"  "E173S04"
-  "E174S03"  "E174S07"  "E174S09"  "E175S01"  "E175S03"
-  "E176S03"  "E176S04"  "E176S06"  "E176S07"  "E176S08"
-  "E47S12"
-)
+# Populate with the basenames (without .memory-delta.md suffix) of legacy deltas to exempt.
+LEGACY_GRANDFATHERED=()
+# Example: LEGACY_GRANDFATHERED=("LegacyStory1" "LegacyStory2")
+# Project-local overrides: sourced after REPO_ROOT is resolved (see below).
 
 # Resolve repo root from script location (script lives at .gaai/core/scripts/)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 DELTA_DIR="$REPO_ROOT/.gaai/project/contexts/artefacts/memory-deltas"
+
+# Project-local overrides: if a grandfather config exists, source it to populate
+# LEGACY_GRANDFATHERED with project-specific basenames.
+if [[ -f "$REPO_ROOT/.gaai/project/configs/validate-memory-deltas.grandfather" ]]; then
+  # shellcheck source=/dev/null
+  source "$REPO_ROOT/.gaai/project/configs/validate-memory-deltas.grandfather"
+fi
 
 # Allow override for testing edge cases (e.g. DELTA_DIR_OVERRIDE=/tmp/nonexistent)
 if [[ -n "${DELTA_DIR_OVERRIDE:-}" ]]; then

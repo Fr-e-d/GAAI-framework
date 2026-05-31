@@ -160,4 +160,4 @@ The CI validator (`validate-memory-deltas.sh`, `LEGACY_GRANDFATHERED` array) exe
 - The allowlist **MUST NOT grow** — every new delta produced by this skill MUST include at least one canonical section header (`## Confirmed Entries`, `## Contradicted Entries`, `## New Knowledge Candidates`).
 - Allowlist entries **MAY be removed** after the corresponding delta file is triaged by Discovery and moved to `processed/` (which the validator already excludes).
 
-*Authority: audit finding F24, story E164S29 (2026-05-31).*
+*Authority: see project audit-intake for the originating finding and grandfathered basenames.*
