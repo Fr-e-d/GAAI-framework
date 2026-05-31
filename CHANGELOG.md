@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.42.0] - 2026-05-31
 
 ### Changed
+- fix: inline canonical memory-delta schema at the production point
+- feat: add stray-delta placement guard + relocate 2 strays it surfaces
+- Merge pull request #1018 from Fr-e-d/story/
+- chore: drift-check hook excludes memory-deltas/processed/
+- fix: grandfather 21 pre-canonical memory-deltas (F24,)
+- feat: codify adversarial review loop termination rule (audit F23)
+- chore: stop leaking GAAI_IMPL_AUTH_TOKEN via tmux -e (ps-visible) — source 0600 env-file
+
+
+## [2.42.0] - 2026-05-31
+
+### Changed
 - feat: add stray-delta placement guard + relocate 2 strays it surfaces
 - Merge pull request #1018 from Fr-e-d/story/
 - chore: drift-check hook excludes memory-deltas/processed/
