@@ -1836,6 +1836,20 @@ handle_commit_phase() {
       _emit_commit_routing_record "$story_id" "$trace_id" "error" "COMMIT_FAILED" "0" "" "false"
       return 1
     fi
+    # AC3/AC6: seed marker only when recreated worktree has BOTH populated node_modules AND
+    # lockfile hash match — a hash-only seed would write a false-fresh marker (forbidden by AC6)
+    local _wt_marker_dir="${worktree_path}/workers/gaai-cloud/api/node_modules/@cloudflare/workers-types"
+    local _wt_marker_path="${worktree_path}/.gaai-pnpm-install-marker"
+    local _wt_lockfile="${worktree_path}/pnpm-lock.yaml"
+    if [[ -d "$_wt_marker_dir" ]] && [[ -f "$_wt_lockfile" ]]; then
+      local _wt_hash
+      _wt_hash=$(sha256sum < "$_wt_lockfile" 2>/dev/null | awk '{print $1}')
+      [[ -z "$_wt_hash" ]] && _wt_hash=$(shasum -a 256 < "$_wt_lockfile" 2>/dev/null | awk '{print $1}')
+      if [[ -n "$_wt_hash" ]]; then
+        printf '%s\n' "$_wt_hash" > "$_wt_marker_path"
+        echo "[INFO] ${story_id} handle_commit_phase: recreated worktree has populated node_modules — marker seeded (hash=${_wt_hash:0:8})"
+      fi
+    fi
   fi
 
   # ── Ensure worktree deps are fresh before git push ──────────────
@@ -2019,76 +2033,49 @@ ${related_decs_line}"
 ## QA Verdict
 ${qa_snippet}"
 
-  # ── Idempotency Guard 1: HEAD already an ancestor of origin/staging ───────
-  # Fast-path: catches true-merge / fast-forward / re-push of an already-pushed
-  # HEAD. NOT effective after squash-merge (squash yields a new commit). Fail-open.
-  local pr_url="" _skip_pr_create=0
-  if git -C "$worktree_path" fetch origin staging 2>/dev/null && \
-     git -C "$worktree_path" merge-base --is-ancestor HEAD origin/staging 2>/dev/null; then
-    echo "[INFO] ${story_id} handle_commit_phase: Guard 1 — HEAD is ancestor of origin/staging — skipping gh pr create"
-    pr_url=$(gh pr list --state all --head "$branch" --json url --jq '.[0].url' 2>/dev/null || true)
-    [[ "$pr_url" == "null" ]] && pr_url=""
-    _skip_pr_create=1
-  fi
+  # ── gh pr create with retry (AC2 + AC5-b/c/d) ────────────────────────────
+  local pr_url="" pr_exit=1 pr_attempt=0 pr_max=3 pr_output
+  while [[ $pr_attempt -lt $pr_max ]]; do
+    pr_attempt=$(( pr_attempt + 1 ))
+    pr_output=$(gh pr create \
+      --title "$pr_title" \
+      --body  "$pr_body" \
+      --base  "staging" \
+      --head  "$branch" 2>&1)
+    pr_exit=$?
 
-  # ── Idempotency Guard 2: existing PR in any state (squash-merge safe) ─────
-  # Decisive idempotency guard: gh retains headRefName on merged/closed PRs even
-  # after branch deletion; recreated story/<id> branch matches historical PR.
-  if [[ "$_skip_pr_create" -eq 0 ]]; then
-    local _g2_url
-    _g2_url=$(gh pr list --state all --head "$branch" --json url --jq '.[0].url' 2>/dev/null || true)
-    if [[ -n "$_g2_url" && "$_g2_url" != "null" ]]; then
-      pr_url="$_g2_url"
-      _skip_pr_create=1
-      echo "[INFO] ${story_id} handle_commit_phase: Guard 2 — PR already exists ($pr_url) — skipping gh pr create"
+    if [[ "$pr_exit" -eq 0 ]]; then
+      pr_url=$(printf '%s\n' "$pr_output" | grep -E '^https://' | tail -1 || true)
+      break
     fi
-  fi
 
-  # ── gh pr create with retry (AC3 + AC5-b/c/d fallback) ───────────────────
-  local pr_exit=1 pr_attempt=0 pr_max=3 pr_output
-  if [[ "$_skip_pr_create" -eq 0 ]]; then
-    while [[ $pr_attempt -lt $pr_max ]]; do
-      pr_attempt=$(( pr_attempt + 1 ))
-      pr_output=$(gh pr create \
-        --title "$pr_title" \
-        --body  "$pr_body" \
-        --base  "staging" \
-        --head  "$branch" 2>&1)
-      pr_exit=$?
-
-      if [[ "$pr_exit" -eq 0 ]]; then
-        pr_url=$(printf '%s\n' "$pr_output" | grep -E '^https://' | tail -1 || true)
-        break
-      fi
-
-      # AC5-b: auth missing → immediate failed, no retry
-      if printf '%s\n' "$pr_output" | grep -qiE 'GH_TOKEN|authentication|gh auth login|not logged in'; then
-        local _stderr_tail="${pr_output: -200}"
-        echo "[ERROR] ${story_id} handle_commit_phase: GH auth missing — run 'gh auth login' or set GH_TOKEN. detail: ${_stderr_tail} [class=GH_AUTH_MISSING]"
-        _emit_commit_routing_record "$story_id" "$trace_id" "error" "GH_AUTH_MISSING" "0" "" "false"
-        "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
-        return 1
-      fi
-
-      # AC5-c: already exists → fallback to gh pr view
-      if printf '%s\n' "$pr_output" | grep -qi "already exists"; then
-        pr_url=$(gh pr view "$branch" --json url --jq .url 2>/dev/null || true)
-        if [[ -n "$pr_url" ]]; then
-          echo "[INFO] ${story_id} handle_commit_phase: PR already exists, using existing URL: $pr_url"
-          pr_exit=0; break
-        fi
-      fi
-
-      echo "[WARN] ${story_id} handle_commit_phase: gh pr create attempt ${pr_attempt}/${pr_max} failed: ${pr_output: -200}"
-      [[ $pr_attempt -lt $pr_max ]] && sleep 3
-    done
-
-    if [[ "$pr_exit" -ne 0 ]]; then
-      echo "[ERROR] ${story_id} handle_commit_phase: gh pr create failed after ${pr_max} attempts [class=PR_CREATE_FAILED]"
-      _emit_commit_routing_record "$story_id" "$trace_id" "error" "PR_CREATE_FAILED" "0" "" "false"
+    # AC5-b: auth missing → immediate failed, no retry
+    if printf '%s\n' "$pr_output" | grep -qiE 'GH_TOKEN|authentication|gh auth login|not logged in'; then
+      local _stderr_tail="${pr_output: -200}"
+      echo "[ERROR] ${story_id} handle_commit_phase: GH auth missing — run 'gh auth login' or set GH_TOKEN. detail: ${_stderr_tail} [class=GH_AUTH_MISSING]"
+      _emit_commit_routing_record "$story_id" "$trace_id" "error" "GH_AUTH_MISSING" "0" "" "false"
+      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
       return 1
     fi
-  fi  # end _skip_pr_create guard
+
+    # AC5-c: already exists → fallback to gh pr view
+    if printf '%s\n' "$pr_output" | grep -qi "already exists"; then
+      pr_url=$(gh pr view "$branch" --json url --jq .url 2>/dev/null || true)
+      if [[ -n "$pr_url" ]]; then
+        echo "[INFO] ${story_id} handle_commit_phase: PR already exists, using existing URL: $pr_url"
+        pr_exit=0; break
+      fi
+    fi
+
+    echo "[WARN] ${story_id} handle_commit_phase: gh pr create attempt ${pr_attempt}/${pr_max} failed: ${pr_output: -200}"
+    [[ $pr_attempt -lt $pr_max ]] && sleep 3
+  done
+
+  if [[ "$pr_exit" -ne 0 ]]; then
+    echo "[ERROR] ${story_id} handle_commit_phase: gh pr create failed after ${pr_max} attempts [class=PR_CREATE_FAILED]"
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "PR_CREATE_FAILED" "0" "" "false"
+    return 1
+  fi
 
   # ── Persist pr_url + pr_number (AC2) ─────────────────────────────────────
   # MUST commit + push to the target branch BEFORE auto-merge (below)
