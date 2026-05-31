@@ -13,7 +13,7 @@
 #   1 — one or more files FAIL schema validation
 #   2 — script-internal error (permissions, unexpected state)
 #
-# Example FAIL output:
+# Example FAIL output (also covers legacy-grandfather edge cases):
 #   FAIL: contexts/artefacts/memory-deltas/E43S03.memory-delta.md — missing required section header
 #         (expected one of: ## Confirmed Entries, ## Contradicted Entries, ## New Knowledge Candidates)
 #   Total: 3 files checked, 1 failure.
