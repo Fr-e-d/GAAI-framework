@@ -2032,7 +2032,7 @@ ${qa_snippet}"
   fi
 
   # ── Idempotency Guard 2: existing PR in any state (squash-merge safe) ─────
-  # Decisive fix for E177S04: gh retains headRefName on merged/closed PRs even
+  # Decisive idempotency guard: gh retains headRefName on merged/closed PRs even
   # after branch deletion; recreated story/<id> branch matches historical PR.
   if [[ "$_skip_pr_create" -eq 0 ]]; then
     local _g2_url
