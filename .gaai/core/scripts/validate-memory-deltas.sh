@@ -31,28 +31,10 @@ CANONICAL_SECTIONS=(
   "## New Knowledge Candidates"
 )
 
-# One-time grandfather of pre-canonical-schema memory-delta files.
-# Context: legacy deltas use heterogeneous non-canonical section headers with no single
-# rename rule; normalizing them would risk distorting historical artefacts.
-# Policy: this list MUST NOT grow — new deltas MUST conform to canonical section headers.
-# Entries MAY be removed as the corresponding delta is triaged/normalized and moved to
-# processed/ (which this validator already excludes from checks).
-# Populate with the basenames (without .memory-delta.md suffix) of legacy deltas to exempt.
-LEGACY_GRANDFATHERED=()
-# Example: LEGACY_GRANDFATHERED=("LegacyStory1" "LegacyStory2")
-# Project-local overrides: sourced after REPO_ROOT is resolved (see below).
-
 # Resolve repo root from script location (script lives at .gaai/core/scripts/)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 DELTA_DIR="$REPO_ROOT/.gaai/project/contexts/artefacts/memory-deltas"
-
-# Project-local overrides: if a grandfather config exists, source it to populate
-# LEGACY_GRANDFATHERED with project-specific basenames.
-if [[ -f "$REPO_ROOT/.gaai/project/configs/validate-memory-deltas.grandfather" ]]; then
-  # shellcheck source=/dev/null
-  source "$REPO_ROOT/.gaai/project/configs/validate-memory-deltas.grandfather"
-fi
 
 # Allow override for testing edge cases (e.g. DELTA_DIR_OVERRIDE=/tmp/nonexistent)
 if [[ -n "${DELTA_DIR_OVERRIDE:-}" ]]; then
@@ -111,38 +93,18 @@ for f in "${files[@]}"; do
     continue
   fi
 
-  # Determine if this file is in the grandfather allowlist
-  file_basename="$(basename "$f" .memory-delta.md)"
-  is_grandfathered=false
-  for legacy in "${LEGACY_GRANDFATHERED[@]}"; do
-    if [[ "$file_basename" == "$legacy" ]]; then
-      is_grandfathered=true
+  # AC1b — body must contain at least one canonical section header
+  section_found=false
+  for section in "${CANONICAL_SECTIONS[@]}"; do
+    if grep -qF "$section" "$f"; then
+      section_found=true
       break
     fi
   done
 
-  # AC1b — body must contain at least one canonical section header
-  # Skipped for grandfathered legacy files (canonical-section check only — other checks above still apply)
-  if [[ "$is_grandfathered" == false ]]; then
-    section_found=false
-    for section in "${CANONICAL_SECTIONS[@]}"; do
-      if grep -qF "$section" "$f"; then
-        section_found=true
-        break
-      fi
-    done
-
-    if [[ "$section_found" == false ]]; then
-      echo "FAIL: $rel_path — missing required section header (expected one of: ${CANONICAL_SECTIONS[*]})"
-      ((failures++)) || true
-    fi
-  fi
-done
-
-# Advisory: grandfathered file no longer on disk — the allowlist entry can be pruned
-for legacy in "${LEGACY_GRANDFATHERED[@]}"; do
-  if [[ ! -f "$DELTA_DIR/${legacy}.memory-delta.md" ]]; then
-    echo "Advisory: grandfathered file no longer exists: ${legacy}.memory-delta.md — safe to remove from LEGACY_GRANDFATHERED"
+  if [[ "$section_found" == false ]]; then
+    echo "FAIL: $rel_path — missing required section header (expected one of: ${CANONICAL_SECTIONS[*]})"
+    ((failures++)) || true
   fi
 done
 
