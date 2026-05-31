@@ -5,7 +5,7 @@
 [ "$GAAI_SKILLS_INDEX_RUNNING" = "1" ] && exit 0
 export GAAI_SKILLS_INDEX_RUNNING=1
 
-# Guard: skip amend on story/* branches — they must not carry skills-index changes (E182S01 AC3)
+# Guard: skip amend on story/* branches — they must not carry skills-index changes
 _current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
 if [[ "$_current_branch" == story/* ]]; then
   echo "ℹ️  skills-index: skipping amend on story branch (${_current_branch})"
