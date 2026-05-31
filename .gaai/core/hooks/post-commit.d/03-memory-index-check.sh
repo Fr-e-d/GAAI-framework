@@ -25,13 +25,10 @@ if git diff-tree --no-commit-id --name-only -r HEAD | grep -q 'contexts/memory/.
     UNREGISTERED=0
     while IFS= read -r file; do
         rel="${file#"$MEMORY_DIR"/}"
-        # Skip index itself, sibling indices, READMEs, archive, sessions, templates, example files.
-        # Also skip *.draft.md: drafts are tracked in the registry by their logical decision id
-        # (without the .draft suffix), so the filename never matches the registry row — same
-        # rationale as templates/examples (non-final artifacts tracked outside the per-file index).
+        # Skip index itself, sibling indices, READMEs, archive, sessions, templates, example files
         case "$rel" in
             index.md|index-*.md|README*|archive/*|sessions/*) continue ;;
-            *_template*|*.example.md|*.draft.md) continue ;;
+            *_template*|*.example.md) continue ;;
         esac
         # Check if file is referenced in ANY registry file by:
         #   1. Full relative path (e.g., decisions/DEC-1.md)
