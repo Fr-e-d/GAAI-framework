@@ -5,11 +5,11 @@ license: ELv2
 compatibility: Works with any filesystem-based AI coding agent
 metadata:
   author: gaai-framework
-  version: "1.2"
+  version: "1.1"
   category: discovery
   track: discovery
   id: SKILL-VALIDATE-ARTEFACTS-001
-  updated_at: 2026-05-31
+  updated_at: 2026-04-18
   status: stable
 inputs:
   - contexts/artefacts/epics/**
@@ -53,19 +53,6 @@ This is the **mandatory gate** between Discovery and Delivery. No Story proceeds
 - Avoids solution design
 - Has `related_decs` field in frontmatter (list or explicit empty `[]`)
 - Has `skills_invoked` field in frontmatter (must list the skill IDs that were read to produce it)
-- `required_skills` field is optional. If present, it must be a YAML list (e.g.
-  `required_skills: [name-a, name-b]`). A bare string, map, or other non-list type
-  returns BLOCKED: `required_skills must be a YAML list (got: <type>)`.
-- Each string entry in `required_skills` must resolve to an existing custom skill via
-  the project skills index (`.gaai/project/skills/skills-index.yaml`) or directly as
-  `.gaai/project/skills/<track>/<name>/SKILL.md`. A non-resolving entry returns
-  BLOCKED: `required_skills entry '<name>' not found in project skills`.
-- Each entry in `required_skills` must have at least one AC in the story body that
-  names the observable output of that skill. An entry with no co-declared output AC
-  returns BLOCKED: `required_skills entry '<name>' has no bound output AC — add an AC
-  naming the observable output the skill must produce`.
-- Absence of `required_skills` (field missing or `required_skills: []`) does not affect
-  any other validation. Non-regression for stories that do not use custom skills.
 
 ### Story Scope Pre-Flight (Plan contract symmetry)
 
@@ -201,11 +188,6 @@ The skill MUST block progression if:
 - A `## File Inventory` lists more than 5 files (no V1 escape hatch — decompose)
 - Acceptance criteria count exceeds 6 (Plan contract symmetry)
 - A `loc_estimate` total in File Inventory exceeds 300 (Plan contract symmetry)
-- `required_skills` entry present without a co-declared output AC in the story body
-  (unbound contract — DEC-126 §3)
-- `required_skills` entry does not resolve to an existing custom skill in
-  `.gaai/project/skills/` (referential integrity failure)
-- `required_skills` value is not a YAML list (malformed field — DEC-126 §3)
 
 **No partial approval. No silent warnings.**
 
