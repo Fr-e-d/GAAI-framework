@@ -1281,6 +1281,18 @@ cat >> "$FIXTURE" << 'YAML_COMMIT'
   delivery_pipeline: 3phase
   title: "Already done story"
   impl_model: primary
+- id: TST-COMMIT-GUARD1
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase
+  title: "Guard 1 ancestor test story"
+  impl_model: primary
+- id: TST-COMMIT-GUARD2
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase
+  title: "Guard 2 merged PR test story"
+  impl_model: primary
 YAML_COMMIT
 
 # Helper: create a real git worktree with optional story auto_merge frontmatter
@@ -1310,7 +1322,7 @@ make_commit_worktree() {
 }
 
 # Create worktrees for all commit test stories (TST-COMMIT-SKIPMERGE created separately below)
-for _csid in TST-COMMIT-01 TST-COMMIT-NOTITLE TST-COMMIT-AUTOMERGE TST-COMMIT-PUSHFAIL TST-COMMIT-ALREADY-DONE; do
+for _csid in TST-COMMIT-01 TST-COMMIT-NOTITLE TST-COMMIT-AUTOMERGE TST-COMMIT-PUSHFAIL TST-COMMIT-ALREADY-DONE TST-COMMIT-GUARD1 TST-COMMIT-GUARD2; do
   make_commit_worktree "$_csid"
 done
 # TST-COMMIT-SKIPMERGE gets auto_merge: false frontmatter
@@ -1323,13 +1335,15 @@ mkdir -p "$COMMIT_SHIM_DIR"
 
 # git shim: intercepts 'push', delegates everything else to real git
 COMMIT_REAL_GIT="$(command -v git)"
-export COMMIT_REAL_GIT GAAI_SHIM_PUSH_FAIL GAAI_SHIM_GH_AUTH_FAIL GAAI_SHIM_GH_PR_EXISTS
+export COMMIT_REAL_GIT GAAI_SHIM_PUSH_FAIL GAAI_SHIM_GH_AUTH_FAIL GAAI_SHIM_GH_PR_EXISTS GAAI_SHIM_HEAD_IS_ANCESTOR GAAI_SHIM_GH_PR_MERGED
 export GAAI_SHIM_AUTOMERGE_NULL GAAI_SHIM_AUTOMERGE_FAIL
 GAAI_SHIM_PUSH_FAIL=0
 GAAI_SHIM_GH_AUTH_FAIL=0
 GAAI_SHIM_GH_PR_EXISTS=0
 GAAI_SHIM_AUTOMERGE_NULL=0
 GAAI_SHIM_AUTOMERGE_FAIL=0
+GAAI_SHIM_HEAD_IS_ANCESTOR=0
+GAAI_SHIM_GH_PR_MERGED=0
 
 cat > "$COMMIT_SHIM_DIR/git" << 'GIT_SHIM_EOF'
 #!/usr/bin/env bash
@@ -1349,6 +1363,16 @@ if [[ "$_subcmd" == "push" ]]; then
   if [[ "${GAAI_SHIM_PUSH_FAIL:-0}" == "1" ]]; then
     echo "error: remote push failed" >&2; exit 1
   fi
+  exit 0
+fi
+# Guard 1 shim: intercept merge-base --is-ancestor when flag is set
+if [[ "$_subcmd" == "merge-base" ]] && [[ "${GAAI_SHIM_HEAD_IS_ANCESTOR:-0}" == "1" ]]; then
+  for _arg in "${_args[@]}"; do
+    [[ "$_arg" == "--is-ancestor" ]] && exit 0
+  done
+fi
+# Guard 1 shim: intercept fetch when flag is set (simulates successful fetch)
+if [[ "$_subcmd" == "fetch" ]] && [[ "${GAAI_SHIM_HEAD_IS_ANCESTOR:-0}" == "1" ]]; then
   exit 0
 fi
 exec "$COMMIT_REAL_GIT" "$@"
@@ -1390,6 +1414,11 @@ case "$_cmd" in
         echo "null"; exit 0
       fi
       echo '{"mergeMethod":"squash"}'; exit 0
+    fi
+    exit 0 ;;
+  "pr list")
+    if [[ "${GAAI_SHIM_GH_PR_MERGED:-0}" == "1" ]]; then
+      echo "https://github.com/test/repo/pull/888"
     fi
     exit 0 ;;
   "pr merge")
@@ -1717,10 +1746,83 @@ else
   fail "T44b: (skipped)"
 fi
 
+# ── T45: Guard 1 — HEAD ancestor of origin/staging → no gh pr create ──────
+echo "T45: Guard 1 — HEAD ancestor fast-path"
+GAAI_SHIM_HEAD_IS_ANCESTOR=1
+> "$COMMIT_CALL_LOG"
+make_commit_worktree "TST-COMMIT-GUARD1"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-GUARD1" qa_passed "$FIXTURE" 2>/dev/null || true
+TRACE="test-trace-$(date +%s)-045"
+if handle_commit_phase "TST-COMMIT-GUARD1" "$TRACE" 2>/dev/null; then
+  if ! grep -q "pr create" "$COMMIT_CALL_LOG" 2>/dev/null; then
+    pass "T45a: Guard 1 — zero gh pr create calls when HEAD is ancestor"
+  else
+    fail "T45a: Guard 1 fired but gh pr create was still called"
+  fi
+  new_ps=$(get_phase_status "TST-COMMIT-GUARD1")
+  if [[ "$new_ps" == "done" ]]; then
+    pass "T45b: phase_status advanced to done via Guard 1 path"
+  else
+    fail "T45b: expected done, got '$new_ps'"
+  fi
+else
+  fail "T45a: handle_commit_phase returned non-zero on Guard 1 path"
+  fail "T45b: (skipped)"
+fi
+GAAI_SHIM_HEAD_IS_ANCESTOR=0
+
+# ── T46: Guard 2 — existing merged/open PR → reuse URL, no gh pr create ───
+echo "T46: Guard 2 — existing PR reuse"
+# T46a: MERGED PR variant (primary E177S04 scenario)
+GAAI_SHIM_GH_PR_MERGED=1
+> "$COMMIT_CALL_LOG"
+> "$ROUTING_LOG"
+make_commit_worktree "TST-COMMIT-GUARD2"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-GUARD2" qa_passed "$FIXTURE" 2>/dev/null || true
+TRACE="test-trace-$(date +%s)-046a"
+if handle_commit_phase "TST-COMMIT-GUARD2" "$TRACE" 2>/dev/null; then
+  if ! grep -q "pr create" "$COMMIT_CALL_LOG" 2>/dev/null; then
+    pass "T46a-1: Guard 2 (MERGED) — zero gh pr create calls"
+  else
+    fail "T46a-1: Guard 2 fired but gh pr create was still called"
+  fi
+  if grep -q '"pr_url":"https://github.com/test/repo/pull/888"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T46a-2: Guard 2 (MERGED) — merged PR URL reused in routing record"
+  else
+    fail "T46a-2: routing record missing reused pr_url — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+else
+  fail "T46a-1: handle_commit_phase returned non-zero on Guard 2 MERGED path"
+  fail "T46a-2: (skipped)"
+fi
+
+# T46b: OPEN PR variant
+> "$COMMIT_CALL_LOG"
+> "$ROUTING_LOG"
+make_commit_worktree "TST-COMMIT-GUARD2"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-GUARD2" qa_passed "$FIXTURE" 2>/dev/null || true
+TRACE="test-trace-$(date +%s)-046b"
+if handle_commit_phase "TST-COMMIT-GUARD2" "$TRACE" 2>/dev/null; then
+  if ! grep -q "pr create" "$COMMIT_CALL_LOG" 2>/dev/null; then
+    pass "T46b-1: Guard 2 (OPEN) — zero gh pr create calls"
+  else
+    fail "T46b-1: Guard 2 fired but gh pr create was still called (OPEN variant)"
+  fi
+  if grep -q '"pr_url":"https://github.com/test/repo/pull/888"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T46b-2: Guard 2 (OPEN) — PR URL reused in routing record"
+  else
+    fail "T46b-2: routing record missing reused pr_url (OPEN) — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+else
+  fail "T46b-1: handle_commit_phase returned non-zero on Guard 2 OPEN path"
+  fail "T46b-2: (skipped)"
+fi
+GAAI_SHIM_GH_PR_MERGED=0
+
 # Cleanup commit phase test fixtures
 export PATH="$COMMIT_OLD_PATH"
 unset GAAI_WORKTREES_BASE GAAI_SKIP_AUTO_MERGE GAAI_AUTO_MERGE_POLICY
-unset GAAI_SHIM_PUSH_FAIL GAAI_SHIM_GH_AUTH_FAIL GAAI_SHIM_GH_PR_EXISTS
+unset GAAI_SHIM_PUSH_FAIL GAAI_SHIM_GH_AUTH_FAIL GAAI_SHIM_GH_PR_EXISTS GAAI_SHIM_HEAD_IS_ANCESTOR GAAI_SHIM_GH_PR_MERGED
 unset GAAI_SHIM_AUTOMERGE_NULL GAAI_SHIM_AUTOMERGE_FAIL GAAI_COMMIT_CALL_LOG
 unset COMMIT_OLD_PATH COMMIT_FIXTURE_DIR COMMIT_SHIM_DIR COMMIT_REAL_GIT COMMIT_CALL_LOG
 rm -rf "/tmp/gaai-commit-phase-tests-$$"

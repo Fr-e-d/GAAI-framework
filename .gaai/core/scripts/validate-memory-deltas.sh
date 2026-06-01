@@ -24,11 +24,17 @@ set -uo pipefail
 
 trap 'echo "Script-internal error on line $LINENO. Exiting with code 2." >&2; exit 2' ERR
 
-# Canonical section headers — update this list if schema changes
+# Canonical section headings. The match below is case-insensitive and tolerant
+# of trailing text after the phrase (e.g. a parenthetical qualifier like
+# "## Confirmed Entries (no update needed)") — autonomous QA agents reliably
+# produce the right three sections but slip on casing/qualifiers. The exact
+# canonical phrase is still required as the heading, so invented section names
+# (## Summary, ## Implementation Footprint, ...) are NOT accepted. Update this
+# list if the schema changes.
 CANONICAL_SECTIONS=(
-  "## Confirmed Entries"
-  "## Contradicted Entries"
-  "## New Knowledge Candidates"
+  "Confirmed Entries"
+  "Contradicted Entries"
+  "New Knowledge Candidates"
 )
 
 # One-time grandfather of pre-canonical-schema memory-delta files.
@@ -158,14 +164,16 @@ for f in "${files[@]}"; do
   if [[ "$is_grandfathered" == false ]]; then
     section_found=false
     for section in "${CANONICAL_SECTIONS[@]}"; do
-      if grep -qF "$section" "$f"; then
+      # Header-anchored, case-insensitive, tolerant of trailing text after the
+      # canonical phrase (whitespace, a parenthetical, or end-of-line).
+      if grep -qiE "^##[[:space:]]+${section}([[:space:]]|\(|$)" "$f"; then
         section_found=true
         break
       fi
     done
 
     if [[ "$section_found" == false ]]; then
-      echo "FAIL: $rel_path — missing required section header (expected one of: ${CANONICAL_SECTIONS[*]})"
+      echo "FAIL: $rel_path — missing required section header (expected a '## ' heading matching one of: ${CANONICAL_SECTIONS[*]} — case-insensitive)"
       ((failures++)) || true
     fi
   fi

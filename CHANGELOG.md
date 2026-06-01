@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- fix: regression = new failure vs baseline (stop false-escalation on pre-existing red tests)
+
 ## [2.43.0] - 2026-06-01
 
 ### Changed
