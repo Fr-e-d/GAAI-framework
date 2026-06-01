@@ -59,7 +59,7 @@ Activate after implementation is complete. This is a **hard quality gate**.
 - Any broken rule → FAIL
 
 ### 4. Regression Scan
-- Broken tests → FAIL
+- **Broken tests → FAIL — but only a *new* breakage is a regression.** A regression is a test that fails on this change yet passed on the pre-change baseline. Before failing on a red test, establish whether it is pre-existing: re-run it on the base branch / the story's fork-point, or consult known-failing context. A test already red on the baseline and unrelated to this story's changed surface is **not** a regression — record it as pre-existing and do **not** FAIL/ESCALATE on it. A failure this story caused, or in a test that exercises the surface this story changed, **is** a regression → FAIL. Do not weaken this by labelling a genuinely new failure "pre-existing" — verify, don't assume.
 - Behavior drift → FAIL
 - Known risk patterns from memory → FAIL
 
