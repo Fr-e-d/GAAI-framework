@@ -142,7 +142,7 @@ The plan file MUST be non-empty.
 
 ### Scope discipline check (escalation trigger)
 
-Before finalising the plan, audit its scope. If the plan touches **>5 distinct
+Before finalising the plan, audit its scope. If the plan touches **>10 distinct
 files** OR has **>6 acceptance criteria** OR projects to >300 lines of code
 modification, the story is too large for reliable single-pass implementation
 on the secondary route (GLM 5.1) and at risk of hitting Sonnet's turn budget
@@ -150,7 +150,7 @@ on the primary route.
 
 When the scope exceeds those thresholds, write `{id}.plan-blocked.md` at
 `$GAAI_PLAN_PATH` instead of the plan, attach a recommended decomposition
-into 2-3 smaller stories (each ≤5 files / ≤6 ACs), and exit non-zero. The
+into 2-3 smaller stories (each ≤10 files / ≤6 ACs), and exit non-zero. The
 Discovery agent will then split the story before re-attempting Plan.
 
 This is the V1 doctrine : keep stories small enough to fit in a single

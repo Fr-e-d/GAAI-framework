@@ -70,13 +70,13 @@ This is the **mandatory gate** between Discovery and Delivery. No Story proceeds
 ### Story Scope Pre-Flight (Plan contract symmetry)
 
 The Plan phase agent enforces hard scope caps before producing an execution plan:
-**>5 distinct files modified OR created**, **>6 acceptance criteria**, or **>300 lines of code projected** all trigger a plan-block + decomposition demand and waste a full Delivery cycle (worktree spin, branch chore commit, then PLAN exit non-zero with `plan-blocked.md`). To prevent this Discovery → Refined → Plan-blocked round-trip, this skill enforces the **same caps** at the Discovery gate. The Refined contract MUST guarantee Plan-feasibility upstream.
+**>10 distinct files modified OR created**, **>6 acceptance criteria**, or **>300 lines of code projected** all trigger a plan-block + decomposition demand and waste a full Delivery cycle (worktree spin, branch chore commit, then PLAN exit non-zero with `plan-blocked.md`). To prevent this Discovery → Refined → Plan-blocked round-trip, this skill enforces the **same caps** at the Discovery gate. The Refined contract MUST guarantee Plan-feasibility upstream.
 
 **Cap enforcement is hard, not advisory.**
 
 | Cap | Threshold | Source of truth in story |
 |---|---|---|
-| Files | ≤ 5 distinct files modified or created | `## File Inventory` section (mandatory for any multi-file story) |
+| Files | ≤ 10 distinct files modified or created | `## File Inventory` section (mandatory for any multi-file story) |
 | Acceptance criteria | ≤ 6 | counted from `## Acceptance Criteria` bullets |
 | LOC projection | ≤ 300 | optional `loc_estimate` line in File Inventory, summed |
 
@@ -89,7 +89,7 @@ A story requires a `## File Inventory` section if BOTH of the following are true
 
 When BOTH signals match, the story body MUST contain a `## File Inventory` section listing each file to be modified or created, with a 1-line scope note per file (and an optional `loc_estimate` per row). Stories matching the detection criteria without this section are BLOCKED — the validator cannot compute the file cap without an explicit list.
 
-A `## File Inventory` listing more than 5 files is BLOCKED. Discovery must decompose before re-running this skill. This is the PLAN contract symmetry — any story that would plan-block at Delivery MUST be caught here instead. There is no escape hatch in V1: the cap mirrors the Plan agent's hard cap exactly, and the Plan agent does not honor exemption flags. Truly atomic cross-file refactors are vanishingly rare ; if encountered, raise the cap in BOTH this skill AND the Plan agent prompt as a single coordinated decision.
+A `## File Inventory` listing more than 10 files is BLOCKED. Discovery must decompose before re-running this skill. This is the PLAN contract symmetry — any story that would plan-block at Delivery MUST be caught here instead. There is no escape hatch in V1: the cap mirrors the Plan agent's hard cap exactly, and the Plan agent does not honor exemption flags. Truly atomic cross-file refactors are vanishingly rare ; if encountered, raise the cap in BOTH this skill AND the Plan agent prompt as a single coordinated decision.
 
 **Single-file stories** (one of the two detection signals does not match) may omit the File Inventory section. AC and LOC caps still apply.
 
@@ -198,7 +198,7 @@ The skill MUST block progression if:
 - Any artefact is missing `skills_invoked` in frontmatter (Base Rule #2 violation)
 - Any Story is missing `related_decs` in frontmatter
 - A multi-file story (both detection signals match) is missing the `## File Inventory` section
-- A `## File Inventory` lists more than 5 files (no V1 escape hatch — decompose)
+- A `## File Inventory` lists more than 10 files (no V1 escape hatch — decompose)
 - Acceptance criteria count exceeds 6 (Plan contract symmetry)
 - A `loc_estimate` total in File Inventory exceeds 300 (Plan contract symmetry)
 - `required_skills` entry present without a co-declared output AC in the story body
