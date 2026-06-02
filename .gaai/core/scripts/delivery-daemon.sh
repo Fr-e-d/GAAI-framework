@@ -1717,6 +1717,19 @@ _reconcile_story_file_from_staging() {
     return 0
   fi
 
+  # Guard: an existing worktree whose branch was deleted out from under it (re-delivery
+  # churn) has a null/unborn HEAD. The git diff/commit below would then run against a
+  # null HEAD and, under `set -euo pipefail`, a fatal git status takes down the ENTIRE
+  # daemon main loop before the wrapper ever spawns (observed: E185S05 poison-pill,
+  # 2026-06-02 — the only one of 19 worktrees with a null HEAD). Detect it, prune the
+  # corrupt worktree, and treat as a fresh pickup so the wrapper recreates it cleanly.
+  if ! git -C "$wt_path" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+    log "${tag} ${sid} : worktree has null/unborn HEAD (corrupt — branch deleted under it), pruning → fresh pickup"
+    git worktree remove --force "$wt_path" 2>/dev/null || rm -rf "$wt_path"
+    git worktree prune 2>/dev/null || true
+    return 0
+  fi
+
   log "${tag} ${sid} : checking story.md against origin/staging (wt=${wt_path})"
 
   # Fetch (best-effort — failure is non-fatal, proceed with cached ref)
