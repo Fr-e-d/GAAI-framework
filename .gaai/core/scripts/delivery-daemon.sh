@@ -1456,6 +1456,36 @@ except Exception:
         fi
         ;;
       not_started|"")
+        # Merged-PR guard (mirrors the qa_passed case above): when a delivered
+        # story's done-flip push is stranded (working-tree drift pauses the commit),
+        # origin still shows in_progress/not_started even though its PR is already
+        # merged. Without this guard, recovery reverts it refined + retry++ and
+        # re-delivers an already-merged story (duplicate PR). Detect a merged PR and
+        # reconcile to done (idempotent) instead of reverting.
+        if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
+          _ns_json=$(gh pr list --state all --search "$sid" --json number,mergedAt --limit 1 2>/dev/null || echo "")
+          _ns_merged_at=""
+          _ns_number=""
+          if [[ -n "$_ns_json" ]]; then
+            read -r _ns_merged_at _ns_number < <(printf '%s' "$_ns_json" | python3 -c "import json,sys
+try:
+    d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
+    print((s.get('mergedAt') or '-'), (s.get('number') or '-'))
+except Exception:
+    print('- -')" 2>/dev/null || echo "- -")
+          fi
+          if [[ -n "$_ns_merged_at" && "$_ns_merged_at" != "-" ]]; then
+            pr_number="$_ns_number"
+            log "${GREEN}[RECOVERY] $sid : phase_status=${ps:-empty} but PR #${_ns_number} already merged ($_ns_merged_at) — reconciling to done instead of reverting${NC}"
+            if _reconcile_merged_pr "$sid" "$_ns_merged_at"; then
+              rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+              ((reconciled++))
+            else
+              ((skipped++))
+            fi
+            continue
+          fi
+        fi
         log "${YELLOW}[RECOVERY] $sid : phase_status=${ps:-empty} — revert refined + retry++${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined${NC}"
