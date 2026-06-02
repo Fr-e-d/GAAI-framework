@@ -1345,6 +1345,37 @@ crash_recovery_scan() {
         ((skipped++))
         ;;
       qa_passed)
+        # Merged-PR guard (loop-breaker): a qa_passed wrapper whose PR is already
+        # merged has nothing left to deliver. Without this, a stranded done-
+        # reconciliation (push race, or PR-watcher chore-commit returning rc=1)
+        # makes RECOVERY re-launch the wrapper forever — the bounded-death counter
+        # below never trips because it resets whenever the worktree HEAD moves
+        # (which a relaunch causes). Detect a merged PR here and reconcile to done
+        # (idempotent) instead of re-delivering an already-merged story.
+        if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
+          _rg_json=$(gh pr list --state all --search "$sid" --json number,mergedAt --limit 1 2>/dev/null || echo "")
+          _rg_merged_at=""
+          _rg_number=""
+          if [[ -n "$_rg_json" ]]; then
+            read -r _rg_merged_at _rg_number < <(printf '%s' "$_rg_json" | python3 -c "import json,sys
+try:
+    d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
+    print((s.get('mergedAt') or '-'), (s.get('number') or '-'))
+except Exception:
+    print('- -')" 2>/dev/null || echo "- -")
+          fi
+          if [[ -n "$_rg_merged_at" && "$_rg_merged_at" != "-" ]]; then
+            pr_number="$_rg_number"
+            log "${GREEN}[RECOVERY] $sid : phase_status=qa_passed but PR #${_rg_number} already merged ($_rg_merged_at) — reconciling to done instead of re-launching${NC}"
+            if _reconcile_merged_pr "$sid" "$_rg_merged_at"; then
+              rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+              ((reconciled++))
+            else
+              ((skipped++))
+            fi
+            continue
+          fi
+        fi
         # Bounded-retry guard: count consecutive deaths where push did not succeed.
         # Halts relaunch after threshold to prevent silent infinite retry loop.
         _cd_file="$LOCK_DIR/.commit-deaths-${sid}"
