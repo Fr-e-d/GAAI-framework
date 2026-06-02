@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - fix: prune null-HEAD worktree in reconcile (corrupt-worktree poison-pill)
+- fix: prune null-HEAD worktree in reconcile (corrupt-worktree poison-pill)
 - fix: RECOVERY merged-PR guard — stop infinite re-delivery of already-merged stories
 - fix: raise file cap 5→10 (coordinated, validate-artefacts + Plan agent)
 - fix: regression = new failure vs baseline (stop false-escalation on pre-existing red tests)
