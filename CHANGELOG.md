@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: scope PR-merge recovery to delivery branch — stop Discovery-PR false-done
 - fix: recovery reconciles merged PR to done instead of re-delivering
 - fix: prune null-HEAD worktree in reconcile (corrupt-worktree poison-pill)
 - fix: prune null-HEAD worktree in reconcile (corrupt-worktree poison-pill)

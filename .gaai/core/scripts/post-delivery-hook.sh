@@ -143,8 +143,10 @@ fi
 # ── 6. PR fields — from gh CLI ───────────────────────────────────────────────
 if ! field_is_set "pr_url" || ! field_is_set "pr_number" || ! field_is_set "pr_status"; then
   if command -v gh &>/dev/null; then
-    # Search for PR with this story ID in title or branch name
-    pr_json=$(gh pr list --state all --search "$story_id" --json url,number,state,mergedAt --limit 1 2>/dev/null) || pr_json=""
+    # Match ONLY this story's delivery branch PR (story/<id>). A bare --search "$story_id"
+    # also matches the Discovery/promotion PR (story id in its title) and would record the
+    # wrong PR — the same conflation that false-reconciled stories to done in delivery-daemon.sh.
+    pr_json=$(gh pr list --state all --head "story/$story_id" --json url,number,state,mergedAt --limit 1 2>/dev/null) || pr_json=""
 
     if [[ -n "$pr_json" && "$pr_json" != "[]" ]]; then
       pr_url=$(echo "$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('url',''))" 2>/dev/null) || pr_url=""

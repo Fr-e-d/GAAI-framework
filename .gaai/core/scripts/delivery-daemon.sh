@@ -1353,7 +1353,11 @@ crash_recovery_scan() {
         # (which a relaunch causes). Detect a merged PR here and reconcile to done
         # (idempotent) instead of re-delivering an already-merged story.
         if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
-          _rg_json=$(gh pr list --state all --search "$sid" --json number,mergedAt --limit 1 2>/dev/null || echo "")
+          # --head "story/$sid" (not --search "$sid"): match ONLY this story's delivery
+          # branch PR. A bare --search matches any PR whose title/body contains the story
+          # id — including the Discovery PR that promoted the story to refined — which
+          # falsely reconciled refined/in_progress stories to done (completed_at < started_at).
+          _rg_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt --limit 1 2>/dev/null || echo "")
           _rg_merged_at=""
           _rg_number=""
           if [[ -n "$_rg_json" ]]; then
@@ -1463,7 +1467,9 @@ except Exception:
         # re-delivers an already-merged story (duplicate PR). Detect a merged PR and
         # reconcile to done (idempotent) instead of reverting.
         if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
-          _ns_json=$(gh pr list --state all --search "$sid" --json number,mergedAt --limit 1 2>/dev/null || echo "")
+          # --head "story/$sid" (not --search "$sid"): see the matching note above —
+          # avoid matching the Discovery/promotion PR (id in title) as a delivery PR.
+          _ns_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt --limit 1 2>/dev/null || echo "")
           _ns_merged_at=""
           _ns_number=""
           if [[ -n "$_ns_json" ]]; then
@@ -2503,7 +2509,7 @@ PYEOF
   # PR fields — from gh CLI
   if command -v gh &>/dev/null; then
     local pr_json
-    pr_json=\$(gh pr list --state all --search "$story_id" --json url,number,state,mergedAt --limit 1 2>/dev/null) || pr_json=""
+    pr_json=\$(gh pr list --state all --head "story/$story_id" --json url,number,state,mergedAt --limit 1 2>/dev/null) || pr_json=""
     if [[ -n "\$pr_json" && "\$pr_json" != "[]" ]]; then
       local pr_url pr_number pr_state
       pr_url=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('url',''))" 2>/dev/null) || pr_url=""
@@ -3162,7 +3168,7 @@ PYEOF
 
   if command -v gh &>/dev/null; then
     local pr_json
-    pr_json=\$(gh pr list --state all --search "$story_id" --json url,number,state,mergedAt --limit 1 2>/dev/null) || pr_json=""
+    pr_json=\$(gh pr list --state all --head "story/$story_id" --json url,number,state,mergedAt --limit 1 2>/dev/null) || pr_json=""
     if [[ -n "\$pr_json" && "\$pr_json" != "[]" ]]; then
       local pr_url pr_number pr_state
       pr_url=\$(echo "\$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('url',''))" 2>/dev/null) || pr_url=""
