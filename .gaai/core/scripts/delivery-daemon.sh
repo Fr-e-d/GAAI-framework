@@ -1265,6 +1265,39 @@ crash_recovery_scan() {
             continue
           fi
         else
+          # Done-flip-lag heal: a drift where the WT advanced past origin (e.g. WT
+          # qa_passed while HEAD is still not_started) commonly means the delivery
+          # finished + its PR merged but the phase_status chore-commits raced and never
+          # reached origin. Without this check the drift-skip strands the story
+          # in_progress forever (it short-circuits before the merged-PR reconcile at the
+          # phase_status cases below). So: if story/$sid's delivery PR is already merged,
+          # reconcile to done here instead of skipping. --head "story/$sid" (not --search)
+          # matches ONLY the delivery branch PR, never a Discovery/babysit PR (see the
+          # matching note at the phase_status reconcile sites).
+          if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
+            local _dr_json _dr_merged_at _dr_number
+            _dr_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt --limit 1 2>/dev/null || echo "")
+            _dr_merged_at=""
+            _dr_number=""
+            if [[ -n "$_dr_json" ]]; then
+              read -r _dr_merged_at _dr_number < <(printf '%s' "$_dr_json" | python3 -c "import json,sys
+try:
+    d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
+    print((s.get('mergedAt') or '-'), (s.get('number') or '-'))
+except Exception:
+    print('- -')" 2>/dev/null || echo "- -")
+            fi
+            if [[ -n "$_dr_merged_at" && "$_dr_merged_at" != "-" ]]; then
+              log "${GREEN}[RECOVERY] $sid : working-tree drift but delivery PR #${_dr_number} already merged (${_dr_merged_at}) — reconciling to done instead of skipping${NC}"
+              if _reconcile_merged_pr "$sid" "$_dr_merged_at"; then
+                rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+                _clear_drift_marker_if_clean
+                ((reconciled++))
+                continue
+              fi
+              log "${YELLOW}[RECOVERY] $sid : merged-PR reconcile failed — falling through to drift-skip${NC}"
+            fi
+          fi
           log "${YELLOW}[RECOVERY] $sid : working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) — skipping relaunch this scan${NC}"
           _write_drift_marker "scan" "drift-$sid"
           drift_detected=1
