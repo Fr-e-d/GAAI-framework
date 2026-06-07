@@ -24,6 +24,16 @@ GAAI_TIMEOUT_COMMIT_SEC="${GAAI_TIMEOUT_COMMIT_SEC:-600}"  # 10 min (commit-phas
 # Distinct exit code for wall-clock timeout (vs 124 loop-breaker).
 GAAI_TIMEOUT_RC=137
 
+# ── Per-phase agent turn caps ────────────────────────────────────────────
+# QA carries the heaviest deterministic workload of the three phases
+# (mandatory reads of story/epic/plan/impl-report + per-DEC reads + run the
+# test suite + tsc/lint + qa-review + consistency-check), yet historically ran
+# at --max-turns 30 — the lowest of the three (plan 60, impl 150). On large
+# stories the QA agent exhausted 30 turns before writing a verdict, exited
+# non-zero (error_max_turns), and the wrapper died at phase_status=implemented
+# in an unbounded relaunch loop. Raise the default and make it overridable.
+GAAI_QA_MAX_TURNS="${GAAI_QA_MAX_TURNS:-100}"
+
 # Resolve the available timeout binary. Linux ships `timeout`, macOS coreutils
 # ships `gtimeout`. Empty string when neither is present — callers must then
 # fall back to the in-process watchdog.
@@ -1497,7 +1507,7 @@ handle_qa_phase() {
     _run_claude_with_loop_breaker \
       "$story_id" "qa" "$log_path" "$prompt_file" "$worktree_path" \
       --model sonnet \
-      --max-turns 30 \
+      --max-turns "$GAAI_QA_MAX_TURNS" \
       --output-format stream-json \
       --verbose \
       --dangerously-skip-permissions \

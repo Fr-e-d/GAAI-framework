@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: raise QA phase turn cap 30→100 + GAAI_QA_MAX_TURNS knob (D1)
 - fix: heal done-flip lag — reconcile merged delivery PR in the drift-skip path
 - fix: scope PR-merge recovery to delivery branch — stop Discovery-PR false-done
 - fix: recovery reconciles merged PR to done instead of re-delivering
