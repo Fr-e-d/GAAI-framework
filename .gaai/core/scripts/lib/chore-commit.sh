@@ -93,16 +93,19 @@ _chore_option_a_fallback() {
     if git add "$backlog_rel" 2>/dev/null \
        && git commit -m "chore(daemon): commit accumulated wrapper-progress writes [pre-mark $story_id]" --quiet -- "$backlog_rel" 2>/dev/null; then
       if ! git push origin "$target_branch" --quiet 2>/dev/null; then
-        # Push race — try rebase-retry once
-        if git fetch origin "$target_branch" --quiet 2>/dev/null \
-          && git rebase "origin/$target_branch" --quiet 2>/dev/null \
-          && git push origin "$target_branch" --quiet 2>/dev/null; then
-          : # success
+        # Push race — fetch then distinguish genuine conflict from just-behind (AC4).
+        git fetch origin "$target_branch" --quiet 2>/dev/null || true
+        if git rebase "origin/$target_branch" --quiet 2>/dev/null; then
+          # Rebase clean — retry push; if push still fails, re-sync to origin (AC2+AC3).
+          if ! git push origin "$target_branch" --quiet 2>/dev/null; then
+            git reset --hard "origin/$target_branch" --quiet 2>/dev/null || true
+            echo "[CHORE-COMMIT] $story_id : pre-mark drift sweep re-synced to origin — will re-apply field" >&2
+          fi
         else
+          # Genuine rebase conflict (not just behind) — AC4: distinct diagnosable message.
           git rebase --abort 2>/dev/null || true
-          # Roll back our local sweep commit since we couldn't share it
-          git reset --hard "HEAD^" --quiet 2>/dev/null || true
-          echo "[CHORE-COMMIT] $story_id : pre-mark drift sweep push failed — refuse-skip" >&2
+          git reset --hard "origin/$target_branch" --quiet 2>/dev/null || true
+          echo "[CHORE-COMMIT] $story_id : pre-mark drift sweep — genuine rebase conflict, operator resolve required" >&2
           _chore_a_done 6
           return $?
         fi
