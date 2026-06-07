@@ -77,6 +77,28 @@ Execute these reads in order before any QA work:
 
 ---
 
+## Handling Large Command Output
+
+When running the test suite, `tsc --noEmit`, lint, or any command that may produce large output:
+
+1. **Redirect output to a file** — do NOT capture inline or let it stream to stdout:
+   ```bash
+   pnpm test 2>&1 | tee /tmp/test-output.txt
+   ```
+2. **Inspect via `tail`, `grep`, or `rg`** — NEVER use the Read tool on a file you expect to
+   exceed ~256KB. The Read tool has a hard 256KB ceiling; hitting it burns a turn and returns
+   no content.
+   ```bash
+   grep -E "FAIL|✕|Error|error TS" /tmp/test-output.txt | tail -100
+   tail -200 /tmp/test-output.txt
+   ```
+3. **Recovery on oversized Read:** if you accidentally hit the 256KB Read-tool limit, do NOT
+   retry the Read. Switch immediately to `grep`/`tail` to extract only failure lines.
+4. **OSS-clean rule:** always write output to `/tmp/` or the worktree root — never to paths
+   outside `$GAAI_WORKTREE_PATH` except `/tmp/`.
+
+---
+
 ## Verdict Rules
 
 | Verdict | Condition |
