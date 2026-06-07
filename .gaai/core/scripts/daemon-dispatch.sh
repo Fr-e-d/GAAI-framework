@@ -1451,16 +1451,19 @@ handle_qa_phase() {
   if [[ ! -f "$story_path" ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: story file not found: $story_path"
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "0"
+    touch "${LOCK_DIR}/.qa-spawn-death-pending-${story_id}" 2>/dev/null || true
     return 1
   fi
   if [[ ! -f "$plan_path" ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: plan file not found: $plan_path"
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "0"
+    touch "${LOCK_DIR}/.qa-spawn-death-pending-${story_id}" 2>/dev/null || true
     return 1
   fi
   if [[ ! -f "$impl_report_path" ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: impl-report not found: $impl_report_path"
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "0"
+    touch "${LOCK_DIR}/.qa-spawn-death-pending-${story_id}" 2>/dev/null || true
     return 1
   fi
 
@@ -1476,6 +1479,7 @@ handle_qa_phase() {
   if [[ ! -f "$agent_prompt_src" ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: qa.daemon-prompt.md not found at $agent_prompt_src"
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "0"
+    touch "${LOCK_DIR}/.qa-spawn-death-pending-${story_id}" 2>/dev/null || true
     return 1
   fi
 
@@ -1533,6 +1537,7 @@ handle_qa_phase() {
   if [[ "$claude_exit" -ne 0 ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: claude -p exited ${claude_exit} [class=QA_SPAWN_FAILED]"
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "$duration_ms"
+    touch "${LOCK_DIR}/.qa-spawn-death-pending-${story_id}" 2>/dev/null || true
     return 1
   fi
 

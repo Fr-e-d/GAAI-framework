@@ -81,6 +81,13 @@ describe('formatPhaseStdout (unit)', () => {
     assert.equal(line, '▸ Phase Impl (secondary / glm-4.6) ... ⚠ Falling back to primary (reason: AUTH_FAILED)\n');
   });
 
+  // AC3: spawn-error provider (not 'secondary') — no "Falling back" label even with non-null reason
+  test('provider=error with QA_SPAWN_FAILED → no "Falling back" label, error class shown', () => {
+    const line = formatPhaseStdout('qa', 'error', 'claude-sonnet-4-6', 'QA_SPAWN_FAILED');
+    assert.ok(!line.includes('Falling back'), 'must not show "Falling back to primary" on spawn-error');
+    assert.ok(line.includes('QA_SPAWN_FAILED'), 'must include the error class for diagnostics');
+  });
+
   // AC10: no secrets — format contains only provider label, model ID, error class
   test('no token-like content in formatted line', () => {
     const line = formatPhaseStdout('impl', 'secondary', 'glm-4.6', 'AUTH_FAILED');
