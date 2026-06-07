@@ -212,8 +212,10 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
 export function formatPhaseStdout(phase, provider, model, fallbackReason) {
   const phaseName = phase === 'qa' ? 'QA'
     : phase.charAt(0).toUpperCase() + phase.slice(1);
-  const suffix = fallbackReason != null
-    ? `... ⚠ Falling back to primary (reason: ${fallbackReason})`
-    : '... done';
+  const suffix = fallbackReason == null
+    ? '... done'
+    : provider === 'secondary'
+      ? `... ⚠ Falling back to primary (reason: ${fallbackReason})`
+      : `... ⚠ ${fallbackReason}`;
   return `▸ Phase ${phaseName} (${provider} / ${model}) ${suffix}\n`;
 }

@@ -1351,6 +1351,8 @@ except Exception:
         ;;
       failed)
         rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+        rm -f "$LOCK_DIR/.qa-spawn-deaths-${sid}" "$LOCK_DIR/.qa-spawn-deaths-${sid}.head" \
+              "$LOCK_DIR/.qa-spawn-death-pending-${sid}" 2>/dev/null || true
         log "${YELLOW}[RECOVERY] $sid : phase_status=failed — reconciling YAML status${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=failed${NC}"
@@ -1363,6 +1365,8 @@ except Exception:
         ;;
       escalated|qa_escalated)
         rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+        rm -f "$LOCK_DIR/.qa-spawn-deaths-${sid}" "$LOCK_DIR/.qa-spawn-deaths-${sid}.head" \
+              "$LOCK_DIR/.qa-spawn-death-pending-${sid}" 2>/dev/null || true
         log "${YELLOW}[RECOVERY] $sid : phase_status=$ps — reconciling YAML status escalated${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=escalated${NC}"
@@ -1378,6 +1382,8 @@ except Exception:
         ((skipped++))
         ;;
       qa_passed)
+        rm -f "$LOCK_DIR/.qa-spawn-deaths-${sid}" "$LOCK_DIR/.qa-spawn-deaths-${sid}.head" \
+              "$LOCK_DIR/.qa-spawn-death-pending-${sid}" 2>/dev/null || true
         # Merged-PR guard (loop-breaker): a qa_passed wrapper whose PR is already
         # merged has nothing left to deliver. Without this, a stranded done-
         # reconciliation (push race, or PR-watcher chore-commit returning rc=1)
@@ -1457,7 +1463,49 @@ except Exception:
         ;;
       implemented|qa_failed)
         rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
-        log "${GREEN}[RECOVERY] $sid : phase_status=$ps — re-launching wrapper to resume${NC}"
+        # AC1/AC2: bounded QA spawn-death counter (only for phase_status=implemented)
+        if [[ "$ps" == "implemented" ]]; then
+          _qsd_pending="${LOCK_DIR}/.qa-spawn-death-pending-${sid}"
+          _qsd_file="${LOCK_DIR}/.qa-spawn-deaths-${sid}"
+          _qsd_head_file="${_qsd_file}.head"
+          if [[ -f "$_qsd_pending" ]]; then
+            _qsd_current=$(cat "$_qsd_file" 2>/dev/null | tr -d '[:space:]' || echo 0)
+            _qsd_current=$(( _qsd_current > 1000 ? 1000 : _qsd_current ))
+            _qsd_head_now=$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null || echo "")
+            _qsd_head_prev=$(cat "$_qsd_head_file" 2>/dev/null | tr -d '[:space:]' || echo "")
+            if [[ -n "$_qsd_head_now" && "$_qsd_head_now" == "$_qsd_head_prev" ]]; then
+              _qsd_new=$(( _qsd_current + 1 ))
+              _qsd_new=$(( _qsd_new > 1000 ? 1000 : _qsd_new ))
+              printf '%s\n' "$_qsd_new" > "${_qsd_file}.tmp" && mv "${_qsd_file}.tmp" "$_qsd_file" 2>/dev/null || true
+            else
+              _qsd_new=1
+              printf '%s\n' "$_qsd_new" > "${_qsd_file}.tmp" && mv "${_qsd_file}.tmp" "$_qsd_file" 2>/dev/null || true
+              printf '%s\n' "$_qsd_head_now" > "${_qsd_head_file}.tmp" && mv "${_qsd_head_file}.tmp" "$_qsd_head_file" 2>/dev/null || true
+            fi
+            rm -f "$_qsd_pending" 2>/dev/null || true
+            _qsd_max="${GAAI_QA_SPAWN_RETRY_MAX:-3}"
+            if (( _qsd_new >= _qsd_max )); then
+              log "[$(date '+%Y-%m-%dT%H:%M:%SZ')] $sid QA_SPAWN_FAILED — exhausted ${_qsd_new} retries (cap=${_qsd_max}) — escalating to failed"
+              if ! $DRY_RUN; then
+                _recovery_set_status "$sid" "failed" "qa-spawn-exhausted"
+                rm -f "$_qsd_file" "$_qsd_head_file" 2>/dev/null || true
+                if declare -f notify_escalation_inline >/dev/null 2>&1; then
+                  notify_escalation_inline "$sid" "QA spawn-failure exhausted retries" \
+                    "QA_SPAWN_FAILED repeated ${_qsd_new}×. Inspect QA agent config (max-turns, model) then reset phase_status=implemented to retry."
+                fi
+              else
+                log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid failed (qa-spawn-exhausted)${NC}"
+              fi
+              ((skipped++))
+              continue
+            fi
+            log "${GREEN}[RECOVERY] $sid : phase_status=implemented spawn-deaths=${_qsd_new}/${_qsd_max} — re-launching${NC}"
+          else
+            log "${GREEN}[RECOVERY] $sid : phase_status=$ps — re-launching wrapper to resume${NC}"
+          fi
+        else
+          log "${GREEN}[RECOVERY] $sid : phase_status=$ps — re-launching wrapper to resume${NC}"
+        fi
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
           ((resumed++))
