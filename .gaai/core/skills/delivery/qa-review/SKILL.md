@@ -62,6 +62,11 @@ Activate after implementation is complete. This is a **hard quality gate**.
 - **Broken tests → FAIL — but only a *new* breakage is a regression.** A regression is a test that fails on this change yet passed on the pre-change baseline. Before failing on a red test, establish whether it is pre-existing: re-run it on the base branch / the story's fork-point, or consult known-failing context. A test already red on the baseline and unrelated to this story's changed surface is **not** a regression — record it as pre-existing and do **not** FAIL/ESCALATE on it. A failure this story caused, or in a test that exercises the surface this story changed, **is** a regression → FAIL. Do not weaken this by labelling a genuinely new failure "pre-existing" — verify, don't assume.
 - Behavior drift → FAIL
 - Known risk patterns from memory → FAIL
+- **Large command output:** redirect test-runner output to a file (e.g. `/tmp/test-output.txt`)
+  and inspect via `grep`/`tail`/`rg`. **NEVER use the Read tool on a file expected to exceed
+  ~256KB** — it has a hard 256KB ceiling that burns a turn and returns no content. On an
+  accidental oversized Read, switch immediately to `grep -E "FAIL|✕|Error" <file>` to extract
+  failures rather than retrying the Read.
 
 ### 5. Build / Type / Lint Integrity
 
@@ -76,6 +81,11 @@ Identify and run the project's full static-analysis gate for every workspace pac
 If the project documents the exact command in `contexts/memory/patterns/conventions.md` or a delivery rules file, use that command verbatim — do not improvise.
 
 Any error → FAIL. "Test files only" is not a mitigation: test files are part of the typecheck graph and break the deploy gate.
+
+**Large output:** redirect `tsc --noEmit` / lint output to a file and inspect via `grep`/`tail`.
+Do NOT Read files expected to exceed ~256KB — the Read-tool hard ceiling is 256KB; a failed
+Read burns a turn with no content returned. To summarize a large output file: `grep -E "error
+TS|Error|warning" /tmp/tsc-output.txt | tail -100`.
 
 ### 6. Quality Checks
 - Error-prone operations lack error handling → FAIL

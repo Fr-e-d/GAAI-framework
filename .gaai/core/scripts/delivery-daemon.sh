@@ -2259,13 +2259,16 @@ for line in content.splitlines():
 _reconcile_merged_pr() {
   local sid="$1" merged_at="$2"
 
-  # MEDIUM-F4: concurrent pre-check — re-read working-tree status before chore-commit
-  local current_status=""
-  if [[ -f "$BACKLOG" ]]; then
-    current_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
+  # AC1: pre-check reads from origin so an uncommitted local 'done' edit
+  # cannot mask a still-in_progress reconcile on origin (mirrors watcher read at ~2153).
+  local _pcheck_tmp _pcheck_status=""
+  _pcheck_tmp=$(mktemp)
+  if git -C "$PROJECT_DIR" show "origin/${TARGET_BRANCH}:${BACKLOG_REL}" > "$_pcheck_tmp" 2>/dev/null; then
+    _pcheck_status=$(backlog_status "$sid" "$_pcheck_tmp" 2>/dev/null || true)
   fi
-  if [[ "$current_status" == "done" ]]; then
-    log "${CYAN}[PR-WATCHER] $sid : already reconciled by concurrent path, skipping${NC}"
+  rm -f "$_pcheck_tmp" 2>/dev/null || true
+  if [[ "$_pcheck_status" == "done" ]]; then
+    log "${CYAN}[PR-WATCHER] $sid : already reconciled by concurrent path (origin confirms done), skipping${NC}"
     return 0
   fi
 
