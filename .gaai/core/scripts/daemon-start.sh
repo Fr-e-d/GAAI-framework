@@ -355,6 +355,32 @@ do_start() {
     exit 1
   fi
 
+  # Home-branch guard: the daemon coordinates delivery git-state (mark in_progress,
+  # reconcile to done, status pushes) IN THIS CHECKOUT against the target branch. If the
+  # home checkout has drifted onto another branch, every coordination step rebase-conflicts
+  # and NO story is ever claimed — a silent failure spiral with no clear cause. Refuse to
+  # start with an actionable message instead. Keep this checkout pinned to the target branch
+  # (the daemon's home) and do feature work in worktrees.
+  local _target_branch="${GAAI_TARGET_BRANCH:-staging}"
+  local _home_branch
+  _home_branch="$(git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null || echo "")"
+  if [[ "$_home_branch" != "$_target_branch" ]]; then
+    if [[ "${GAAI_DAEMON_ALLOW_BRANCH_MISMATCH:-}" == "1" ]]; then
+      echo "⚠️  Home checkout is on '${_home_branch:-<detached HEAD>}', not '$_target_branch' — continuing anyway (GAAI_DAEMON_ALLOW_BRANCH_MISMATCH=1)."
+    else
+      echo "❌ Daemon home checkout is on '${_home_branch:-<detached HEAD>}', not the target branch '$_target_branch'."
+      echo "   The daemon coordinates delivery git-state in this checkout on '$_target_branch'."
+      echo "   On any other branch, mark-in-progress and reconcile rebase-conflict and NO story delivers."
+      echo ""
+      echo "   Fix (save any uncommitted work first), then retry:"
+      echo "     git -C \"$PROJECT_ROOT\" switch $_target_branch && git -C \"$PROJECT_ROOT\" pull origin $_target_branch --ff-only"
+      echo ""
+      echo "   Pin this checkout to '$_target_branch' (the daemon's home); do feature work in worktrees."
+      echo "   Override (not recommended): GAAI_DAEMON_ALLOW_BRANCH_MISMATCH=1 before re-running."
+      exit 1
+    fi
+  fi
+
   # Clean stale PID file
   [[ -f "$PID_FILE" ]] && rm -f "$PID_FILE"
 
