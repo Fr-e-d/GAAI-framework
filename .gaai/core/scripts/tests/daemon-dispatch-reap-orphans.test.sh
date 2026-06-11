@@ -6,8 +6,9 @@
 #
 # T1: empty pattern → pkill is NOT invoked (safety: `pkill -f ""` would match every process)
 # T2: pattern not ending in `-workspace` → pkill is NOT invoked (safety)
-# T3: `<storyId>-workspace` pattern → pkill -9 -f invoked with that exact pattern
+# T3: a `<storyId>-workspace` pattern → pkill -9 -f invoked with that exact pattern
 # T4: a full worktree path ending in `-workspace` → pkill -9 -f invoked with the path
+# (concrete IDs below are generic placeholders — this file is mirrored to public OSS)
 #
 # Run: bash .gaai/core/scripts/tests/daemon-dispatch-reap-orphans.test.sh
 # Exit 0 = all pass.
@@ -53,18 +54,18 @@ else
   fail "T2: non-'-workspace' pattern invoked pkill (got: $(cat "$PKILL_LOG"))"
 fi
 
-# ── T3: <storyId>-workspace pattern → pkill -9 -f <pattern> ───────────────────
+# ── T3: <id>-workspace pattern → pkill -9 -f <pattern> ───────────────────────
 reset_log
-_reap_worktree_orphans "E203S02-workspace"
-if [[ "$(pkill_calls)" -eq 1 ]] && grep -qx -- "-9 -f E203S02-workspace" "$PKILL_LOG"; then
-  pass "T3: '<storyId>-workspace' invokes pkill -9 -f with the exact pattern"
+_reap_worktree_orphans "demo-workspace"
+if [[ "$(pkill_calls)" -eq 1 ]] && grep -qx -- "-9 -f demo-workspace" "$PKILL_LOG"; then
+  pass "T3: '<id>-workspace' invokes pkill -9 -f with the exact pattern"
 else
-  fail "T3: expected 'pkill -9 -f E203S02-workspace' (got: $(cat "$PKILL_LOG"))"
+  fail "T3: expected 'pkill -9 -f demo-workspace' (got: $(cat "$PKILL_LOG"))"
 fi
 
 # ── T4: full worktree path ending in -workspace → pkill -9 -f <path> ─────────
 reset_log
-WT="/Users/x/.gaai-worktrees/repo/E204S02-workspace"
+WT="/Users/x/.gaai-worktrees/repo/demo2-workspace"
 _reap_worktree_orphans "$WT"
 if [[ "$(pkill_calls)" -eq 1 ]] && grep -qx -- "-9 -f $WT" "$PKILL_LOG"; then
   pass "T4: full worktree path invokes pkill -9 -f with the path"
