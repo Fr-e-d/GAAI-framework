@@ -47,6 +47,27 @@ _resolve_timeout_cmd() {
   fi
 }
 
+# ── Orphaned-process reaper (OSS — memory-leak guard) ────────────────────
+# SIGKILL any process still rooted in a story's worktree. A delivery phase is a
+# `claude -p` invocation; the agent routinely spawns heavy subprocess trees (test
+# runners, dev/build servers, container runtimes — whatever the project's test and
+# build commands invoke). Every phase-ending kill path signals only the claude PID,
+# not its descendants, so a process whose own tool-call timeout detached it is left
+# orphaned. Across phase timeouts and QA retries these long-lived workers accumulate
+# until the daemon host runs out of memory. This reaps them by worktree path.
+#
+# SAFETY: the argument MUST be a non-empty `*-workspace` pattern. A bare `pkill -f ""`
+# would match every process on the host — the guard makes that impossible. The match
+# is a unique-per-story full-argv substring, so it never touches another story's tree.
+# pkill is portable across macOS and Linux (setsid / kill-by-pgid is not). Best-effort.
+#
+# Args: $1 = worktree path or `<storyId>-workspace` pattern
+_reap_worktree_orphans() {
+  local pattern="${1:-}"
+  [[ -n "$pattern" && "$pattern" == *-workspace ]] || return 0
+  pkill -9 -f "$pattern" 2>/dev/null || true
+}
+
 # ── Worktree integrity helper ──────────────────────────────────
 # Sourced here so dispatch's handle_commit_phase can run pre-push checks.
 # PROJECT_DIR must be set by caller before sourcing (same requirement as SCHEDULER).
@@ -333,6 +354,17 @@ _run_claude_with_loop_breaker() {
 
   rm -f "$fifo"
   rm -f "$_agent_pid_file" 2>/dev/null || true
+
+  # Reap orphaned descendants the agent left running in the worktree. claude was
+  # waited above, so any process still rooted in $worktree_path is an orphan — a
+  # test runner, dev/build server, or worker pool the agent spawned and whose own
+  # tool-call timeout detached rather than reaped. Every kill site that ends a phase
+  # (the wall-clock watchdog, the loop-breaker, nested-claude-spawn, a normal exit
+  # with leftovers) signals only the claude PID, not its tree; without this sweep
+  # those long-lived workers accumulate across QA retries until the daemon host runs
+  # out of memory. Running it here — once, after the phase, on every return path —
+  # bounds the leak to a single phase.
+  _reap_worktree_orphans "$worktree_path"
 
   if [[ "$breaker_triggered" == "1" ]]; then
     return 124
