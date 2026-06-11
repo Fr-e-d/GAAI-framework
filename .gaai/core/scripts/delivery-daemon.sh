@@ -3856,6 +3856,13 @@ disown \$HEARTBEAT_PID 2>/dev/null || true
 
 cleanup() {
   kill \$HEARTBEAT_PID 2>/dev/null || true
+  # Backstop reap: SIGKILL any process still rooted in this story's worktree (orphaned
+  # test runners / dev-build servers / worker pools an agent left behind). The per-phase
+  # sweep in daemon-dispatch handles the common case; this covers a graceful daemon stop
+  # where the wrapper exits between/after a phase. Delegates to the dispatch helper (sourced
+  # below) for the centralised empty-pattern safety guard; declare -f tolerates an early
+  # exit before the source. \`${story_id}-workspace\` is a unique, tightly-scoped match.
+  declare -f _reap_worktree_orphans >/dev/null 2>&1 && _reap_worktree_orphans "${story_id}-workspace"
   # AC2 (E134S14): only reconcile on clean exit — skip if interrupted
   if [[ "\$_INTERRUPT_REQUESTED" != "1" ]] && [[ ! -f "\$INTERRUPTED_FILE" ]]; then
     # AC1 (E134S14): reconcile top-level YAML status from phase_status before releasing lock.

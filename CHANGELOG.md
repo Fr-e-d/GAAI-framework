@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: reap orphaned worktree processes in the bash delivery daemon
 - fix: refuse to start when home checkout drifted off target branch
 - fix: raise QA phase turn cap 30→100 + GAAI_QA_MAX_TURNS knob (D1)
 - fix: heal done-flip lag — reconcile merged delivery PR in the drift-skip path
