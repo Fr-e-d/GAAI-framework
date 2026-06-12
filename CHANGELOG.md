@@ -7,10 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.44.0] - 2026-06-12
 
 ### Changed
-- fix: reap orphaned worktree processes in the bash delivery daemon
+- feat: add native Codex daemon support
 - fix: reap orphaned worktree processes in the bash delivery daemon
 - fix: refuse to start when home checkout drifted off target branch
 - fix: raise QA phase turn cap 30→100 + GAAI_QA_MAX_TURNS knob (D1)
@@ -18,10 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix: scope PR-merge recovery to delivery branch — stop Discovery-PR false-done
 - fix: recovery reconciles merged PR to done instead of re-delivering
 - fix: prune null-HEAD worktree in reconcile (corrupt-worktree poison-pill)
-- fix: prune null-HEAD worktree in reconcile (corrupt-worktree poison-pill)
 - fix: RECOVERY merged-PR guard — stop infinite re-delivery of already-merged stories
 - fix: raise file cap 5→10 (coordinated, validate-artefacts + Plan agent)
 - fix: regression = new failure vs baseline (stop false-escalation on pre-existing red tests)
+
 
 ## [2.43.0] - 2026-06-01
 

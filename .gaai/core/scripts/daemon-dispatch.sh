@@ -193,17 +193,23 @@ except Exception:
 #                                  (default: 3)
 #   GAAI_LOOP_BREAKER_DISABLE   — set to "1" to fully disable the breaker
 #                                  (returns to the legacy `tee -a` pipeline)
+#   GAAI_DAEMON_EXECUTOR        — claude|codex (default: claude)
+#   GAAI_CODEX_SANDBOX          — codex exec sandbox (default: workspace-write)
+#   GAAI_CODEX_MODEL            — optional codex model override
+#   GAAI_CODEX_EPHEMERAL        — set to "0" to persist Codex sessions
+#   GAAI_CODEX_IGNORE_USER_CONFIG — set to "1" to add --ignore-user-config
 #
 # Returns:
-#   0   — claude exited cleanly
+#   0   — agent exited cleanly
 #   2   — worktree path missing or invalid
-#   124 — loop breaker triggered (custom exit code, distinct from claude's)
-#   <N> — claude's actual exit code on other failures
+#   124 — loop breaker triggered (custom exit code, distinct from agent's)
+#   <N> — agent's actual exit code on other failures
 _run_claude_with_loop_breaker() {
   local story_id="$1" phase="$2" log_path="$3" prompt_file="$4" worktree_path="$5"
   shift 5
   local threshold="${GAAI_LOOP_BREAKER_THRESHOLD:-3}"
   local disabled="${GAAI_LOOP_BREAKER_DISABLE:-0}"
+  local executor="${GAAI_DAEMON_EXECUTOR:-claude}"
 
   # Resolve per-phase wall-clock timeout. Caller may also pass GAAI_PHASE_TIMEOUT_SEC
   # to override; otherwise we look up the phase-specific default.
@@ -211,12 +217,13 @@ _run_claude_with_loop_breaker() {
   if [[ -z "$timeout_sec" ]]; then
     case "$phase" in
       plan) timeout_sec="$GAAI_TIMEOUT_PLAN_SEC" ;;
+      impl) timeout_sec="$GAAI_TIMEOUT_IMPL_SEC" ;;
       qa)   timeout_sec="$GAAI_TIMEOUT_QA_SEC" ;;
       *)    timeout_sec="$GAAI_TIMEOUT_PLAN_SEC" ;;
     esac
   fi
 
-  # Worktree must exist — claude is launched with cwd=$worktree_path so all
+  # Worktree must exist — the agent is launched with cwd=$worktree_path so all
   # cwd-relative writes by the agent land in the per-story worktree branch.
   # Without this, agents writing relative paths pollute the parent repo.
   if [[ ! -d "$worktree_path" ]]; then
@@ -224,17 +231,35 @@ _run_claude_with_loop_breaker() {
     return 2
   fi
 
+  local agent_cmd=()
+  case "$executor" in
+    claude)
+      agent_cmd=(claude -p "$@")
+      ;;
+    codex)
+      agent_cmd=(codex exec --json --sandbox "${GAAI_CODEX_SANDBOX:-workspace-write}" --cd "$worktree_path")
+      [[ -n "${GAAI_CODEX_MODEL:-}" ]] && agent_cmd+=(--model "$GAAI_CODEX_MODEL")
+      [[ "${GAAI_CODEX_EPHEMERAL:-1}" != "0" ]] && agent_cmd+=(--ephemeral)
+      [[ "${GAAI_CODEX_IGNORE_USER_CONFIG:-0}" == "1" ]] && agent_cmd+=(--ignore-user-config)
+      agent_cmd+=(-)
+      ;;
+    *)
+      echo "[ERROR] ${story_id} _run_claude_with_loop_breaker: unsupported GAAI_DAEMON_EXECUTOR=${executor}" >&2
+      return 2
+      ;;
+  esac
+
   # Bypass mode — original synchronous pipeline (escape hatch / debugging).
-  # Subshell + exec replaces the subshell process with claude after cd, so
-  # $! reports claude's PID and signals propagate correctly.
+  # Subshell + exec replaces the subshell process with the agent after cd, so
+  # $! reports the agent's PID and signals propagate correctly.
   if [[ "$disabled" == "1" ]]; then
     set -o pipefail
     local _to_cmd
     _to_cmd=$(_resolve_timeout_cmd)
     if [[ -n "$_to_cmd" ]]; then
-      ( cd "$worktree_path" && exec "$_to_cmd" --kill-after=10s "${timeout_sec}s" claude -p "$@" < "$prompt_file" 2>&1 ) | tee -a "$log_path"
+      ( cd "$worktree_path" && exec "$_to_cmd" --kill-after=10s "${timeout_sec}s" "${agent_cmd[@]}" < "$prompt_file" 2>&1 ) | tee -a "$log_path"
     else
-      ( cd "$worktree_path" && exec claude -p "$@" < "$prompt_file" 2>&1 ) | tee -a "$log_path"
+      ( cd "$worktree_path" && exec "${agent_cmd[@]}" < "$prompt_file" 2>&1 ) | tee -a "$log_path"
     fi
     local rc=${PIPESTATUS[0]}
     set +o pipefail
@@ -244,40 +269,40 @@ _run_claude_with_loop_breaker() {
     # the streaming reader (not bypass mode), so a 124 here can only mean
     # `timeout` fired.
     if [[ "$rc" == "124" || "$rc" == "137" ]]; then
-      echo "[TIMEOUT] ${story_id} phase=${phase}: claude wall-clock timeout after ${timeout_sec}s (bypass mode)"
+      echo "[TIMEOUT] ${story_id} phase=${phase}: ${executor} wall-clock timeout after ${timeout_sec}s (bypass mode)"
       return "$GAAI_TIMEOUT_RC"
     fi
     return "$rc"
   fi
 
-  # Named fifo for claude → reader handoff
+  # Named fifo for agent → reader handoff
   local fifo
-  fifo=$(mktemp -u "/tmp/gaai-claude-fifo-${story_id}-${phase}-XXXXXX")
+  fifo=$(mktemp -u "/tmp/gaai-agent-fifo-${story_id}-${phase}-XXXXXX")
   if ! mkfifo "$fifo" 2>/dev/null; then
     echo "[WARN] ${story_id} _run_claude_with_loop_breaker: mkfifo failed; falling back to plain pipeline"
     set -o pipefail
-    ( cd "$worktree_path" && exec claude -p "$@" < "$prompt_file" 2>&1 ) | tee -a "$log_path"
+    ( cd "$worktree_path" && exec "${agent_cmd[@]}" < "$prompt_file" 2>&1 ) | tee -a "$log_path"
     local rc=${PIPESTATUS[0]}
     set +o pipefail
     return "$rc"
   fi
 
-  # Spawn claude in background, redirecting stdout+stderr to fifo.
-  # The subshell cd's into the worktree then exec replaces it with claude,
-  # so $! is claude's PID and kill -TERM propagates correctly.
-  ( cd "$worktree_path" && exec claude -p "$@" < "$prompt_file" > "$fifo" 2>&1 ) &
-  local claude_pid=$!
+  # Spawn agent in background, redirecting stdout+stderr to fifo.
+  # The subshell cd's into the worktree then exec replaces it with the agent,
+  # so $! is the agent's PID and kill -TERM propagates correctly.
+  ( cd "$worktree_path" && exec "${agent_cmd[@]}" < "$prompt_file" > "$fifo" 2>&1 ) &
+  local agent_pid=$!
 
   # Write agent subprocess PID sidecar so the daemon hang-detector can kill the
   # agent instead of the wrapper, letting the wrapper's EXIT trap run cleanly.
   local _agent_pid_file
   _agent_pid_file="$(_marker_dir)/${story_id}.agent.pid"
-  echo "$claude_pid" > "$_agent_pid_file" 2>/dev/null || true
+  echo "$agent_pid" > "$_agent_pid_file" 2>/dev/null || true
 
   # Wall-clock watchdog: send SIGTERM after $timeout_sec, then SIGKILL after
   # an additional 10s grace. Decoupled from the loop-breaker — handles silent
   # hangs that emit no errors. The watchdog auto-exits via `kill -0` check
-  # once claude has ended cleanly, so we don't need to track it for cleanup.
+  # once the agent has ended cleanly, so we don't need to track it for cleanup.
   # Polling granularity = min(timeout/3, 5s) — keeps overshoot bounded for
   # short timeouts (tests, debug overrides) while staying cheap for long ones.
   local watchdog_pid=""
@@ -289,15 +314,15 @@ _run_claude_with_loop_breaker() {
       local _waited=0
       while (( _waited < timeout_sec )); do
         sleep "$_poll_step"
-        kill -0 "$claude_pid" 2>/dev/null || exit 0
+        kill -0 "$agent_pid" 2>/dev/null || exit 0
         _waited=$((_waited + _poll_step))
       done
-      # Timeout reached — terminate claude.
+      # Timeout reached — terminate the agent.
       printf '{"type":"system","subtype":"phase_timeout","story_id":"%s","phase":"%s","timeout_sec":%d,"timestamp":"%s"}\n' \
         "$story_id" "$phase" "$timeout_sec" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$log_path" 2>/dev/null || true
-      kill -TERM "$claude_pid" 2>/dev/null || true
+      kill -TERM "$agent_pid" 2>/dev/null || true
       sleep 10
-      kill -0 "$claude_pid" 2>/dev/null && kill -KILL "$claude_pid" 2>/dev/null || true
+      kill -0 "$agent_pid" 2>/dev/null && kill -KILL "$agent_pid" 2>/dev/null || true
     ) &
     watchdog_pid=$!
     disown "$watchdog_pid" 2>/dev/null || true
@@ -321,7 +346,7 @@ _run_claude_with_loop_breaker() {
         if [[ "$err_count" -ge "$threshold" ]]; then
           local err_short="${content:0:160}"
           local breaker_msg
-          breaker_msg="[LOOP-BREAKER] ${story_id} phase=${phase}: killing claude_pid=${claude_pid} after ${err_count} consecutive identical tool errors: ${err_short}"
+          breaker_msg="[LOOP-BREAKER] ${story_id} phase=${phase}: killing agent_pid=${agent_pid} executor=${executor} after ${err_count} consecutive identical tool errors: ${err_short}"
           echo "$breaker_msg"
           # Synthetic JSONL marker so parsers/monitor see the event in-band
           local err_json
@@ -329,9 +354,9 @@ _run_claude_with_loop_breaker() {
           printf '{"type":"system","subtype":"loop_breaker","story_id":"%s","phase":"%s","consecutive_errors":%d,"error_content":%s,"timestamp":"%s"}\n' \
             "$story_id" "$phase" "$err_count" "$err_json" \
             "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$log_path"
-          kill -TERM "$claude_pid" 2>/dev/null || true
+          kill -TERM "$agent_pid" 2>/dev/null || true
           sleep 1
-          kill -KILL "$claude_pid" 2>/dev/null || true
+          kill -KILL "$agent_pid" 2>/dev/null || true
           breaker_triggered=1
           # Drain remaining output so fifo writer can close cleanly
           while IFS= read -r drain; do
@@ -344,8 +369,8 @@ _run_claude_with_loop_breaker() {
     fi
   done < "$fifo"
 
-  wait "$claude_pid" 2>/dev/null
-  local claude_exit=$?
+  local agent_exit=0
+  wait "$agent_pid" 2>/dev/null || agent_exit=$?
 
   # Cleanup: stop the watchdog (no-op if it already exited).
   if [[ -n "$watchdog_pid" ]]; then
@@ -355,12 +380,12 @@ _run_claude_with_loop_breaker() {
   rm -f "$fifo"
   rm -f "$_agent_pid_file" 2>/dev/null || true
 
-  # Reap orphaned descendants the agent left running in the worktree. claude was
+  # Reap orphaned descendants the agent left running in the worktree. The agent was
   # waited above, so any process still rooted in $worktree_path is an orphan — a
   # test runner, dev/build server, or worker pool the agent spawned and whose own
   # tool-call timeout detached rather than reaped. Every kill site that ends a phase
   # (the wall-clock watchdog, the loop-breaker, nested-claude-spawn, a normal exit
-  # with leftovers) signals only the claude PID, not its tree; without this sweep
+  # with leftovers) signals only the agent PID, not its tree; without this sweep
   # those long-lived workers accumulate across QA retries until the daemon host runs
   # out of memory. Running it here — once, after the phase, on every return path —
   # bounds the leak to a single phase.
@@ -370,11 +395,11 @@ _run_claude_with_loop_breaker() {
     return 124
   fi
   # Translate SIGTERM/SIGKILL exit codes from the watchdog to our canonical
-  # wall-clock timeout RC. claude exits 143 on SIGTERM, 137 on SIGKILL.
-  if [[ "$claude_exit" == "143" || "$claude_exit" == "137" ]]; then
+  # wall-clock timeout RC. Agents commonly exit 143 on SIGTERM, 137 on SIGKILL.
+  if [[ "$agent_exit" == "143" || "$agent_exit" == "137" ]]; then
     return "$GAAI_TIMEOUT_RC"
   fi
-  return "$claude_exit"
+  return "$agent_exit"
 }
 
 # ── Inline MCP workspace-scope helpers ───────────────────────────────────────
@@ -557,7 +582,35 @@ _emit_routing_record() {
     --fallback-reason "$fallback_reason" \
     --impl-model-tag  "$impl_tag" \
     ${log_path_args[@]+"${log_path_args[@]}"} \
-    2>/dev/null || true
+    2>/dev/null || _emit_routing_record_fallback "$trace_id" "$story_id" "$phase" "$provider" "n/a" "0" "$fallback_reason" "$impl_tag" "" "" ""
+}
+
+_emit_routing_record_fallback() {
+  [[ -n "${ROUTING_LOG_PATH:-}" ]] || return 0
+  local trace_id="$1" story_id="$2" phase="$3" provider="$4" model="$5" duration_ms="$6" fallback_reason="$7" impl_tag="$8" pipeline="${9:-}" pr_url="${10:-}" auto_merge_applied="${11:-}"
+  TRACE_ID="$trace_id" STORY_ID="$story_id" PHASE="$phase" PROVIDER="$provider" MODEL="$model" DURATION_MS="$duration_ms" FALLBACK_REASON="$fallback_reason" IMPL_TAG="$impl_tag" PIPELINE="$pipeline" PR_URL="$pr_url" AUTO_MERGE_APPLIED="$auto_merge_applied" ROUTING_LOG_PATH="$ROUTING_LOG_PATH" \
+    python3 - <<'PYEOF' 2>/dev/null || true
+import json, os, time
+record = {
+  "trace_id": os.environ["TRACE_ID"],
+  "story_id": os.environ["STORY_ID"],
+  "phase": os.environ["PHASE"],
+  "provider": os.environ["PROVIDER"],
+  "model": os.environ["MODEL"],
+  "duration_ms": int(os.environ.get("DURATION_MS") or 0),
+  "fallback_reason": None if os.environ.get("FALLBACK_REASON") in ("", "null") else os.environ.get("FALLBACK_REASON"),
+  "impl_model_tag": os.environ.get("IMPL_TAG") or "",
+  "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+}
+if os.environ.get("PIPELINE"):
+  record["pipeline"] = os.environ["PIPELINE"]
+if os.environ.get("PR_URL"):
+  record["pr_url"] = os.environ["PR_URL"]
+if os.environ.get("AUTO_MERGE_APPLIED"):
+  record["auto_merge_applied"] = os.environ["AUTO_MERGE_APPLIED"] == "true"
+with open(os.environ["ROUTING_LOG_PATH"], "a", encoding="utf-8") as fh:
+  fh.write(json.dumps(record, separators=(",", ":")) + "\n")
+PYEOF
 }
 
 # ── Plan-phase routing record (adds --pipeline, real model, real duration) ──
@@ -567,6 +620,10 @@ _emit_plan_routing_record() {
   local impl_tag model_val
   impl_tag=$(get_impl_model_tag "$story_id")
   model_val="${CLAUDE_MODEL_PRIMARY:-claude-sonnet-4-6}"
+  if [[ "${GAAI_DAEMON_EXECUTOR:-claude}" == "codex" ]]; then
+    [[ "$provider" == "primary" ]] && provider="codex"
+    model_val="${GAAI_CODEX_MODEL:-codex-default}"
+  fi
 
   local log_path_args=()
   if [[ -n "${ROUTING_LOG_PATH:-}" ]]; then
@@ -584,7 +641,7 @@ _emit_plan_routing_record() {
     --impl-model-tag  "$impl_tag" \
     --pipeline        "3phase" \
     ${log_path_args[@]+"${log_path_args[@]}"} \
-    2>/dev/null || true
+    2>/dev/null || _emit_routing_record_fallback "$trace_id" "$story_id" "plan" "$provider" "$model_val" "$duration_ms" "$fallback_reason" "$impl_tag" "3phase" "" ""
 }
 
 # ── QA-phase routing record (adds --pipeline, real model, real duration, verdict) ──
@@ -594,6 +651,10 @@ _emit_qa_routing_record() {
   local impl_tag model_val
   impl_tag=$(get_impl_model_tag "$story_id")
   model_val="${CLAUDE_MODEL_PRIMARY:-claude-sonnet-4-6}"
+  if [[ "${GAAI_DAEMON_EXECUTOR:-claude}" == "codex" ]]; then
+    [[ "$provider" == "primary" ]] && provider="codex"
+    model_val="${GAAI_CODEX_MODEL:-codex-default}"
+  fi
 
   local log_path_args=()
   if [[ -n "${ROUTING_LOG_PATH:-}" ]]; then
@@ -611,7 +672,7 @@ _emit_qa_routing_record() {
     --impl-model-tag  "$impl_tag" \
     --pipeline        "3phase" \
     ${log_path_args[@]+"${log_path_args[@]}"} \
-    2>/dev/null || true
+    2>/dev/null || _emit_routing_record_fallback "$trace_id" "$story_id" "qa" "$provider" "$model_val" "$duration_ms" "$fallback_reason" "$impl_tag" "3phase" "" ""
 }
 
 # ── Commit-phase routing record (adds --pipeline, --pr-url, --auto-merge-applied) ──
@@ -640,7 +701,7 @@ _emit_commit_routing_record() {
     --pr-url             "$pr_url" \
     --auto-merge-applied "$auto_merge_applied" \
     ${log_path_args[@]+"${log_path_args[@]}"} \
-    2>/dev/null || true
+    2>/dev/null || _emit_routing_record_fallback "$trace_id" "$story_id" "commit" "$provider" "n/a" "$duration_ms" "$fallback_reason" "$impl_tag" "3phase" "$pr_url" "$auto_merge_applied"
 }
 
 # ── Cutover default pipeline reader (AC4) ────────────────────────────────
@@ -1317,6 +1378,61 @@ handle_impl_phase() {
   local prompt_file
   prompt_file=$(mktemp "/tmp/gaai-impl-prompt-${story_id}-XXXXXX")
   printf '%s' "$prompt_content" > "$prompt_file"
+
+  if [[ "${GAAI_DAEMON_EXECUTOR:-claude}" == "codex" ]]; then
+    local codex_exit t_start_ms t_end_ms duration_ms
+    if [[ -n "${EPOCHREALTIME:-}" ]]; then
+      t_start_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+    else
+      t_start_ms=$(( $(date +%s) * 1000 ))
+    fi
+
+    GAAI_STORY_ID="$story_id" \
+    GAAI_WORKTREE_PATH="$worktree_path" \
+    GAAI_STORY_PATH="$story_path" \
+    GAAI_PLAN_PATH="$plan_path" \
+    GAAI_IMPL_REPORT_PATH="$impl_report_path" \
+    GAAI_EPIC_PATH="${epic_path:-}" \
+    GAAI_DELIVERY_LOG_FILE="$log_path" \
+      _run_claude_with_loop_breaker \
+        "$story_id" "impl" "$log_path" "$prompt_file" "$worktree_path"
+    codex_exit=$?
+
+    if [[ -n "${EPOCHREALTIME:-}" ]]; then
+      t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+    else
+      t_end_ms=$(( $(date +%s) * 1000 ))
+    fi
+    duration_ms=$(( t_end_ms - t_start_ms ))
+    rm -f "$prompt_file"
+
+    if [[ "$codex_exit" -eq 124 ]]; then
+      echo "[ERROR] ${story_id} handle_impl_phase: loop breaker triggered (codex killed after consecutive identical tool errors)"
+      _emit_routing_record "$story_id" "$trace_id" "impl" "error" "IMPL_LOOP_BREAKER"
+      return 1
+    fi
+    if [[ "$codex_exit" -ne 0 ]]; then
+      echo "[ERROR] ${story_id} handle_impl_phase: codex exec exited $codex_exit"
+      _emit_routing_record "$story_id" "$trace_id" "impl" "error" "IMPL_PHASE_FAILED"
+      return 1
+    fi
+    if [[ ! -s "$impl_report_path" ]]; then
+      echo "[ERROR] ${story_id} handle_impl_phase: impl-report.md missing or empty at $impl_report_path"
+      _emit_routing_record "$story_id" "$trace_id" "impl" "error" "NO_ARTEFACT"
+      return 1
+    fi
+    if ! "$SCHEDULER" --set-phase-status "$story_id" implemented "$BACKLOG_FILE" 2>/dev/null; then
+      echo "[ERROR] ${story_id} handle_impl_phase: --set-phase-status implemented failed"
+      _emit_routing_record "$story_id" "$trace_id" "impl" "error" "SCHEDULER_FAILURE"
+      return 1
+    fi
+
+    _emit_routing_record "$story_id" "$trace_id" "impl" "codex" "null"
+    _run_worktree_audit "$story_id" "impl" "$log_path" "$worktree_path"
+    ts=$(date '+%H:%M:%S')
+    echo "[${ts}] ${story_id} phase=impl DONE"
+    return 0
+  fi
 
   # ── Invoke nested-claude-spawn.js flag-CLI (AC1 — always exits 0) ────────
   local spawn_script

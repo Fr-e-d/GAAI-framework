@@ -10,8 +10,8 @@
  * V1 is info-only; log rotation deferred to V2 once size signal justifies.
  */
 
-import { appendFileSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { appendFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ export function logPhase(params) {
 // CLI entry point
 // ---------------------------------------------------------------------------
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).href) {
   const args = process.argv.slice(2);
 
   function argValue(flag) {
