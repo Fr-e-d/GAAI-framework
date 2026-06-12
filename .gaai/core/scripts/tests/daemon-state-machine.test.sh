@@ -26,6 +26,7 @@ ROUTING_LOG="/tmp/gaai-daemon-state-machine.routing.jsonl"
 # Clean up on exit
 cleanup() {
   rm -f "$FIXTURE" "$ROUTING_LOG"
+  rm -rf "${LOCK_DIR:-}"
 }
 trap cleanup EXIT
 
@@ -78,6 +79,8 @@ export SCHEDULER
 export PROJECT_DIR
 export ROUTING_LOG_PATH="$ROUTING_LOG"
 export GAAI_STUB_DELAY_S=0
+export LOCK_DIR="/tmp/gaai-daemon-state-machine.locks.$$"
+mkdir -p "$LOCK_DIR"
 
 # shellcheck disable=SC1090
 source "$DISPATCH_LIB"
@@ -119,6 +122,8 @@ DISPATCH_FIXTURE_DIR="/tmp/gaai-dispatch-tests-$$"
 mkdir -p "$DISPATCH_FIXTURE_DIR/.gaai/project/contexts/artefacts/stories"
 mkdir -p "$DISPATCH_FIXTURE_DIR/.gaai/project/contexts/artefacts/plans"
 mkdir -p "$DISPATCH_FIXTURE_DIR/.delivery-logs"
+cp -R "$PROJECT_DIR/.gaai/core" "$DISPATCH_FIXTURE_DIR/.gaai/core"
+cp "$PROJECT_DIR/package.json" "$DISPATCH_FIXTURE_DIR/package.json"
 cat > "$DISPATCH_FIXTURE_DIR/.gaai/project/contexts/artefacts/stories/E134S01.story.md" << 'DISPATCH_STORY_EOF'
 ---
 type: artefact
@@ -129,6 +134,17 @@ related_decs: []
 ## Acceptance Criteria
 - [ ] AC1: test
 DISPATCH_STORY_EOF
+
+git -C "$DISPATCH_FIXTURE_DIR" init -q
+git -C "$DISPATCH_FIXTURE_DIR" config user.email "test@example.com"
+git -C "$DISPATCH_FIXTURE_DIR" config user.name "Test"
+git -C "$DISPATCH_FIXTURE_DIR" add . >/dev/null
+git -C "$DISPATCH_FIXTURE_DIR" commit -m "dispatch fixture" --quiet
+git -C "$DISPATCH_FIXTURE_DIR" checkout -B staging -q
+
+DISPATCH_PROJECT_DIR="$DISPATCH_FIXTURE_DIR"
+DISPATCH_WORKTREES_BASE="$DISPATCH_FIXTURE_DIR/worktrees"
+mkdir -p "$DISPATCH_WORKTREES_BASE"
 
 DISPATCH_SHIM_DIR="$DISPATCH_FIXTURE_DIR/shims"
 mkdir -p "$DISPATCH_SHIM_DIR"
@@ -173,12 +189,21 @@ esac
 DISPATCH_GH_SHIM_EOF
 chmod +x "$DISPATCH_SHIM_DIR/gh"
 
+cat > "$DISPATCH_SHIM_DIR/pnpm" << 'DISPATCH_PNPM_SHIM_EOF'
+#!/usr/bin/env bash
+mkdir -p workers/gaai-cloud/api/node_modules/@cloudflare/workers-types
+exit 0
+DISPATCH_PNPM_SHIM_EOF
+chmod +x "$DISPATCH_SHIM_DIR/pnpm"
+
 # ── Impl-phase fixture worktrees for T5 and T7 ───────────────────────────────
 # handle_impl_phase resolves worktrees as: $GAAI_WORKTREES_BASE/{story_id}-workspace
-export GAAI_WORKTREES_BASE="$DISPATCH_FIXTURE_DIR"
+DISPATCH_OLD_PROJECT_DIR="$PROJECT_DIR"
+export PROJECT_DIR="$DISPATCH_PROJECT_DIR"
+export GAAI_WORKTREES_BASE="$DISPATCH_WORKTREES_BASE"
 
-for _impl_id in E134S01 TST-3PHASE-PLANNED; do
-  _wt="$DISPATCH_FIXTURE_DIR/${_impl_id}-workspace"
+for _impl_id in TST-3PHASE-PLANNED; do
+  _wt="$DISPATCH_WORKTREES_BASE/${_impl_id}-workspace"
   mkdir -p "$_wt/.gaai/project/contexts/artefacts/stories"
   mkdir -p "$_wt/.gaai/project/contexts/artefacts/plans"
   mkdir -p "$_wt/.gaai/project/contexts/artefacts/impl-reports"
@@ -243,6 +268,7 @@ if dispatch_3phase_story "E134S01" "$TRACE" 2>/dev/null; then
   fi
 else
   fail "T4: dispatch_3phase_story returned non-zero for not_started story"
+  git -C "$DISPATCH_PROJECT_DIR" worktree remove -f "$DISPATCH_WORKTREES_BASE/E134S01-workspace" >/dev/null 2>&1 || rm -rf "$DISPATCH_WORKTREES_BASE/E134S01-workspace"
 fi
 
 # ── T5: dispatch planned → implemented ───────────────────────
@@ -258,7 +284,7 @@ if dispatch_3phase_story "TST-3PHASE-PLANNED" "$TRACE"; then
   fi
   # Routing record for impl is emitted internally by runImpl (AC4 — no daemon duplicate-emit).
   # Verify the impl-report.md was written at the canonical worktree path instead.
-  _t5_report="$DISPATCH_FIXTURE_DIR/TST-3PHASE-PLANNED-workspace/.gaai/project/contexts/artefacts/impl-reports/TST-3PHASE-PLANNED.impl-report.md"
+  _t5_report="$DISPATCH_WORKTREES_BASE/TST-3PHASE-PLANNED-workspace/.gaai/project/contexts/artefacts/impl-reports/TST-3PHASE-PLANNED.impl-report.md"
   if [[ -f "$_t5_report" ]]; then
     pass "T5b: impl-report.md written at canonical worktree path"
   else
@@ -382,7 +408,8 @@ rm -f "$T8b_FIXTURE"
 # Cleanup T4-T8 dispatch fixtures
 export PATH="$DISPATCH_OLD_PATH"
 unset GAAI_WORKTREE_PATH CLAUDE_MODEL_PRIMARY GAAI_WORKTREES_BASE
-unset DISPATCH_REAL_NODE IMPL_SPAWN_STUB_PATH DISPATCH_FIXTURE_DIR DISPATCH_SHIM_DIR DISPATCH_OLD_PATH
+export PROJECT_DIR="$DISPATCH_OLD_PROJECT_DIR"
+unset DISPATCH_REAL_NODE IMPL_SPAWN_STUB_PATH DISPATCH_FIXTURE_DIR DISPATCH_SHIM_DIR DISPATCH_OLD_PATH DISPATCH_PROJECT_DIR DISPATCH_WORKTREES_BASE DISPATCH_OLD_PROJECT_DIR
 rm -rf "/tmp/gaai-dispatch-tests-$$"
 
 # ── T9-T14: handle_plan_phase real spawn tests ────────────────
@@ -393,10 +420,15 @@ rm -rf "/tmp/gaai-dispatch-tests-$$"
 PLAN_FIXTURE_DIR="/tmp/gaai-plan-phase-tests-$$"
 rm -rf "$PLAN_FIXTURE_DIR"
 mkdir -p "$PLAN_FIXTURE_DIR"
+PLAN_PROJECT_DIR="$PLAN_FIXTURE_DIR/project"
+PLAN_WORKTREES_BASE="$PLAN_FIXTURE_DIR/worktrees"
+mkdir -p "$PLAN_PROJECT_DIR/.gaai/project/contexts/artefacts/stories" "$PLAN_WORKTREES_BASE"
+cp -R "$PROJECT_DIR/.gaai/core" "$PLAN_PROJECT_DIR/.gaai/core"
+cp "$PROJECT_DIR/package.json" "$PLAN_PROJECT_DIR/package.json"
 
 # Fixture story file (minimal — just needs 'epic:' field parseable by grep)
 PLAN_STORY_ID="TST-PLAN-01"
-PLAN_STORY_PATH="$PLAN_FIXTURE_DIR/${PLAN_STORY_ID}.story.md"
+PLAN_STORY_PATH="$PLAN_PROJECT_DIR/.gaai/project/contexts/artefacts/stories/${PLAN_STORY_ID}.story.md"
 cat > "$PLAN_STORY_PATH" << 'STORY_EOF'
 ---
 type: artefact
@@ -410,13 +442,14 @@ related_decs: []
 - [ ] AC1: test
 STORY_EOF
 
-PLAN_WORKTREE="$PLAN_FIXTURE_DIR/worktree"
-mkdir -p "$PLAN_WORKTREE/.gaai/project/contexts/artefacts/plans"
-mkdir -p "$PLAN_WORKTREE/.delivery-logs"
-# Place the story file inside the worktree at the canonical path
-mkdir -p "$PLAN_WORKTREE/.gaai/project/contexts/artefacts/stories"
-cp "$PLAN_STORY_PATH" "$PLAN_WORKTREE/.gaai/project/contexts/artefacts/stories/${PLAN_STORY_ID}.story.md"
+git -C "$PLAN_PROJECT_DIR" init -q
+git -C "$PLAN_PROJECT_DIR" config user.email "test@example.com"
+git -C "$PLAN_PROJECT_DIR" config user.name "Test"
+git -C "$PLAN_PROJECT_DIR" add . >/dev/null
+git -C "$PLAN_PROJECT_DIR" commit -m "plan fixture" --quiet
+git -C "$PLAN_PROJECT_DIR" checkout -B staging -q
 
+PLAN_WORKTREE="$PLAN_WORKTREES_BASE/${PLAN_STORY_ID}-workspace"
 PLAN_PATH="$PLAN_WORKTREE/.gaai/project/contexts/artefacts/plans/${PLAN_STORY_ID}.execution-plan.md"
 
 # Add fixture story to fixture YAML for scheduler calls
@@ -431,6 +464,13 @@ YAML_APPEND
 # ── claude shim directory ─────────────────────────────────────
 SHIM_DIR="$PLAN_FIXTURE_DIR/shims"
 mkdir -p "$SHIM_DIR"
+
+cat > "$SHIM_DIR/pnpm" << 'PLAN_PNPM_SHIM_EOF'
+#!/usr/bin/env bash
+mkdir -p workers/gaai-cloud/api/node_modules/@cloudflare/workers-types
+exit 0
+PLAN_PNPM_SHIM_EOF
+chmod +x "$SHIM_DIR/pnpm"
 
 # Helper: create a valid-plan-content claude shim
 make_success_shim() {
@@ -470,19 +510,21 @@ export PATH="$SHIM_DIR:$PATH"
 
 # Required env vars for handle_plan_phase
 export GAAI_WORKTREE_PATH="$PLAN_WORKTREE"
+export GAAI_WORKTREES_BASE="$PLAN_WORKTREES_BASE"
 export GAAI_WORKSPACE_ID="test-workspace"
 export GAAI_ORG_ID="test-org"
 export CLAUDE_MODEL_PRIMARY="claude-sonnet-4-6"
 
 # Point PROJECT_DIR to the test project dir so handle_plan_phase finds planning.daemon-prompt.md
 export PROJECT_DIR_ORIG="$PROJECT_DIR"
-export PROJECT_DIR="$SCRIPT_DIR/../../../.."
+export PROJECT_DIR="$PLAN_PROJECT_DIR"
 
 # ── T9: successful Plan phase spawn — phase_status advances ──
 echo "T9: handle_plan_phase — mock claude exits 0, valid plan output"
 make_success_shim
 "$SCHEDULER" --set-phase-status "$PLAN_STORY_ID" not_started "$FIXTURE" 2>/dev/null || true
 rm -f "$PLAN_PATH"
+git -C "$PLAN_PROJECT_DIR" worktree remove -f "$PLAN_WORKTREE" >/dev/null 2>&1 || rm -rf "$PLAN_WORKTREE"
 > "$ROUTING_LOG"
 TRACE="test-trace-$(date +%s)-009"
 
@@ -528,6 +570,7 @@ echo "T11: handle_plan_phase — mock claude exits 1 → no phase advance, error
 make_fail_shim
 "$SCHEDULER" --set-phase-status "$PLAN_STORY_ID" not_started "$FIXTURE" 2>/dev/null || true
 rm -f "$PLAN_PATH"
+git -C "$PLAN_PROJECT_DIR" worktree remove -f "$PLAN_WORKTREE" >/dev/null 2>&1 || rm -rf "$PLAN_WORKTREE"
 > "$ROUTING_LOG"
 TRACE="test-trace-$(date +%s)-011"
 
@@ -557,6 +600,7 @@ echo "T12: pipefail propagation — PIPESTATUS[0] captures claude exit 1 through
 make_fail_shim
 "$SCHEDULER" --set-phase-status "$PLAN_STORY_ID" not_started "$FIXTURE" 2>/dev/null || true
 rm -f "$PLAN_PATH"
+git -C "$PLAN_PROJECT_DIR" worktree remove -f "$PLAN_WORKTREE" >/dev/null 2>&1 || rm -rf "$PLAN_WORKTREE"
 > "$ROUTING_LOG"
 TRACE="test-trace-$(date +%s)-012"
 
@@ -578,6 +622,7 @@ SHIM_T13
 chmod +x "$SHIM_DIR/claude"
 "$SCHEDULER" --set-phase-status "$PLAN_STORY_ID" not_started "$FIXTURE" 2>/dev/null || true
 rm -f "$PLAN_PATH"
+git -C "$PLAN_PROJECT_DIR" worktree remove -f "$PLAN_WORKTREE" >/dev/null 2>&1 || rm -rf "$PLAN_WORKTREE"
 > "$ROUTING_LOG"
 TRACE="test-trace-$(date +%s)-013"
 
@@ -606,6 +651,7 @@ SHIM_T14
 chmod +x "$SHIM_DIR/claude"
 "$SCHEDULER" --set-phase-status "$PLAN_STORY_ID" not_started "$FIXTURE" 2>/dev/null || true
 rm -f "$PLAN_PATH"
+git -C "$PLAN_PROJECT_DIR" worktree remove -f "$PLAN_WORKTREE" >/dev/null 2>&1 || rm -rf "$PLAN_WORKTREE"
 > "$ROUTING_LOG"
 TRACE="test-trace-$(date +%s)-014"
 
@@ -624,6 +670,7 @@ fi
 # Restore PATH and PROJECT_DIR
 export PATH="$OLD_PATH"
 export PROJECT_DIR="$PROJECT_DIR_ORIG"
+unset GAAI_WORKTREES_BASE
 
 # Cleanup plan phase test fixtures
 rm -rf "$PLAN_FIXTURE_DIR"
@@ -1059,9 +1106,6 @@ make_qa_claude_shim "FAIL"
 TRACE="test-trace-$(date +%s)-023"
 
 if handle_qa_phase "TST-QA-FAIL" "$TRACE" 2>/dev/null; then
-  fail "T23a: expected non-zero return for FAIL verdict, got 0"
-  fail "T23b: (skipped)"
-else
   new_ps=$(get_phase_status "TST-QA-FAIL")
   if [[ "$new_ps" == "qa_failed" ]]; then
     pass "T23a: phase_status advanced to 'qa_failed' on FAIL verdict"
@@ -1073,6 +1117,9 @@ else
   else
     fail "T23b: routing.jsonl missing QA_VERDICT:FAIL — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
   fi
+else
+  fail "T23a: handle_qa_phase returned non-zero for FAIL verdict; retry-loop convention expects qa_failed + rc=0"
+  fail "T23b: (skipped)"
 fi
 
 # ── T24: QA ESCALATE verdict → qa_escalated ──────────────────
@@ -1707,6 +1754,7 @@ make_commit_worktree "TST-COMMIT-AUTOMERGE"
 "$SCHEDULER" --set-phase-status "TST-COMMIT-AUTOMERGE" qa_passed "$FIXTURE" 2>/dev/null || true
 GAAI_SKIP_AUTO_MERGE=0
 GAAI_AUTO_MERGE_POLICY=staging_only
+export TARGET_BRANCH=preview
 TRACE="test-trace-$(date +%s)-043"
 
 if handle_commit_phase "TST-COMMIT-AUTOMERGE" "$TRACE" 2>/dev/null; then
@@ -1719,6 +1767,7 @@ else
   fail "T43: handle_commit_phase returned non-zero"
 fi
 export GAAI_AUTO_MERGE_POLICY=off
+unset TARGET_BRANCH
 
 # ── T44: dispatch qa_passed → done via full commit phase ───────
 echo "T44: dispatch_3phase_story — qa_passed → done via handle_commit_phase"
