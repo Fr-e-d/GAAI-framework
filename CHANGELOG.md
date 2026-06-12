@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.47.0] - 2026-06-12
+
+### Changed
+- feat: add native Codex daemon support
+
+
 ## [2.46.0] - 2026-06-12
 
 ### Changed
