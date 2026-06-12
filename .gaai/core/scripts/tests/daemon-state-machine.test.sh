@@ -268,10 +268,7 @@ if dispatch_3phase_story "E134S01" "$TRACE" 2>/dev/null; then
   fi
 else
   fail "T4: dispatch_3phase_story returned non-zero for not_started story"
-  for dispatch_worktree in "$DISPATCH_WORKTREES_BASE"/*-workspace; do
-    [[ -d "$dispatch_worktree" ]] || continue
-    git -C "$DISPATCH_PROJECT_DIR" worktree remove -f "$dispatch_worktree" >/dev/null 2>&1 || rm -rf "$dispatch_worktree"
-  done
+  git -C "$DISPATCH_PROJECT_DIR" worktree remove -f "$DISPATCH_WORKTREES_BASE/E134S01-workspace" >/dev/null 2>&1 || rm -rf "$DISPATCH_WORKTREES_BASE/E134S01-workspace"
 fi
 
 # ── T5: dispatch planned → implemented ───────────────────────
