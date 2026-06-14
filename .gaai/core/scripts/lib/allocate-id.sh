@@ -11,7 +11,7 @@
 #
 # Usage:
 #   allocate-id.sh epic                 # → E221
-#   allocate-id.sh story <EPIC_ID>      # → E220S05    (EPIC_ID e.g. "E220")
+#   allocate-id.sh story <EPIC_ID>      # → <EPIC_ID>S05    (EPIC_ID e.g. E220)
 #
 # Env overrides:
 #   GAAI_LEDGER_DIR        base dir for the ledger   (default: $HOME/.gaai)
