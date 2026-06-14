@@ -144,6 +144,7 @@ The following are explicitly forbidden in all contexts — structured flows and 
 - Producing artefacts without reading the governing skill file first
 - Silently overwriting existing artefacts without checking for ID collisions
 - Writing substance into index / registry rows. **Index = pointer.** Every row of `index.md`, `index-*.md`, archive indexes is metadata + ≤30-word topic, ≤200 chars total. Substance lives in the target file (DEC body, `_log.md`, artefact, `git log`). Forbidden in any registry row : Tier 2 cycle trails, finding counts, commit SHAs, §-numbered substance dumps duplicating target body, validation ceremony prose, drift-heal forensic prose. Remediation when drift detected : skill `memory-index-compact` (SKILL-MEMORY-INDEX-COMPACT-001).
+- Ad-hoc epic or story ID allocation (computing `max+1` directly from the backlog or artefact directory, without going through the guarded allocator). When concurrent Discovery sessions are possible on the same host, agents MUST obtain epic and story IDs exclusively via `scripts/lib/allocate-id.sh`. The guarded allocator serializes allocation under `flock` and records reservations in a host-stable ledger so that in-flight IDs in one session are visible to parallel sessions before any branch merges.
 
 For additional flow-specific forbidden patterns (Delivery memory ingestion, direct human→Delivery interaction), see `orchestration.rules.md` § Forbidden Patterns.
 
