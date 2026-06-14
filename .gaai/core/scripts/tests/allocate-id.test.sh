@@ -4,9 +4,18 @@
 # Covers atomic allocation under flock (AC1), cross-session/cross-worktree
 # ledger visibility (AC2), max-over-backlog-and-ledger (AC3), landed/TTL
 # pruning (AC4), and project-agnostic + graceful-flock-degradation (AC6).
-# Each test runs in an isolated GAAI_LEDGER_DIR so they never touch the host
-# ledger, and most use a fixture backlog via GAAI_BACKLOG_PATH (no git repo
-# required → also exercises project-agnostic behaviour).
+# Each test runs in an isolated GAAI_LEDGER_DIR so it never touches the host
+# ledger, and uses a fixture backlog via GAAI_BACKLOG_PATH.
+#
+# Note on repo-key isolation: alloc() runs the allocator from a non-git temp
+# cwd, so `git rev-parse --git-common-dir` fails and the allocator uses the
+# host-global "default" ledger key → $dir/reservations/default.ledger. This
+# makes the planted-entry prune tests read/write the SAME ledger file the
+# allocator uses (otherwise they would silently test the wrong file).
+#
+# Note on OSS hygiene: the fixture uses a synthetic epic prefix ($EPIC) and all
+# story-shaped IDs are constructed from it, so NO literal E<num>S<num> appears
+# in this source file — keeping .gaai/core/ free of concrete backlog IDs.
 #
 # Usage: bash .gaai/core/scripts/tests/allocate-id.test.sh
 # Exit 0 = all pass. Exit 1 = at least one failure.
@@ -27,20 +36,31 @@ ROOT_TMP="$(mktemp -d "${_TMPDIR}/allocate-id.test.XXXXXX")"
 cleanup() { rm -rf "$ROOT_TMP"; }
 trap cleanup EXIT
 
-FIXTURE="$ROOT_TMP/backlog.yaml"
-# Backlog max epic = 220 (from E220S0x); E220 story max = 02; E174 story max = 10.
-cat > "$FIXTURE" << 'YAML_EOF'
-items:
-- id: E174S10
-- id: E219S03
-- id: E220S01
-- id: E220S02
-YAML_EOF
+# Non-git cwd so the allocator resolves repo-key="default" (see header note).
+NOGIT="$ROOT_TMP/nogit"; mkdir -p "$NOGIT"
 
-# Allocate into a fresh ledger dir; echo the ID (stdout only).
+# Synthetic epic prefix — pure test data, not a real backlog entry. All
+# story-shaped IDs below are built from $EPIC so no literal leaks into source.
+EPIC="E500"; EPIC_NUM=500
+EPIC_PREV="E499"
+NEXT_EPIC="E$((EPIC_NUM+1))"     # E501
+NEXT_EPIC2="E$((EPIC_NUM+2))"    # E502
+NEXT_STORY="${EPIC}S03"          # fixture has S01,S02 → next is S03
+
+FIXTURE="$ROOT_TMP/backlog.yaml"
+# Fixture backlog (runtime): one story under E499, two stories under E500 (S01,S02) → max epic 500, E500 story max 02.
+{
+  printf 'items:\n'
+  printf -- '- id: %sS01\n' "$EPIC_PREV"
+  printf -- '- id: %sS01\n' "$EPIC"
+  printf -- '- id: %sS02\n' "$EPIC"
+} > "$FIXTURE"
+
+# Allocate from a non-git cwd into a fresh ledger dir; echo the ID (stdout only).
 alloc() {
   local dir="$1"; shift
-  GAAI_LEDGER_DIR="$dir" GAAI_BACKLOG_PATH="$FIXTURE" bash "$ALLOC" "$@" 2>/dev/null
+  ( cd "$NOGIT" && GAAI_LEDGER_DIR="$dir" GAAI_BACKLOG_PATH="$FIXTURE" \
+      bash "$ALLOC" "$@" 2>/dev/null )
 }
 
 test_basic_epic() {
@@ -53,7 +73,7 @@ test_basic_epic() {
 
 test_basic_story() {
   local d="$ROOT_TMP/basic-story" out
-  out="$(alloc "$d" story E220)" || { fail "basic_story: non-zero exit"; return; }
+  out="$(alloc "$d" story "$EPIC")" || { fail "basic_story: non-zero exit"; return; }
   printf '%s' "$out" | grep -qE '^E[0-9]+S[0-9]+$' \
     && pass "basic_story: single call returns '$out' (E<n>S<m>)" \
     || fail "basic_story: bad format '$out'"
@@ -66,8 +86,8 @@ concurrent_distinct() {
   mkdir -p "$out_dir"; rm -rf "$d"
   local pids=() i
   for i in $(seq 1 10); do
-    GAAI_LEDGER_DIR="$d" GAAI_BACKLOG_PATH="$FIXTURE" \
-      bash "$ALLOC" "$@" > "$out_dir/out.$i.txt" 2>/dev/null &
+    ( cd "$NOGIT" && GAAI_LEDGER_DIR="$d" GAAI_BACKLOG_PATH="$FIXTURE" \
+        bash "$ALLOC" "$@" > "$out_dir/out.$i.txt" 2>/dev/null ) &
     pids+=($!)
   done
   for pid in "${pids[@]}"; do wait "$pid"; done
@@ -80,10 +100,9 @@ concurrent_distinct() {
 }
 
 test_concurrent_epic()  { concurrent_distinct epic  epic; }
-test_concurrent_story() { concurrent_distinct story story E220; }
+test_concurrent_story() { concurrent_distinct story story "$EPIC"; }
 
-# AC2: a reservation in one allocation dir is honoured by a later call sharing
-# the same ledger (same repo key → same ledger file).
+# AC2: a reservation in one call is honoured by a later call sharing the ledger.
 test_cross_session_visibility() {
   local d="$ROOT_TMP/cross" a b
   rm -rf "$d"
@@ -94,60 +113,57 @@ test_cross_session_visibility() {
     || fail "cross_session: B reused A's ID ($a)"
 }
 
-# AC3: next = max(backlog, ledger) + 1. Backlog max epic = 220, ledger empty.
+# AC3: next = max(backlog, ledger) + 1. Backlog max epic = EPIC_NUM, ledger empty.
 test_backlog_max_respected() {
   local d="$ROOT_TMP/backlog-max" out
   rm -rf "$d"
   out="$(alloc "$d" epic)" || { fail "backlog_max: non-zero exit"; return; }
-  [ "$out" = "E221" ] \
-    && pass "backlog_max: backlog epic 220 → '$out'" \
-    || fail "backlog_max: expected E221, got '$out'"
+  [ "$out" = "$NEXT_EPIC" ] \
+    && pass "backlog_max: backlog epic $EPIC_NUM → '$out'" \
+    || fail "backlog_max: expected $NEXT_EPIC, got '$out'"
 }
 
 # AC3: ledger reservation above backlog max is honoured.
 test_ledger_max_respected() {
   local d="$ROOT_TMP/ledger-max" out
   rm -rf "$d"
-  # Reserve E221 (backlog max is 220), then reserve again: expect E222.
-  alloc "$d" epic >/dev/null   # E221
+  alloc "$d" epic >/dev/null        # reserves $NEXT_EPIC
   out="$(alloc "$d" epic)" || { fail "ledger_max: non-zero exit"; return; }
-  [ "$out" = "E222" ] \
-    && pass "ledger_max: after reserving E221, next → '$out'" \
-    || fail "ledger_max: expected E222, got '$out'"
+  [ "$out" = "$NEXT_EPIC2" ] \
+    && pass "ledger_max: after reserving $NEXT_EPIC, next → '$out'" \
+    || fail "ledger_max: expected $NEXT_EPIC2, got '$out'"
 }
 
 # AC4: a ledger entry whose ID has landed in the backlog is pruned on next call.
 test_prune_landed() {
-  local d="$ROOT_TMP/prune-landed" ledger out lines_before lines_after
+  local d="$ROOT_TMP/prune-landed" ledger out lines_after planted
   rm -rf "$d"
-  # Reserve a story that the fixture backlog already contains (E220S02).
-  # Manually plant it as an in-flight reservation to simulate a stale entry.
+  planted="${EPIC}S02"   # a story the fixture backlog already contains (landed)
   mkdir -p "$d/reservations"
   ledger="$d/reservations/default.ledger"
-  printf '%s\tstory\tE220S02\n' "$(date +%s)" > "$ledger"
-  lines_before=$(wc -l < "$ledger" | tr -d ' ')
-  out="$(alloc "$d" story E220)"   # backlog max story = 02 → next = 03
+  printf '%s\tstory\t%s\n' "$(date +%s)" "$planted" > "$ledger"
+  out="$(alloc "$d" story "$EPIC")"   # planted landed entry pruned; next = S03
   lines_after=$(wc -l < "$ledger" 2>/dev/null | tr -d ' ')
-  # After the call, the planted E220S02 (landed) must be gone; only the new
-  # reservation (E220S03) should remain → exactly 1 line.
-  [ "$lines_after" = "1" ] && printf '%s' "$out" | grep -q 'E220S03' \
-    && pass "prune_landed: stale E220S02 dropped, returned '$out', ledger=$lines_after line(s)" \
-    || fail "prune_landed: not pruned (before=$lines_before after=$lines_after out='$out')"
+  # After the call the planted entry must be gone; only the new reservation
+  # ($NEXT_STORY) should remain → exactly 1 line.
+  [ "$lines_after" = "1" ] && printf '%s' "$out" | grep -qF "$NEXT_STORY" \
+    && pass "prune_landed: stale $planted dropped, returned '$out', ledger=$lines_after line(s)" \
+    || fail "prune_landed: not pruned (after=$lines_after line(s) out='$out')"
 }
 
 # AC4: a reservation older than the TTL is pruned on next call.
 test_prune_ttl() {
-  local d="$ROOT_TMP/prune-ttl" ledger out
+  local d="$ROOT_TMP/prune-ttl" ledger out stale
   rm -rf "$d"
   mkdir -p "$d/reservations"
   ledger="$d/reservations/default.ledger"
-  # Plant a stale epic reservation (well over the 72h default TTL).
-  local stale; stale=$(( $(date +%s) - 100000 ))
-  printf '%s\tepic\tE500\n' "$stale" > "$ledger"
-  out="$(alloc "$d" epic)"   # stale E500 pruned → next from backlog max 220 → E221
-  [ "$out" = "E221" ] \
-    && pass "prune_ttl: stale E500 pruned, next → '$out'" \
-    || fail "prune_ttl: expected E221, got '$out'"
+  # Plant a stale epic reservation (300000s ≈ 83h > 72h default TTL).
+  stale=$(( $(date +%s) - 300000 ))
+  printf '%s\tepic\tE900\n' "$stale" > "$ledger"
+  out="$(alloc "$d" epic)"   # stale E900 pruned → next from backlog max → $NEXT_EPIC
+  [ "$out" = "$NEXT_EPIC" ] \
+    && pass "prune_ttl: stale E900 pruned, next → '$out'" \
+    || fail "prune_ttl: expected $NEXT_EPIC, got '$out'"
 }
 
 # AC6: with flock absent from PATH, the allocator still returns a valid ID and
@@ -171,7 +187,7 @@ test_flock_unavailable() {
     echo "  SKIP: flock_unavailable — flock not excludable on this host; AC6 degradation untestable here"
     return
   fi
-  out="$(PATH="$restricted_path" GAAI_LEDGER_DIR="$d" GAAI_BACKLOG_PATH="$FIXTURE" \
+  out="$(cd "$NOGIT" && PATH="$restricted_path" GAAI_LEDGER_DIR="$d" GAAI_BACKLOG_PATH="$FIXTURE" \
          bash "$ALLOC" epic 2>"$ROOT_TMP/no-flock.err")"
   err_out="$(cat "$ROOT_TMP/no-flock.err")"
   printf '%s' "$out" | grep -qE '^E[0-9]+$' \
@@ -183,10 +199,9 @@ test_flock_unavailable() {
 # AC6: project-agnostic. No GAAI_BACKLOG_PATH and not a git repo → no crash,
 # returns a valid E<number> (computes from ledger only / empty backlog).
 test_project_agnostic() {
-  local d="$ROOT_TMP/agnostic" out err_out workdir
+  local d="$ROOT_TMP/agnostic" out err_out
   rm -rf "$d"
-  workdir="$ROOT_TMP/nowhere"; mkdir -p "$workdir"
-  out="$(cd "$workdir" && GAAI_LEDGER_DIR="$d" GAAI_BACKLOG_PATH="" \
+  out="$(cd "$NOGIT" && GAAI_LEDGER_DIR="$d" GAAI_BACKLOG_PATH="" \
          bash "$ALLOC" epic 2>"$ROOT_TMP/agnostic.err")"
   err_out="$(cat "$ROOT_TMP/agnostic.err")"
   printf '%s' "$out" | grep -qE '^E[0-9]+$' \
