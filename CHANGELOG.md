@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- fix: reap orphaned worktrees of archived/terminal stories
+
 ## [2.45.0] - 2026-06-14
 
 ### Changed

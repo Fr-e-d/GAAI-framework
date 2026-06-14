@@ -68,6 +68,116 @@ _reap_worktree_orphans() {
   pkill -9 -f "$pattern" 2>/dev/null || true
 }
 
+# ── Orphaned-worktree reaper (OSS — disk-leak guard) ──────────────────────
+# Enumerate the worktree directories ACTUALLY ON DISK and remove any whose
+# delivery has concluded. This closes the gap in reconcile_done_merged_worktrees(),
+# which only iterates ACTIVE-backlog `done` ids and therefore never reclaims the
+# worktree of an archived-done / escalated / failed / branch-deleted story. That
+# gap is what silently accumulates abandoned worktrees (one observed run: 24
+# orphans, ~31 GB, all belonging to stories no longer in the active backlog).
+#
+# Concluded = ANY authoritative integration signal, evaluated only AFTER the
+# safety guards below all pass:
+#   1. the story's PR (gh, by `--head story/<sid>`) is MERGED or CLOSED. GitHub
+#      retains headRefName on merged/closed PRs, so this matches even after the
+#      local branch was deleted — the branch-independent source of truth.
+#   2. the worktree HEAD is already an ancestor of origin/<target> (work
+#      integrated by a manual/no-PR flow).
+#
+# HARD SAFETY GUARDS (every one must pass before a removal is even considered):
+#   - never PROJECT_DIR itself (realpath compare)
+#   - never a live delivery: no `gaai-deliver-<sid>` tmux session AND no fresh
+#     (<120s) heartbeat — a wrapper can run detached from any tmux
+#   - never a dirty worktree (uncommitted/untracked content) — data safety
+# `git worktree remove` deletes only the working dir; the branch ref survives, so
+# committed work is never lost (only reclaimable disk is freed).
+#
+# Throttled to GAAI_WT_REAP_INTERVAL_SEC (default 1800s) so the per-worktree `gh`
+# calls cannot run every poll cycle. Best-effort throughout; never aborts the loop.
+#
+# Requires (set by delivery-daemon.sh before sourcing): PROJECT_DIR, LOCK_DIR,
+# TARGET_BRANCH (defaults to staging), and log(). Honors GAAI_WORKTREES_BASE.
+reap_orphaned_worktrees() {
+  local _now _last _interval _marker
+  _interval="${GAAI_WT_REAP_INTERVAL_SEC:-1800}"
+  _marker="${LOCK_DIR}/.wt-reap.last"
+  _now=$(date +%s)
+  _last=0
+  [[ -f "$_marker" ]] && _last=$(cat "$_marker" 2>/dev/null || echo 0)
+  [[ "$_last" =~ ^[0-9]+$ ]] || _last=0
+  (( _now - _last < _interval )) && return 0
+  echo "$_now" > "$_marker" 2>/dev/null || true
+
+  # Resolve the worktree base dir (same formula as the dispatch path resolvers).
+  local _base _repo_name
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    _base="$GAAI_WORKTREES_BASE"
+  else
+    _repo_name=$(basename "$PROJECT_DIR")
+    _base="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${_repo_name}"
+  fi
+  [[ -d "$_base" ]] || return 0
+
+  local _target="${TARGET_BRANCH:-staging}"
+  git -C "$PROJECT_DIR" fetch origin "$_target" --quiet 2>/dev/null || true
+
+  local _proj_real
+  _proj_real=$(realpath "$PROJECT_DIR" 2>/dev/null || echo "$PROJECT_DIR")
+
+  local _wt _sid _wt_real _hb _hb_mtime _porcelain _rc
+  local _pr_json _pr_state _concluded _reason
+  for _wt in "$_base"/*-workspace; do
+    [[ -d "$_wt" ]] || continue
+    _sid=$(basename "$_wt"); _sid="${_sid%-workspace}"
+
+    # Safety: never the main checkout.
+    _wt_real=$(realpath "$_wt" 2>/dev/null || echo "$_wt")
+    [[ "$_wt_real" == "$_proj_real" ]] && continue
+
+    # Live guard 1: an active delivery owns a tmux session named for this story.
+    tmux has-session -t "gaai-deliver-${_sid}" 2>/dev/null && continue
+
+    # Live guard 2: a fresh heartbeat (<120s) means a detached wrapper is running.
+    _hb="${LOCK_DIR}/${_sid}.heartbeat"
+    if [[ -f "$_hb" ]]; then
+      _hb_mtime=$(stat -f %m "$_hb" 2>/dev/null || stat -c %Y "$_hb" 2>/dev/null || echo 0)
+      [[ "$_hb_mtime" =~ ^[0-9]+$ ]] || _hb_mtime=0
+      (( _now - _hb_mtime < 120 )) && continue
+    fi
+
+    # Data safety: never remove a worktree with uncommitted/untracked content.
+    _porcelain=$(git -C "$_wt" status --porcelain 2>/dev/null); _rc=$?
+    { (( _rc != 0 )) || [[ -n "$_porcelain" ]]; } && continue
+
+    # Integration signal 1: PR MERGED/CLOSED (branch-independent, authoritative).
+    _concluded=0; _reason=""
+    _pr_json=$(gh pr list --state all --head "story/${_sid}" --json state --limit 1 2>/dev/null || echo "")
+    if [[ -n "$_pr_json" && "$_pr_json" != "[]" ]]; then
+      _pr_state=$(printf '%s' "$_pr_json" | grep -oE '"state":"[A-Z]+"' | head -1 | cut -d'"' -f4)
+      case "$_pr_state" in
+        MERGED) _concluded=1; _reason="pr_merged" ;;
+        CLOSED) _concluded=1; _reason="pr_closed" ;;
+      esac
+    fi
+    # Integration signal 2: HEAD already integrated into origin/<target>.
+    if (( _concluded == 0 )) && \
+       git -C "$_wt" merge-base --is-ancestor HEAD "origin/${_target}" 2>/dev/null; then
+      _concluded=1; _reason="head_integrated"
+    fi
+    (( _concluded == 0 )) && continue
+
+    # Remove. --force: the branch ref still exists; the dir is clean (guarded above).
+    if git -C "$PROJECT_DIR" worktree remove --force "$_wt" 2>/dev/null; then
+      log "${CYAN:-}[WT-REAP] ${_sid}: removed ${_wt} (${_reason})${NC:-}"
+      git -C "$PROJECT_DIR" branch -D "story/${_sid}" 2>/dev/null || true
+    else
+      log "${YELLOW:-}[WT-REAP] ${_sid}: remove failed ${_wt} (lock contention?) — retry next interval${NC:-}"
+    fi
+  done
+
+  git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
+}
+
 # ── Worktree integrity helper ──────────────────────────────────
 # Sourced here so dispatch's handle_commit_phase can run pre-push checks.
 # PROJECT_DIR must be set by caller before sourcing (same requirement as SCHEDULER).

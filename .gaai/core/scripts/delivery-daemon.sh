@@ -4376,5 +4376,12 @@ while true; do
   # This sweep detects integrated worktrees post-hoc via git branch --merged.
   reconcile_done_merged_worktrees || true
 
+  # ── Orphaned-worktree reaper: reclaim worktrees of stories no longer in the
+  # active backlog (archived-done / escalated / failed / branch-deleted) — the
+  # accumulation class reconcile_done_merged_worktrees() cannot see because it
+  # only iterates active-backlog `done` ids. Enumerates on-disk worktrees,
+  # removes only concluded+clean+non-live ones, throttled internally. (#1365 follow-up)
+  reap_orphaned_worktrees || true
+
   sleep "$POLL_INTERVAL"
 done
