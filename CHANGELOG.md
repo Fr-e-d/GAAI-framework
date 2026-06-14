@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.44.0] - 2026-06-14
+
+### Changed
+- feat: concurrent-safe ID allocator + skill/rule wiring
+- feat: add native Codex daemon support
+
+
 ## [2.47.0] - 2026-06-12
 
 ### Changed
