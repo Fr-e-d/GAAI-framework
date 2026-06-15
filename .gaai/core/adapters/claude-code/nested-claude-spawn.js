@@ -232,6 +232,15 @@ function buildPrimaryChildEnv() {
   // Required: bypass nested Claude Code detection
   env.CLAUDECODE = '';
 
+  // When a daemon-scoped Claude proxy is configured, primary subprocess must also
+  // route through the proxy (DEC-148 AC4: no silent wrong-upstream routing).
+  // In daemon mode this is idempotent (daemon already exports ANTHROPIC_BASE_URL from
+  // GAAI_CLAUDE_PROXY_BASE_URL), but explicit forwarding here ensures correct behavior
+  // when the module is invoked outside the daemon (tests, direct CLI invocation).
+  if (env.GAAI_CLAUDE_PROXY_BASE_URL) {
+    env.ANTHROPIC_BASE_URL = env.GAAI_CLAUDE_PROXY_BASE_URL;
+  }
+
   // Parent auth credentials (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, etc.) are kept
   // GAAI_IMPL_* vars are NOT remapped — subprocess uses operator's own Claude account
 
@@ -265,9 +274,14 @@ function buildSpawnArgs(prompt, extraArgs, model = 'opus', includeFallbackModel 
   //   GAAI-Cloud variant — Impl needs MCP to talk to the Workspace DO. Cloud
   //     callers MUST set GAAI_NESTED_KEEP_MCP=1 to opt out of the strict flag
   //     and preserve the inherited MCP discovery.
+  // Check both ANTHROPIC_BASE_URL (already set in parent) and GAAI_CLAUDE_PROXY_BASE_URL
+  // (set by operator, not yet propagated to ANTHROPIC_BASE_URL in parent process).
+  // Without this fallback, --strict-mcp-config would not be injected when the operator
+  // uses GAAI_CLAUDE_PROXY_BASE_URL alone and the parent process has no ANTHROPIC_BASE_URL.
+  const _effectiveBaseUrl =
+    process.env.ANTHROPIC_BASE_URL || process.env.GAAI_CLAUDE_PROXY_BASE_URL || '';
   const isNonAnthropicShim = Boolean(
-    process.env.ANTHROPIC_BASE_URL &&
-    !process.env.ANTHROPIC_BASE_URL.includes('anthropic.com')
+    _effectiveBaseUrl && !_effectiveBaseUrl.includes('anthropic.com')
   );
   const keepMcp = process.env.GAAI_NESTED_KEEP_MCP === '1';
   const injectStrictMcp = isNonAnthropicShim && !keepMcp;

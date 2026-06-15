@@ -36,22 +36,11 @@ Works with or without a PRD.
 1. Read the Epic template at `contexts/artefacts/epics/_template.epic.md` before writing any Epic file.
 
    **CRITICAL — ID Collision Guard (MUST execute before assigning any Epic ID):**
-   - **a)** Obtain the next Epic ID by invoking `.gaai/core/scripts/lib/allocate-id.sh epic`
-     (path relative to the repository root). This script serialises allocation under an
-     exclusive `flock`, cross-references both `active.backlog.yaml` and the host-stable
-     reservation ledger (shared across all local worktrees before any branch merges), and
-     writes a reservation before returning. **Never compute `max+1` manually** — the allocator
-     is the single authority for ID assignment. If the script is absent (bootstrapping a fresh
-     install before this allocator was delivered), fall back to the original scan-max pattern
-     as a degraded mode with a stderr warning.
-   - **b)** For each Epic file to be created, **check if the file already exists** at
-     `contexts/artefacts/epics/{id}.epic.md`. If it exists with different content,
-     **STOP immediately** — surface the conflict to the human.
-   - **c)** Never reuse an Epic ID, even if the previous Epic was deleted or superseded.
-   - **Rationale:** In a past incident, two concurrent sessions both assigned the same Epic ID
-     to different epics because each did an independent scan-max on its own branch-isolated
-     backlog. The allocator fixes this by serialising under `flock` and recording reservations
-     in a host-stable ledger visible to all local sessions before any branch merges.
+   - **a)** Scan `contexts/backlog/active.backlog.yaml` to find the **highest existing Epic number** (e.g., if E52 is the last, the next Epic must be E53 or higher).
+   - **b)** Also scan `contexts/artefacts/epics/` for existing `.epic.md` files to catch any that may not yet be in the backlog.
+   - **c)** For each Epic file to be created, **check if the file already exists** at `contexts/artefacts/epics/{id}.epic.md`. If it exists with different content, **STOP immediately** — surface the conflict to the human.
+   - **d)** The new Epic ID = `max(existing IDs) + 1`. Never reuse an Epic ID, even if the previous Epic was deleted or superseded.
+   - **Rationale:** In a past incident, two concurrent sessions both assigned the same Epic ID to different epics. The second overwrote the first's stories. This guard prevents recurrence.
 
 2. Think in **user outcomes**, not features
 3. Keep Epics high-level and value-focused
