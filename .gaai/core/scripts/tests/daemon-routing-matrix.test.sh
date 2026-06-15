@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # daemon-routing-matrix.test.sh
 #
-# Shell runner for the DEC-148 proxy/direct compatibility matrix regression test.
+# Shell runner for the proxy/direct compatibility contract proxy/direct compatibility matrix regression test.
 # Runs the node:test fixture covering all five matrix rows × {Plan, Impl, QA} env checks.
 #
 # AC4: deterministic dry-run command for the proxy/direct compatibility matrix.

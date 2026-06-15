@@ -29,7 +29,7 @@ Launch or inspect the GAAI OSS Delivery Daemon.
 | `GAAI_IMPL_MODEL` | _(absent)_ | Model ID for the secondary Impl provider (e.g. `glm-4.6`). |
 | `GAAI_NESTED_KEEP_MCP` | `0` | Set to `1` to suppress `--strict-mcp-config` injection when a proxy is active. Required for GAAI Cloud variants that need MCP connectivity preserved through the proxy. |
 
-### Transport vs. provider intent (DEC-148)
+### Transport vs. provider intent
 
 `GAAI_CLAUDE_PROXY_BASE_URL` and `GAAI_IMPL_*` are **orthogonal controls**, not alternatives:
 
