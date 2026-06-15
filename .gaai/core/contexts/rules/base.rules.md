@@ -144,6 +144,13 @@ The following are explicitly forbidden in all contexts — structured flows and 
 - Producing artefacts without reading the governing skill file first
 - Silently overwriting existing artefacts without checking for ID collisions
 - Writing substance into index / registry rows. **Index = pointer.** Every row of `index.md`, `index-*.md`, archive indexes is metadata + ≤30-word topic, ≤200 chars total. Substance lives in the target file (DEC body, `_log.md`, artefact, `git log`). Forbidden in any registry row : Tier 2 cycle trails, finding counts, commit SHAs, §-numbered substance dumps duplicating target body, validation ceremony prose, drift-heal forensic prose. Remediation when drift detected : skill `memory-index-compact` (SKILL-MEMORY-INDEX-COMPACT-001).
+- Ad-hoc scan-max epic/story ID allocation when concurrent Discovery sessions are possible.
+  Use `.gaai/core/scripts/lib/allocate-id.sh` instead — it serialises allocation under an
+  exclusive lock and records reservations in a host-stable ledger (`~/.gaai/reservations/`)
+  visible to all local worktrees before any branch merges. Epic and story IDs MUST be obtained
+  from this allocator whenever running more than one Discovery session locally.
+  (Exception: allocator script absent on a fresh install — fall back to scan-verify with a
+  stderr warning, then install the allocator at the next available opportunity.)
 
 For additional flow-specific forbidden patterns (Delivery memory ingestion, direct human→Delivery interaction), see `orchestration.rules.md` § Forbidden Patterns.
 
