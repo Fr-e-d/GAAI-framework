@@ -232,11 +232,11 @@ function buildPrimaryChildEnv() {
   // Required: bypass nested Claude Code detection
   env.CLAUDECODE = '';
 
-  // When a daemon-scoped Claude proxy is configured, primary subprocess must also
-  // route through the proxy (DEC-148 AC4: no silent wrong-upstream routing).
-  // In daemon mode this is idempotent (daemon already exports ANTHROPIC_BASE_URL from
-  // GAAI_CLAUDE_PROXY_BASE_URL), but explicit forwarding here ensures correct behavior
-  // when the module is invoked outside the daemon (tests, direct CLI invocation).
+  // When a daemon-scoped Claude proxy is configured, the primary subprocess must
+  // also route through the proxy so there is no silent wrong-upstream routing.
+  // In daemon mode this is idempotent (daemon already exports ANTHROPIC_BASE_URL
+  // from GAAI_CLAUDE_PROXY_BASE_URL), but explicit forwarding here ensures correct
+  // behavior when the module is invoked outside the daemon (tests, direct CLI).
   if (env.GAAI_CLAUDE_PROXY_BASE_URL) {
     env.ANTHROPIC_BASE_URL = env.GAAI_CLAUDE_PROXY_BASE_URL;
   }
