@@ -1717,9 +1717,9 @@ CDEOF
 
 # ── OSS-5 helper : revert YAML status to refined (cross-device pushed) ────
 # Args: sid, reset_phase_status (true|false), reason (log marker).
-# Pulls staging, sets status, optionally resets phase_status, commits with
-# [daemon-recovery:reason] tag, pushes. Mirrors check_stale_in_progress
-# pattern (line ~800) — V1 accepts the duplication ; V1.5 may factor.
+# Pulls staging, removes stale pr_url/pr_number, sets status, optionally
+# resets phase_status, commits+pushes. On success: clears retry-counter
+# and removes stale worktree+branch so re-delivery starts clean (AC1-AC4).
 _recovery_revert_refined() {
   local sid="$1" reset_phase="$2" reason="$3"
   local script
@@ -1746,6 +1746,30 @@ if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
   echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
   rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
 fi
+# AC1 — remove stale pr_url / pr_number before status reset (idempotent — no-op if absent)
+python3 - "$BACKLOG" "$sid" <<'PREOF' 2>/dev/null || true
+import sys, re
+file_path = sys.argv[1]
+target_id = sys.argv[2]
+with open(file_path, 'r') as f:
+    lines = f.readlines()
+block_start = -1
+block_end = len(lines)
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    if re.match(r'-\s+id:\s+' + re.escape(target_id) + r'\s*$', stripped):
+        block_start = i
+        continue
+    if block_start >= 0 and re.match(r'-\s+id:\s+', stripped):
+        block_end = i
+        break
+if block_start < 0:
+    sys.exit(0)
+new_lines = [l for idx, l in enumerate(lines)
+             if not (block_start <= idx < block_end and re.match(r'^\s+(pr_url|pr_number):', l))]
+with open(file_path, 'w') as f:
+    f.writelines(new_lines)
+PREOF
 RSTEOF
   if [[ "$reset_phase" == "true" ]]; then
     cat >> "$script" <<RSTEOF
@@ -1764,6 +1788,21 @@ RSTEOF
   rm -f "$script"
   if [[ "$rc" -eq 6 ]]; then
     _write_drift_marker "commit" "revert-refined-$sid"
+  fi
+  if [[ "$rc" -eq 0 ]]; then
+    # AC2: purge retry-counter entry so re-delivery starts from zero (idempotent)
+    if [[ -f "$RETRY_FILE" ]]; then
+      sed_inplace "/^${sid}=/d" "$RETRY_FILE" 2>/dev/null || true
+    fi
+    # AC3: remove stale worktree and story branch so next delivery takes fresh-worktree path
+    local wt_path
+    wt_path=$(_recovery_resolve_worktree "$sid")
+    if [[ -d "$wt_path" ]]; then
+      git -C "$PROJECT_DIR" worktree remove --force "$wt_path" 2>/dev/null \
+        || rm -rf "$wt_path" 2>/dev/null || true
+      git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
+    fi
+    git -C "$PROJECT_DIR" branch -D "story/${sid}" 2>/dev/null || true
   fi
   return $rc
 }
