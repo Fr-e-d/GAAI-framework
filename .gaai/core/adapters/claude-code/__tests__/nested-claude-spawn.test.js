@@ -103,6 +103,7 @@ function clearEnv() {
   delete process.env.GAAI_IMPL_AUTH_TOKEN;
   delete process.env.GAAI_IMPL_MODEL;
   delete process.env.GAAI_IMPL_MODEL_FALLBACK;
+  delete process.env.GAAI_CLAUDE_PROXY_BASE_URL;
 }
 
 // ---------------------------------------------------------------------------
@@ -372,6 +373,30 @@ describe('nested-claude-spawn', () => {
     assert.equal(r.model_requested,          'test-model');
     // model_fallback_triggered is false here (model_actual is null since mock emits no JSON model line)
     assert.equal(typeof r.model_fallback_triggered, 'boolean');
+  });
+
+  test('T10b: daemon Claude proxy wins over Impl base URL for ANTHROPIC_BASE_URL', async () => {
+    setValidEnv();
+    process.env.GAAI_CLAUDE_PROXY_BASE_URL = 'https://proxy.example.test';
+
+    let capturedEnv = null;
+    const reportPath = '/tmp/gaai-test-claude-proxy-env-report.md';
+    writeFileSync(reportPath, '# Proxy env test report\n');
+
+    _setSpawnFn((_cmd, _args, options) => {
+      capturedEnv = options.env;
+      return createMockChild({
+        exitCode: 0,
+        stdoutData: '## QA\nAll good.\n',
+      });
+    });
+
+    await spawnNestedClaude('test-prompt', reportPath);
+
+    assert.ok(capturedEnv, 'env must have been captured by mock spawn');
+    assert.equal(capturedEnv.ANTHROPIC_BASE_URL, 'https://proxy.example.test');
+    assert.equal(capturedEnv.ANTHROPIC_AUTH_TOKEN, 'test-token-do-not-log');
+    assert.equal(capturedEnv.ANTHROPIC_DEFAULT_OPUS_MODEL, 'test-model');
   });
 
   // -------------------------------------------------------------------------
