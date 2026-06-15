@@ -45,10 +45,25 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
    - **Rationale:** In a past project incident, a story created a synchronous helper despite a previously-active DEC explicitly prohibiting that pattern. Subsequent stories reused the helper, accumulating violations that went undetected for weeks because no cross-reference step existed between Epic intent and the active DEC registry.
 
    **CRITICAL — Collision Guard (MUST execute before writing any file):**
-   - **a)** Scan `contexts/backlog/active.backlog.yaml` for any existing entries with the same Epic ID prefix. If entries exist, determine the **next available story number** (e.g., if E01S01–E01S05 exist, start at E01S06).
-   - **b)** For each story file to be created, **check if the file already exists** on disk at `contexts/artefacts/stories/{id}.story.md`. If the file exists and its `id` frontmatter matches a **different** epic or title, **STOP immediately** — this means an ID collision between two epics. Surface the conflict to the human and do not proceed.
-   - **c)** If the file exists and its content matches the current Epic (same epic ID, same intent), treat it as an update — read the existing content first and preserve any human edits.
-   - **Rationale:** In a past incident, two concurrent sessions assigned the same Epic ID to different epics. The second session overwrote story files without checking, destroying existing stories. This guard prevents recurrence.
+   - **a)** Obtain the next Story ID by invoking
+     `.gaai/core/scripts/lib/allocate-id.sh story <epic_prefix>` (where `<epic_prefix>` is
+     the parent Epic's ID, e.g. `E220`). This script serialises allocation under an exclusive
+     `flock`, accounts for IDs in both `active.backlog.yaml` and the host-stable reservation
+     ledger, and writes a reservation before returning. **Never compute the next story number
+     by scanning the backlog manually** — the allocator is the single authority. If the
+     allocator script is absent (fresh install), fall back to the scan-and-verify pattern as a
+     degraded mode with a stderr warning.
+   - **b)** For each story file to be created, **check if the file already exists** on disk at
+     `contexts/artefacts/stories/{id}.story.md`. If the file exists and its `id` frontmatter
+     matches a **different** epic or title, **STOP immediately** — this means an ID collision
+     between two epics. Surface the conflict to the human and do not proceed.
+   - **c)** If the file exists and its content matches the current Epic (same epic ID, same
+     intent), treat it as an update — read the existing content first and preserve any human
+     edits.
+   - **Rationale:** In a past incident, two concurrent sessions assigned the same Epic ID to
+     different epics because each did an independent scan-max on its own branch-isolated
+     backlog. The allocator fixes this by serialising under `flock` and recording reservations
+     in a host-stable ledger visible to all local sessions before any branch merges.
 
    **CRITICAL — Definition of Ready (DoR) Enforcement (MUST execute after writing each story):**
    - **a)** Read the parent Epic's `mandatory_ac_categories` frontmatter field.
