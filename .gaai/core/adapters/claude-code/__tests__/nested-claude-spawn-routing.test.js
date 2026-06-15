@@ -1,8 +1,8 @@
 /**
  * nested-claude-spawn-routing.test.js
  *
- * Proxy-mode routing tests for nested-claude-spawn.js (E224S02 — DEC-148).
- * Covers the DEC-148 compatibility matrix: direct/proxy/proxy+secondary modes,
+ * Proxy-mode routing tests for nested-claude-spawn.js.
+ * Covers the proxy-mode compatibility matrix: direct/proxy/proxy+secondary modes,
  * model/provider intent forwarding, and --strict-mcp-config injection.
  *
  * Run with:
@@ -157,7 +157,7 @@ async function runImplPrimary() {
     implModelTag: 'primary',
     prompt:       'test-prompt',
     reportPath:   '',
-    storyId:      'E224S02-routing-test',
+    storyId:      'proxy-routing-test',
     logFile:      tmpLog,
   });
 }
@@ -167,7 +167,7 @@ async function runImplSecondary() {
     implModelTag: null,
     prompt:       'test-prompt',
     reportPath:   '',
-    storyId:      'E224S02-routing-test',
+    storyId:      'proxy-routing-test',
     logFile:      tmpLog,
   });
 }
@@ -363,7 +363,7 @@ describe('AC5 — proxy mode fallback: primary fallback preserves ANTHROPIC_BASE
 
     // Primary fallback must also use proxy (not fall back to direct Anthropic)
     assert.equal(calls[1].env.ANTHROPIC_BASE_URL, PROXY_URL,
-      'primary fallback spawn must preserve proxy URL (DEC-148: no silent wrong-upstream routing)');
+      'primary fallback spawn must preserve proxy URL (no silent wrong-upstream routing)');
   });
 
   test('primary fallback must not switch to GAAI_IMPL_BASE_URL (gateway bypass forbidden)', async () => {
