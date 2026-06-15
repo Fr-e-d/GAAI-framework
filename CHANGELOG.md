@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.48.0] - 2026-06-15
 
 ### Changed
+- fix: add opt-in Claude proxy transport
 - fix: reap orphaned worktrees of archived/terminal stories
+- feat: add native Codex daemon support
+
 
 ## [2.45.0] - 2026-06-14
 

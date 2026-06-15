@@ -136,8 +136,14 @@ function buildChildEnv() {
   // Required: bypass nested Claude Code detection
   env.CLAUDECODE = '';
 
-  // Map GAAI_IMPL_* -> Anthropic SDK env vars
-  if (env.GAAI_IMPL_BASE_URL)      { env.ANTHROPIC_BASE_URL             = env.GAAI_IMPL_BASE_URL; }
+  // Claude CLI transport is independent from Impl provider routing. A daemon-scoped
+  // proxy wins for ANTHROPIC_BASE_URL; otherwise the existing direct Impl provider
+  // mapping is preserved for backward compatibility.
+  if (env.GAAI_CLAUDE_PROXY_BASE_URL) {
+    env.ANTHROPIC_BASE_URL = env.GAAI_CLAUDE_PROXY_BASE_URL;
+  } else if (env.GAAI_IMPL_BASE_URL) {
+    env.ANTHROPIC_BASE_URL = env.GAAI_IMPL_BASE_URL;
+  }
   if (env.GAAI_IMPL_AUTH_TOKEN)    { env.ANTHROPIC_AUTH_TOKEN           = env.GAAI_IMPL_AUTH_TOKEN; }
   if (env.GAAI_IMPL_MODEL)         { env.ANTHROPIC_DEFAULT_OPUS_MODEL   = env.GAAI_IMPL_MODEL; }
   if (env.GAAI_IMPL_MODEL_FALLBACK){ env.ANTHROPIC_DEFAULT_SONNET_MODEL = env.GAAI_IMPL_MODEL_FALLBACK; }

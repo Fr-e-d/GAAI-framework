@@ -58,6 +58,9 @@ set -euo pipefail
 #   GAAI_WORKSPACE_ID=<uuid>         workspace UUIDv4; if unset at daemon start, read from
 #                                    .gaai/local/workspace-preference.json hint file (E99S11)
 #   GAAI_ORG_ID=<uuid>               org UUIDv4; same fallback as GAAI_WORKSPACE_ID
+#   GAAI_CLAUDE_PROXY_BASE_URL=<url> daemon-scoped Claude CLI transport proxy.
+#                                    When set, daemon-launched claude -p receives
+#                                    ANTHROPIC_BASE_URL with this value.
 #   GAAI_IMPL_BASE_URL=<url>         secondary impl provider base URL (DEC-72)
 #   GAAI_IMPL_AUTH_TOKEN=<token>     secondary impl provider auth token (DEC-72)
 #   GAAI_IMPL_MODEL=<model>          secondary impl provider model name (DEC-72)
@@ -3023,6 +3026,9 @@ echo ""
 cd "$PROJECT_DIR"
 unset CLAUDECODE 2>/dev/null || true
 export GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log"
+if [[ -n "\${GAAI_CLAUDE_PROXY_BASE_URL:-}" ]]; then
+  export ANTHROPIC_BASE_URL="\${GAAI_CLAUDE_PROXY_BASE_URL}"
+fi
 
 # [E99S11] Resolve session env per DEC-75 §6 before spawning subprocess
 _gaai_resolve_session_env
@@ -3093,6 +3099,7 @@ fi
 if command -v gtimeout &>/dev/null; then
   GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+  ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
   GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
@@ -3104,6 +3111,7 @@ Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
 elif command -v timeout &>/dev/null; then
   GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+  ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
   GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
@@ -3115,6 +3123,7 @@ Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
 else
   GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+  ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
   GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
@@ -3677,6 +3686,9 @@ echo ""
 cd "$PROJECT_DIR"
 unset CLAUDECODE 2>/dev/null || true
 export GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log"
+if [[ -n "\${GAAI_CLAUDE_PROXY_BASE_URL:-}" ]]; then
+  export ANTHROPIC_BASE_URL="\${GAAI_CLAUDE_PROXY_BASE_URL}"
+fi
 
 # [E99S11] Resolve session env per DEC-75 §6 before spawning subprocess
 _gaai_resolve_session_env
@@ -3749,6 +3761,7 @@ fi
 if command -v gtimeout &>/dev/null; then
   GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+  ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
   GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
@@ -3760,6 +3773,7 @@ Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
 else
   GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+  ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
   GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
   GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
   GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
@@ -3905,6 +3919,10 @@ export SCHEDULER="$SCHEDULER"
 export LOCK_DIR="$LOCK_DIR"
 export LOG_DIR="$LOG_DIR"
 export TARGET_BRANCH="$TARGET_BRANCH"
+export GAAI_CLAUDE_PROXY_BASE_URL="${GAAI_CLAUDE_PROXY_BASE_URL:-}"
+if [[ -n "\${GAAI_CLAUDE_PROXY_BASE_URL:-}" ]]; then
+  export ANTHROPIC_BASE_URL="\${GAAI_CLAUDE_PROXY_BASE_URL}"
+fi
 export GAAI_IMPL_BASE_URL="${GAAI_IMPL_BASE_URL:-}"
 export GAAI_IMPL_AUTH_TOKEN="${GAAI_IMPL_AUTH_TOKEN:-}"
 export GAAI_IMPL_MODEL="${GAAI_IMPL_MODEL:-}"
@@ -3984,6 +4002,7 @@ WRAPPER_EOF
     secrets_prefix=". '$secrets_file'; "
   fi
   local tmux_env_args=()
+  [[ -n "${GAAI_CLAUDE_PROXY_BASE_URL:-}" ]] && tmux_env_args+=(-e "GAAI_CLAUDE_PROXY_BASE_URL=${GAAI_CLAUDE_PROXY_BASE_URL}")
   [[ -n "${GAAI_IMPL_BASE_URL:-}"   ]] && tmux_env_args+=(-e "GAAI_IMPL_BASE_URL=${GAAI_IMPL_BASE_URL}")
   # GAAI_IMPL_AUTH_TOKEN intentionally NOT forwarded via -e — sourced from secrets_file (above).
   [[ -n "${GAAI_IMPL_MODEL:-}"      ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL=${GAAI_IMPL_MODEL}")
@@ -4012,7 +4031,7 @@ WRAPPER_EOF
     unset GAAI_QA_REPORT_PATH GAAI_QA_INJECT_PHASE 2>/dev/null || true
   fi
 
-  tmux new-session -d -s "gaai-deliver-${story_id}" "${tmux_env_args[@]}" "${secrets_prefix}$wrapper"
+  tmux new-session -d -s "gaai-deliver-${story_id}" ${tmux_env_args[@]+"${tmux_env_args[@]}"} "${secrets_prefix}$wrapper"
 
   # Pipe wrapper stdout/stderr to persistent log for post-mortem diagnosis.
   # Non-fatal: log WARN on failure and continue.

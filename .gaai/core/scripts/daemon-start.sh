@@ -403,10 +403,11 @@ do_start() {
       secrets_prefix=". '$secrets_file'; "
     fi
     local daemon_cmd="${secrets_prefix}bash '${DAEMON_SCRIPT}' ${PASSTHROUGH_ARGS[*]+${PASSTHROUGH_ARGS[*]}}"
-    # Forward GAAI_IMPL_* env vars into tmux session (tmux strips parent env by default).
-    # Required for daemon-dispatch.sh resolveMode() to route Impl phase to secondary (GLM).
-    # Plan + QA stay on primary (Sonnet) regardless ; only Impl reads these vars.
+    # Forward daemon-scoped env vars into the tmux session (tmux strips parent env by default).
+    # GAAI_CLAUDE_PROXY_BASE_URL controls Claude CLI transport only. GAAI_IMPL_* keeps its
+    # existing role for Impl provider routing.
     local tmux_env_args=()
+    [[ -n "${GAAI_CLAUDE_PROXY_BASE_URL:-}" ]] && tmux_env_args+=(-e "GAAI_CLAUDE_PROXY_BASE_URL=${GAAI_CLAUDE_PROXY_BASE_URL}")
     [[ -n "${GAAI_IMPL_BASE_URL:-}"   ]] && tmux_env_args+=(-e "GAAI_IMPL_BASE_URL=${GAAI_IMPL_BASE_URL}")
     # GAAI_IMPL_AUTH_TOKEN intentionally NOT forwarded via -e — sourced from secrets_file (above).
     [[ -n "${GAAI_IMPL_MODEL:-}"      ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL=${GAAI_IMPL_MODEL}")
@@ -421,7 +422,7 @@ do_start() {
     # Admin fallback (free-tier opt-in) — when --auto fails branch_protection_missing,
     # fall back to gh pr merge --admin --squash. Trust-arc opt-in, default off.
     [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
-    tmux new-session -d -s gaai-daemon "${tmux_env_args[@]}" "$daemon_cmd"
+    tmux new-session -d -s gaai-daemon ${tmux_env_args[@]+"${tmux_env_args[@]}"} "$daemon_cmd"
 
     # Give it a moment to start, then grab the PID
     sleep 1
