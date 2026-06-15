@@ -1,7 +1,7 @@
 /**
  * daemon-routing-matrix.fixture.js
  *
- * Matrix regression test for the DEC-148 proxy/direct compatibility contract.
+ * Matrix regression test for the the proxy/direct compatibility contract proxy/direct compatibility contract.
  * Covers all five rows of the compatibility matrix × {Plan-equivalent primary,
  * Impl secondary, Impl primary, QA-equivalent primary} env checks.
  *
@@ -34,7 +34,7 @@ import {
 import { _setLogPath, _resetLogPath } from '../../adapters/claude-code/runtime-routing-logger.js';
 
 // ---------------------------------------------------------------------------
-// Constants matching DEC-148 compatibility contract
+// Constants matching the proxy/direct compatibility contract compatibility contract
 // ---------------------------------------------------------------------------
 
 const PROXY_URL  = 'http://127.0.0.1:8787'; // illustrative gateway address
