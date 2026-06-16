@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- chore: commit pending framework writes to clear working-tree drift
+
 ## [2.48.0] - 2026-06-15
 
 ### Changed
