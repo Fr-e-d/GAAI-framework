@@ -1115,6 +1115,44 @@ check_stale_in_progress() {
         fi
       fi
 
+      # AC3: Before stale-failing, check if the delivery PR is already merged or if
+      # qa_passed awaits human merge — both cases must NOT be brute-force-failed.
+      # gh is optional — skip guard if not installed (backward compat).
+      if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
+        local _stale_json="" _stale_merged_at="" _stale_pr_state="" _stale_pr_number=""
+        _stale_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt,state --limit 1 2>/dev/null || echo "")
+        if [[ -n "$_stale_json" ]]; then
+          read -r _stale_merged_at _stale_pr_state _stale_pr_number < <(
+            printf '%s' "$_stale_json" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
+    print((s.get('mergedAt') or '-'), (s.get('state') or '-'), (s.get('number') or '-'))
+except Exception:
+    print('- - -')" 2>/dev/null || echo "- - -")
+        fi
+        # Merged PR: reconcile to done instead of stale-failing (AC3a)
+        if [[ -n "$_stale_merged_at" && "$_stale_merged_at" != "-" ]]; then
+          log "${GREEN}[STALE-CHECK] $sid : delivery PR #${_stale_pr_number} already merged ($_stale_merged_at) — reconciling to done instead of stale-failing${NC}"
+          if _reconcile_merged_pr "$sid" "$_stale_merged_at"; then
+            notify_escalation "$sid" "Auto-reconciled merged story (stale guard)" "Delivery PR was merged; status reconciled to done automatically"
+            track_for_resolution "$sid" "done"
+          fi
+          continue
+        fi
+        # qa_passed + OPEN PR: wrapper finished delivery, PR awaits human merge — hold (AC3b)
+        local _stale_ps="" _stale_ps_tmp
+        _stale_ps_tmp=$(mktemp)
+        if git -C "$PROJECT_DIR" show "origin/${TARGET_BRANCH}:${BACKLOG_REL}" > "$_stale_ps_tmp" 2>/dev/null; then
+          _stale_ps=$(backlog_phase_status "$sid" "$_stale_ps_tmp" 2>/dev/null || true)
+        fi
+        rm -f "$_stale_ps_tmp" 2>/dev/null || true
+        if [[ "$_stale_ps" == "qa_passed" && -n "$_stale_pr_state" && "$_stale_pr_state" == "OPEN" ]]; then
+          log "${CYAN}[STALE-CHECK] $sid : phase_status=qa_passed with OPEN PR #${_stale_pr_number} — holding, not stale-failing${NC}"
+          continue
+        fi
+      fi
+
       # Mark as failed on staging
       log "${YELLOW}Marking $sid as failed (stale in_progress)...${NC}"
       local reset_script
@@ -1130,17 +1168,6 @@ TARGET_BRANCH="$TARGET_BRANCH"
 SCHEDULER="$SCHEDULER"
 # shellcheck source=lib/chore-commit.sh
 source "$SCRIPT_DIR/lib/chore-commit.sh"
-if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
-    git rebase --abort --quiet 2>/dev/null || true
-    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
-    printf '%s|recovery|rebase-failed-staleness-$sid\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
-    exit 1
-  fi
-  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
-  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
-fi
 chore_commit_field "$sid" status failed "chore($sid): failed [daemon-staleness]" || exit \$?
 RSTEOF
       chmod +x "$reset_script"
@@ -1825,17 +1852,6 @@ TARGET_BRANCH="$TARGET_BRANCH"
 SCHEDULER="$SCHEDULER"
 # shellcheck source=lib/chore-commit.sh
 source "$SCRIPT_DIR/lib/chore-commit.sh"
-if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
-    git rebase --abort --quiet 2>/dev/null || true
-    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
-    printf '%s|recovery|rebase-failed-reconcile-$new_status-$sid\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
-    exit 1
-  fi
-  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
-  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
-fi
 chore_commit_field "$sid" status "$new_status" "chore($sid): $new_status [daemon-recovery:$reason]" || exit \$?
 RSTEOF
   chmod +x "$script"

@@ -1106,6 +1106,389 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# T-DRIFT-SELF-RESOLVE (AC4a)
+# Local drift on story-A block + origin ahead on story-B block (same file,
+# non-overlapping lines) → chore_commit_field self-resolves, both changes land.
+# This is the exact failing case: same-file collision is the trigger.
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== T-DRIFT-SELF-RESOLVE (AC4a): behind+dirty self-resolve (non-overlapping blocks) ==="
+
+DSR_DIR="$FIXTURE_DIR/dsr-project"
+DSR_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
+DSR_STORY_A="DSR-A"
+DSR_STORY_B="DSR-B"
+DSR_LOCK_DIR="$FIXTURE_DIR/dsr-locks"
+DSR_LOG="$FIXTURE_DIR/dsr.log"
+DSR_DAEMON_DIR="$(dirname "$DAEMON")"
+mkdir -p "$DSR_LOCK_DIR"
+
+DSR_INIT_YAML="- id: $DSR_STORY_A
+  status: in_progress
+  phase_status: planned
+  delivery_pipeline: 3phase
+- id: $DSR_STORY_B
+  status: in_progress
+  phase_status: planned
+  delivery_pipeline: 3phase"
+
+setup_git_repo "$DSR_DIR" "$DSR_INIT_YAML"
+
+# Origin advances: story-B phase_status=implemented (different block from story-A)
+DSR_ORIGIN_YAML="- id: $DSR_STORY_A
+  status: in_progress
+  phase_status: planned
+  delivery_pipeline: 3phase
+- id: $DSR_STORY_B
+  status: in_progress
+  phase_status: implemented
+  delivery_pipeline: 3phase"
+printf '%s\n' "$DSR_ORIGIN_YAML" > "$DSR_DIR/$DSR_BACKLOG_REL"
+git -C "$DSR_DIR" add "$DSR_BACKLOG_REL"
+git -C "$DSR_DIR" commit -m "chore($DSR_STORY_B): implemented [daemon]" -q
+git -C "$DSR_DIR" push origin HEAD -q
+# Reset local to initial — behind origin by 1, story-B back to planned locally
+git -C "$DSR_DIR" reset --hard HEAD~1 -q
+# Add uncommitted local drift on story-A block only
+DSR_DRIFT_YAML="- id: $DSR_STORY_A
+  status: in_progress
+  phase_status: qa_failed
+  delivery_pipeline: 3phase
+- id: $DSR_STORY_B
+  status: in_progress
+  phase_status: planned
+  delivery_pipeline: 3phase"
+printf '%s\n' "$DSR_DRIFT_YAML" > "$DSR_DIR/$DSR_BACKLOG_REL"
+
+DSR_HARNESS="$FIXTURE_DIR/dsr-harness.sh"
+cat > "$DSR_HARNESS" <<DSR_HEREDOC
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$DSR_DIR"
+export LOCK_DIR="$DSR_LOCK_DIR"
+export BACKLOG_FILE="$DSR_DIR/$DSR_BACKLOG_REL"
+export BACKLOG="$DSR_DIR/$DSR_BACKLOG_REL"
+export BACKLOG_REL="$DSR_BACKLOG_REL"
+export TARGET_BRANCH="main"
+export SCHEDULER="$SCHEDULER"
+source "$DSR_DAEMON_DIR/lib/chore-commit.sh"
+chore_commit_field "$DSR_STORY_A" phase_status implemented "chore($DSR_STORY_A): implemented [daemon]"
+DSR_HEREDOC
+chmod +x "$DSR_HARNESS"
+DSR_RC=0
+bash "$DSR_HARNESS" > "$DSR_LOG" 2>&1 || DSR_RC=$?
+rm -f "$DSR_HARNESS"
+
+if [[ "$DSR_RC" -eq 0 ]]; then
+  pass "T-DSR-1: chore_commit_field self-resolved behind+dirty (rc=0)"
+else
+  fail "T-DSR-1: expected rc=0, got rc=$DSR_RC — log: $(head -5 "$DSR_LOG" 2>/dev/null | tr '\n' '|')"
+fi
+
+DSR_ORIGIN=$(git -C "$DSR_DIR" show "origin/main:$DSR_BACKLOG_REL" 2>/dev/null || echo "MISSING")
+DSR_A_PS=$(printf '%s\n' "$DSR_ORIGIN" | awk '/^- id: '"$DSR_STORY_A"'/{f=1} f && /^  phase_status:/{print $2; exit}')
+if [[ "$DSR_A_PS" == "implemented" ]]; then
+  pass "T-DSR-2: story-A phase_status=implemented on origin"
+else
+  fail "T-DSR-2: story-A phase_status='$DSR_A_PS' (expected implemented)"
+fi
+
+DSR_B_PS=$(printf '%s\n' "$DSR_ORIGIN" | awk '/^- id: '"$DSR_STORY_B"'/{f=1} f && /^  phase_status:/{print $2; exit}')
+if [[ "$DSR_B_PS" == "implemented" ]]; then
+  pass "T-DSR-3: story-B drift swept to origin (implemented)"
+else
+  fail "T-DSR-3: story-B phase_status='$DSR_B_PS' (expected implemented — drift not swept)"
+fi
+
+if grep -qi "operator intervention required" "$DSR_LOG" 2>/dev/null; then
+  fail "T-DSR-4: spurious 'operator intervention required' message present"
+else
+  pass "T-DSR-4: no 'operator intervention required' message"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# T-SAME-LINE-CONFLICT (AC4d)
+# Both sides edit the SAME yaml line → rc=6 via chore-commit helper,
+# confirming AC2 compliance (no bespoke conflict message).
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== T-SAME-LINE-CONFLICT (AC4d): same-line edit on both sides → rc=6 ==="
+
+SLC_DIR="$FIXTURE_DIR/slc-project"
+SLC_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
+SLC_STORY="SLC-A"
+SLC_LOCK_DIR="$FIXTURE_DIR/slc-locks"
+SLC_LOG="$FIXTURE_DIR/slc.log"
+SLC_DAEMON_DIR="$(dirname "$DAEMON")"
+mkdir -p "$SLC_LOCK_DIR"
+
+SLC_INIT_YAML="- id: $SLC_STORY
+  status: in_progress
+  phase_status: planned
+  delivery_pipeline: 3phase"
+setup_git_repo "$SLC_DIR" "$SLC_INIT_YAML"
+
+# Origin: story status changes to done (modifies the status: line on story-A)
+SLC_ORIGIN_YAML="- id: $SLC_STORY
+  status: done
+  phase_status: done
+  delivery_pipeline: 3phase"
+printf '%s\n' "$SLC_ORIGIN_YAML" > "$SLC_DIR/$SLC_BACKLOG_REL"
+git -C "$SLC_DIR" add "$SLC_BACKLOG_REL"
+git -C "$SLC_DIR" commit -m "chore($SLC_STORY): done [pr-watcher]" -q
+git -C "$SLC_DIR" push origin HEAD -q
+# Local: reset to initial (behind), then drift the SAME line to a different value
+git -C "$SLC_DIR" reset --hard HEAD~1 -q
+SLC_DRIFT_YAML="- id: $SLC_STORY
+  status: refined
+  phase_status: not_started
+  delivery_pipeline: 3phase"
+printf '%s\n' "$SLC_DRIFT_YAML" > "$SLC_DIR/$SLC_BACKLOG_REL"
+
+SLC_HARNESS="$FIXTURE_DIR/slc-harness.sh"
+cat > "$SLC_HARNESS" <<SLC_HEREDOC
+#!/usr/bin/env bash
+set -uo pipefail
+cd "$SLC_DIR"
+export LOCK_DIR="$SLC_LOCK_DIR"
+export BACKLOG_FILE="$SLC_DIR/$SLC_BACKLOG_REL"
+export BACKLOG="$SLC_DIR/$SLC_BACKLOG_REL"
+export BACKLOG_REL="$SLC_BACKLOG_REL"
+export TARGET_BRANCH="main"
+export SCHEDULER="$SCHEDULER"
+source "$SLC_DAEMON_DIR/lib/chore-commit.sh"
+chore_commit_field "$SLC_STORY" status failed "chore($SLC_STORY): failed [daemon-staleness]"
+SLC_HEREDOC
+chmod +x "$SLC_HARNESS"
+SLC_RC=0
+bash "$SLC_HARNESS" > "$SLC_LOG" 2>&1 || SLC_RC=$?
+rm -f "$SLC_HARNESS"
+
+if [[ "$SLC_RC" -eq 6 ]]; then
+  pass "T-SLC-1: genuine same-line conflict returns rc=6"
+else
+  fail "T-SLC-1: expected rc=6, got rc=$SLC_RC — log: $(head -5 "$SLC_LOG" 2>/dev/null | tr '\n' '|')"
+fi
+
+if grep -qi "genuine rebase conflict.*operator resolve required" "$SLC_LOG" 2>/dev/null; then
+  pass "T-SLC-2: helper conflict message present (AC2 — no bespoke deadlock string)"
+else
+  fail "T-SLC-2: expected 'genuine rebase conflict, operator resolve required' — log: $(head -5 "$SLC_LOG" 2>/dev/null | tr '\n' '|')"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# T-STALE-MERGED-PR (AC4b)
+# in_progress past stale threshold with a MERGED delivery PR → reconcile done,
+# NOT stale-failed. Validates AC3a guard in check_stale_in_progress.
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== T-STALE-MERGED-PR (AC4b): stale story with merged PR → reconcile done ==="
+
+SMPR_DIR="$FIXTURE_DIR/smpr-project"
+SMPR_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
+SMPR_STORY="TST-SMPR"
+SMPR_LOCK_DIR="$FIXTURE_DIR/smpr-locks"
+SMPR_LOG="$FIXTURE_DIR/smpr.log"
+SMPR_FLAG="$FIXTURE_DIR/smpr-reconcile-flag"
+SMPR_MOCK_GH_DIR="$FIXTURE_DIR/smpr-mock-gh"
+SMPR_DAEMON_DIR="$(dirname "$DAEMON")"
+mkdir -p "$SMPR_LOCK_DIR" "$SMPR_MOCK_GH_DIR"
+
+SMPR_YAML="items:
+- id: $SMPR_STORY
+  status: in_progress
+  phase_status: planned
+  delivery_pipeline: 3phase"
+setup_git_repo "$SMPR_DIR" "$SMPR_YAML"
+# Stale in_progress commit: timestamp set to 2020 so age > STALENESS_THRESHOLD=0
+GIT_COMMITTER_DATE="2020-01-01T00:00:00Z" GIT_AUTHOR_DATE="2020-01-01T00:00:00Z" \
+  git -C "$SMPR_DIR" commit --allow-empty \
+  -m "chore($SMPR_STORY): in_progress [daemon]" -q
+git -C "$SMPR_DIR" push origin HEAD -q
+
+cat > "$SMPR_MOCK_GH_DIR/gh" <<'GH_SMPR_EOF'
+#!/usr/bin/env bash
+echo "${MOCK_GH_RESPONSE:-[]}"
+exit 0
+GH_SMPR_EOF
+chmod +x "$SMPR_MOCK_GH_DIR/gh"
+
+SMPR_HARNESS="$FIXTURE_DIR/smpr-harness.sh"
+cat > "$SMPR_HARNESS" <<SMPR_EOF
+#!/usr/bin/env bash
+set -uo pipefail
+export PATH="$SMPR_MOCK_GH_DIR:\$PATH"
+export MOCK_GH_RESPONSE='[{"number":42,"mergedAt":"2026-06-17T10:00:00Z","state":"MERGED"}]'
+
+PROJECT_DIR="$SMPR_DIR"
+BACKLOG_REL="$SMPR_BACKLOG_REL"
+BACKLOG="\$PROJECT_DIR/\$BACKLOG_REL"
+BACKLOG_FILE="\$BACKLOG"
+LOCK_DIR="$SMPR_LOCK_DIR"
+LOG_DIR="$SMPR_LOCK_DIR/logs"
+LOG_FILE="$SMPR_LOG"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+DRY_RUN=false
+STALENESS_THRESHOLD=0
+SUSPEND_GRACE_UNTIL=0
+GAAI_RECONCILE_GRACE_SEC=0
+
+mkdir -p "\$LOG_DIR" "\$LOCK_DIR"
+RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
+log() { echo "\$*" >> "\$LOG_FILE"; }
+is_locked() { return 1; }
+with_staging_lock() { "\$@"; }
+notify_escalation() { return 0; }
+track_for_resolution() { return 0; }
+_write_drift_marker() { return 0; }
+_reconcile_merged_pr() { touch "$SMPR_FLAG"; return 0; }
+fetch_and_read_backlog() {
+  git -C "\$PROJECT_DIR" show "origin/main:\$BACKLOG_REL" 2>/dev/null || cat "\$BACKLOG"
+}
+
+source "$SMPR_DAEMON_DIR/lib/backlog-yaml.sh"
+_BACKLOG_YQ_AVAILABLE="no"
+
+eval "\$(awk '
+  /^check_stale_in_progress\(\)/{p=1; depth=0}
+  p {
+    print
+    for (i=1; i<=length(\$0); i++) {
+      c = substr(\$0, i, 1)
+      if (c == "{") depth++
+      if (c == "}") depth--
+    }
+    if (p && depth == 0 && NR > 1) { p=0 }
+  }
+' "$DAEMON" 2>/dev/null)"
+
+check_stale_in_progress
+SMPR_EOF
+chmod +x "$SMPR_HARNESS"
+bash "$SMPR_HARNESS" > /dev/null 2>&1 || true
+rm -f "$SMPR_HARNESS"
+
+if [[ -f "$SMPR_FLAG" ]]; then
+  pass "T-SMPR-1: _reconcile_merged_pr called (merged story not stale-failed)"
+else
+  fail "T-SMPR-1: _reconcile_merged_pr NOT called — merged story went to fail path"
+fi
+
+SMPR_FAIL_COUNT=$(git -C "$SMPR_DIR" log --oneline "origin/main" 2>/dev/null \
+  | grep -c "chore($SMPR_STORY): failed" 2>/dev/null; true)
+if [[ "$SMPR_FAIL_COUNT" -eq 0 ]]; then
+  pass "T-SMPR-2: no 'failed' commit pushed (story correctly not stale-failed)"
+else
+  fail "T-SMPR-2: $SMPR_FAIL_COUNT 'failed' commit(s) found — story incorrectly stale-failed"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# T-QA-PASSED-OPEN-PR (AC4c)
+# qa_passed story past stale threshold with OPEN delivery PR → held, not failed.
+# Validates AC3b guard in check_stale_in_progress.
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== T-QA-PASSED-OPEN-PR (AC4c): qa_passed + OPEN PR → hold, not fail ==="
+
+QAOP_DIR="$FIXTURE_DIR/qaop-project"
+QAOP_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
+QAOP_STORY="TST-QAOP"
+QAOP_LOCK_DIR="$FIXTURE_DIR/qaop-locks"
+QAOP_LOG="$FIXTURE_DIR/qaop.log"
+QAOP_MOCK_GH_DIR="$FIXTURE_DIR/qaop-mock-gh"
+QAOP_DAEMON_DIR="$(dirname "$DAEMON")"
+mkdir -p "$QAOP_LOCK_DIR" "$QAOP_MOCK_GH_DIR"
+
+QAOP_YAML="items:
+- id: $QAOP_STORY
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase"
+setup_git_repo "$QAOP_DIR" "$QAOP_YAML"
+GIT_COMMITTER_DATE="2020-01-01T00:00:00Z" GIT_AUTHOR_DATE="2020-01-01T00:00:00Z" \
+  git -C "$QAOP_DIR" commit --allow-empty \
+  -m "chore($QAOP_STORY): in_progress [daemon]" -q
+git -C "$QAOP_DIR" push origin HEAD -q
+
+cat > "$QAOP_MOCK_GH_DIR/gh" <<'GH_QAOP_EOF'
+#!/usr/bin/env bash
+echo "${MOCK_GH_RESPONSE:-[]}"
+exit 0
+GH_QAOP_EOF
+chmod +x "$QAOP_MOCK_GH_DIR/gh"
+
+QAOP_HARNESS="$FIXTURE_DIR/qaop-harness.sh"
+cat > "$QAOP_HARNESS" <<QAOP_EOF
+#!/usr/bin/env bash
+set -uo pipefail
+export PATH="$QAOP_MOCK_GH_DIR:\$PATH"
+export MOCK_GH_RESPONSE='[{"number":99,"mergedAt":null,"state":"OPEN"}]'
+
+PROJECT_DIR="$QAOP_DIR"
+BACKLOG_REL="$QAOP_BACKLOG_REL"
+BACKLOG="\$PROJECT_DIR/\$BACKLOG_REL"
+BACKLOG_FILE="\$BACKLOG"
+LOCK_DIR="$QAOP_LOCK_DIR"
+LOG_DIR="$QAOP_LOCK_DIR/logs"
+LOG_FILE="$QAOP_LOG"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+DRY_RUN=false
+STALENESS_THRESHOLD=0
+SUSPEND_GRACE_UNTIL=0
+GAAI_RECONCILE_GRACE_SEC=0
+
+mkdir -p "\$LOG_DIR" "\$LOCK_DIR"
+RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
+log() { echo "\$*" >> "\$LOG_FILE"; }
+is_locked() { return 1; }
+with_staging_lock() { "\$@"; }
+notify_escalation() { return 0; }
+track_for_resolution() { return 0; }
+_write_drift_marker() { return 0; }
+_reconcile_merged_pr() { return 0; }
+fetch_and_read_backlog() {
+  git -C "\$PROJECT_DIR" show "origin/main:\$BACKLOG_REL" 2>/dev/null || cat "\$BACKLOG"
+}
+
+source "$QAOP_DAEMON_DIR/lib/backlog-yaml.sh"
+_BACKLOG_YQ_AVAILABLE="no"
+
+eval "\$(awk '
+  /^check_stale_in_progress\(\)/{p=1; depth=0}
+  p {
+    print
+    for (i=1; i<=length(\$0); i++) {
+      c = substr(\$0, i, 1)
+      if (c == "{") depth++
+      if (c == "}") depth--
+    }
+    if (p && depth == 0 && NR > 1) { p=0 }
+  }
+' "$DAEMON" 2>/dev/null)"
+
+check_stale_in_progress
+QAOP_EOF
+chmod +x "$QAOP_HARNESS"
+bash "$QAOP_HARNESS" > /dev/null 2>&1 || true
+rm -f "$QAOP_HARNESS"
+
+QAOP_FAIL_COUNT=$(git -C "$QAOP_DIR" log --oneline "origin/main" 2>/dev/null \
+  | grep -c "chore($QAOP_STORY): failed" 2>/dev/null; true)
+if [[ "$QAOP_FAIL_COUNT" -eq 0 ]]; then
+  pass "T-QAOP-1: no 'failed' commit pushed (qa_passed+OPEN PR story held)"
+else
+  fail "T-QAOP-1: $QAOP_FAIL_COUNT 'failed' commit(s) found — story incorrectly stale-failed"
+fi
+
+if [[ -f "$QAOP_LOG" ]] && grep -qi "holding" "$QAOP_LOG" 2>/dev/null; then
+  pass "T-QAOP-2: 'holding' log message present (AC3b hold path taken)"
+else
+  fail "T-QAOP-2: 'holding' message not found — log: $(head -5 "$QAOP_LOG" 2>/dev/null | tr '\n' '|')"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Summary
 # ═══════════════════════════════════════════════════════════════════════════════
 echo ""
