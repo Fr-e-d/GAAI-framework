@@ -185,7 +185,8 @@ _backlog_max_epic() {
   result="$(grep -oE 'E[0-9]+' "$BACKLOG_PATH" 2>/dev/null \
     | sed 's/^E//' \
     | sort -n | tail -1)" || true
-  echo "${result:-0}"
+  # Force base-10 so a leading-zero value never octal-parses in a caller's $(( )).
+  echo "$(( 10#${result:-0} ))"
 }
 
 _backlog_max_story() {
@@ -195,7 +196,9 @@ _backlog_max_story() {
   result="$(grep -oE "${prefix}S[0-9]+" "$BACKLOG_PATH" 2>/dev/null \
     | grep -oE '[0-9]+$' \
     | sort -n | tail -1)" || true
-  echo "${result:-0}"
+  # Force base-10: story numbers are zero-padded (S08/S09 → "08"/"09"), which
+  # bash arithmetic would otherwise reject as invalid octal.
+  echo "$(( 10#${result:-0} ))"
 }
 
 _ledger_max_epic() {
