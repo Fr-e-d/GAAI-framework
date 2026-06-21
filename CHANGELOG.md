@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - fix: stop auto-merge failure commit loop
+- fix: stop auto-merge failure commit loop
 - fix: address Tier-2 review on allocator remote scan
 - fix: allocator scans remote branches for in-flight IDs
 - chore: commit pending framework writes to clear working-tree drift
