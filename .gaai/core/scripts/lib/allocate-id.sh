@@ -14,10 +14,11 @@
 #   GAAI_SCAN_REMOTE         scan remote branches for in-flight IDs (default: 1; 0/false/no/off disables)
 #   GAAI_REMOTE              remote name to scan (default: origin)
 #   GAAI_REMOTE_TIMEOUT      seconds to bound the remote scan before falling back (default: 5)
+#   GAAI_RESERVATION_BACKEND reservation backend (default: git-cas; valid: git-cas)
 #
 # The allocator serialises under an exclusive flock (Linux) or mkdir-spin (macOS) and computes
-# next = max(backlog, ledger, remote-refs) + 1, writes a reservation row before returning, and
-# prunes stale/landed entries on each run.
+# next = max(backlog, ledger, remote-refs, CAS-reservation-ref) + 1, writes a reservation row
+# before returning, and prunes stale/landed entries on each run.
 #
 # Cross-worktree visibility: the ledger lives under ~/.gaai/reservations/ (outside any git
 # worktree) and is keyed by a 12-char hash of the repo root path, so all local worktrees of
@@ -30,6 +31,14 @@
 # token found into the max. The same scan protects a still-on-a-branch ledger entry from being
 # TTL-pruned. This augments — it does not replace — the ledger: a concurrent session that has
 # not yet pushed a branch on another host remains invisible (irreducible without a shared backend).
+#
+# When GAAI_RESERVATION_BACKEND=git-cas (the default), reservations are additionally written to
+# refs/gaai/reservations on origin via a compare-and-swap push (plain non-force push; the
+# non-fast-forward rejection IS the lease), closing the residual cross-host/unpushed-branch gap.
+# A CAS-pushed reservation is confirmed; an offline reservation is unconfirmed (explicit stderr
+# warning) and is reconciled at the next successful push. Remote I/O is bounded by
+# GAAI_REMOTE_TIMEOUT and performed outside the local flock so a slow remote never stalls local
+# sessions.
 #
 # Graceful degradation: if flock/mkdir both fail, allocation proceeds with a stderr warning. If
 # the ledger directory is unwritable, proceeds with backlog-only max and warns. If the remote
@@ -52,19 +61,22 @@ Env vars (all optional):
   GAAI_BACKLOG_PATH        Path to active.backlog.yaml (default: auto-detect from git root)
   GAAI_RESERVATION_LEDGER  Ledger file (default: ~/.gaai/reservations/<repo_id>.tsv)
   GAAI_RESERVATION_TTL_H   Abandoned-reservation TTL in hours (default: 72)
-  GAAI_SCAN_REMOTE         Scan remote branches for in-flight IDs (default: 1; 0/false/no/off off)
-  GAAI_REMOTE              Remote name to scan (default: origin)
-  GAAI_REMOTE_TIMEOUT      Seconds to bound the remote scan before fallback (default: 5)
+  GAAI_SCAN_REMOTE         Scan remote for in-flight IDs and enable CAS (default: 1; 0/false/no/off off)
+  GAAI_REMOTE              Remote name (default: origin)
+  GAAI_REMOTE_TIMEOUT      Seconds to bound remote operations before fallback (default: 5)
+  GAAI_RESERVATION_BACKEND Reservation backend (default: git-cas; valid: git-cas)
 
 Ledger format (TSV):
   # GAAI ID reservation ledger — do not edit manually
   E221        epic    <epoch_secs>
   {EPIC}S{NN} story   <epoch_secs>
 
-The allocator computes next = max(highest-in-backlog, highest-in-ledger, highest-on-remote) + 1,
-writes the new reservation to the ledger, then prints the ID on stdout. The remote source
-serialises against IDs that live on pushed-but-unmerged branches on other hosts; the ledger
-serialises local (not-yet-pushed) concurrent sessions on this host.
+The allocator computes next = max(highest-in-backlog, highest-in-ledger, highest-on-remote,
+highest-in-CAS-ref) + 1, writes the new reservation to the ledger, performs a compare-and-swap
+push to refs/gaai/reservations on origin (git-cas backend), then prints the ID on stdout.
+The remote branch source serialises against IDs on pushed-but-unmerged branches on other hosts;
+the CAS ref serialises against IDs reserved but not yet pushed as branches on other hosts;
+the ledger serialises local (not-yet-pushed) concurrent sessions on this host.
 EOF
   exit 0
 fi
@@ -111,6 +123,21 @@ LEDGER_FILE="${GAAI_RESERVATION_LEDGER:-${HOME}/.gaai/reservations/${REPO_ID}.ts
 LOCK_FILE="${LEDGER_FILE}.lock"
 LOCK_DIR="${LOCK_FILE}.d"
 TTL_H="${GAAI_RESERVATION_TTL_H:-72}"
+
+# ── Reservation backend seam ──────────────────────────────────────────────────
+# GAAI_RESERVATION_BACKEND selects the cross-host coordination backend.
+# Valid values: git-cas (default). An unknown value fails immediately with a clear error.
+GAAI_RESERVATION_BACKEND="${GAAI_RESERVATION_BACKEND:-git-cas}"
+case "$GAAI_RESERVATION_BACKEND" in
+  git-cas) : ;;
+  *)
+    echo "allocate-id.sh: unknown GAAI_RESERVATION_BACKEND '${GAAI_RESERVATION_BACKEND}'. Valid options: git-cas" >&2
+    exit 1
+    ;;
+esac
+
+GIT_CAS_REF="refs/gaai/reservations"
+GIT_CAS_FILE="reservations.tsv"
 
 # ── Remote-scan configuration ─────────────────────────────────────────────────
 GAAI_REMOTE="${GAAI_REMOTE:-origin}"
@@ -178,6 +205,73 @@ if [[ "$SCAN_REMOTE" == "true" ]] && git remote get-url "$GAAI_REMOTE" >/dev/nul
     REMOTE_HEADS_RAW=""
     echo "allocate-id.sh: WARNING: remote scan of '${GAAI_REMOTE}' failed/timed out after ${REMOTE_TIMEOUT}s — falling back to backlog+ledger max; an unmerged ID reserved on another host may collide" >&2
   fi
+fi
+
+# ── Fetch CAS reservation ref from remote (outside lock — runs before flock) ─────
+# Sets CAS_CONTENT as a side-effect. Uses force-fetch (+refspec) so a failed CAS push from a
+# prior attempt does not leave the local ref ahead of the remote, blocking subsequent fetches.
+# Returns 0 on success (ref exists and was fetched), 1 on timeout/network error/missing ref.
+_fetch_cas_ref() {
+  local tobin=""
+  if   command -v timeout  >/dev/null 2>&1; then tobin="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then tobin="gtimeout"; fi
+
+  if [[ -n "$tobin" ]]; then
+    if "$tobin" "${REMOTE_TIMEOUT}s" \
+        git fetch "$GAAI_REMOTE" "+${GIT_CAS_REF}:${GIT_CAS_REF}" 2>/dev/null; then
+      CAS_CONTENT="$(git show "${GIT_CAS_REF}:${GIT_CAS_FILE}" 2>/dev/null || true)"
+      return 0
+    fi
+    return 1
+  fi
+
+  # Fallback: background git with PID-bounded timeout (no timeout(1) available)
+  git fetch "$GAAI_REMOTE" "+${GIT_CAS_REF}:${GIT_CAS_REF}" 2>/dev/null &
+  local pid=$! waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 1
+    waited=$(( waited + 1 ))
+    if (( waited >= REMOTE_TIMEOUT )); then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 1
+    fi
+  done
+  local rc=0
+  wait "$pid" 2>/dev/null || rc=$?
+  if (( rc != 0 )); then return 1; fi
+  CAS_CONTENT="$(git show "${GIT_CAS_REF}:${GIT_CAS_FILE}" 2>/dev/null || true)"
+  return 0
+}
+
+# Extract the highest epic number from the CAS reservation content (no I/O).
+_cas_max_epic() {
+  [[ -n "$CAS_CONTENT" ]] || { echo 0; return; }
+  printf '%s\n' "$CAS_CONTENT" | awk -F'\t' '
+    $1 !~ /^#/ && $2 == "epic" {
+      sub(/^E/, "", $1); if ($1+0 > max) max = $1+0
+    }
+    END { print max+0 }' 2>/dev/null || echo 0
+}
+
+# Extract the highest story number for a given epic prefix from the CAS reservation content.
+_cas_max_story() {
+  local prefix="$1"
+  [[ -n "$CAS_CONTENT" ]] || { echo 0; return; }
+  printf '%s\n' "$CAS_CONTENT" | awk -F'\t' -v p="$prefix" '
+    $1 !~ /^#/ && $2 == "story" && $1 ~ ("^"p"S[0-9]+$") {
+      sub("^"p"S0*", "", $1); if ($1+0 > max) max = $1+0
+    }
+    END { print max+0 }' 2>/dev/null || echo 0
+}
+
+# Fetch CAS ref before the lock. Gated on SCAN_REMOTE (both are remote operations; setting
+# GAAI_SCAN_REMOTE=0 disables the branch scan AND the CAS to keep isolated / offline runs hermetic).
+# Failure is silent — push will detect it via the unconfirmed path.
+CAS_CONTENT=""
+if [[ "$GAAI_RESERVATION_BACKEND" == "git-cas" && "$SCAN_REMOTE" == "true" ]] && \
+    git remote get-url "$GAAI_REMOTE" >/dev/null 2>&1; then
+  _fetch_cas_ref || true
 fi
 
 # ── Ensure ledger directory exists ────────────────────────────────────────────
@@ -349,22 +443,24 @@ if [[ "$MODE" == "epic" ]]; then
   MAX_BACKLOG="$(_backlog_max_epic)"
   MAX_LEDGER="$(_ledger_max_epic)"
   MAX_REMOTE="$(_remote_max_epic)"
-  MAX_BACKLOG="${MAX_BACKLOG:-0}"
-  MAX_LEDGER="${MAX_LEDGER:-0}"
-  MAX_REMOTE="${MAX_REMOTE:-0}"
+  MAX_CAS="$(_cas_max_epic)"
+  MAX_BACKLOG="${MAX_BACKLOG:-0}"; MAX_LEDGER="${MAX_LEDGER:-0}"
+  MAX_REMOTE="${MAX_REMOTE:-0}"; MAX_CAS="${MAX_CAS:-0}"
   MAX=$(( MAX_BACKLOG > MAX_LEDGER ? MAX_BACKLOG : MAX_LEDGER ))
   MAX=$(( MAX > MAX_REMOTE ? MAX : MAX_REMOTE ))
+  MAX=$(( MAX > MAX_CAS ? MAX : MAX_CAS ))
   NEXT_NUM=$(( MAX + 1 ))
   NEW_ID="E${NEXT_NUM}"
 else
   MAX_BACKLOG="$(_backlog_max_story "$EPIC_PREFIX")"
   MAX_LEDGER="$(_ledger_max_story "$EPIC_PREFIX")"
   MAX_REMOTE="$(_remote_max_story "$EPIC_PREFIX")"
-  MAX_BACKLOG="${MAX_BACKLOG:-0}"
-  MAX_LEDGER="${MAX_LEDGER:-0}"
-  MAX_REMOTE="${MAX_REMOTE:-0}"
+  MAX_CAS="$(_cas_max_story "$EPIC_PREFIX")"
+  MAX_BACKLOG="${MAX_BACKLOG:-0}"; MAX_LEDGER="${MAX_LEDGER:-0}"
+  MAX_REMOTE="${MAX_REMOTE:-0}"; MAX_CAS="${MAX_CAS:-0}"
   MAX=$(( MAX_BACKLOG > MAX_LEDGER ? MAX_BACKLOG : MAX_LEDGER ))
   MAX=$(( MAX > MAX_REMOTE ? MAX : MAX_REMOTE ))
+  MAX=$(( MAX > MAX_CAS ? MAX : MAX_CAS ))
   NEXT_NUM=$(( MAX + 1 ))
   NEXT_PADDED="$(printf '%02d' "$NEXT_NUM")"
   NEW_ID="${EPIC_PREFIX}S${NEXT_PADDED}"
@@ -380,6 +476,110 @@ if [[ "$LEDGER_WRITABLE" == "true" ]]; then
   } >> "$LEDGER_FILE" 2>/dev/null || {
     echo "allocate-id.sh: WARNING: cannot write reservation to ${LEDGER_FILE}" >&2
   }
+fi
+
+# ── Release lock before CAS I/O (remote must not stall local sessions) ────────
+_release_lock
+
+# ── git-CAS push (outside lock — serialises cross-host reservations) ──────────
+# Mechanism: plain non-force push to refs/gaai/reservations; the non-fast-forward rejection
+# IS the lease. On NFF loss, re-fetch CAS content, recompute NEW_ID, retry up to 3 times.
+# Confirmed = CAS push succeeded. Unconfirmed = all retries exhausted (warns + reconciles at
+# next successful push). No --force-with-lease: the plain push IS the CAS.
+CAS_CONFIRMED=false
+CAS_ATTEMPT=0
+CAS_MAX_RETRIES=3
+
+if [[ "$GAAI_RESERVATION_BACKEND" == "git-cas" && "$SCAN_REMOTE" == "true" ]] && \
+    git remote get-url "$GAAI_REMOTE" >/dev/null 2>&1; then
+
+  while (( CAS_ATTEMPT < CAS_MAX_RETRIES )); do
+
+    # Build blob: existing CAS content (piped directly to preserve newlines) + new row.
+    # Using a process substitution pipe avoids the $() trailing-newline stripping issue.
+    _cas_new_blob="$({
+      git show "${GIT_CAS_REF}:${GIT_CAS_FILE}" 2>/dev/null || true
+      printf '%s\t%s\t%s\n' "$NEW_ID" "$MODE" "$NOW_EPOCH"
+    } | git hash-object -w --stdin 2>/dev/null)" || {
+      CAS_ATTEMPT=$(( CAS_ATTEMPT + 1 ))
+      continue
+    }
+
+    # Build tree: one blob entry. TAB between SHA and filename is required by git mktree.
+    _cas_new_tree="$(printf '100644 blob %s\t%s\n' "$_cas_new_blob" "$GIT_CAS_FILE" \
+      | git mktree 2>/dev/null)" || {
+      CAS_ATTEMPT=$(( CAS_ATTEMPT + 1 ))
+      continue
+    }
+
+    # Get current parent (empty if ref does not exist yet — produces a root commit).
+    # --verify ensures output is a real OID; plain rev-parse echoes the input when unresolvable.
+    _cas_parent="$(git rev-parse --verify "$GIT_CAS_REF" 2>/dev/null || true)"
+
+    # Build commit with stable author env so no identity configuration is required.
+    if [[ -n "$_cas_parent" ]]; then
+      _cas_new_commit="$(
+        GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-gaai}" \
+        GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-gaai@localhost}" \
+        GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-gaai}" \
+        GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-gaai@localhost}" \
+        GIT_AUTHOR_DATE="${NOW_EPOCH} +0000" \
+        GIT_COMMITTER_DATE="${NOW_EPOCH} +0000" \
+        git commit-tree -m "reserve ${NEW_ID}" -p "$_cas_parent" "$_cas_new_tree" 2>/dev/null
+      )" || { CAS_ATTEMPT=$(( CAS_ATTEMPT + 1 )); continue; }
+    else
+      _cas_new_commit="$(
+        GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-gaai}" \
+        GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-gaai@localhost}" \
+        GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-gaai}" \
+        GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-gaai@localhost}" \
+        GIT_AUTHOR_DATE="${NOW_EPOCH} +0000" \
+        GIT_COMMITTER_DATE="${NOW_EPOCH} +0000" \
+        git commit-tree -m "reserve ${NEW_ID}" "$_cas_new_tree" 2>/dev/null
+      )" || { CAS_ATTEMPT=$(( CAS_ATTEMPT + 1 )); continue; }
+    fi
+
+    # Update local ref to point at our commit.
+    git update-ref "$GIT_CAS_REF" "$_cas_new_commit" 2>/dev/null || {
+      CAS_ATTEMPT=$(( CAS_ATTEMPT + 1 ))
+      continue
+    }
+
+    # Plain non-force push: NFF rejection = another session won the race → retry.
+    if git push "$GAAI_REMOTE" "$GIT_CAS_REF" 2>/dev/null; then
+      CAS_CONFIRMED=true
+      break
+    fi
+
+    # NFF loss: force-fetch to reset local ref to winner's state, recompute NEW_ID.
+    CAS_CONTENT=""
+    _fetch_cas_ref || true
+
+    if [[ "$MODE" == "epic" ]]; then
+      _cas_retry_max="$(_cas_max_epic)"
+      _cas_retry_max="${_cas_retry_max:-0}"
+      _cas_floor=$(( MAX > _cas_retry_max ? MAX : _cas_retry_max ))
+      NEXT_NUM=$(( _cas_floor + 1 ))
+      NEW_ID="E${NEXT_NUM}"
+    else
+      _cas_retry_max="$(_cas_max_story "$EPIC_PREFIX")"
+      _cas_retry_max="${_cas_retry_max:-0}"
+      _cas_floor=$(( MAX > _cas_retry_max ? MAX : _cas_retry_max ))
+      NEXT_NUM=$(( _cas_floor + 1 ))
+      NEW_ID="${EPIC_PREFIX}S$(printf '%02d' "$NEXT_NUM")"
+    fi
+
+    # Append updated ID to local ledger so concurrent local sessions see it.
+    if [[ "$LEDGER_WRITABLE" == "true" ]]; then
+      printf '%s\t%s\t%s\n' "$NEW_ID" "$MODE" "$NOW_EPOCH" >> "$LEDGER_FILE" 2>/dev/null || true
+    fi
+
+    CAS_ATTEMPT=$(( CAS_ATTEMPT + 1 ))
+  done
+
+  if [[ "$CAS_CONFIRMED" == "false" ]]; then
+    echo "allocate-id.sh: WARNING: git-CAS reservation UNCONFIRMED — ID ${NEW_ID} may collide with a concurrent unmerged reservation on another host. Reconciliation (re-allocation on detected collision) will occur at the next successful push." >&2
+  fi
 fi
 
 # ── Output ────────────────────────────────────────────────────────────────────

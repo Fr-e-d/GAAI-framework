@@ -292,6 +292,69 @@ else
   _fail "Expected E1 (E2E-* must not seed the epic max), got: ${R7}"
 fi
 
+# ── Test 8: AC6 — git-CAS concurrency (hermetic local bare remote) ───────────
+echo "Test 8: AC6 — git-CAS concurrent reservations get distinct IDs"
+
+T8_BARE="${WORK}/t8-remote.git"
+T8_SEED="${WORK}/t8-seed"
+T8_WORK_A="${WORK}/t8-work-a"
+T8_WORK_B="${WORK}/t8-work-b"
+
+git init -q --bare "$T8_BARE"
+git init -q "$T8_SEED"
+(
+  cd "$T8_SEED"
+  git config user.email t@example.test
+  git config user.name tester
+  git commit -q --allow-empty -m init
+  git remote add origin "$T8_BARE"
+  git push -q origin HEAD
+) >/dev/null 2>&1
+
+git clone -q "$T8_BARE" "$T8_WORK_A" >/dev/null 2>&1
+git clone -q "$T8_BARE" "$T8_WORK_B" >/dev/null 2>&1
+
+T8_EMPTY="${WORK}/t8-empty.yaml"
+printf '# empty\n' > "$T8_EMPTY"
+T8_OUT_A="${WORK}/t8a.txt"
+T8_OUT_B="${WORK}/t8b.txt"
+
+(
+  cd "$T8_WORK_A"
+  GAAI_SCAN_REMOTE=1 GAAI_RESERVATION_BACKEND=git-cas \
+  GAAI_BACKLOG_PATH="$T8_EMPTY" GAAI_RESERVATION_LEDGER="${WORK}/t8a.tsv" \
+    "$ALLOCATOR" epic > "$T8_OUT_A" 2>/dev/null
+) &
+PID_A=$!
+
+(
+  cd "$T8_WORK_B"
+  GAAI_SCAN_REMOTE=1 GAAI_RESERVATION_BACKEND=git-cas \
+  GAAI_BACKLOG_PATH="$T8_EMPTY" GAAI_RESERVATION_LEDGER="${WORK}/t8b.tsv" \
+    "$ALLOCATOR" epic > "$T8_OUT_B" 2>/dev/null
+) &
+PID_B=$!
+
+wait "$PID_A" "$PID_B" 2>/dev/null || true
+
+T8_ID_A="$(cat "$T8_OUT_A" 2>/dev/null || echo "")"
+T8_ID_B="$(cat "$T8_OUT_B" 2>/dev/null || echo "")"
+
+if [[ -n "$T8_ID_A" && -n "$T8_ID_B" && "$T8_ID_A" != "$T8_ID_B" ]]; then
+  _pass "CAS concurrent: A=${T8_ID_A}, B=${T8_ID_B} (distinct)"
+else
+  _fail "CAS concurrent: A='${T8_ID_A}' B='${T8_ID_B}' — expected distinct non-empty IDs"
+fi
+
+# Verify refs/gaai/reservations was pushed to the bare remote after both runs.
+T8_CAS_ON_REMOTE="$(cd "$T8_WORK_A" && \
+  git ls-remote origin refs/gaai/reservations 2>/dev/null | awk '{print $1}' || echo "")"
+if [[ -n "$T8_CAS_ON_REMOTE" ]]; then
+  _pass "refs/gaai/reservations present on remote (OID=${T8_CAS_ON_REMOTE:0:12}...)"
+else
+  _fail "refs/gaai/reservations absent from remote after two CAS allocations"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "────────────────────────────────────────"
