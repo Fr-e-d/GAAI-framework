@@ -1937,7 +1937,10 @@ _auto_resolve_pr_conflicts() {
     local conflicting_files_raw
     conflicting_files_raw=$(git -C "$worktree_path" diff --name-only --diff-filter=U 2>/dev/null || echo "")
     local conflicting_files_count
-    conflicting_files_count=$(printf '%s\n' "$conflicting_files_raw" | grep -c . 2>/dev/null || echo 0)
+    conflicting_files_count=$(printf '%s\n' "$conflicting_files_raw" | grep -c . 2>/dev/null || true)
+    if [[ ! "$conflicting_files_count" =~ ^[0-9]+$ ]]; then
+      conflicting_files_count=0
+    fi
 
     echo "[INFO] ${story_id} auto-resolve attempt=${resolve_attempt}/${resolve_max} pr=${pr_url} conflicting_files=${conflicting_files_count}"
     _emit_auto_resolve_routing_record "$story_id" "$trace_id" \
@@ -2726,6 +2729,7 @@ ${qa_snippet}"
           else
             echo "[ERROR] ${story_id} handle_commit_phase: gh pr merge --auto failed after resolve: ${resolve_merge_out: -200} [class=AUTO_MERGE_FAILED]"
             _emit_commit_routing_record "$story_id" "$trace_id" "error" "AUTO_MERGE_FAILED" "0" "$pr_url" "false"
+            "$SCHEDULER" --set-phase-status "$story_id" escalated "$BACKLOG_FILE" 2>/dev/null || true
             return 1
           fi
         else
@@ -2738,6 +2742,7 @@ ${qa_snippet}"
         # Non-conflict failure (network, rate-limit, branch-protection) — original path unchanged
         echo "[ERROR] ${story_id} handle_commit_phase: gh pr merge --auto failed after ${merge_max} attempts [class=AUTO_MERGE_FAILED]"
         _emit_commit_routing_record "$story_id" "$trace_id" "error" "AUTO_MERGE_FAILED" "0" "$pr_url" "false"
+        "$SCHEDULER" --set-phase-status "$story_id" escalated "$BACKLOG_FILE" 2>/dev/null || true
         return 1
       fi
     fi

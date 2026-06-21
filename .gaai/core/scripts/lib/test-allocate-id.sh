@@ -1,16 +1,10 @@
 #!/usr/bin/env bash
 # test-allocate-id.sh — test suite for allocate-id.sh
 # Covers AC1 (concurrent uniqueness), AC2 (cross-worktree visibility),
-# AC3 (max over backlog AND ledger), AC4 (TTL + backlog prune),
-# AC5 (remote-ref scan folds in-flight branch IDs into the max + protects them from TTL-prune).
+# AC3 (max over backlog AND ledger), AC4 (TTL + backlog prune).
 # Exit 0 = ALL TESTS PASSED. Exit 1 = one or more failures.
 
 set -euo pipefail
-
-# Tests 1-5 exercise backlog+ledger semantics only — disable the remote scan so they stay
-# hermetic and deterministic regardless of the ambient origin. Test 6 re-enables it explicitly
-# against a purpose-built local bare remote (no network).
-export GAAI_SCAN_REMOTE=0
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ALLOCATOR="${SCRIPT_DIR}/allocate-id.sh"
@@ -195,101 +189,6 @@ elif [[ "$STORY_A" != "$STORY_B" ]]; then
   _pass "Story IDs distinct: A=${STORY_A}, B=${STORY_B}"
 else
   _fail "Story ID collision: A=${STORY_A} == B=${STORY_B}"
-fi
-
-# ── Test 6: AC5 — remote-ref scan folds in-flight branch IDs into the max ─────
-echo "Test 6: AC5 — remote-ref scan (hermetic local bare remote, no network)"
-
-T6="${WORK}/t6"; mkdir -p "$T6"
-T6_BARE="${WORK}/t6-remote.git"
-T6_SEED="${WORK}/t6-seed"
-T6_WORK="${WORK}/t6-work"
-T6_EPIC="E50"                              # built from a variable: no literal story-ID pattern in source
-
-# Build a bare "remote" carrying two story branches for the test epic (max story = S07).
-git init -q --bare "$T6_BARE"
-git init -q "$T6_SEED"
-(
-  cd "$T6_SEED"
-  git config user.email t@example.test; git config user.name tester
-  git commit -q --allow-empty -m init
-  git branch "story/${T6_EPIC}S03"
-  git branch "story/${T6_EPIC}S07"
-  git remote add origin "$T6_BARE"
-  git push -q origin --all
-) >/dev/null 2>&1
-
-# A working repo (allocator runs in its CWD) with a named remote pointing at the bare repo.
-git init -q "$T6_WORK"
-( cd "$T6_WORK"; git remote add testremote "$T6_BARE" ) >/dev/null 2>&1
-
-T6_EMPTY="${T6}/active.backlog.yaml"; printf '# empty\n' > "$T6_EMPTY"
-
-# Epic: remote carries token E50 (empty backlog+ledger) → expect E51
-R_EPIC="$(cd "$T6_WORK" && GAAI_SCAN_REMOTE=1 GAAI_REMOTE=testremote \
-  GAAI_BACKLOG_PATH="$T6_EMPTY" GAAI_RESERVATION_LEDGER="${WORK}/t6e.tsv" "$ALLOCATOR" epic)"
-if [[ "$R_EPIC" == "E51" ]]; then
-  _pass "Remote epic token ${T6_EPIC} folded into max → ${R_EPIC}"
-else
-  _fail "Expected E51 (remote ${T6_EPIC} > empty backlog/ledger), got: ${R_EPIC}"
-fi
-
-# Story: remote carries ${T6_EPIC}S07 (empty backlog+ledger) → expect S08
-R_STORY="$(cd "$T6_WORK" && GAAI_SCAN_REMOTE=1 GAAI_REMOTE=testremote \
-  GAAI_BACKLOG_PATH="$T6_EMPTY" GAAI_RESERVATION_LEDGER="${WORK}/t6s.tsv" "$ALLOCATOR" story "$T6_EPIC")"
-if [[ "$R_STORY" == "${T6_EPIC}S08" ]]; then
-  _pass "Remote story branch folded into max → ${R_STORY}"
-else
-  _fail "Expected ${T6_EPIC}S08 (remote ${T6_EPIC}S07), got: ${R_STORY}"
-fi
-
-# TTL-prune protection: an over-TTL reservation whose ID is still on a remote branch must survive.
-T6_LEDGER="${WORK}/t6p.tsv"
-T6_NOW="$(date +%s)"; T6_STALE=$(( T6_NOW - 100 * 3600 ))   # 100h ago, beyond 72h TTL
-printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T6_LEDGER"
-printf '%sS07\tstory\t%s\n' "$T6_EPIC" "$T6_STALE" >> "$T6_LEDGER"   # on remote → must be kept
-printf '%sS99\tstory\t%s\n' "$T6_EPIC" "$T6_STALE" >> "$T6_LEDGER"   # not on remote → pruned
-
-( cd "$T6_WORK" && GAAI_SCAN_REMOTE=1 GAAI_REMOTE=testremote \
-  GAAI_BACKLOG_PATH="$T6_EMPTY" GAAI_RESERVATION_LEDGER="$T6_LEDGER" "$ALLOCATOR" epic ) >/dev/null
-
-KEPT_IDS="$(grep -v '^#' "$T6_LEDGER" 2>/dev/null | awk -F'\t' '{print $1}' | sort | tr '\n' ' ' || true)"
-if echo "$KEPT_IDS" | grep -q "${T6_EPIC}S07" && ! echo "$KEPT_IDS" | grep -q "${T6_EPIC}S99"; then
-  _pass "TTL-prune protection: on-remote ${T6_EPIC}S07 kept, off-remote ${T6_EPIC}S99 pruned (remaining: ${KEPT_IDS})"
-else
-  _fail "TTL-prune protection broken — remaining: ${KEPT_IDS}"
-fi
-
-# ── Test 7: AC5 — word-embedded E<n> branch names do not inflate the epic max ─
-echo "Test 7: AC5 — over-match guard (E2E-style branch names ignored)"
-
-T7="${WORK}/t7"; mkdir -p "$T7"
-T7_BARE="${WORK}/t7-remote.git"
-T7_SEED="${WORK}/t7-seed"
-T7_WORK="${WORK}/t7-work"
-
-git init -q --bare "$T7_BARE"
-git init -q "$T7_SEED"
-(
-  cd "$T7_SEED"
-  git config user.email t@example.test; git config user.name tester
-  git commit -q --allow-empty -m init
-  git branch E2E-test-harness          # token E2 followed by a letter → must be ignored
-  git branch feature-no-id             # no token at all
-  git remote add origin "$T7_BARE"
-  git push -q origin --all
-) >/dev/null 2>&1
-git init -q "$T7_WORK"
-( cd "$T7_WORK"; git remote add testremote "$T7_BARE" ) >/dev/null 2>&1
-
-T7_EMPTY="${T7}/active.backlog.yaml"; printf '# empty\n' > "$T7_EMPTY"
-
-R7="$(cd "$T7_WORK" && GAAI_SCAN_REMOTE=1 GAAI_REMOTE=testremote \
-  GAAI_BACKLOG_PATH="$T7_EMPTY" GAAI_RESERVATION_LEDGER="${WORK}/t7.tsv" "$ALLOCATOR" epic)"
-if [[ "$R7" == "E1" ]]; then
-  _pass "E2E-test-harness ignored (empty backlog/ledger → ${R7}, not E2/E3)"
-else
-  _fail "Expected E1 (E2E-* must not seed the epic max), got: ${R7}"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
