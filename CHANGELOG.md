@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: address Tier-2 review on allocator remote scan
 - fix: allocator scans remote branches for in-flight IDs
 - chore: commit pending framework writes to clear working-tree drift
 
