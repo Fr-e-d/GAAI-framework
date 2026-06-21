@@ -5,6 +5,7 @@
 # Covers:
 #   T1 SUCCESS path — generated files + backlog auto-section resolved, push OK
 #   T2 ABORT path — hand-coded .ts conflict triggers ABORT + merge --abort
+#   T3 ZERO-CONFLICT path — empty conflict list stays numeric and resolves
 #
 # Run from repo root: bash .gaai/core/scripts/tests/daemon-dispatch-auto-resolve.test.sh
 # Exit 0 = all tests pass. Exit 1 = at least one failure.
@@ -225,6 +226,34 @@ YAML
   cd - > /dev/null
 }
 
+setup_zero_conflict_fixture() {
+  local fixture_dir="$1"
+
+  rm -rf "$fixture_dir"
+  mkdir -p "$fixture_dir"
+
+  git init --bare "$fixture_dir/origin.git" 2>/dev/null
+  git clone "$fixture_dir/origin.git" "$fixture_dir/worktree" 2>/dev/null
+  cd "$fixture_dir/worktree"
+
+  git config user.email "test@gaa.test" 2>/dev/null
+  git config user.name "Test" 2>/dev/null
+  echo "initial" > README.md
+  git add . && git commit -m "initial" 2>/dev/null
+  git branch -M main 2>/dev/null
+  git push origin main 2>/dev/null
+
+  git checkout -b staging 2>/dev/null
+  git push origin staging 2>/dev/null
+
+  git checkout -b "story/$STORY_ID" 2>/dev/null
+  echo "story" > story.txt
+  git add . && git commit -m "story changes" 2>/dev/null
+  git push origin "story/$STORY_ID" 2>/dev/null
+
+  cd - > /dev/null
+}
+
 # ── Stub gh ───────────────────────────────────────────────────────────────────
 
 setup_gh_stub() {
@@ -361,6 +390,47 @@ fi
 cd - > /dev/null
 
 # Cleanup
+export PATH="${PATH#"$STUB_DIR:"}"
+rm -rf "$FIXTURE_DIR"
+
+# ── T3: ZERO-CONFLICT path ───────────────────────────────────────────────────
+
+echo ""
+echo "=== T3: ZERO-CONFLICT path (empty conflict list remains numeric) ==="
+
+FIXTURE_DIR="/tmp/gaai-auto-resolve-test-zero-conflict"
+rm -f "$ROUTING_LOG"
+setup_zero_conflict_fixture "$FIXTURE_DIR"
+
+WT_PATH="$FIXTURE_DIR/worktree"
+BRANCH="story/$STORY_ID"
+
+STUB_DIR="$FIXTURE_DIR/stubs"
+setup_gh_stub "$STUB_DIR"
+export PATH="$STUB_DIR:$PATH"
+
+result=0
+_auto_resolve_pr_conflicts "https://github.com/test/pr/3" "$BRANCH" "$WT_PATH" "$STORY_ID" "$TRACE_ID" || result=$?
+
+if [[ "$result" -eq 0 ]]; then
+  pass "T3: _auto_resolve_pr_conflicts returned 0 (ZERO-CONFLICT)"
+else
+  fail "T3: _auto_resolve_pr_conflicts returned $result, expected 0"
+fi
+
+detected_line=$(grep "auto_merge_conflict_detected" "$ROUTING_LOG" | tail -1)
+if echo "$detected_line" | grep -q '"conflicting_files_count":0'; then
+  pass "T3: conflicting_files_count=0 emitted as numeric zero"
+else
+  fail "T3: conflicting_files_count not numeric zero in: $(echo "$detected_line" | head -c 200)"
+fi
+
+if grep -q "syntax error in expression" "$ROUTING_LOG" 2>/dev/null; then
+  fail "T3: shell arithmetic syntax error leaked into routing log"
+else
+  pass "T3: no shell arithmetic syntax error"
+fi
+
 export PATH="${PATH#"$STUB_DIR:"}"
 rm -rf "$FIXTURE_DIR"
 
