@@ -1378,6 +1378,10 @@ except Exception:
         if _recovery_set_status "$sid" "done" "reconcile-done"; then
           ((reconciled++))
         fi
+        # Secondary triage safety-net: fires only if primary was skipped (AC2, AC3).
+        if declare -f _run_triage_for_story >/dev/null 2>&1; then
+          _run_triage_for_story "$sid" 2>/dev/null || true
+        fi
         ;;
       failed)
         rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
@@ -2413,6 +2417,13 @@ RECONCILE_EOF
   fi
 
   log "${GREEN}[PR-WATCHER] $sid : merged at $merged_at to ${TARGET_BRANCH:-staging}, reconciled to status:done + worktree/branch cleaned (or .cleanup-pending.audit emitted)${NC}"
+
+  # Secondary triage safety-net: fires only if primary (handle_commit_phase) was skipped.
+  # Single-fire marker in _run_triage_for_story prevents double-fire. (AC2, AC3)
+  if declare -f _run_triage_for_story >/dev/null 2>&1; then
+    _run_triage_for_story "$sid" 2>/dev/null || true
+  fi
+
   return 0
 }
 
