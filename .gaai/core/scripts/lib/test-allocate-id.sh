@@ -260,6 +260,38 @@ else
   _fail "TTL-prune protection broken — remaining: ${KEPT_IDS}"
 fi
 
+# ── Test 7: AC5 — word-embedded E<n> branch names do not inflate the epic max ─
+echo "Test 7: AC5 — over-match guard (E2E-style branch names ignored)"
+
+T7="${WORK}/t7"; mkdir -p "$T7"
+T7_BARE="${WORK}/t7-remote.git"
+T7_SEED="${WORK}/t7-seed"
+T7_WORK="${WORK}/t7-work"
+
+git init -q --bare "$T7_BARE"
+git init -q "$T7_SEED"
+(
+  cd "$T7_SEED"
+  git config user.email t@example.test; git config user.name tester
+  git commit -q --allow-empty -m init
+  git branch E2E-test-harness          # token E2 followed by a letter → must be ignored
+  git branch feature-no-id             # no token at all
+  git remote add origin "$T7_BARE"
+  git push -q origin --all
+) >/dev/null 2>&1
+git init -q "$T7_WORK"
+( cd "$T7_WORK"; git remote add testremote "$T7_BARE" ) >/dev/null 2>&1
+
+T7_EMPTY="${T7}/active.backlog.yaml"; printf '# empty\n' > "$T7_EMPTY"
+
+R7="$(cd "$T7_WORK" && GAAI_SCAN_REMOTE=1 GAAI_REMOTE=testremote \
+  GAAI_BACKLOG_PATH="$T7_EMPTY" GAAI_RESERVATION_LEDGER="${WORK}/t7.tsv" "$ALLOCATOR" epic)"
+if [[ "$R7" == "E1" ]]; then
+  _pass "E2E-test-harness ignored (empty backlog/ledger → ${R7}, not E2/E3)"
+else
+  _fail "Expected E1 (E2E-* must not seed the epic max), got: ${R7}"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "────────────────────────────────────────"

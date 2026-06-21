@@ -128,12 +128,32 @@ esac
 REMOTE_HEADS_RAW=""
 
 # Bounded `git ls-remote --heads <remote>` — prints "refs/heads/..." lines on success, returns
-# non-zero on network failure/timeout. pipefail (inherited) makes a git failure propagate even
-# though awk would otherwise mask it, so an empty-but-failed scan is never mistaken for "no branches".
+# non-zero on network failure/timeout. Prefer timeout(1)/gtimeout(1) when present: it kills the
+# whole transport process group on expiry, so no orphaned git/transport-helper lingers. Otherwise
+# fall back to backgrounding git DIRECTLY (not inside a pipe-subshell) so the bounded `kill "$pid"`
+# targets the git process itself; awk runs afterwards in the foreground, leaving no grandchild to
+# orphan. git's own exit status is captured via `wait`, so an empty-but-failed scan is never
+# mistaken for "no branches" (which would silently drop the cross-host serialisation).
 _ls_remote_heads() {
   local out_file
   out_file="$(mktemp "${TMPDIR:-/tmp}/gaai_lsremote.XXXXXX" 2>/dev/null)" || return 1
-  ( git ls-remote --heads "$GAAI_REMOTE" 2>/dev/null | awk '{print $2}' >"$out_file" ) &
+
+  local tobin=""
+  if   command -v timeout  >/dev/null 2>&1; then tobin="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then tobin="gtimeout"; fi
+
+  if [[ -n "$tobin" ]]; then
+    if "$tobin" "${REMOTE_TIMEOUT}s" git ls-remote --heads "$GAAI_REMOTE" >"$out_file" 2>/dev/null; then
+      awk '{print $2}' "$out_file" 2>/dev/null || true
+      rm -f "$out_file" 2>/dev/null || true
+      return 0
+    fi
+    rm -f "$out_file" 2>/dev/null || true
+    return 1
+  fi
+
+  # Fallback (no timeout(1), common on stock macOS): background git directly and bound it by PID.
+  git ls-remote --heads "$GAAI_REMOTE" >"$out_file" 2>/dev/null &
   local pid=$! waited=0
   while kill -0 "$pid" 2>/dev/null; do
     sleep 1
@@ -148,7 +168,7 @@ _ls_remote_heads() {
   local rc=0
   wait "$pid" 2>/dev/null || rc=$?
   if (( rc != 0 )); then rm -f "$out_file" 2>/dev/null || true; return 1; fi
-  cat "$out_file" 2>/dev/null || true
+  awk '{print $2}' "$out_file" 2>/dev/null || true
   rm -f "$out_file" 2>/dev/null || true
   return 0
 }
@@ -296,11 +316,22 @@ _ledger_max_story() {
 # yields 0, so this source is simply a no-op in those cases.
 _remote_max_epic() {
   [[ -n "$REMOTE_HEADS_RAW" ]] || { echo 0; return; }
-  local result
-  result="$(printf '%s\n' "$REMOTE_HEADS_RAW" | grep -oE 'E[0-9]+' 2>/dev/null \
-    | sed 's/^E//' \
-    | sort -n | tail -1)" || true
-  echo "$(( 10#${result:-0} ))"
+  # Extract E<n> tokens but reject word-embedded false matches like `E2E-test-harness` (where the
+  # E<n> is followed by another letter). A real epic token is followed by `S<digit>` (story branch),
+  # a separator, or end-of-name. Direction-safe regardless: an over- or under-match only moves the
+  # next ID forward, never causes a collision.
+  printf '%s\n' "$REMOTE_HEADS_RAW" | awk '
+    { s = $0
+      while (match(s, /E[0-9]+/)) {
+        tok  = substr(s, RSTART, RLENGTH)
+        rest = substr(s, RSTART + RLENGTH)
+        if (rest ~ /^S[0-9]/ || rest == "" || rest ~ /^[^0-9A-Za-z]/) {
+          n = substr(tok, 2) + 0
+          if (n > max) max = n
+        }
+        s = rest
+      }
+    } END { print max + 0 }' 2>/dev/null || echo 0
 }
 
 _remote_max_story() {
