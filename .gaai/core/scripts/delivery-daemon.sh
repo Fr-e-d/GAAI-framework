@@ -2925,19 +2925,33 @@ notify_escalation_inline() {
   fi
 }
 
-# Detect if delivery failure is due to Anthropic rate-limit (transient, retry-eligible).
-# A rate-limit rejection typically occurs before any tool call — no work to preserve,
-# no deterministic bug to surface. Caller should revert story to 'refined' so the daemon
-# retries after the limit resets, rather than terminally marking 'failed'.
+# Detect if delivery failure is due to a transient Anthropic API condition —
+# rate-limit rejection, 529 Overloaded, or server_error with api_error_status 529.
+# All are retry-eligible. Caller should revert story to 'refined' so the daemon
+# retries, rather than terminally marking 'failed'.
 is_rate_limit_failure() {
-  local log_file="$LOG_DIR/${story_id}.log"
-  [[ -f "\$log_file" ]] || return 1
-  if grep -q '"type":"rate_limit_event"' "\$log_file" && grep -q '"status":"rejected"' "\$log_file"; then
-    return 0
+  local _wt _log
+  local -a _logs
+  _logs=("$LOG_DIR/${story_id}.log")
+
+  # Scan phase logs (plan/impl/qa) where 529 errors surface in spawned phases
+  _wt=\$(git -C "$PROJECT_DIR" worktree list --porcelain 2>/dev/null \
+    | awk '/^worktree /{wt=substr(\$0,10)} /^branch refs\/heads\/story\/${story_id}\$/{print wt; exit}' \
+    || echo "")
+  if [[ -n "\$_wt" && -d "\$_wt" ]]; then
+    _logs+=( "\$_wt/.delivery-logs/${story_id}.plan.log"
+             "\$_wt/.delivery-logs/${story_id}.impl.log"
+             "\$_wt/.delivery-logs/${story_id}.qa.log" )
   fi
-  if grep -q '"error":"rate_limit"' "\$log_file"; then
-    return 0
-  fi
+
+  for _log in "\${_logs[@]}"; do
+    [[ -f "\$_log" ]] || continue
+    if grep -q '"type":"rate_limit_event"' "\$_log" && grep -q '"status":"rejected"' "\$_log"; then return 0; fi
+    if grep -q '"error":"rate_limit"' "\$_log"; then return 0; fi
+    if grep -qE '"error":"overloaded"' "\$_log"; then return 0; fi
+    if grep -qE '"subtype":"api_retry"' "\$_log"; then return 0; fi
+    if grep -qE '"api_error_status":[[:space:]]*529|"error_status":[[:space:]]*529' "\$_log"; then return 0; fi
+  done
   return 1
 }
 
@@ -3590,19 +3604,33 @@ notify_escalation_inline() {
   fi
 }
 
-# Detect if delivery failure is due to Anthropic rate-limit (transient, retry-eligible).
-# A rate-limit rejection typically occurs before any tool call — no work to preserve,
-# no deterministic bug to surface. Caller should revert story to 'refined' so the daemon
-# retries after the limit resets, rather than terminally marking 'failed'.
+# Detect if delivery failure is due to a transient Anthropic API condition —
+# rate-limit rejection, 529 Overloaded, or server_error with api_error_status 529.
+# All are retry-eligible. Caller should revert story to 'refined' so the daemon
+# retries, rather than terminally marking 'failed'.
 is_rate_limit_failure() {
-  local log_file="$LOG_DIR/${story_id}.log"
-  [[ -f "\$log_file" ]] || return 1
-  if grep -q '"type":"rate_limit_event"' "\$log_file" && grep -q '"status":"rejected"' "\$log_file"; then
-    return 0
+  local _wt _log
+  local -a _logs
+  _logs=("$LOG_DIR/${story_id}.log")
+
+  # Scan phase logs (plan/impl/qa) where 529 errors surface in spawned phases
+  _wt=\$(git -C "$PROJECT_DIR" worktree list --porcelain 2>/dev/null \
+    | awk '/^worktree /{wt=substr(\$0,10)} /^branch refs\/heads\/story\/${story_id}\$/{print wt; exit}' \
+    || echo "")
+  if [[ -n "\$_wt" && -d "\$_wt" ]]; then
+    _logs+=( "\$_wt/.delivery-logs/${story_id}.plan.log"
+             "\$_wt/.delivery-logs/${story_id}.impl.log"
+             "\$_wt/.delivery-logs/${story_id}.qa.log" )
   fi
-  if grep -q '"error":"rate_limit"' "\$log_file"; then
-    return 0
-  fi
+
+  for _log in "\${_logs[@]}"; do
+    [[ -f "\$_log" ]] || continue
+    if grep -q '"type":"rate_limit_event"' "\$_log" && grep -q '"status":"rejected"' "\$_log"; then return 0; fi
+    if grep -q '"error":"rate_limit"' "\$_log"; then return 0; fi
+    if grep -qE '"error":"overloaded"' "\$_log"; then return 0; fi
+    if grep -qE '"subtype":"api_retry"' "\$_log"; then return 0; fi
+    if grep -qE '"api_error_status":[[:space:]]*529|"error_status":[[:space:]]*529' "\$_log"; then return 0; fi
+  done
   return 1
 }
 
