@@ -2549,6 +2549,39 @@ ${qa_snippet}"
     fi
   fi
 
+  # ── PR-state guard: never merge a CLOSED or MERGED PR (AC1-AC4) ──────────
+  # Guard 1/2 use --state all and may select a historical CLOSED or MERGED PR
+  # on a recreated story/<id> branch. Re-read the selected PR's state before
+  # proceeding to gh pr merge. Mirrors the pattern at L154-160 (reap_orphaned_worktrees).
+  if [[ "$_skip_pr_create" -eq 1 && -n "$pr_url" ]]; then
+    local _selected_pr_state
+    _selected_pr_state=$(gh pr view "$pr_url" --json state --jq .state 2>/dev/null || echo "OPEN")
+    case "$_selected_pr_state" in
+      OPEN)
+        :  # nominal path — fall through to gh pr merge
+        ;;
+      MERGED)
+        # AC3: PR already merged (including squash-merge, which Guard 1 misses)
+        echo "[INFO] ${story_id} handle_commit_phase: selected PR ($pr_url) is MERGED — reconciling to done without merge"
+        "$SCHEDULER" --set-phase-status "$story_id" done "$BACKLOG_FILE" 2>/dev/null || true
+        "$SCHEDULER" --set-status "$story_id" done "$BACKLOG_FILE" 2>/dev/null || true
+        _emit_commit_routing_record "$story_id" "$trace_id" "daemon-bash" "null" "0" "$pr_url" "false"
+        return 0
+        ;;
+      CLOSED)
+        # AC2: CLOSED and not merged — clear guard, fall through to gh pr create fresh PR
+        echo "[INFO] ${story_id} handle_commit_phase: selected PR ($pr_url) is CLOSED (unmerged) — clearing guard, opening fresh PR"
+        pr_url=""
+        _skip_pr_create=0
+        ;;
+      *)
+        # Unknown state (gh API evolution) — treat as OPEN; conservative, lets existing
+        # AUTO_MERGE_FAILED handling deal with it rather than silently dropping the merge.
+        echo "[WARN] ${story_id} handle_commit_phase: unknown PR state '${_selected_pr_state}' for $pr_url — treating as OPEN"
+        ;;
+    esac
+  fi
+
   # ── gh pr create with retry (AC3 + AC5-b/c/d fallback) ───────────────────
   local pr_exit=1 pr_attempt=0 pr_max=3 pr_output
   if [[ "$_skip_pr_create" -eq 0 ]]; then
