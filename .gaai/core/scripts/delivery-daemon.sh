@@ -177,6 +177,8 @@ source "$SCRIPT_DIR/lib/chore-commit.sh"
 [[ -z "${_WORKTREE_INTEGRITY_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/worktree-integrity.sh" && _WORKTREE_INTEGRITY_SH_SOURCED=1
 # shellcheck source=lib/stuck-classifier.sh
 [[ -z "${_STUCK_CLASSIFIER_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/stuck-classifier.sh" && _STUCK_CLASSIFIER_SH_SOURCED=1
+# shellcheck source=lib/home-branch-guard.sh
+[[ -z "${_GAAI_HOME_BRANCH_GUARD_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/home-branch-guard.sh" && _GAAI_HOME_BRANCH_GUARD_SH_SOURCED=1
 NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
 WEBHOOK_SECRET="${GAAI_DAEMON_WEBHOOK_SECRET:-}"
 
@@ -529,6 +531,35 @@ _clear_drift_marker_if_clean() {
   if git -C "$PROJECT_DIR" diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
     rm -f "$DRIFT_MARKER"
   fi
+}
+
+# Per-cycle home-branch guard wrapper (AC1–AC3, E222S05).
+# Calls _gaai_home_branch_guard and emits daemon-scoped log + notify on drift.
+# Returns 0 to proceed, 1 to pause the cycle (dirty drift).
+_per_cycle_home_branch_check() {
+  local _hbg_rc=0
+  _gaai_home_branch_guard "$PROJECT_DIR" "$TARGET_BRANCH" || _hbg_rc=$?
+
+  if [[ "$_hbg_rc" -eq 0 ]]; then
+    return 0
+  fi
+
+  if [[ "$_hbg_rc" -eq 2 ]]; then
+    log "${GREEN}[HOME-BRANCH-GUARD] Home checkout drifted (clean) — auto-restored to '$TARGET_BRANCH'${NC}"
+    return 0
+  fi
+
+  # rc=1: drifted + dirty → pause this cycle, alert operator
+  local _drifted_branch _dirty_paths
+  _drifted_branch="$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || echo '<detached HEAD>')"
+  _dirty_paths="$(git -C "$PROJECT_DIR" status --porcelain 2>/dev/null | head -5)"
+  log "${RED}[HOME-BRANCH-GUARD] ALERT: Home checkout on '${_drifted_branch}', not '$TARGET_BRANCH'. Dirty working tree — coordination paused this cycle.${NC}"
+  log "${RED}[HOME-BRANCH-GUARD] Dirty paths (first 5): ${_dirty_paths}${NC}"
+  log "${YELLOW}[HOME-BRANCH-GUARD] Fix: save your work, then: git -C '$PROJECT_DIR' switch $TARGET_BRANCH${NC}"
+  notify_escalation "home-branch-drift" \
+    "Home checkout on '${_drifted_branch}' with dirty working tree" \
+    "Run: git -C '$PROJECT_DIR' switch $TARGET_BRANCH (after saving work); then wait for next daemon cycle"
+  return 1
 }
 
 # ── Preflight checks ─────────────────────────────────────────────────────
@@ -4278,6 +4309,14 @@ while true; do
     log "${YELLOW}[SUSPEND_DETECTED] poll gap ${_loop_gap}s > ${SUSPEND_JUMP_THRESHOLD_SEC}s (host suspend or daemon pause) — liveness kills suppressed for ${POST_RESUME_GRACE_SEC}s${NC}"
   fi
   _last_loop_ts=$_loop_now
+
+  # Per-cycle home-branch guard (AC1–AC3, E222S05): verify before any coordination
+  # git-state ops (mark in_progress, reconcile, status push). Clean drift → auto-restored;
+  # dirty drift → pause this cycle and alert; on-target+clean → no-op.
+  if ! _per_cycle_home_branch_check; then
+    sleep "$POLL_INTERVAL"
+    continue
+  fi
 
   # Tick-based cycle orphan-lock scan — runs before clean_stale_locks
   # so dead-PID locks are detected and recovery invoked at cycle time.
