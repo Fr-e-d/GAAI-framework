@@ -3164,14 +3164,21 @@ _reconcile_yaml_status_on_exit() {
     git reset --hard "origin/${TARGET_BRANCH:-staging}" --quiet 2>/dev/null || true
   fi
 
-  # AC3: drift check — skip commit if operator has unstaged edits on the backlog
+  # AC1/AC3: commit accumulated drift (same model as chore-commit pre-mark sweep).
+  # Write drift-marker only on genuine commit/rebase failure (rc=6), not on every diff.
   if ! git diff --quiet HEAD -- "$backlog_rel" 2>/dev/null; then
-    echo "[WRAPPER-RECONCILE] $story_id : working-tree drift, skipping reconcile — daemon will retry"
-    printf '%s|commit|wrapper-reconcile-drift-%s\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" "$story_id" \
-      > "$drift_marker" 2>/dev/null || true
-    rm -f "$_rip_marker" 2>/dev/null || true
-    return 0
+    local _drift_rc=0
+    _commit_accumulated_backlog_drift "$story_id" "$backlog_rel" "${TARGET_BRANCH:-staging}" "wrapper-reconcile" \
+      || _drift_rc=$?
+    if [[ "$_drift_rc" -ne 0 ]]; then
+      echo "[WRAPPER-RECONCILE] $story_id : drift commit failed (rc=$_drift_rc) — writing drift-marker, daemon will retry"
+      printf '%s|commit|wrapper-reconcile-drift-%s\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" "$story_id" \
+        > "$drift_marker" 2>/dev/null || true
+      rm -f "$_rip_marker" 2>/dev/null || true
+      return 0
+    fi
+    echo "[WRAPPER-RECONCILE] $story_id : committed accumulated backlog drift — continuing reconcile"
   fi
 
   # Update YAML status field

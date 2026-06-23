@@ -23,6 +23,41 @@ _CHORE_HELPER_AVAILABLE=0
 #   _CHORE_HELPER_AVAILABLE=1
 # fi
 
+# _commit_accumulated_backlog_drift <story_id> <backlog_rel> <target_branch> <context>
+# Commits any uncommitted backlog diff and pushes with push-race rebase+retry.
+# Returns: 0 = success (no diff OR diff committed+pushed), 6 = genuine rebase-conflict|commit-failure.
+# Must be called with cwd=PROJECT_DIR (callers are responsible for cd).
+_commit_accumulated_backlog_drift() {
+  local story_id="$1" backlog_rel="$2" target_branch="$3" context="${4:-daemon}"
+  if git diff --quiet HEAD -- "$backlog_rel" 2>/dev/null; then
+    return 0
+  fi
+  if git add "$backlog_rel" 2>/dev/null \
+     && git commit -m "chore(daemon): commit accumulated wrapper-progress writes [$context $story_id]" \
+          --quiet -- "$backlog_rel" 2>/dev/null; then
+    if ! git push origin "$target_branch" --quiet 2>/dev/null; then
+      git fetch origin "$target_branch" --quiet 2>/dev/null || true
+      if git rebase "origin/$target_branch" --quiet 2>/dev/null; then
+        if ! git push origin "$target_branch" --quiet 2>/dev/null; then
+          git reset --hard "origin/$target_branch" --quiet 2>/dev/null || true
+          echo "[COMMIT-DRIFT] $story_id : push-race re-sync to origin [$context]" >&2
+        fi
+      else
+        git rebase --abort 2>/dev/null || true
+        git reset --hard "origin/$target_branch" --quiet 2>/dev/null || true
+        echo "[COMMIT-DRIFT] $story_id : genuine rebase conflict [$context]" >&2
+        return 6
+      fi
+    fi
+    echo "[COMMIT-DRIFT] $story_id : committed accumulated backlog drift [$context]" >&2
+  else
+    git reset HEAD -- "$backlog_rel" 2>/dev/null || true
+    echo "[COMMIT-DRIFT] $story_id : drift commit failed [$context]" >&2
+    return 6
+  fi
+  return 0
+}
+
 # Option A fallback: refuse if drift, else scheduler-write + commit + push.
 # Used when yq is unavailable OR when the yq-formatting-pinning prerequisite
 # is not met (the non-fallback path is currently disabled — see comment above).
@@ -89,36 +124,12 @@ _chore_option_a_fallback() {
   # other wrappers and needs to land on origin anyway. If THAT commit
   # itself fails, fall back to the old refuse-skip (operator may have
   # genuine uncommitted edits we don't want to silently absorb).
-  if ! git diff --quiet HEAD -- "$backlog_rel" 2>/dev/null; then
-    if git add "$backlog_rel" 2>/dev/null \
-       && git commit -m "chore(daemon): commit accumulated wrapper-progress writes [pre-mark $story_id]" --quiet -- "$backlog_rel" 2>/dev/null; then
-      if ! git push origin "$target_branch" --quiet 2>/dev/null; then
-        # Push race — fetch then distinguish genuine conflict from just-behind (AC4).
-        git fetch origin "$target_branch" --quiet 2>/dev/null || true
-        if git rebase "origin/$target_branch" --quiet 2>/dev/null; then
-          # Rebase clean — retry push; if push still fails, re-sync to origin (AC2+AC3).
-          if ! git push origin "$target_branch" --quiet 2>/dev/null; then
-            git reset --hard "origin/$target_branch" --quiet 2>/dev/null || true
-            echo "[CHORE-COMMIT] $story_id : pre-mark drift sweep re-synced to origin — will re-apply field" >&2
-          fi
-        else
-          # Genuine rebase conflict (not just behind) — AC4: distinct diagnosable message.
-          git rebase --abort 2>/dev/null || true
-          git reset --hard "origin/$target_branch" --quiet 2>/dev/null || true
-          echo "[CHORE-COMMIT] $story_id : pre-mark drift sweep — genuine rebase conflict, operator resolve required" >&2
-          _chore_a_done 6
-          return $?
-        fi
-      fi
-      echo "[CHORE-COMMIT] $story_id : swept accumulated wrapper-progress drift before mark-in-progress" >&2
-    else
-      # add+commit itself failed — likely no diff content despite git diff
-      # signalling drift (e.g. mode-only change). Revert to old refuse-skip.
-      git reset HEAD -- "$backlog_rel" 2>/dev/null || true
-      echo "[CHORE-COMMIT] $story_id : pre-mark drift sweep commit failed — refuse-skip" >&2
-      _chore_a_done 6
-      return $?
-    fi
+  local _cad_rc=0
+  _commit_accumulated_backlog_drift "$story_id" "$backlog_rel" "$target_branch" "pre-mark" \
+    || _cad_rc=$?
+  if [[ "$_cad_rc" -ne 0 ]]; then
+    _chore_a_done 6
+    return $?
   fi
   while [[ $# -ge 2 ]]; do
     "${SCHEDULER:-}" --set-field "$story_id" "$1" "$2" "$backlog_file" 2>/dev/null || true
