@@ -358,7 +358,7 @@ do_start() {
     exit 1
   fi
 
-  # Home-branch guard: delegates to shared helper (AC4, E222S05).
+  # Home-branch guard: delegates to shared helper (lib/home-branch-guard.sh).
   # rc=0: on-target (proceed); rc=1: drifted+dirty (exit 1); rc=2: drifted+clean (auto-restored, proceed).
   local _target_branch="${GAAI_TARGET_BRANCH:-staging}"
   local _hbg_rc=0
