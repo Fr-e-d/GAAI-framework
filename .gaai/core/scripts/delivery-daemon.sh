@@ -1359,9 +1359,20 @@ except Exception:
               log "${YELLOW}[RECOVERY] $sid : merged-PR reconcile failed — falling through to drift-skip${NC}"
             fi
           fi
-          log "${YELLOW}[RECOVERY] $sid : working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) — skipping relaunch this scan${NC}"
-          _write_drift_marker "scan" "drift-$sid"
-          drift_detected=1
+          # AC2 (E222S06): commit accumulated backlog drift instead of skip.
+          # Drift-marker only when the commit genuinely fails, matching the
+          # chore-commit pre-mark sweep's proven behavior.
+          local _drift_rc=0
+          _commit_accumulated_backlog_drift "$sid" "$BACKLOG_REL" "${TARGET_BRANCH:-staging}" \
+            "recovery-scan" || _drift_rc=$?
+          if [[ "$_drift_rc" -ne 0 ]]; then
+            log "${YELLOW}[RECOVERY] $sid : working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) — drift commit failed, writing marker for operator attention${NC}"
+            _write_drift_marker "scan" "drift-$sid"
+            drift_detected=1
+          else
+            log "${GREEN}[RECOVERY] $sid : accumulated backlog drift committed — will relaunch on next scan${NC}"
+            _clear_drift_marker_if_clean
+          fi
           continue
         fi
       fi
