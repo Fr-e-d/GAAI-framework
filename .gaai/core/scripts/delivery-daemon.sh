@@ -533,7 +533,7 @@ _clear_drift_marker_if_clean() {
   fi
 }
 
-# Per-cycle home-branch guard wrapper (AC1–AC3, E222S05).
+# Per-cycle home-branch guard wrapper.
 # Calls _gaai_home_branch_guard and emits daemon-scoped log + notify on drift.
 # Returns 0 to proceed, 1 to pause the cycle (dirty drift).
 _per_cycle_home_branch_check() {
@@ -4310,8 +4310,8 @@ while true; do
   fi
   _last_loop_ts=$_loop_now
 
-  # Per-cycle home-branch guard (AC1–AC3, E222S05): verify before any coordination
-  # git-state ops (mark in_progress, reconcile, status push). Clean drift → auto-restored;
+  # Per-cycle home-branch guard: verify before any coordination git-state ops
+  # (mark in_progress, reconcile, status push). Clean drift → auto-restored;
   # dirty drift → pause this cycle and alert; on-target+clean → no-op.
   if ! _per_cycle_home_branch_check; then
     sleep "$POLL_INTERVAL"
