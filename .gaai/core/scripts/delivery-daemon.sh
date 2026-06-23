@@ -109,6 +109,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GAAI_CORE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_DIR="$(cd "$GAAI_CORE_DIR/../.." && pwd)"
+# Real repo root — paths that must stay anchored to the operator's main checkout
+# (per-story worktree-base derivation, realpath safety guard).
+# Defaults to PROJECT_DIR; override with GAAI_REPO_ROOT for future flexibility.
+# Coordination git-ops and asset reads stay on PROJECT_DIR (redirected in E1003S03).
+REPO_ROOT="${GAAI_REPO_ROOT:-${PROJECT_DIR}}"
 
 # Auto-detect project directory (v2.x core/project split vs v1.x flat)
 if [[ -d "$GAAI_CORE_DIR/../project" ]]; then
@@ -1695,8 +1700,8 @@ _recovery_resolve_worktree() {
     echo "${GAAI_WORKTREES_BASE}/${sid}-workspace"
   else
     local repo_name
-    repo_name=$(basename "$PROJECT_DIR")
-    echo "$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
+    repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+    echo "$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
   fi
 }
 
@@ -2048,8 +2053,8 @@ sweep_cleanup_pending() {
       worktree_path="${GAAI_WORKTREES_BASE}/${sid}-workspace"
     else
       local repo_name
-      repo_name=$(basename "$PROJECT_DIR")
-      worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
+      repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+      worktree_path="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
     fi
 
     local wt_ok=true
@@ -2097,19 +2102,19 @@ reconcile_done_merged_worktrees() {
       wt_path="${GAAI_WORKTREES_BASE}/${sid}-workspace"
     else
       local repo_name
-      repo_name=$(basename "$PROJECT_DIR")
-      wt_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
+      repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+      wt_path="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
     fi
 
     # Skip if worktree directory does not exist (already cleaned — idempotent no-op).
     [[ -d "$wt_path" ]] || continue
 
-    # Safety guard: never remove PROJECT_DIR itself.
+    # Safety guard: never remove REPO_ROOT (the operator's real repo checkout) itself.
     local wt_real proj_real
     wt_real=$(realpath "$wt_path" 2>/dev/null || echo "$wt_path")
-    proj_real=$(realpath "$PROJECT_DIR" 2>/dev/null || echo "$PROJECT_DIR")
+    proj_real=$(realpath "${REPO_ROOT:-$PROJECT_DIR}" 2>/dev/null || echo "${REPO_ROOT:-$PROJECT_DIR}")
     if [[ "$wt_real" == "$proj_real" ]]; then
-      log "[RECONCILE-SWEEP] $sid: skipped:safety-guard path=$wt_path (resolved to PROJECT_DIR)"
+      log "[RECONCILE-SWEEP] $sid: skipped:safety-guard path=$wt_path (resolved to REPO_ROOT)"
       continue
     fi
 
@@ -2439,8 +2444,8 @@ RECONCILE_EOF
     worktree_path="${GAAI_WORKTREES_BASE}/${sid}-workspace"
   else
     local repo_name
-    repo_name=$(basename "$PROJECT_DIR")
-    worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
+    repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+    worktree_path="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
   fi
 
   local cleanup_failed=false
@@ -3282,7 +3287,7 @@ WRAPPER_EOF
   if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
     _cc_legacy_wt_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
   else
-    _cc_legacy_wt_path="$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd)/.gaai-worktrees/$(basename "$PROJECT_DIR")/${story_id}-workspace"
+    _cc_legacy_wt_path="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." 2>/dev/null && pwd)/.gaai-worktrees/$(basename "${REPO_ROOT:-$PROJECT_DIR}")/${story_id}-workspace"
   fi
   local _cc_legacy_out _cc_legacy_args=()
   _cc_legacy_out=$(_resolve_cross_cycle_qa_report "$story_id" "$_cc_legacy_wt_path" 2>/dev/null || true)
@@ -4148,7 +4153,7 @@ WRAPPER_EOF
   if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
     _cc_3p_wt_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
   else
-    _cc_3p_wt_path="$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd)/.gaai-worktrees/$(basename "$PROJECT_DIR")/${story_id}-workspace"
+    _cc_3p_wt_path="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." 2>/dev/null && pwd)/.gaai-worktrees/$(basename "${REPO_ROOT:-$PROJECT_DIR}")/${story_id}-workspace"
   fi
   local _cc_3p_out
   _cc_3p_out=$(_resolve_cross_cycle_qa_report "$story_id" "$_cc_3p_wt_path" 2>/dev/null || true)

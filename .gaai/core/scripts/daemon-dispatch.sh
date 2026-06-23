@@ -113,8 +113,8 @@ reap_orphaned_worktrees() {
   if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
     _base="$GAAI_WORKTREES_BASE"
   else
-    _repo_name=$(basename "$PROJECT_DIR")
-    _base="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${_repo_name}"
+    _repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+    _base="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${_repo_name}"
   fi
   [[ -d "$_base" ]] || return 0
 
@@ -122,7 +122,7 @@ reap_orphaned_worktrees() {
   git -C "$PROJECT_DIR" fetch origin "$_target" --quiet 2>/dev/null || true
 
   local _proj_real
-  _proj_real=$(realpath "$PROJECT_DIR" 2>/dev/null || echo "$PROJECT_DIR")
+  _proj_real=$(realpath "${REPO_ROOT:-$PROJECT_DIR}" 2>/dev/null || echo "${REPO_ROOT:-$PROJECT_DIR}")
 
   local _wt _sid _wt_real _hb _hb_mtime _porcelain _rc
   local _pr_json _pr_state _concluded _reason
@@ -1042,8 +1042,8 @@ handle_plan_phase() {
     worktree_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
   else
     local repo_name
-    repo_name=$(basename "$PROJECT_DIR")
-    worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
+    repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+    worktree_path="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
   # ── Ensure worktree + story branch exist (idempotent) ─────────────────────
@@ -1336,8 +1336,8 @@ handle_impl_phase() {
     worktree_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
   else
     local repo_name
-    repo_name=$(basename "$PROJECT_DIR")
-    worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
+    repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+    worktree_path="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
   # ── Inline MCP workspace scope for autonomous spawn ──────────────────────
@@ -1644,8 +1644,8 @@ handle_qa_phase() {
     worktree_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
   else
     local repo_name
-    repo_name=$(basename "$PROJECT_DIR")
-    worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
+    repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+    worktree_path="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
   # ── Inline MCP workspace scope for autonomous spawn ──────────────────────
@@ -2290,8 +2290,8 @@ handle_commit_phase() {
     worktree_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
   else
     local repo_name
-    repo_name=$(basename "$PROJECT_DIR")
-    worktree_path="$(cd "${PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
+    repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+    worktree_path="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
   # ── Deterministic branch + recover a pruned worktree ─────────────────────
@@ -2954,8 +2954,8 @@ dispatch_3phase_story() {
       if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
         _wt_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
       else
-        _wt_repo=$(basename "$PROJECT_DIR")
-        if _wt_parent=$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd); then
+        _wt_repo=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+        if _wt_parent=$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." 2>/dev/null && pwd); then
           _wt_path="${_wt_parent}/.gaai-worktrees/${_wt_repo}/${story_id}-workspace"
         else
           echo "[ERROR] ${story_id} dispatch: cannot resolve worktree parent dir for qa-report path — retry aborted"
@@ -3091,8 +3091,8 @@ _reconcile_yaml_status_on_exit() {
   if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
     _worktree_path="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
   else
-    _repo_name=$(basename "$PROJECT_DIR")
-    if _parent_dir=$(cd "${PROJECT_DIR}/.." 2>/dev/null && pwd); then
+    _repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+    if _parent_dir=$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." 2>/dev/null && pwd); then
       _worktree_path="${_parent_dir}/.gaai-worktrees/${_repo_name}/${story_id}-workspace"
     else
       _worktree_path=""
