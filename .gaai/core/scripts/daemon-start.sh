@@ -66,6 +66,9 @@ LOG_DIR="$GAAI_DIR/project/contexts/backlog/.delivery-logs"
 # is a best-effort grace period after which we escalate to tmux kill-session.
 STOP_DRAIN_TIMEOUT="${GAAI_STOP_DRAIN_TIMEOUT:-600}"
 
+# shellcheck source=lib/home-branch-guard.sh
+[[ -z "${_GAAI_HOME_BRANCH_GUARD_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/home-branch-guard.sh" && _GAAI_HOME_BRANCH_GUARD_SH_SOURCED=1
+
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 daemon_is_running() {
@@ -355,30 +358,27 @@ do_start() {
     exit 1
   fi
 
-  # Home-branch guard: the daemon coordinates delivery git-state (mark in_progress,
-  # reconcile to done, status pushes) IN THIS CHECKOUT against the target branch. If the
-  # home checkout has drifted onto another branch, every coordination step rebase-conflicts
-  # and NO story is ever claimed — a silent failure spiral with no clear cause. Refuse to
-  # start with an actionable message instead. Keep this checkout pinned to the target branch
-  # (the daemon's home) and do feature work in worktrees.
+  # Home-branch guard: delegates to shared helper (AC4, E222S05).
+  # rc=0: on-target (proceed); rc=1: drifted+dirty (exit 1); rc=2: drifted+clean (auto-restored, proceed).
   local _target_branch="${GAAI_TARGET_BRANCH:-staging}"
-  local _home_branch
-  _home_branch="$(git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null || echo "")"
-  if [[ "$_home_branch" != "$_target_branch" ]]; then
-    if [[ "${GAAI_DAEMON_ALLOW_BRANCH_MISMATCH:-}" == "1" ]]; then
-      echo "⚠️  Home checkout is on '${_home_branch:-<detached HEAD>}', not '$_target_branch' — continuing anyway (GAAI_DAEMON_ALLOW_BRANCH_MISMATCH=1)."
-    else
-      echo "❌ Daemon home checkout is on '${_home_branch:-<detached HEAD>}', not the target branch '$_target_branch'."
-      echo "   The daemon coordinates delivery git-state in this checkout on '$_target_branch'."
-      echo "   On any other branch, mark-in-progress and reconcile rebase-conflict and NO story delivers."
-      echo ""
-      echo "   Fix (save any uncommitted work first), then retry:"
-      echo "     git -C \"$PROJECT_ROOT\" switch $_target_branch && git -C \"$PROJECT_ROOT\" pull origin $_target_branch --ff-only"
-      echo ""
-      echo "   Pin this checkout to '$_target_branch' (the daemon's home); do feature work in worktrees."
-      echo "   Override (not recommended): GAAI_DAEMON_ALLOW_BRANCH_MISMATCH=1 before re-running."
-      exit 1
-    fi
+  local _hbg_rc=0
+  _gaai_home_branch_guard "$PROJECT_ROOT" "$_target_branch" || _hbg_rc=$?
+  if [[ "${GAAI_DAEMON_ALLOW_BRANCH_MISMATCH:-}" == "1" ]]; then
+    [[ "$_hbg_rc" -ne 0 ]] && echo "⚠️  Home checkout drifted — continuing anyway (GAAI_DAEMON_ALLOW_BRANCH_MISMATCH=1)."
+  elif [[ "$_hbg_rc" -eq 1 ]]; then
+    local _hbg_branch
+    _hbg_branch="$(git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null || echo '<detached HEAD>')"
+    echo "❌ Daemon home checkout is on '${_hbg_branch}', not '${_target_branch}'."
+    echo "   Working tree has uncommitted changes — resolve before starting the daemon."
+    echo ""
+    echo "   Fix: save/stash your work, then:"
+    echo "     git -C \"$PROJECT_ROOT\" switch $_target_branch && git -C \"$PROJECT_ROOT\" pull origin $_target_branch --ff-only"
+    echo ""
+    echo "   Pin this checkout to '$_target_branch' (the daemon's home); do feature work in worktrees."
+    echo "   Override (not recommended): GAAI_DAEMON_ALLOW_BRANCH_MISMATCH=1 before re-running."
+    exit 1
+  elif [[ "$_hbg_rc" -eq 2 ]]; then
+    echo "✅ Home checkout was on another branch (clean) — auto-restored to '$_target_branch'."
   fi
 
   # Clean stale PID file
