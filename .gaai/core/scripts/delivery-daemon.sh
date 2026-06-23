@@ -112,7 +112,8 @@ PROJECT_DIR="$(cd "$GAAI_CORE_DIR/../.." && pwd)"
 # Real repo root — paths that must stay anchored to the operator's main checkout
 # (per-story worktree-base derivation, realpath safety guard).
 # Defaults to PROJECT_DIR; override with GAAI_REPO_ROOT for future flexibility.
-# Coordination git-ops and asset reads stay on PROJECT_DIR (redirected in E1003S03).
+# Coordination git-ops and asset reads stay on PROJECT_DIR and are redirected
+# separately when the daemon coordination home is provisioned.
 REPO_ROOT="${GAAI_REPO_ROOT:-${PROJECT_DIR}}"
 
 # Auto-detect project directory (v2.x core/project split vs v1.x flat)
