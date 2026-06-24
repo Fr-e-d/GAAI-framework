@@ -360,29 +360,6 @@ do_start() {
     exit 1
   fi
 
-  # Home-branch guard: delegates to shared helper (lib/home-branch-guard.sh).
-  # rc=0: on-target (proceed); rc=1: drifted+dirty (exit 1); rc=2: drifted+clean (auto-restored, proceed).
-  local _target_branch="${GAAI_TARGET_BRANCH:-staging}"
-  local _hbg_rc=0
-  _gaai_home_branch_guard "$PROJECT_ROOT" "$_target_branch" || _hbg_rc=$?
-  if [[ "${GAAI_DAEMON_ALLOW_BRANCH_MISMATCH:-}" == "1" ]]; then
-    [[ "$_hbg_rc" -ne 0 ]] && echo "⚠️  Home checkout drifted — continuing anyway (GAAI_DAEMON_ALLOW_BRANCH_MISMATCH=1)."
-  elif [[ "$_hbg_rc" -eq 1 ]]; then
-    local _hbg_branch
-    _hbg_branch="$(git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null || echo '<detached HEAD>')"
-    echo "❌ Daemon home checkout is on '${_hbg_branch}', not '${_target_branch}'."
-    echo "   Working tree has uncommitted changes — resolve before starting the daemon."
-    echo ""
-    echo "   Fix: save/stash your work, then:"
-    echo "     git -C \"$PROJECT_ROOT\" switch $_target_branch && git -C \"$PROJECT_ROOT\" pull origin $_target_branch --ff-only"
-    echo ""
-    echo "   Pin this checkout to '$_target_branch' (the daemon's home); do feature work in worktrees."
-    echo "   Override (not recommended): GAAI_DAEMON_ALLOW_BRANCH_MISMATCH=1 before re-running."
-    exit 1
-  elif [[ "$_hbg_rc" -eq 2 ]]; then
-    echo "✅ Home checkout was on another branch (clean) — auto-restored to '$_target_branch'."
-  fi
-
   # Provision the daemon home worktree (provision-only step; the coordination
   # flip is a separate subsequent step).  Non-fatal: failure logs a warning
   # and daemon startup proceeds — the home is unused until the flip lands.

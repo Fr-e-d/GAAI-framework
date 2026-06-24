@@ -115,6 +115,13 @@ PROJECT_DIR="$(cd "$GAAI_CORE_DIR/../.." && pwd)"
 # Coordination git-ops and asset reads stay on PROJECT_DIR and are redirected
 # separately when the daemon coordination home is provisioned.
 REPO_ROOT="${GAAI_REPO_ROOT:-${PROJECT_DIR}}"
+# Redirect coordination git-ops and asset reads to the daemon home worktree when
+# provisioned (DEC-162 §57 — coordination-git-home axis). REPO_ROOT stays anchored
+# to the original PROJECT_DIR (the real repo checkout) for per-story worktree-base
+# derivation and the realpath safety guard. GAAI_PROJECT_DIR (derived from GAAI_CORE_DIR
+# / SCRIPT_DIR below, not PROJECT_DIR) is unaffected — LOCK_DIR/LOG_DIR/LOG_FILE stay
+# on the operator's checkout intentionally (DEC-162 §89).
+PROJECT_DIR="${GAAI_DAEMON_HOME:-$PROJECT_DIR}"
 
 # Auto-detect project directory (v2.x core/project split vs v1.x flat)
 if [[ -d "$GAAI_CORE_DIR/../project" ]]; then
@@ -539,33 +546,24 @@ _clear_drift_marker_if_clean() {
   fi
 }
 
-# Per-cycle home-branch guard wrapper.
-# Calls _gaai_home_branch_guard and emits daemon-scoped log + notify on drift.
-# Returns 0 to proceed, 1 to pause the cycle (dirty drift).
+# Per-cycle home-branch integrity check (DEC-162 re-aim).
+# Post-flip, PROJECT_DIR = GAAI_DAEMON_HOME (on gaai-daemon-home branch).
+# Asserts the home is on 'gaai-daemon-home'; repairs via provisioner on mismatch.
+# Always returns 0 — home drift is unexpected and non-blocking (repair + proceed).
 _per_cycle_home_branch_check() {
-  local _hbg_rc=0
-  _gaai_home_branch_guard "$PROJECT_DIR" "$TARGET_BRANCH" || _hbg_rc=$?
-
-  if [[ "$_hbg_rc" -eq 0 ]]; then
+  # No coordination home set: daemon running direct (GAAI_DAEMON_HOME unset) — skip.
+  [[ -z "${GAAI_DAEMON_HOME:-}" ]] && return 0
+  local _home_branch
+  _home_branch="$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || echo "")"
+  if [[ "$_home_branch" == "gaai-daemon-home" ]]; then
     return 0
   fi
-
-  if [[ "$_hbg_rc" -eq 2 ]]; then
-    log "${GREEN}[HOME-BRANCH-GUARD] Home checkout drifted (clean) — auto-restored to '$TARGET_BRANCH'${NC}"
-    return 0
-  fi
-
-  # rc=1: drifted + dirty → pause this cycle, alert operator
-  local _drifted_branch _dirty_paths
-  _drifted_branch="$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || echo '<detached HEAD>')"
-  _dirty_paths="$(git -C "$PROJECT_DIR" status --porcelain 2>/dev/null | head -5)"
-  log "${RED}[HOME-BRANCH-GUARD] ALERT: Home checkout on '${_drifted_branch}', not '$TARGET_BRANCH'. Dirty working tree — coordination paused this cycle.${NC}"
-  log "${RED}[HOME-BRANCH-GUARD] Dirty paths (first 5): ${_dirty_paths}${NC}"
-  log "${YELLOW}[HOME-BRANCH-GUARD] Fix: save your work, then: git -C '$PROJECT_DIR' switch $TARGET_BRANCH${NC}"
-  notify_escalation "home-branch-drift" \
-    "Home checkout on '${_drifted_branch}' with dirty working tree" \
-    "Run: git -C '$PROJECT_DIR' switch $TARGET_BRANCH (after saving work); then wait for next daemon cycle"
-  return 1
+  # Home is on wrong branch (e.g. detached residual or unexpected drift) — repair.
+  log "${YELLOW}[HOME-INTEGRITY] Home is on '${_home_branch:-<detached>}', not 'gaai-daemon-home' — repairing via provisioner${NC}"
+  local _repo_root
+  _repo_root="$(git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null || echo "$REPO_ROOT")"
+  _gaai_provision_daemon_home "$GAAI_DAEMON_HOME" "$TARGET_BRANCH" "$_repo_root" || true
+  return 0
 }
 
 # ── Preflight checks ─────────────────────────────────────────────────────
@@ -1760,10 +1758,10 @@ if ! git commit -m "$_commit_subject" --quiet -- "$BACKLOG_REL" 2>/dev/null; the
   git reset HEAD -- "$BACKLOG_REL" 2>/dev/null || true
   exit 1
 fi
-if ! git push origin "$TARGET_BRANCH" --quiet 2>/dev/null; then
+if ! git push origin "HEAD:$TARGET_BRANCH" --quiet 2>/dev/null; then
   if git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null \
     && git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null \
-    && git push origin "$TARGET_BRANCH" --quiet 2>/dev/null; then
+    && git push origin "HEAD:$TARGET_BRANCH" --quiet 2>/dev/null; then
     exit 0
   fi
   git rebase --abort 2>/dev/null || true
@@ -2425,7 +2423,7 @@ fi
 "$SCHEDULER" --set-field "$sid" completed_at "$merged_at" "$BACKLOG" 2>/dev/null
 git add "$BACKLOG_REL"
 git diff --cached --quiet || git commit -m "chore($sid): done [pr-watcher]" --quiet
-git push origin "$TARGET_BRANCH" --quiet 2>&1
+git push origin "HEAD:$TARGET_BRANCH" --quiet 2>&1
 RECONCILE_EOF
   fi
 

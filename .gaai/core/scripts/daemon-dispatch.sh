@@ -3212,7 +3212,7 @@ _reconcile_yaml_status_on_exit() {
     return 0
   fi
 
-  git push origin "${TARGET_BRANCH:-staging}" --quiet 2>/dev/null || true
+  git push origin "HEAD:${TARGET_BRANCH:-staging}" --quiet 2>/dev/null || true
   echo "[WRAPPER-RECONCILE] $story_id : reconciled status=$target_status from phase_status=$phase_status"
 
   # Cleanup QA retry counter on terminal transitions — escalated already
