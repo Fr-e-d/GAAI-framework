@@ -68,6 +68,8 @@ STOP_DRAIN_TIMEOUT="${GAAI_STOP_DRAIN_TIMEOUT:-600}"
 
 # shellcheck source=lib/home-branch-guard.sh
 [[ -z "${_GAAI_HOME_BRANCH_GUARD_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/home-branch-guard.sh" && _GAAI_HOME_BRANCH_GUARD_SH_SOURCED=1
+# shellcheck source=lib/daemon-home.sh
+[[ -z "${_GAAI_DAEMON_HOME_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/daemon-home.sh" && _GAAI_DAEMON_HOME_SH_SOURCED=1
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -381,6 +383,21 @@ do_start() {
     echo "✅ Home checkout was on another branch (clean) — auto-restored to '$_target_branch'."
   fi
 
+  # Provision the daemon home worktree (DEC-162 step 2 — S02 provision only;
+  # S03 owns the coordination flip).  Non-fatal: failure logs a warning and
+  # daemon startup proceeds — the home is unused in S02.
+  local _wt_base
+  _wt_base="$(cd "$PROJECT_ROOT/.." && pwd)/.gaai-worktrees/$(basename "$PROJECT_ROOT")"
+  GAAI_DAEMON_HOME="${GAAI_DAEMON_HOME:-${_wt_base}/__daemon-home}"
+  export GAAI_DAEMON_HOME
+  local _dhome_rc=0
+  _gaai_provision_daemon_home "$GAAI_DAEMON_HOME" "$_target_branch" "$PROJECT_ROOT" \
+    || _dhome_rc=$?
+  if [[ "$_dhome_rc" -ne 0 ]]; then
+    echo "⚠️  GAAI_DAEMON_HOME provisioning failed (rc=$_dhome_rc) — proceeding without home worktree."
+    echo "   Home: $GAAI_DAEMON_HOME"
+  fi
+
   # Clean stale PID file
   [[ -f "$PID_FILE" ]] && rm -f "$PID_FILE"
 
@@ -422,6 +439,7 @@ do_start() {
     # Admin fallback (free-tier opt-in) — when --auto fails branch_protection_missing,
     # fall back to gh pr merge --admin --squash. Trust-arc opt-in, default off.
     [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
+    [[ -n "${GAAI_DAEMON_HOME:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_HOME=${GAAI_DAEMON_HOME}")
     tmux new-session -d -s gaai-daemon ${tmux_env_args[@]+"${tmux_env_args[@]}"} "$daemon_cmd"
 
     # Give it a moment to start, then grab the PID
