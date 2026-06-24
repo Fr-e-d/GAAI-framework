@@ -3,7 +3,7 @@
 #
 # Covers:
 #   TC1: coordination push from gaai-daemon-home lands on origin/staging (AC6a)
-#   TC2: dirty / branch-switched main checkout is INERT to daemon (AC6b — DEC-162 proof)
+#   TC2: dirty / branch-switched main checkout is INERT to daemon (AC6b — main-checkout-decoupled proof)
 #   TC3: completeness backstop — zero coordination push sites lack HEAD: refspec (AC6c)
 #   TC4: home is on gaai-daemon-home; main checkout's staging ref never modified (AC6d)
 #
@@ -109,7 +109,7 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TC2: dirty / branch-switched main checkout is INERT (AC6b — DEC-162 proof)
+# TC2: dirty / branch-switched main checkout is INERT (AC6b — main-checkout-decoupled proof)
 # ═══════════════════════════════════════════════════════════════════════════════
 # The daemon's home is a separate worktree sharing the same .git as the main checkout.
 # When the home pushes to "origin HEAD:staging", it goes to the bare remote.

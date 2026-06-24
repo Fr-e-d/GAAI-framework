@@ -116,11 +116,11 @@ PROJECT_DIR="$(cd "$GAAI_CORE_DIR/../.." && pwd)"
 # separately when the daemon coordination home is provisioned.
 REPO_ROOT="${GAAI_REPO_ROOT:-${PROJECT_DIR}}"
 # Redirect coordination git-ops and asset reads to the daemon home worktree when
-# provisioned (DEC-162 §57 — coordination-git-home axis). REPO_ROOT stays anchored
-# to the original PROJECT_DIR (the real repo checkout) for per-story worktree-base
-# derivation and the realpath safety guard. GAAI_PROJECT_DIR (derived from GAAI_CORE_DIR
-# / SCRIPT_DIR below, not PROJECT_DIR) is unaffected — LOCK_DIR/LOG_DIR/LOG_FILE stay
-# on the operator's checkout intentionally (DEC-162 §89).
+# provisioned (coordination-git-home axis). REPO_ROOT stays anchored to the original
+# PROJECT_DIR (the real repo checkout) for per-story worktree-base derivation and the
+# realpath safety guard. GAAI_PROJECT_DIR (derived from GAAI_CORE_DIR / SCRIPT_DIR below,
+# not PROJECT_DIR) is unaffected — LOCK_DIR/LOG_DIR/LOG_FILE stay on the operator's
+# checkout intentionally (daemon state files live where the monitor reads them).
 PROJECT_DIR="${GAAI_DAEMON_HOME:-$PROJECT_DIR}"
 
 # Auto-detect project directory (v2.x core/project split vs v1.x flat)
@@ -546,7 +546,7 @@ _clear_drift_marker_if_clean() {
   fi
 }
 
-# Per-cycle home-branch integrity check (DEC-162 re-aim).
+# Per-cycle home-branch integrity check (re-aimed: home must be on gaai-daemon-home).
 # Post-flip, PROJECT_DIR = GAAI_DAEMON_HOME (on gaai-daemon-home branch).
 # Asserts the home is on 'gaai-daemon-home'; repairs via provisioner on mismatch.
 # Always returns 0 — home drift is unexpected and non-blocking (repair + proceed).
