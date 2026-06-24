@@ -43,6 +43,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CORE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 GAAI_DIR="$(cd "$CORE_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$GAAI_DIR/.." && pwd)"
+# The operator's real repo checkout. Exported so the daemon — even when its binary runs from
+# GAAI_DAEMON_HOME (DEC-162 / E1003S04) — anchors BOTH the per-story worktree base
+# (delivery-daemon.sh REPO_ROOT, else it falls back to PROJECT_DIR=home and nests) AND its
+# operator-facing state (logs/locks/retry/drift), so the monitor + `--logs` keep working.
+export GAAI_REPO_ROOT="$PROJECT_ROOT"
 
 # ── Platform guard ────────────────────────────────────────────────────
 case "$(uname -s)" in
@@ -426,6 +431,7 @@ do_start() {
     # fall back to gh pr merge --admin --squash. Trust-arc opt-in, default off.
     [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
     [[ -n "${GAAI_DAEMON_HOME:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_HOME=${GAAI_DAEMON_HOME}")
+    [[ -n "${GAAI_REPO_ROOT:-}" ]] && tmux_env_args+=(-e "GAAI_REPO_ROOT=${GAAI_REPO_ROOT}")
     tmux new-session -d -s gaai-daemon ${tmux_env_args[@]+"${tmux_env_args[@]}"} "$daemon_cmd"
 
     # Give it a moment to start, then grab the PID

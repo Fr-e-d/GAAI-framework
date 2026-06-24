@@ -168,16 +168,25 @@ BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
 BACKLOG="$PROJECT_DIR/$BACKLOG_REL"
 BACKLOG_FILE="$BACKLOG"   # alias for daemon-dispatch.sh library (E134S02)
 SCHEDULER="$SCRIPT_DIR/backlog-scheduler.sh"
-LOCK_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-locks"
+# Operator-facing daemon state (logs / locks / retry / drift markers) resolves to the
+# operator's REAL checkout (GAAI_REPO_ROOT), NOT the GAAI_DAEMON_HOME the daemon binary
+# may run from (DEC-162 / E1003S04). This keeps the monitor + `--logs` working (they read
+# the operator checkout) and the state surviving the home's per-cycle reset --hard.
+# Falls back to GAAI_PROJECT_DIR when GAAI_REPO_ROOT is unset (no-home / direct run) — no
+# behavior change in that case. Note: BACKLOG (above) deliberately stays on PROJECT_DIR
+# (the home) — it is coordination/committed state, not operator-facing ephemeral state.
+_STATE_PROJECT_DIR="${GAAI_REPO_ROOT:+$GAAI_REPO_ROOT/.gaai/project}"
+_STATE_PROJECT_DIR="${_STATE_PROJECT_DIR:-$GAAI_PROJECT_DIR}"
+LOCK_DIR="$_STATE_PROJECT_DIR/contexts/backlog/.delivery-locks"
 DRIFT_MARKER="$LOCK_DIR/.drift-detected.audit"
 REBASE_CONFLICT_MARKER="$LOCK_DIR/.rebase-conflict.audit"
 AGENT_HANG_AUDIT="$LOCK_DIR/.agent-hang.audit"
 CRASH_DRIFT_RECONCILE_AUDIT="$LOCK_DIR/.crash-drift-reconcile.audit"
-LOG_DIR="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-logs"
+LOG_DIR="$_STATE_PROJECT_DIR/contexts/backlog/.delivery-logs"
 STAGING_LOCK="$LOCK_DIR/.staging.lock"
 RETRY_FILE="$LOCK_DIR/.retry-counts"
 RESOLUTION_TRACKING="$LOCK_DIR/.resolution-tracking"
-LOG_FILE="$GAAI_PROJECT_DIR/contexts/backlog/.delivery-daemon.log"
+LOG_FILE="$_STATE_PROJECT_DIR/contexts/backlog/.delivery-daemon.log"
 MAX_RETRIES=3
 
 # Source chore-commit helper (Option B' flock+yq — E134S16)
