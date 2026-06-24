@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# daemon-home-provision.test.sh — regression tests for _gaai_provision_daemon_home() (AC6, E1003S02)
+# daemon-home-provision.test.sh — regression tests for _gaai_provision_daemon_home()
 #
 # Covers:
 #   TC1: first run creates a detached home worktree at origin/staging tip
