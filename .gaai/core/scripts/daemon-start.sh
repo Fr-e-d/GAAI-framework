@@ -367,12 +367,21 @@ do_start() {
   _wt_base="$(cd "$PROJECT_ROOT/.." && pwd)/.gaai-worktrees/$(basename "$PROJECT_ROOT")"
   GAAI_DAEMON_HOME="${GAAI_DAEMON_HOME:-${_wt_base}/__daemon-home}"
   export GAAI_DAEMON_HOME
+  local _target_branch="${GAAI_TARGET_BRANCH:-staging}"
   local _dhome_rc=0
   _gaai_provision_daemon_home "$GAAI_DAEMON_HOME" "$_target_branch" "$PROJECT_ROOT" \
     || _dhome_rc=$?
   if [[ "$_dhome_rc" -ne 0 ]]; then
     echo "⚠️  GAAI_DAEMON_HOME provisioning failed (rc=$_dhome_rc) — proceeding without home worktree."
     echo "   Home: $GAAI_DAEMON_HOME"
+  fi
+
+  # Re-resolve DAEMON_SCRIPT to the home copy when provisioning succeeded (DEC-162 §65).
+  # The daemon then runs only committed-on-<target> framework code (binary + assets).
+  # Falls back to the main-checkout script when the home is absent or provisioning failed.
+  local _home_daemon="$GAAI_DAEMON_HOME/.gaai/core/scripts/delivery-daemon.sh"
+  if [[ "$_dhome_rc" -eq 0 && -f "$_home_daemon" ]]; then
+    DAEMON_SCRIPT="$_home_daemon"
   fi
 
   # Clean stale PID file
