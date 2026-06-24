@@ -383,9 +383,9 @@ do_start() {
     echo "✅ Home checkout was on another branch (clean) — auto-restored to '$_target_branch'."
   fi
 
-  # Provision the daemon home worktree (DEC-162 step 2 — S02 provision only;
-  # S03 owns the coordination flip).  Non-fatal: failure logs a warning and
-  # daemon startup proceeds — the home is unused in S02.
+  # Provision the daemon home worktree (provision-only step; the coordination
+  # flip is a separate subsequent step).  Non-fatal: failure logs a warning
+  # and daemon startup proceeds — the home is unused until the flip lands.
   local _wt_base
   _wt_base="$(cd "$PROJECT_ROOT/.." && pwd)/.gaai-worktrees/$(basename "$PROJECT_ROOT")"
   GAAI_DAEMON_HOME="${GAAI_DAEMON_HOME:-${_wt_base}/__daemon-home}"

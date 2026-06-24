@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# lib/daemon-home.sh — daemon home worktree provisioner (DEC-162 step 2)
+# lib/daemon-home.sh — daemon home worktree provisioner
 #
 # _gaai_provision_daemon_home <home_path> <target_branch> [repo_root]
 #
 #   Provisions an idempotent, self-repairing git worktree at <home_path>.
 #   The worktree is created DETACHED (not on a branch) so it never conflicts
-#   with the main checkout still holding <target_branch> at the S02 stage.
-#   Branch adoption is deferred to E1003S03.
+#   with the main checkout still holding <target_branch>.
+#   Branch adoption is deferred to the coordination-flip step (see backlog).
 #
 #   Behaviour:
 #     - Fetches origin/<target_branch> (best-effort; offline acceptable).
@@ -73,7 +73,7 @@ _gaai_provision_daemon_home() {
   [[ -e "$_home_path" ]] && rm -rf "$_home_path"
 
   # Provision detached — never checks out a branch, so it cannot conflict with
-  # the main checkout still holding <target_branch> at this stage (S02 is
-  # provision-only; branch adoption deferred to S03).
+  # the main checkout still holding <target_branch> at this stage
+  # (provision-only; branch adoption deferred to the coordination-flip step).
   git -C "$_repo_root" worktree add --detach "$_home_path" "origin/$_target_branch"
 }
