@@ -35,10 +35,10 @@ _commit_accumulated_backlog_drift() {
   if git add "$backlog_rel" 2>/dev/null \
      && git commit -m "chore(daemon): commit accumulated wrapper-progress writes [$context $story_id]" \
           --quiet -- "$backlog_rel" 2>/dev/null; then
-    if ! git push origin "$target_branch" --quiet 2>/dev/null; then
+    if ! git push origin "HEAD:$target_branch" --quiet 2>/dev/null; then
       git fetch origin "$target_branch" --quiet 2>/dev/null || true
       if git rebase "origin/$target_branch" --quiet 2>/dev/null; then
-        if ! git push origin "$target_branch" --quiet 2>/dev/null; then
+        if ! git push origin "HEAD:$target_branch" --quiet 2>/dev/null; then
           git reset --hard "origin/$target_branch" --quiet 2>/dev/null || true
           echo "[COMMIT-DRIFT] $story_id : push-race re-sync to origin [$context]" >&2
         fi
@@ -149,11 +149,11 @@ _chore_option_a_fallback() {
     _chore_a_done 1
     return $?
   fi
-  if ! git push origin "$target_branch" --quiet 2>/dev/null; then
+  if ! git push origin "HEAD:$target_branch" --quiet 2>/dev/null; then
     # Push failed → try rebase-retry once
     if git fetch origin "$target_branch" --quiet 2>/dev/null \
       && git rebase "origin/$target_branch" --quiet 2>/dev/null \
-      && git push origin "$target_branch" --quiet 2>/dev/null; then
+      && git push origin "HEAD:$target_branch" --quiet 2>/dev/null; then
       _chore_a_done 0
       return $?
     fi
@@ -240,13 +240,13 @@ chore_commit_field() {
   fi
 
   # Push with rebase-retry for non-fast-forward
-  if git push origin "$target_branch" --quiet 2>/dev/null; then
+  if git push origin "HEAD:$target_branch" --quiet 2>/dev/null; then
     exec 200>&-
     return 0
   fi
   if git fetch origin "$target_branch" --quiet 2>/dev/null \
     && git rebase "origin/$target_branch" --quiet 2>/dev/null \
-    && git push origin "$target_branch" --quiet 2>/dev/null; then
+    && git push origin "HEAD:$target_branch" --quiet 2>/dev/null; then
     exec 200>&-
     return 0
   fi
@@ -345,13 +345,13 @@ chore_commit_multi_field() {
     return 1
   fi
 
-  if git push origin "$target_branch" --quiet 2>/dev/null; then
+  if git push origin "HEAD:$target_branch" --quiet 2>/dev/null; then
     exec 200>&-
     return 0
   fi
   if git fetch origin "$target_branch" --quiet 2>/dev/null \
     && git rebase "origin/$target_branch" --quiet 2>/dev/null \
-    && git push origin "$target_branch" --quiet 2>/dev/null; then
+    && git push origin "HEAD:$target_branch" --quiet 2>/dev/null; then
     exec 200>&-
     return 0
   fi

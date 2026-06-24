@@ -2,12 +2,11 @@
 # daemon-home-provision.test.sh — regression tests for _gaai_provision_daemon_home()
 #
 # Covers:
-#   TC1: first run creates a detached home worktree at origin/staging tip
+#   TC1: first run creates home worktree on gaai-daemon-home branch at origin/staging tip
 #   TC2: second run is idempotent (no duplicate registration, home still valid)
-#   TC3a: stale home (dirty working tree) is repaired to clean detached tip
+#   TC3a: stale home (dirty working tree) is repaired to clean gaai-daemon-home tip
 #   TC3b: plain non-worktree directory at home path is repaired to registered worktree
-#   TC4: provisioning succeeds while main checkout is on <target> (detached avoids conflict)
-#   TC5: behavior-neutral — delivery-daemon.sh + daemon-dispatch.sh do not reference GAAI_DAEMON_HOME
+#   TC4: provisioning succeeds while main checkout is on <target> (named branch avoids conflict)
 #
 # Usage: bash .gaai/core/scripts/tests/daemon-home-provision.test.sh
 
@@ -58,10 +57,10 @@ setup_git_repo() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TC1: first run creates a detached home worktree at origin/staging tip
+# TC1: first run creates home on gaai-daemon-home branch at origin/staging tip
 # ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== TC1: first run creates detached home at origin/staging tip ==="
+echo "=== TC1: first run creates home on gaai-daemon-home branch at origin/staging tip ==="
 
 TC1_DIR="$FIXTURE_DIR/tc1-project"
 TC1_HOME="$FIXTURE_DIR/tc1-home"
@@ -90,10 +89,10 @@ else
 fi
 
 TC1_CURRENT_BRANCH="$(git -C "$TC1_HOME" branch --show-current 2>/dev/null || echo "")"
-if [[ -z "$TC1_CURRENT_BRANCH" ]]; then
-  pass "TC1-4: home HEAD is detached (no branch name)"
+if [[ "$TC1_CURRENT_BRANCH" == "gaai-daemon-home" ]]; then
+  pass "TC1-4: home HEAD is on 'gaai-daemon-home' branch"
 else
-  fail "TC1-4: home HEAD is on branch '$TC1_CURRENT_BRANCH' (expected detached)"
+  fail "TC1-4: home HEAD is on '${TC1_CURRENT_BRANCH:-<detached>}' (expected gaai-daemon-home)"
 fi
 
 TC1_ORIGIN_TIP="$(git -C "$TC1_DIR" rev-parse "origin/staging" 2>/dev/null || echo "?")"
@@ -224,10 +223,10 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TC4: provisioning succeeds while main checkout is on <target> (detached avoids conflict)
+# TC4: provisioning succeeds while main checkout is on <target> (named branch avoids conflict)
 # ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== TC4: main checkout on 'staging' — detached avoids conflict ==="
+echo "=== TC4: main checkout on 'staging' — named branch avoids conflict ==="
 
 TC4_DIR="$FIXTURE_DIR/tc4-project"
 TC4_HOME="$FIXTURE_DIR/tc4-home"
@@ -247,7 +246,7 @@ _gaai_provision_daemon_home "$TC4_HOME" "staging" "$TC4_DIR" || TC4_RC=$?
 if [[ "$TC4_RC" -eq 0 ]]; then
   pass "TC4-1: rc=0 — provisioning succeeded despite main checkout on 'staging'"
 else
-  fail "TC4-1: expected rc=0, got rc=$TC4_RC (detached worktree add should not conflict)"
+  fail "TC4-1: expected rc=0, got rc=$TC4_RC (gaai-daemon-home branch add should not conflict)"
 fi
 
 TC4_MAIN_BRANCH_AFTER="$(git -C "$TC4_DIR" branch --show-current 2>/dev/null || echo "")"
@@ -258,10 +257,10 @@ else
 fi
 
 TC4_HOME_BRANCH="$(git -C "$TC4_HOME" branch --show-current 2>/dev/null || echo "")"
-if [[ -z "$TC4_HOME_BRANCH" ]]; then
-  pass "TC4-3: home HEAD is detached (no branch name)"
+if [[ "$TC4_HOME_BRANCH" == "gaai-daemon-home" ]]; then
+  pass "TC4-3: home HEAD is on 'gaai-daemon-home' branch"
 else
-  fail "TC4-3: home HEAD is on branch '$TC4_HOME_BRANCH' (expected detached)"
+  fail "TC4-3: home HEAD is on '${TC4_HOME_BRANCH:-<detached>}' (expected gaai-daemon-home)"
 fi
 
 TC4_ORIGIN_TIP="$(git -C "$TC4_DIR" rev-parse "origin/staging" 2>/dev/null || echo "?")"
@@ -270,32 +269,6 @@ if [[ "$TC4_HOME_HEAD" == "$TC4_ORIGIN_TIP" ]]; then
   pass "TC4-4: home HEAD == origin/staging tip"
 else
   fail "TC4-4: home HEAD ($TC4_HOME_HEAD) != origin/staging tip ($TC4_ORIGIN_TIP)"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TC5: behavior-neutral — coordination paths do not reference GAAI_DAEMON_HOME
-# ═══════════════════════════════════════════════════════════════════════════════
-echo ""
-echo "=== TC5: behavior-neutral — coordination paths do not reference GAAI_DAEMON_HOME ==="
-
-SCRIPTS_DIR="$SCRIPT_DIR/.."
-TC5_PASS=1
-
-for _coord_script in "$SCRIPTS_DIR/delivery-daemon.sh" "$SCRIPTS_DIR/daemon-dispatch.sh"; do
-  if [[ ! -f "$_coord_script" ]]; then
-    fail "TC5: coordination script not found at $_coord_script"
-    TC5_PASS=0
-    continue
-  fi
-  if grep -q "GAAI_DAEMON_HOME" "$_coord_script" 2>/dev/null; then
-    fail "TC5: GAAI_DAEMON_HOME found in $(basename "$_coord_script") — coordination path must not reference the home in S02"
-    TC5_PASS=0
-  fi
-done
-
-if [[ "$TC5_PASS" -eq 1 ]]; then
-  pass "TC5-1: delivery-daemon.sh and daemon-dispatch.sh contain no GAAI_DAEMON_HOME references"
-  pass "TC5-2: home worktree is provisioned but unused by coordination paths (S03 owns the flip)"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════

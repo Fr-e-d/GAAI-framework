@@ -4,16 +4,18 @@
 # _gaai_provision_daemon_home <home_path> <target_branch> [repo_root]
 #
 #   Provisions an idempotent, self-repairing git worktree at <home_path>.
-#   The worktree is created DETACHED (not on a branch) so it never conflicts
-#   with the main checkout still holding <target_branch>.
-#   Branch adoption is deferred to the coordination-flip step (see backlog).
+#   The worktree is created on branch 'gaai-daemon-home' (tracking origin/<target_branch>).
+#   Because 'gaai-daemon-home' != <target_branch>, the main checkout never contends
+#   for <target_branch> — it remains on whatever branch the operator has checked out.
+#   Coordination pushes to origin/<target_branch> use an explicit HEAD:<target_branch>
+#   refspec (required since the home is not on <target_branch> itself).
 #
 #   Behaviour:
 #     - Fetches origin/<target_branch> (best-effort; offline acceptable).
-#     - Valid home (registered worktree + HEAD resolves + clean tree):
+#     - Valid home (registered worktree + HEAD resolves + clean tree + on gaai-daemon-home):
 #         bring to current origin/<target_branch> tip via reset --hard + clean.
-#     - Stale or absent home:
-#         remove + prune + rm -rf + re-add detached at origin/<target_branch>.
+#     - Stale, absent, or detached home (e.g. S02 provisioned detached):
+#         remove + prune + rm -rf + re-add on -B gaai-daemon-home at origin/<target_branch>.
 #
 #   Returns: 0 on success, 1 on unrecoverable error.
 #
@@ -48,10 +50,13 @@ _gaai_provision_daemon_home() {
     _home_real="$(cd "$_home_path" && pwd -P 2>/dev/null || echo "$_home_path")"
     if git -C "$_repo_root" worktree list --porcelain 2>/dev/null \
         | grep -qF "worktree $_home_real"; then
-      # Registered — lightweight health check: HEAD resolves + tree is clean.
+      # Registered — lightweight health check: HEAD resolves + clean tree + on gaai-daemon-home.
+      # Branch assertion: a detached home (S02-era) returns empty from branch --show-current
+      # and fails this check, forcing the repair path to run -B gaai-daemon-home (migration).
       if git -C "$_home_path" rev-parse HEAD >/dev/null 2>&1 \
           && git -C "$_home_path" diff --quiet 2>/dev/null \
-          && git -C "$_home_path" diff --cached --quiet 2>/dev/null; then
+          && git -C "$_home_path" diff --cached --quiet 2>/dev/null \
+          && [[ "$(git -C "$_home_path" branch --show-current 2>/dev/null)" == "gaai-daemon-home" ]]; then
         _is_valid=1
       fi
     fi
@@ -72,8 +77,9 @@ _gaai_provision_daemon_home() {
   # directory at the path also needs to be cleared before worktree add.
   [[ -e "$_home_path" ]] && rm -rf "$_home_path"
 
-  # Provision detached — never checks out a branch, so it cannot conflict with
-  # the main checkout still holding <target_branch> at this stage
-  # (provision-only; branch adoption deferred to the coordination-flip step).
-  git -C "$_repo_root" worktree add --detach "$_home_path" "origin/$_target_branch"
+  # Provision on dedicated branch gaai-daemon-home. Because the branch name != <target_branch>,
+  # the main checkout can stay on <target_branch> without conflict. Coordination pushes use
+  # explicit HEAD:<target_branch> refspecs to land commits on origin/<target_branch>.
+  # -B force-creates or resets gaai-daemon-home to origin/<target_branch> tip (idempotent).
+  git -C "$_repo_root" worktree add -B gaai-daemon-home "$_home_path" "origin/$_target_branch"
 }
