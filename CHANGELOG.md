@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: anchor operator state + worktree base to the real checkout, not the home
 - fix: operator state (logs/locks) + worktree base anchor to REPO_ROOT, not the home
 - fix: stop auto-merge failure commit loop
 - fix: stop auto-merge failure commit loop

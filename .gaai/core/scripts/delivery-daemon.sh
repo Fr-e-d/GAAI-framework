@@ -170,7 +170,7 @@ BACKLOG_FILE="$BACKLOG"   # alias for daemon-dispatch.sh library (E134S02)
 SCHEDULER="$SCRIPT_DIR/backlog-scheduler.sh"
 # Operator-facing daemon state (logs / locks / retry / drift markers) resolves to the
 # operator's REAL checkout (GAAI_REPO_ROOT), NOT the GAAI_DAEMON_HOME the daemon binary
-# may run from (DEC-162 / E1003S04). This keeps the monitor + `--logs` working (they read
+# may run from (the dedicated daemon home worktree). This keeps the monitor + `--logs` working (they read
 # the operator checkout) and the state surviving the home's per-cycle reset --hard.
 # Falls back to GAAI_PROJECT_DIR when GAAI_REPO_ROOT is unset (no-home / direct run) — no
 # behavior change in that case. Note: BACKLOG (above) deliberately stays on PROJECT_DIR

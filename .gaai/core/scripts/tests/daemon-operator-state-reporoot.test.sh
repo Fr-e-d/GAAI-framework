@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regression test: daemon operator-facing state (logs/locks/retry/drift) + the per-story
 # worktree-base anchor (REPO_ROOT) resolve to the operator's REAL checkout (GAAI_REPO_ROOT),
-# NOT the GAAI_DAEMON_HOME the daemon binary runs from (DEC-162 / E1003S04 monitor regression).
+# NOT the GAAI_DAEMON_HOME the daemon binary runs from (the dedicated daemon home worktree).
 #
 # Guards two invariants the flip broke:
 #   1. delivery-daemon.sh LOG_FILE/LOG_DIR/LOCK_DIR follow GAAI_REPO_ROOT (else the monitor,
