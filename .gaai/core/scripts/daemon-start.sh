@@ -44,7 +44,7 @@ CORE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 GAAI_DIR="$(cd "$CORE_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$GAAI_DIR/.." && pwd)"
 # The operator's real repo checkout. Exported so the daemon — even when its binary runs from
-# GAAI_DAEMON_HOME (DEC-162 / E1003S04) — anchors BOTH the per-story worktree base
+# GAAI_DAEMON_HOME (the dedicated daemon home worktree) — anchors BOTH the per-story worktree base
 # (delivery-daemon.sh REPO_ROOT, else it falls back to PROJECT_DIR=home and nests) AND its
 # operator-facing state (logs/locks/retry/drift), so the monitor + `--logs` keep working.
 export GAAI_REPO_ROOT="$PROJECT_ROOT"
