@@ -66,6 +66,7 @@ Execute these reads in order before any QA work:
 4. **`$GAAI_IMPL_REPORT_PATH`** — the implementation report from the Impl phase. This is the agent's narrative of what was done.
 5. **`git diff $GAAI_BASE_REF...HEAD` in `$GAAI_WORKTREE_PATH`** — run this as a Bash command. This is the ground-truth code diff. The IMPL report is a narrative; the diff is the GROUND TRUTH. QA validates that what the diff shows matches what the plan + ACs require. Discrepancy between IMPL narrative and diff = automatic FAIL with finding (model said X, code shows Y).
 6. **For EACH id in story frontmatter `related_decs`** — Read the file at `$GAAI_WORKTREE_PATH/.gaai/project/contexts/memory/decisions/{id}.md`. Verify code respects each decision's invariants. Run consistency-check per E94 D-12.
+   - **Read the ENTIRE decision — not just the first determination heading.** Decisions evolve *in place*: a later amendment / reword / `⚠` block **overrides** the original text above it, and the most recent in-section amendment is authoritative. Do NOT issue a verdict against a rule whose amendment block you stopped short of reading (a determination header immediately followed by an amendment is a classic trap — the header states the *old* rule). When checking a convention, confirm it against the current decision text rather than a remembered value; if the decision delegates the convention to a referenced guide (e.g. a voice/style guide), read that guide's current rule too.
 
 ---
 
