@@ -376,7 +376,7 @@ do_start() {
     echo "   Home: $GAAI_DAEMON_HOME"
   fi
 
-  # Re-resolve DAEMON_SCRIPT to the home copy when provisioning succeeded (DEC-162 §65).
+  # Re-resolve DAEMON_SCRIPT to the home copy when provisioning succeeded.
   # The daemon then runs only committed-on-<target> framework code (binary + assets).
   # Falls back to the main-checkout script when the home is absent or provisioning failed.
   local _home_daemon="$GAAI_DAEMON_HOME/.gaai/core/scripts/delivery-daemon.sh"
