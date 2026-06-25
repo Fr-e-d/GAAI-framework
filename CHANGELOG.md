@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: forward REPO_ROOT/DAEMON_HOME to the per-story delivery wrapper
 - fix: instruct QA to read the ENTIRE decision incl. amendment/reword blocks
 - fix: anchor operator state + worktree base to the real checkout, not the home
 - fix: operator state (logs/locks) + worktree base anchor to REPO_ROOT, not the home

@@ -4155,6 +4155,13 @@ WRAPPER_EOF
   [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
   [[ -n "${GAAI_AUTO_MERGE_POLICY:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_POLICY=${GAAI_AUTO_MERGE_POLICY}")
   [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
+  # The delivery wrapper runs in its OWN tmux session and creates the per-story worktree.
+  # It MUST inherit the operator's real checkout + the daemon home, or its worktree-base
+  # derivation falls back to PROJECT_DIR (= the home when the daemon binary runs from the
+  # home worktree) and nests the worktrees under the home. Forward both.
+  [[ -n "${GAAI_REPO_ROOT:-}" ]] && tmux_env_args+=(-e "GAAI_REPO_ROOT=${GAAI_REPO_ROOT}")
+  [[ -n "${GAAI_DAEMON_HOME:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_HOME=${GAAI_DAEMON_HOME}")
+  [[ -n "${GAAI_WORKTREES_BASE:-}" ]] && tmux_env_args+=(-e "GAAI_WORKTREES_BASE=${GAAI_WORKTREES_BASE}")
 
   # ── Cross-cycle qa-report env setup ────────────────────────────────
   local _cc_3p_wt_path
