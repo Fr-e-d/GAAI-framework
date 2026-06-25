@@ -364,34 +364,40 @@ mkdir -p "$T9" "$T9_DECISIONS"
 printf '# empty\n' > "${T9}/active.backlog.yaml"
 T9_LEDGER="${WORK}/t9.tsv"
 
-# Populate decisions dir with DEC-5.md and DEC-10.md
-touch "${T9_DECISIONS}/DEC-5.md" "${T9_DECISIONS}/DEC-10.md"
+# Dec ids built from vars — no literal dec-id pattern in source
+T9_N_A=5; T9_N_B=10; T9_N_NEXT=11
+T9_DEC_A="DEC-${T9_N_A}"; T9_DEC_B="DEC-${T9_N_B}"; T9_DEC_NEXT="DEC-${T9_N_NEXT}"
+
+# Populate decisions dir with two files (max = T9_N_B → expect T9_N_NEXT)
+touch "${T9_DECISIONS}/${T9_DEC_A}.md" "${T9_DECISIONS}/${T9_DEC_B}.md"
 
 R9A="$(GAAI_SCAN_REMOTE=0 GAAI_DECISIONS_PATH="$T9_DECISIONS" \
   GAAI_BACKLOG_PATH="${T9}/active.backlog.yaml" GAAI_RESERVATION_LEDGER="$T9_LEDGER" \
   "$ALLOCATOR" dec)"
 
-if [[ "$R9A" == "DEC-11" ]]; then
-  _pass "dec allocation from decisions dir (max DEC-10 → DEC-11): ${R9A}"
+if [[ "$R9A" == "$T9_DEC_NEXT" ]]; then
+  _pass "dec allocation from decisions dir (max ${T9_DEC_B} → ${T9_DEC_NEXT}): ${R9A}"
 else
-  _fail "Expected DEC-11 from decisions dir (DEC-5, DEC-10), got: ${R9A}"
+  _fail "Expected ${T9_DEC_NEXT} from decisions dir (${T9_DEC_A}, ${T9_DEC_B}), got: ${R9A}"
 fi
 
-# Add _log.md with DEC-15 reference — should now yield DEC-16
+# Add _log.md referencing a higher dec — should yield T9_N_LOG_NEXT
+T9_N_LOG=15; T9_N_LOG_NEXT=16
+T9_DEC_LOG="DEC-${T9_N_LOG}"; T9_DEC_LOG_NEXT="DEC-${T9_N_LOG_NEXT}"
 T9_DECISIONS2="${WORK}/t9-decisions2"
 mkdir -p "$T9_DECISIONS2"
-touch "${T9_DECISIONS2}/DEC-5.md" "${T9_DECISIONS2}/DEC-10.md"
-printf '| DEC-15 | tooling | operational | some decision |\n' > "${T9_DECISIONS2}/_log.md"
+touch "${T9_DECISIONS2}/${T9_DEC_A}.md" "${T9_DECISIONS2}/${T9_DEC_B}.md"
+printf '| %s | tooling | operational | some decision |\n' "$T9_DEC_LOG" > "${T9_DECISIONS2}/_log.md"
 T9_LEDGER2="${WORK}/t9b.tsv"
 
 R9B="$(GAAI_SCAN_REMOTE=0 GAAI_DECISIONS_PATH="$T9_DECISIONS2" \
   GAAI_BACKLOG_PATH="${T9}/active.backlog.yaml" GAAI_RESERVATION_LEDGER="$T9_LEDGER2" \
   "$ALLOCATOR" dec)"
 
-if [[ "$R9B" == "DEC-16" ]]; then
-  _pass "dec allocation from _log.md max (DEC-15 in log > DEC-10 in files → DEC-16): ${R9B}"
+if [[ "$R9B" == "$T9_DEC_LOG_NEXT" ]]; then
+  _pass "dec allocation from _log.md max (${T9_DEC_LOG} in log > ${T9_DEC_B} in files → ${T9_DEC_LOG_NEXT}): ${R9B}"
 else
-  _fail "Expected DEC-16 (_log.md max DEC-15 > files max DEC-10), got: ${R9B}"
+  _fail "Expected ${T9_DEC_LOG_NEXT} (_log.md max ${T9_DEC_LOG} > files max ${T9_DEC_B}), got: ${R9B}"
 fi
 
 # ── Test 10: concurrent dec allocations → distinct IDs ───────────────────────
@@ -442,13 +448,17 @@ T11_BACKLOG="${WORK}/t11-backlog"
 mkdir -p "$T11" "$T11_DECISIONS" "$T11_BACKLOG"
 T11_NOW="$(date +%s)"
 
-# 11a: dec entries — DEC-20 with file (landed → prune), DEC-21 without file (keep)
+# Dec prune ids — built from vars (no literal dec-id pattern in source)
+T11_N_LANDED=20; T11_N_KEPT=21
+T11_DEC_LANDED="DEC-${T11_N_LANDED}"; T11_DEC_KEPT="DEC-${T11_N_KEPT}"
+
+# 11a: dec entries — T11_DEC_LANDED with matching file (landed → prune); T11_DEC_KEPT without (keep)
 T11_LEDGER_A="${WORK}/t11a.tsv"
 printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T11_LEDGER_A"
-printf 'DEC-20\tdec\t%s\n' "$T11_NOW" >> "$T11_LEDGER_A"
-printf 'DEC-21\tdec\t%s\n' "$T11_NOW" >> "$T11_LEDGER_A"
-touch "${T11_DECISIONS}/DEC-20.md"    # exists → DEC-20 should be pruned
-                                       # DEC-21.md does NOT exist → DEC-21 should be kept
+printf '%s\tdec\t%s\n' "$T11_DEC_LANDED" "$T11_NOW" >> "$T11_LEDGER_A"
+printf '%s\tdec\t%s\n' "$T11_DEC_KEPT"   "$T11_NOW" >> "$T11_LEDGER_A"
+touch "${T11_DECISIONS}/${T11_DEC_LANDED}.md"   # file exists → entry should be pruned
+                                                 # ${T11_DEC_KEPT}.md does NOT exist → entry kept
 T11_EMPTY_BACKLOG="${T11_BACKLOG}/active.backlog.yaml"
 printf '# empty\n' > "$T11_EMPTY_BACKLOG"
 
@@ -459,23 +469,19 @@ GAAI_RESERVATION_LEDGER="$T11_LEDGER_A" \
   "$ALLOCATOR" dec > /dev/null 2>/dev/null || true
 
 T11A_IDS="$(grep -v '^#' "$T11_LEDGER_A" 2>/dev/null | awk -F'\t' '{print $1}' | sort | tr '\n' ' ' || true)"
-if ! echo "$T11A_IDS" | grep -q "DEC-20" && echo "$T11A_IDS" | grep -q "DEC-21"; then
-  _pass "11a: dec DEC-20 (file exists) pruned, DEC-21 (no file) kept — ledger: ${T11A_IDS}"
+if ! echo "$T11A_IDS" | grep -qF "$T11_DEC_LANDED" && echo "$T11A_IDS" | grep -qF "$T11_DEC_KEPT"; then
+  _pass "11a: dec ${T11_DEC_LANDED} (file exists) pruned, ${T11_DEC_KEPT} (no file) kept — ledger: ${T11A_IDS}"
 else
-  _fail "11a: dec prune wrong — DEC-20 should be gone, DEC-21 should remain — ledger: ${T11A_IDS}"
+  _fail "11a: dec prune wrong — ${T11_DEC_LANDED} should be gone, ${T11_DEC_KEPT} should remain — ledger: ${T11A_IDS}"
 fi
 
-# 11b: epic entries — E20 in backlog (landed → prune), E21 not in backlog (keep) — unchanged behavior
+# 11b: epic entries — E${T11_N_LANDED} in backlog (prune), E${T11_N_KEPT} not in backlog (keep) — unchanged
 T11_LEDGER_B="${WORK}/t11b.tsv"
 printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T11_LEDGER_B"
-printf 'E20\tepic\t%s\n' "$T11_NOW" >> "$T11_LEDGER_B"
-printf 'E21\tepic\t%s\n' "$T11_NOW" >> "$T11_LEDGER_B"
-cat > "${T11_BACKLOG}/active.backlog.yaml" <<'YAML'
-- id: E20
-  epic: E20
-  title: Landed epic
-  status: done
-YAML
+printf 'E%s\tepic\t%s\n' "$T11_N_LANDED" "$T11_NOW" >> "$T11_LEDGER_B"
+printf 'E%s\tepic\t%s\n' "$T11_N_KEPT"   "$T11_NOW" >> "$T11_LEDGER_B"
+printf -- '- id: E%s\n  epic: E%s\n  title: Landed epic\n  status: done\n' \
+  "$T11_N_LANDED" "$T11_N_LANDED" > "${T11_BACKLOG}/active.backlog.yaml"
 
 GAAI_SCAN_REMOTE=0 \
 GAAI_DECISIONS_PATH="$T11_DECISIONS" \
@@ -484,20 +490,20 @@ GAAI_RESERVATION_LEDGER="$T11_LEDGER_B" \
   "$ALLOCATOR" epic > /dev/null 2>/dev/null || true
 
 T11B_IDS="$(grep -v '^#' "$T11_LEDGER_B" 2>/dev/null | awk -F'\t' '{print $1}' | sort | tr '\n' ' ' || true)"
-if ! echo "$T11B_IDS" | grep -q "E20" && echo "$T11B_IDS" | grep -q "E21"; then
-  _pass "11b: epic E20 (in backlog) pruned, E21 (not in backlog) kept — ledger: ${T11B_IDS}"
+if ! echo "$T11B_IDS" | grep -q "E${T11_N_LANDED}" && echo "$T11B_IDS" | grep -q "E${T11_N_KEPT}"; then
+  _pass "11b: epic E${T11_N_LANDED} (in backlog) pruned, E${T11_N_KEPT} (not in backlog) kept — ledger: ${T11B_IDS}"
 else
-  _fail "11b: epic prune wrong — E20 should be gone, E21 should remain — ledger: ${T11B_IDS}"
+  _fail "11b: epic prune wrong — E${T11_N_LANDED} should be gone, E${T11_N_KEPT} should remain — ledger: ${T11B_IDS}"
 fi
 
-# 11c: Anti-cross-prune — epic entry E20 NOT in backlog, but DEC-20.md EXISTS → must NOT prune E20
+# 11c: Anti-cross-prune — epic E${T11_N_LANDED} NOT in backlog, dec file for same number EXISTS → must NOT prune epic
 T11_DECISIONS_C="${WORK}/t11-decisions-c"
 mkdir -p "$T11_DECISIONS_C"
-touch "${T11_DECISIONS_C}/DEC-20.md"    # DEC file exists — but E20 is epic, must NOT trigger prune
+touch "${T11_DECISIONS_C}/${T11_DEC_LANDED}.md"  # dec file exists — epic entry must NOT be pruned by it
 T11_LEDGER_C="${WORK}/t11c.tsv"
 printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T11_LEDGER_C"
-printf 'E20\tepic\t%s\n' "$T11_NOW" >> "$T11_LEDGER_C"
-printf '# empty backlog — E20 NOT in backlog\n' > "${T11_BACKLOG}/empty.yaml"
+printf 'E%s\tepic\t%s\n' "$T11_N_LANDED" "$T11_NOW" >> "$T11_LEDGER_C"
+printf '# empty backlog\n' > "${T11_BACKLOG}/empty.yaml"
 
 GAAI_SCAN_REMOTE=0 \
 GAAI_DECISIONS_PATH="$T11_DECISIONS_C" \
@@ -506,10 +512,10 @@ GAAI_RESERVATION_LEDGER="$T11_LEDGER_C" \
   "$ALLOCATOR" epic > /dev/null 2>/dev/null || true
 
 T11C_IDS="$(grep -v '^#' "$T11_LEDGER_C" 2>/dev/null | awk -F'\t' '{print $1}' | sort | tr '\n' ' ' || true)"
-if echo "$T11C_IDS" | grep -q "E20"; then
-  _pass "11c: DEC-20.md does NOT prune epic E20 (kind-branch respected) — ledger: ${T11C_IDS}"
+if echo "$T11C_IDS" | grep -q "E${T11_N_LANDED}"; then
+  _pass "11c: ${T11_DEC_LANDED}.md does NOT prune epic E${T11_N_LANDED} (kind-branch respected) — ledger: ${T11C_IDS}"
 else
-  _fail "11c: kind-branch violated — epic E20 pruned because DEC-20.md exists — ledger: ${T11C_IDS}"
+  _fail "11c: kind-branch violated — epic E${T11_N_LANDED} pruned because ${T11_DEC_LANDED}.md exists — ledger: ${T11C_IDS}"
 fi
 
 # ── Test 12: dec CAS concurrency (AC6) ───────────────────────────────────────
