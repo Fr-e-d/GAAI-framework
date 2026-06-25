@@ -5,7 +5,7 @@
 # Usage:
 #   allocate-id.sh epic                   Return next Epic ID (e.g., E221)
 #   allocate-id.sh story <epic_prefix>   Return next Story ID (e.g., {EPIC}S{NN})
-#   allocate-id.sh dec                   Return next Decision ID (e.g., DEC-166)
+#   allocate-id.sh dec                   Return next Decision ID (e.g., DEC-<N>)
 #   allocate-id.sh --help                Show help
 #
 # Env vars (all optional):
@@ -61,7 +61,7 @@ allocate-id.sh — flock-guarded GAAI ID allocator (OSS framework)
 Usage:
   allocate-id.sh epic                   Return next Epic ID (e.g., E221)
   allocate-id.sh story <epic_prefix>   Return next Story ID (e.g., {EPIC}S{NN})
-  allocate-id.sh dec                   Return next Decision ID (e.g., DEC-166)
+  allocate-id.sh dec                   Return next Decision ID (e.g., DEC-<N>)
   allocate-id.sh --help                Show this help
 
 Env vars (all optional):
@@ -78,7 +78,7 @@ Ledger format (TSV):
   # GAAI ID reservation ledger — do not edit manually
   E221        epic    <epoch_secs>
   {EPIC}S{NN} story   <epoch_secs>
-  DEC-166     dec     <epoch_secs>
+  DEC-<N>     dec     <epoch_secs>
 
 The allocator computes next = max(highest-in-backlog, highest-in-ledger, highest-on-remote,
 highest-in-CAS-ref) + 1, writes the new reservation to the ledger, performs a compare-and-swap
