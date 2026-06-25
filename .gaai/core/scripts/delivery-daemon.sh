@@ -4060,6 +4060,13 @@ cd "$PROJECT_DIR" || exit 1
 
 # Inherit daemon's env vars critical to dispatch :
 export PROJECT_DIR="$PROJECT_DIR"
+# REPO_ROOT = the operator's REAL checkout. MUST be baked in: dispatch's per-story
+# worktree-base derivation is \${REPO_ROOT:-\$PROJECT_DIR}/.. — and PROJECT_DIR above is the
+# daemon HOME (post home-flip). Without REPO_ROOT the fallback nests worktrees under the home
+# (.gaai-worktrees/<repo>/.gaai-worktrees/__daemon-home/<sid>-workspace). Bake the daemon's
+# (correct) REPO_ROOT so the wrapper derives the canonical non-nested base.
+export REPO_ROOT="$REPO_ROOT"
+export GAAI_REPO_ROOT="$REPO_ROOT"
 export BACKLOG_FILE="$BACKLOG"
 export SCHEDULER="$SCHEDULER"
 export LOCK_DIR="$LOCK_DIR"
