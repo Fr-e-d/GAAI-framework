@@ -320,9 +320,11 @@ do_status() {
     tmux new-session -d -s "$monitor_session" \
       "bash '$MONITOR_TOP' '$config_file' '$LOG_FILE'"
 
-    # Bottom pane: active deliveries summary (60% height — fits title + 3 concurrent slots)
+    # Bottom pane: active deliveries summary (60% height — fits title + 3 concurrent slots).
+    # Pass GAAI_DAEMON_HOME so the pane reads the LIVE backlog from the daemon's home
+    # worktree (where in_progress marks are written), not the operator's stale main checkout.
     tmux split-window -t "${monitor_session}:0" -v -p 60 \
-      "bash '$MONITOR_TAIL' '$LOG_DIR'"
+      "bash '$MONITOR_TAIL' '$LOG_DIR' '${GAAI_DAEMON_HOME:-}'"
 
     # Enable mouse mode (allows scroll in panes when content exceeds pane height)
     tmux set-option -t "$monitor_session" mouse on

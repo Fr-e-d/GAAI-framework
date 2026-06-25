@@ -3,8 +3,13 @@
 # Parses stream-json NDJSON logs into readable summaries via jq
 
 LOG_DIR="${1:-.gaai/project/contexts/backlog/.delivery-logs}"
+# $2 (optional) = the daemon's dedicated home worktree. When the daemon coordinates in a
+# home worktree, the LIVE backlog (in_progress marks) lives there, not in the operator's
+# main checkout — so the active-deliveries enumeration must read the backlog from there.
+# Logs/locks stay on the operator checkout (PROJECT_DIR) where deliveries write them.
+DAEMON_HOME="${2:-}"
 PROJECT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
-BACKLOG="$PROJECT_DIR/.gaai/project/contexts/backlog/active.backlog.yaml"
+BACKLOG="${DAEMON_HOME:-$PROJECT_DIR}/.gaai/project/contexts/backlog/active.backlog.yaml"
 LOCK_DIR="${PROJECT_DIR}/.gaai/project/contexts/backlog/.delivery-locks"
 WORKTREE_BASE="${PROJECT_DIR}/../.gaai-worktrees/$(basename "$PROJECT_DIR")"
 
