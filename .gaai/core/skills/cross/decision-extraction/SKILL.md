@@ -63,14 +63,8 @@ Do NOT use for trivial steps, implementation details, brainstorming, or reversib
    - Decision
    - Impact
 5. Classify using the **10 canonical domains**: `architecture`, `matching`, `expert-system`, `billing`, `booking`, `infrastructure`, `strategy`, `governance`, `market`, `content`. And **3 levels**: `strategic` (WHAT/WHY), `architectural` (HOW), `operational` (PROCESS).
-6. **Get next available ID** using `allocate-id.sh dec` (flock + ledger + git-CAS; fallback below);
-   write `decisions/DEC-{N}.md`. Keep `decisions/_log.md` updated as the human-readable audit log.
-
-   **Fallback (allocator absent):** scan-verify — grep `decisions/DEC-[0-9]*.md` + `_log.md`
-   for highest N, take `N+1`. Warn: `# allocate-id.sh not found — using scan-verify fallback
-   (collision possible in concurrent sessions)`. Mirror of the epic/story fallback.
-7. **Update `_log.md`:** add one-line entry for the new decision (human-readable log; the allocator
-   is the authoritative ID source but `_log.md` remains the topic-searchable audit trail)
+6. **Get next available ID** from `decisions/_log.md` → write `decisions/DEC-{N}.md`
+7. **Update `_log.md`:** increment next available ID, add one-line entry for the new decision
 8. **MANDATORY GATE — Update Decision Registry (`index.md` or sibling `index-decisions.md` if extracted):** Add one row per new decision. **Row form is pointer-only (per `memory-index-compact` skill, SKILL-MEMORY-INDEX-COMPACT-001):** `| DEC-{N} | {domain} | {level} | {≤30-word topic + key relations e.g. amends/supersedes} | {status} {YYYY-MM-DD} |`. **HARD CAP : ≤ 200 chars per row.** Forbidden in row : Tier 2 cycle trails (F-counts, REFINE narratives), commit SHAs, §-numbered substance dumps duplicating DEC body, validation ceremony prose, drift-heal forensic prose — these live in `_log.md` and the DEC body, NOT in the registry. Increment file count in Shared Categories table. **Verify:** re-read the row + count its chars ; if > 200 chars, compact before completing. Blocking gate — do not output success until confirmed.
 9. **Summary range check:** Read the Summaries section of `index.md`. If the new DEC ID exceeds the highest DEC covered by the latest summary file (e.g., summary covers 90–155 but new DEC is 156), append a line to `decisions/_log.md`: `# ⚠️ PENDING: extend summary range to DEC-{new-max-id} — run memory-refresh`. This signals the next `memory-refresh` cycle to extend the summary. Do NOT create a new summary mid-delivery.
 

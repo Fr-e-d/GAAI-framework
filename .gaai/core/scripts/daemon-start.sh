@@ -316,6 +316,15 @@ do_status() {
     local config_file="$GAAI_DIR/project/contexts/backlog/.delivery-locks/.daemon-config"
     mkdir -p "$LOG_DIR"
 
+    local monitor_daemon_home="${GAAI_DAEMON_HOME:-}"
+    if [[ -z "$monitor_daemon_home" ]]; then
+      local wt_base
+      wt_base="$(cd "$PROJECT_ROOT/.." && pwd)/.gaai-worktrees/$(basename "$PROJECT_ROOT")"
+      if [[ -d "$wt_base/__daemon-home/.gaai/project/contexts/backlog" ]]; then
+        monitor_daemon_home="$wt_base/__daemon-home"
+      fi
+    fi
+
     # Top pane: fixed banner (from config) + scrolling daemon logs
     tmux new-session -d -s "$monitor_session" \
       "bash '$MONITOR_TOP' '$config_file' '$LOG_FILE'"
@@ -324,7 +333,7 @@ do_status() {
     # Pass GAAI_DAEMON_HOME so the pane reads the LIVE backlog from the daemon's home
     # worktree (where in_progress marks are written), not the operator's stale main checkout.
     tmux split-window -t "${monitor_session}:0" -v -p 60 \
-      "bash '$MONITOR_TAIL' '$LOG_DIR' '${GAAI_DAEMON_HOME:-}'"
+      "bash '$MONITOR_TAIL' '$LOG_DIR' '$monitor_daemon_home'"
 
     # Enable mouse mode (allows scroll in panes when content exceeds pane height)
     tmux set-option -t "$monitor_session" mouse on
