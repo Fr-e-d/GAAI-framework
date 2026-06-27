@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: show codex monitor activity
 - fix: bake REPO_ROOT into the generated delivery wrapper (worktree nesting)
 - fix: forward REPO_ROOT/DAEMON_HOME to the per-story delivery wrapper
 - fix: instruct QA to read the ENTIRE decision incl. amendment/reword blocks

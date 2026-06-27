@@ -279,11 +279,19 @@ parse_log() {
   fi
 
   # ── Tool call count ──
+  # Claude stream-json uses assistant.message.content[].tool_use.
+  # Codex exec --json uses item.started/item.completed with item.type=command_execution.
   local tool_count=0
   if $HAS_JQ; then
-    tool_count=$(jq -c 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use")' "$log_file" 2>/dev/null | wc -l | tr -d ' ')
+    local claude_tool_count codex_tool_count
+    claude_tool_count=$(jq -c 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use")' "$log_file" 2>/dev/null | wc -l | tr -d ' ')
+    codex_tool_count=$(jq -c 'select(.type=="item.started" and (.item.type=="command_execution"))' "$log_file" 2>/dev/null | wc -l | tr -d ' ')
+    tool_count=$(( ${claude_tool_count:-0} + ${codex_tool_count:-0} ))
   else
-    tool_count=$(grep -c '"type":"tool_use"' "$log_file" 2>/dev/null || echo 0)
+    local claude_tool_count codex_tool_count
+    claude_tool_count=$(grep -c '"type":"tool_use"' "$log_file" 2>/dev/null || echo 0)
+    codex_tool_count=$(grep -c '"type":"item.started".*"type":"command_execution"' "$log_file" 2>/dev/null || echo 0)
+    tool_count=$(( ${claude_tool_count:-0} + ${codex_tool_count:-0} ))
   fi
 
   # ── Last activity (single line — whichever of main or sub-agent was most recent) ──
@@ -320,6 +328,22 @@ parse_log() {
     last_origin=$(printf '%s' "$last_event" | awk -F'\t' '{print $1}')
     last_text=$(printf   '%s' "$last_event" | awk -F'\t' '{print $2}')
     last_model=$(printf  '%s' "$last_event" | awk -F'\t' '{print $3}')
+
+    # Codex exec --json fallback: show the latest command_execution item when no
+    # Claude-style tool_use event exists in this phase log.
+    if [[ -z "$last_text" ]]; then
+      local codex_event
+      codex_event=$(tail -500 "$log_file" 2>/dev/null \
+        | jq -r '
+          def clean: tostring | gsub("\n"; " ") | gsub("  +"; " ");
+          select((.type=="item.started" or .type=="item.completed") and (.item.type=="command_execution"))
+          | "MAIN" + "\t" + (.item.command // "" | clean) + "\t" + "codex"
+        ' 2>/dev/null \
+        | tail -1 || true)
+      last_origin=$(printf '%s' "$codex_event" | awk -F'\t' '{print $1}')
+      last_text=$(printf   '%s' "$codex_event" | awk -F'\t' '{print $2}')
+      last_model=$(printf  '%s' "$codex_event" | awk -F'\t' '{print $3}')
+    fi
 
     # ── Daemon-log fallback for nested-spawn events ──
     # When the orchestrator passed `--log-file <daemon log>` to nested-claude-spawn
