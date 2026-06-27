@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: support codex executor in bash daemon
 - fix: show codex monitor activity
 - fix: show codex monitor activity
 - fix: bake REPO_ROOT into the generated delivery wrapper (worktree nesting)

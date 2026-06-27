@@ -79,11 +79,28 @@ STOP_DRAIN_TIMEOUT="${GAAI_STOP_DRAIN_TIMEOUT:-600}"
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 daemon_is_running() {
-  [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+  if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    return 0
+  fi
+  if command -v tmux &>/dev/null && tmux has-session -t gaai-daemon 2>/dev/null; then
+    local tmux_pid
+    tmux_pid=$(tmux list-panes -t gaai-daemon -F '#{pane_pid}' 2>/dev/null | head -1 || echo "")
+    [[ -n "$tmux_pid" ]] && kill -0 "$tmux_pid" 2>/dev/null
+    return $?
+  fi
+  return 1
 }
 
 get_pid() {
-  [[ -f "$PID_FILE" ]] && cat "$PID_FILE" || echo ""
+  if [[ -f "$PID_FILE" ]]; then
+    cat "$PID_FILE"
+    return
+  fi
+  if command -v tmux &>/dev/null && tmux has-session -t gaai-daemon 2>/dev/null; then
+    tmux list-panes -t gaai-daemon -F '#{pane_pid}' 2>/dev/null | head -1 || echo ""
+    return
+  fi
+  echo ""
 }
 
 # ── Parse action ──────────────────────────────────────────────────────────
@@ -441,6 +458,11 @@ do_start() {
     # Admin fallback (free-tier opt-in) — when --auto fails branch_protection_missing,
     # fall back to gh pr merge --admin --squash. Trust-arc opt-in, default off.
     [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
+    [[ -n "${GAAI_DAEMON_EXECUTOR:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_EXECUTOR=${GAAI_DAEMON_EXECUTOR}")
+    [[ -n "${GAAI_CODEX_MODEL:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_MODEL=${GAAI_CODEX_MODEL}")
+    [[ -n "${GAAI_CODEX_SANDBOX:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_SANDBOX=${GAAI_CODEX_SANDBOX}")
+    [[ -n "${GAAI_CODEX_EPHEMERAL:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_EPHEMERAL=${GAAI_CODEX_EPHEMERAL}")
+    [[ -n "${GAAI_CODEX_IGNORE_USER_CONFIG:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_IGNORE_USER_CONFIG=${GAAI_CODEX_IGNORE_USER_CONFIG}")
     [[ -n "${GAAI_DAEMON_HOME:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_HOME=${GAAI_DAEMON_HOME}")
     [[ -n "${GAAI_REPO_ROOT:-}" ]] && tmux_env_args+=(-e "GAAI_REPO_ROOT=${GAAI_REPO_ROOT}")
     tmux new-session -d -s gaai-daemon ${tmux_env_args[@]+"${tmux_env_args[@]}"} "$daemon_cmd"

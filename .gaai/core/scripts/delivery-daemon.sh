@@ -583,11 +583,25 @@ if ! command -v python3 &>/dev/null; then
   exit 1
 fi
 
-if ! command -v claude &>/dev/null; then
-  echo -e "${RED}ERROR: claude CLI not found in PATH${NC}"
-  echo "Install: https://docs.anthropic.com/en/docs/claude-code"
-  exit 1
-fi
+case "${GAAI_DAEMON_EXECUTOR:-claude}" in
+  claude)
+    if ! command -v claude &>/dev/null; then
+      echo -e "${RED}ERROR: claude CLI not found in PATH${NC}"
+      echo "Install: https://docs.anthropic.com/en/docs/claude-code"
+      exit 1
+    fi
+    ;;
+  codex)
+    if ! command -v codex &>/dev/null; then
+      echo -e "${RED}ERROR: codex CLI not found in PATH${NC}"
+      exit 1
+    fi
+    ;;
+  *)
+    echo -e "${RED}ERROR: unknown GAAI_DAEMON_EXECUTOR='${GAAI_DAEMON_EXECUTOR:-}' (expected claude or codex)${NC}"
+    exit 1
+    ;;
+esac
 
 if [[ ! -f "$SCHEDULER" ]]; then
   echo -e "${RED}ERROR: backlog-scheduler.sh not found at $SCHEDULER${NC}"
@@ -3223,48 +3237,52 @@ if [[ -n "\${_BINDING_JWT}" ]]; then
   _MCP_HEADER_ARGS=(--header "X-GAAI-Authorized-Workspaces:\${_BINDING_JWT}")
 fi
 
-# --output-format stream-json streams NDJSON events in real-time, so:
-#   - tee updates the log file continuously (natural heartbeat for daemon monitor)
-#   - tail -f shows progress in real-time
-# Dispatch wall-clock cap: prefer gtimeout (macOS: brew install coreutils) → timeout (BSD) →
-# no binary = MAX_TURNS flag cap + daemon heartbeat watchdog are the liveness guards.
+# --output-format stream-json / codex --json stream events in real time, so tee
+# updates the log continuously (natural heartbeat for daemon monitor).
+_AGENT_PROMPT="\${DELIVERY_PROMPT}
+
+Deliver story: $story_id"
+
+_TIMEOUT_PREFIX=()
 if command -v gtimeout &>/dev/null; then
-  GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
-  GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
-  ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
-  GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
-  GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
-  GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
-  GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
-
-Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
-  EXIT_CODE=\${PIPESTATUS[0]}
+  _TIMEOUT_PREFIX=(gtimeout "$DELIVERY_TIMEOUT")
 elif command -v timeout &>/dev/null; then
-  GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
-  GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
-  ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
-  GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
-  GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
-  GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
-  GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  timeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
-
-Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
-  EXIT_CODE=\${PIPESTATUS[0]}
-else
-  GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
-  GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
-  ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
-  GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
-  GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
-  GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
-  GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
-
-Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
-  EXIT_CODE=\${PIPESTATUS[0]}
+  _TIMEOUT_PREFIX=(timeout "$DELIVERY_TIMEOUT")
 fi
+
+case "\${GAAI_DAEMON_EXECUTOR:-claude}" in
+  claude)
+    GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
+    GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+    ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
+    GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
+    GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
+    GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
+    GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
+    "\${_TIMEOUT_PREFIX[@]}" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${_AGENT_PROMPT}" 2>&1 | tee -a "$delivery_log"
+    EXIT_CODE=\${PIPESTATUS[0]}
+    ;;
+  codex)
+    _CODEX_SANDBOX="\${GAAI_CODEX_SANDBOX:-workspace-write}"
+    [[ "\$_CODEX_SANDBOX" == "danger" ]] && _CODEX_SANDBOX="danger-full-access"
+    _CODEX_ARGS=(exec --json --cd "$PROJECT_DIR" --sandbox "\$_CODEX_SANDBOX")
+    [[ "\${GAAI_CODEX_EPHEMERAL:-1}" != "0" ]] && _CODEX_ARGS+=(--ephemeral)
+    [[ "\${GAAI_CODEX_IGNORE_USER_CONFIG:-0}" == "1" ]] && _CODEX_ARGS+=(--ignore-user-config)
+    [[ -n "\${GAAI_CODEX_MODEL:-}" ]] && _CODEX_ARGS+=(--model "\${GAAI_CODEX_MODEL}")
+    GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
+    GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+    GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
+    GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
+    GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
+    GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
+    "\${_TIMEOUT_PREFIX[@]}" codex "\${_CODEX_ARGS[@]}" "\${_AGENT_PROMPT}" 2>&1 | tee -a "$delivery_log"
+    EXIT_CODE=\${PIPESTATUS[0]}
+    ;;
+  *)
+    echo "ERROR: unknown GAAI_DAEMON_EXECUTOR='\${GAAI_DAEMON_EXECUTOR:-}'" >&2
+    EXIT_CODE=2
+    ;;
+esac
 
 echo ""
 echo "================================================================"
@@ -3898,37 +3916,51 @@ if [[ -n "\${_BINDING_JWT}" ]]; then
   _MCP_HEADER_ARGS=(--header "X-GAAI-Authorized-Workspaces:\${_BINDING_JWT}")
 fi
 
-# Print mode (-p): claude processes the prompt and exits, freeing the daemon slot.
-# --dangerously-skip-permissions handles tool approval (required for headless).
-# --output-format stream-json streams NDJSON events in real-time, so:
-#   - tee updates the log file continuously (natural heartbeat for daemon monitor)
-#   - tail -f shows progress in real-time
+# Claude remains the default executor. Codex is opt-in via GAAI_DAEMON_EXECUTOR=codex.
+_AGENT_PROMPT="\${DELIVERY_PROMPT}
 
+Deliver story: $story_id"
+
+_TIMEOUT_PREFIX=()
 if command -v gtimeout &>/dev/null; then
-  GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
-  GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
-  ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
-  GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
-  GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
-  GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
-  GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  gtimeout "$DELIVERY_TIMEOUT" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
-
-Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
-  EXIT_CODE=\${PIPESTATUS[0]}
-else
-  GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
-  GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
-  ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
-  GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
-  GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
-  GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
-  GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
-  claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${DELIVERY_PROMPT}
-
-Deliver story: $story_id" 2>&1 | tee -a "$delivery_log"
-  EXIT_CODE=\${PIPESTATUS[0]}
+  _TIMEOUT_PREFIX=(gtimeout "$DELIVERY_TIMEOUT")
+elif command -v timeout &>/dev/null; then
+  _TIMEOUT_PREFIX=(timeout "$DELIVERY_TIMEOUT")
 fi
+
+case "\${GAAI_DAEMON_EXECUTOR:-claude}" in
+  claude)
+    GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
+    GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+    ANTHROPIC_BASE_URL="\${ANTHROPIC_BASE_URL:-}" \
+    GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
+    GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
+    GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
+    GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
+    "\${_TIMEOUT_PREFIX[@]}" claude $CLAUDE_FLAGS "\${_MCP_HEADER_ARGS[@]}" -p "\${_AGENT_PROMPT}" 2>&1 | tee -a "$delivery_log"
+    EXIT_CODE=\${PIPESTATUS[0]}
+    ;;
+  codex)
+    _CODEX_SANDBOX="\${GAAI_CODEX_SANDBOX:-workspace-write}"
+    [[ "\$_CODEX_SANDBOX" == "danger" ]] && _CODEX_SANDBOX="danger-full-access"
+    _CODEX_ARGS=(exec --json --cd "$PROJECT_DIR" --sandbox "\$_CODEX_SANDBOX")
+    [[ "\${GAAI_CODEX_EPHEMERAL:-1}" != "0" ]] && _CODEX_ARGS+=(--ephemeral)
+    [[ "\${GAAI_CODEX_IGNORE_USER_CONFIG:-0}" == "1" ]] && _CODEX_ARGS+=(--ignore-user-config)
+    [[ -n "\${GAAI_CODEX_MODEL:-}" ]] && _CODEX_ARGS+=(--model "\${GAAI_CODEX_MODEL}")
+    GAAI_WORKSPACE_ID="\${GAAI_WORKSPACE_ID:-}" \
+    GAAI_ORG_ID="\${GAAI_ORG_ID:-}" \
+    GAAI_IMPL_BASE_URL="\${GAAI_IMPL_BASE_URL:-}" \
+    GAAI_IMPL_AUTH_TOKEN="\${GAAI_IMPL_AUTH_TOKEN:-}" \
+    GAAI_IMPL_MODEL="\${GAAI_IMPL_MODEL:-}" \
+    GAAI_DELIVERY_LOG_FILE="$LOG_DIR/${story_id}.log" \
+    "\${_TIMEOUT_PREFIX[@]}" codex "\${_CODEX_ARGS[@]}" "\${_AGENT_PROMPT}" 2>&1 | tee -a "$delivery_log"
+    EXIT_CODE=\${PIPESTATUS[0]}
+    ;;
+  *)
+    echo "ERROR: unknown GAAI_DAEMON_EXECUTOR='\${GAAI_DAEMON_EXECUTOR:-}'" >&2
+    EXIT_CODE=2
+    ;;
+esac
 
 # ── Agent exit signal (DEC-72 wrapper-side audit trail) ─────────────────────
 EXIT_TS=\$(date +%s)
@@ -4237,11 +4269,15 @@ shutdown() {
 trap shutdown SIGINT SIGTERM
 
 # ── Save config for monitor ──────────────────────────────────────────────
+DISPLAY_MODEL="$CLAUDE_MODEL"
+if [[ "${GAAI_DAEMON_EXECUTOR:-claude}" == "codex" ]]; then
+  DISPLAY_MODEL="${GAAI_CODEX_MODEL:-codex}"
+fi
 cat > "$LOCK_DIR/.daemon-config" << EOF
 BRANCH="$TARGET_BRANCH"
 INTERVAL="$POLL_INTERVAL"
 CONCURRENT="$MAX_CONCURRENT"
-MODEL="$CLAUDE_MODEL"
+MODEL="$DISPLAY_MODEL"
 LAUNCHER="$LAUNCHER"
 SKIP_PERMS="$SKIP_PERMISSIONS"
 MAX_TURNS="$MAX_TURNS"
