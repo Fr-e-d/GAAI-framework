@@ -7,10 +7,9 @@ Each agent has a curated set of skills defined in its agent definition file.
 | Agent | Definition File | Core Skills | Cross Skills |
 |---|---|---|---|
 | **Discovery** | `.gaai/core/agents/discovery.agent.md` | 6 discovery skills | 10 cross skills (memory, analysis, governance) |
-| **Delivery** | `.gaai/core/agents/delivery.agent.md` | 5 orchestration skills | 5 supporting skills (memory, context, risk) |
 | **Bootstrap** | `.gaai/core/agents/bootstrap.agent.md` | — | 5 cross skills (scan, extract, ingest, normalize, search) |
 
-Specialists are defined in `.gaai/core/agents/specialists.registry.yaml` and dispatched by the Delivery Orchestrator for Tier 3 stories.
+Specialists are defined in `.gaai/core/agents/specialists.registry.yaml` and dispatched by the Implementation Sub-Agent for Tier 3 stories.
 
 ## How Skills Are Loaded
 
