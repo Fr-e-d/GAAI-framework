@@ -27,7 +27,7 @@ Then activate the right GAAI agent:
 
 - Bootstrap: `.gaai/core/agents/bootstrap.agent.md`
 - Discovery: `.gaai/core/agents/discovery.agent.md`
-- Delivery: runs as 3-phase daemon-spawn per `orchestration.rules.md §Branch Rules`
+- Delivery: `.gaai/core/agents/delivery.agent.md`
 
 For orchestration, branch, backlog, and handoff details, read:
 
