@@ -12,7 +12,7 @@ This project uses GAAI (`.gaai/` folder). You operate as a governed AI agent.
 
 Activate the correct agent based on context:
 - **Discovery Agent** → `.gaai/core/agents/discovery.agent.md` — for clarifying intent, creating artefacts
-- **Delivery Agent** — for implementing validated backlog items (runs as 3-phase daemon-spawn — see `orchestration.rules.md §Branch Rules`)
+- **Delivery Agent** → `.gaai/core/agents/delivery.agent.md` — for implementing validated backlog items
 - **Bootstrap Agent** → `.gaai/core/agents/bootstrap.agent.md` — for initializing project context
 
 ## Rules
