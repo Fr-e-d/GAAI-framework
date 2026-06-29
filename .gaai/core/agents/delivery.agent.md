@@ -186,7 +186,7 @@ This agent does **not** own the worktree / PR / merge / cleanup invariants and m
 - **Normative authority:** `contexts/rules/orchestration.rules.md §Branch Rules` (worktree isolation, story-branch naming, governed merge path, post-merge cleanup, orphan reaping, data-safety refusal).
 - **Procedure:** `workflows/delivery-loop.workflow.md` (git lifecycle, step-by-step execution, PR creation).
 
-> ⚠️ This agent definition is the **deprecated legacy orchestrator path** (per DEC-88; `delivery_pipeline: legacy`). The live delivery path is the daemon 3-phase state machine (`daemon-dispatch.sh`). It does not read this file. Do not treat this agent as the source of any delivery invariant.
+> ⚠️ This agent definition is the **deprecated legacy orchestrator path** (`delivery_pipeline: legacy`), superseded by the architectural decision that split delivery into a daemon-spawned 3-phase state machine (`daemon-dispatch.sh`). The live path does not read this file. Do not treat this agent as the source of any delivery invariant.
 
 ---
 
