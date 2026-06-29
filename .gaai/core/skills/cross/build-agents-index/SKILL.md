@@ -46,7 +46,7 @@ available in the GAAI framework. Consumed by `gaai-status` and agent onboarding 
 
 Traverse `.gaai/core/agents/` recursively. Collect every `.md` file except `README.agents.md`.
 This includes:
-- Primary agents: `discovery.agent.md`, `bootstrap.agent.md` (plus legacy `delivery.agent.md` — still scanned pending its retirement)
+- Primary agents: `discovery.agent.md`, `bootstrap.agent.md`
 - Sub-agents: `sub-agents/*.sub-agent.md`
 
 Ignore non-.md files and the README.
@@ -65,7 +65,7 @@ Extract the following fields:
 | `parent` | frontmatter `parent` | Sub-agents only; absent for primary agents |
 | `lifecycle` | frontmatter `lifecycle` | e.g. `ephemeral`, `persistent` |
 | `updated_at` | frontmatter `updated_at` | May be absent |
-| `path` | derived — relative path from `.gaai/core/agents/` | e.g. `sub-agents/planning.sub-agent.md` |
+| `path` | derived — relative path from `.gaai/core/agents/` | e.g. `sub-agents/review.sub-agent.md` |
 
 If a required field is missing, log a warning inline in the entry but do not skip it.
 
@@ -113,14 +113,14 @@ agents:
     path: discovery.agent.md
 
 sub_agents:
-  - id: SUB-AGENT-PLANNING-001
+  - id: SUB-AGENT-REVIEW-001
     type: sub-agent
-    role: planning-specialist
-    parent: AGENT-DELIVERY-001
-    track: delivery
+    role: discovery-reviewer
+    parent: AGENT-DISCOVERY-001
+    track: discovery
     lifecycle: ephemeral
     updated_at: YYYY-MM-DD
-    path: sub-agents/planning.sub-agent.md
+    path: sub-agents/review.sub-agent.md
 
 specialists:
   - id: db-migration

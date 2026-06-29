@@ -152,6 +152,7 @@ write_verdict_and_exit() {
     case "$verdict" in
       ROLLBACK_TO_LEGACY)
         echo "> One or more gates FAILED. The 3phase pipeline does not meet the configured validation thresholds."
+        echo "> Operator should evaluate failed gates and consider rollback via \`gaai-cutover.sh --to legacy\`."
         ;;
       INCONCLUSIVE_INSUFFICIENT_DATA)
         echo "> Insufficient data to render a verdict. Gather more stories and re-run."
