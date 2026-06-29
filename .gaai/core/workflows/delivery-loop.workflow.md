@@ -200,7 +200,13 @@ Deterministic bash only — no `claude -p` invocation. Implemented in `handle_co
 4. CI watch (advisory mode if no branch protection)
 5. `gh pr merge --squash --delete-branch`
 6. Backlog status → `done` (flock-serialized push to staging)
-7. Worktree removal
+7. Worktree removal (branch deleted by `--delete-branch` at step 5; local worktree removed here)
+
+**Normative authority:** the worktree + PR + cleanup invariants are asserted in `orchestration.rules.md §Branch Rules → Worktree lifecycle & cleanup`. This sequence is the procedure; the rules file is the authority. Do not re-assert the invariants here — point to them.
+
+**Cleanup backstop:** step 7 is the happy-path removal. If it does not run (crash, dirty tree), the daemon's periodic orphan reaper (`reap_orphaned_worktrees` in `daemon-dispatch.sh`) is the eventually-consistent backstop. Orphan removal is therefore convergent, not synchronous.
+
+**Data-safety refusal:** a dirty, active, or ambiguous worktree is never force-removed at step 7 or by the reaper — cleanup halts and escalates rather than risking data loss (see `orchestration.rules.md §Branch Rules`).
 
 **Safety boundary:** `gh pr merge` targeting `main` or `production` is FORBIDDEN. Self-merge to `staging` is permitted after diff-sanity passes.
 

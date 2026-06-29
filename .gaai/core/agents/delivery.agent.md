@@ -181,13 +181,12 @@ After loading memory and before spawning sub-agents, the Orchestrator MUST valid
 
 ## Git Workflow & Orchestration Flow
 
-→ Defined in `workflows/delivery-loop.workflow.md` (the authoritative source for git lifecycle, step-by-step execution, and PR creation).
+This agent does **not** own the worktree / PR / merge / cleanup invariants and must not re-assert them.
 
-**Key invariants (repeated here for emphasis):**
-- The main working tree stays on `staging` at ALL times
-- All staging operations serialized via `flock`
-- AI never interacts with `production`
-- PRs are merged immediately after QA PASS
+- **Normative authority:** `contexts/rules/orchestration.rules.md §Branch Rules` (worktree isolation, story-branch naming, governed merge path, post-merge cleanup, orphan reaping, data-safety refusal).
+- **Procedure:** `workflows/delivery-loop.workflow.md` (git lifecycle, step-by-step execution, PR creation).
+
+> ⚠️ This agent definition is the **deprecated legacy orchestrator path** (per DEC-88; `delivery_pipeline: legacy`). The live delivery path is the daemon 3-phase state machine (`daemon-dispatch.sh`). It does not read this file. Do not treat this agent as the source of any delivery invariant.
 
 ---
 

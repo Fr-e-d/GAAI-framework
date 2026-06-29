@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- docs: formalize worktree+PR+cleanup doctrine in its canonical home
 - fix: support codex executor in bash daemon
 - fix: show codex monitor activity
 - fix: show codex monitor activity

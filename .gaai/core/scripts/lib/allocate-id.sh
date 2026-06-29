@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# allocate-id.sh — flock-guarded epic/story ID allocator
+# allocate-id.sh — flock-guarded epic/story/dec ID allocator
 # GAAI framework (OSS). Project-agnostic — no project-specific references.
 #
 # Usage:
 #   allocate-id.sh epic                   Return next Epic ID (e.g., E221)
 #   allocate-id.sh story <epic_prefix>   Return next Story ID (e.g., {EPIC}S{NN})
+#   allocate-id.sh dec                   Return next Decision ID (e.g., DEC-166)
 #   allocate-id.sh --help                Show help
 #
 # Env vars (all optional):
 #   GAAI_BACKLOG_PATH        path to active.backlog.yaml (default: auto-detect from git root)
+#   GAAI_DECISIONS_PATH      path to decisions directory (default: auto-detect from git root)
 #   GAAI_RESERVATION_LEDGER  ledger file path (default: ~/.gaai/reservations/<repo_id>.tsv)
 #   GAAI_RESERVATION_TTL_H   abandoned-reservation TTL in hours (default: 72)
 #   GAAI_SCAN_REMOTE         scan remote branches for in-flight IDs (default: 1; 0/false/no/off disables)
@@ -17,8 +19,8 @@
 #   GAAI_RESERVATION_BACKEND reservation backend (default: git-cas; valid: git-cas)
 #
 # The allocator serialises under an exclusive flock (Linux) or mkdir-spin (macOS) and computes
-# next = max(backlog, ledger, remote-refs, CAS-reservation-ref) + 1, writes a reservation row
-# before returning, and prunes stale/landed entries on each run.
+# next = max(backlog/decisions-dir, ledger, remote-refs, CAS-reservation-ref) + 1, writes a
+# reservation row before returning, and prunes stale/landed entries on each run.
 #
 # Cross-worktree visibility: the ledger lives under ~/.gaai/reservations/ (outside any git
 # worktree) and is keyed by a 12-char hash of the repo root path, so all local worktrees of
@@ -44,6 +46,11 @@
 # the ledger directory is unwritable, proceeds with backlog-only max and warns. If the remote
 # scan fails or times out (and a remote IS configured), it warns and falls back to backlog+ledger;
 # if no remote is configured (local-only repo), the scan is silently skipped.
+#
+# dec mode: uses the decisions directory (GAAI_DECISIONS_PATH) as its primary landed-signal
+# source (DEC-<N>.md file presence) and the CAS ref as its cross-host reservation backend,
+# exactly like epic/story. Remote-branch scan for dec-<N> tokens is best-effort (DEC branches
+# are often not named with dec-N tokens); the CAS ref is authoritative.
 
 set -euo pipefail
 
@@ -55,10 +62,12 @@ allocate-id.sh — flock-guarded GAAI ID allocator (OSS framework)
 Usage:
   allocate-id.sh epic                   Return next Epic ID (e.g., E221)
   allocate-id.sh story <epic_prefix>   Return next Story ID (e.g., {EPIC}S{NN})
+  allocate-id.sh dec                   Return next Decision ID (e.g., DEC-166)
   allocate-id.sh --help                Show this help
 
 Env vars (all optional):
   GAAI_BACKLOG_PATH        Path to active.backlog.yaml (default: auto-detect from git root)
+  GAAI_DECISIONS_PATH      Path to decisions directory (default: auto-detect from git root)
   GAAI_RESERVATION_LEDGER  Ledger file (default: ~/.gaai/reservations/<repo_id>.tsv)
   GAAI_RESERVATION_TTL_H   Abandoned-reservation TTL in hours (default: 72)
   GAAI_SCAN_REMOTE         Scan remote for in-flight IDs and enable CAS (default: 1; 0/false/no/off off)
@@ -70,13 +79,19 @@ Ledger format (TSV):
   # GAAI ID reservation ledger — do not edit manually
   E221        epic    <epoch_secs>
   {EPIC}S{NN} story   <epoch_secs>
+  DEC-166     dec     <epoch_secs>
 
-The allocator computes next = max(highest-in-backlog, highest-in-ledger, highest-on-remote,
-highest-in-CAS-ref) + 1, writes the new reservation to the ledger, performs a compare-and-swap
-push to refs/gaai/reservations on origin (git-cas backend), then prints the ID on stdout.
+The allocator computes next = max(highest-in-backlog/decisions-dir, highest-in-ledger,
+highest-on-remote, highest-in-CAS-ref) + 1, writes the new reservation to the ledger,
+performs a compare-and-swap push to refs/gaai/reservations on origin (git-cas backend),
+then prints the ID on stdout.
 The remote branch source serialises against IDs on pushed-but-unmerged branches on other hosts;
 the CAS ref serialises against IDs reserved but not yet pushed as branches on other hosts;
 the ledger serialises local (not-yet-pushed) concurrent sessions on this host.
+
+dec mode: DEC-<N>.md file presence in the decisions directory is the landed-signal (replaces
+backlog grep for epic/story). Remote-branch scan for dec-<N> tokens is best-effort; the CAS
+ref is the authoritative cross-host serialiser for dec IDs.
 EOF
   exit 0
 fi
@@ -97,8 +112,10 @@ elif [[ "$MODE" == "story" ]]; then
     echo "allocate-id.sh: epic prefix must match E[0-9]+ (got '${EPIC_PREFIX}')" >&2
     exit 1
   fi
+elif [[ "$MODE" == "dec" ]]; then
+  : # ok — no extra argument; dec IDs are plain integers (DEC-N, no zero-padding)
 else
-  echo "allocate-id.sh: unknown mode '${MODE:-<empty>}'. Use 'epic' or 'story <prefix>'." >&2
+  echo "allocate-id.sh: unknown mode '${MODE:-<empty>}'. Use 'epic', 'story <prefix>', or 'dec'." >&2
   exit 1
 fi
 
@@ -119,6 +136,10 @@ fi
 # ── Paths ─────────────────────────────────────────────────────────────────────
 DEFAULT_BACKLOG="${REPO_ROOT}/.gaai/project/contexts/backlog/active.backlog.yaml"
 BACKLOG_PATH="${GAAI_BACKLOG_PATH:-$DEFAULT_BACKLOG}"
+
+DEFAULT_DECISIONS="${REPO_ROOT}/.gaai/project/contexts/memory/decisions"
+DECISIONS_PATH="${GAAI_DECISIONS_PATH:-$DEFAULT_DECISIONS}"
+
 LEDGER_FILE="${GAAI_RESERVATION_LEDGER:-${HOME}/.gaai/reservations/${REPO_ID}.tsv}"
 LOCK_FILE="${LEDGER_FILE}.lock"
 LOCK_DIR="${LOCK_FILE}.d"
@@ -265,6 +286,16 @@ _cas_max_story() {
     END { print max+0 }' 2>/dev/null || echo 0
 }
 
+# Extract the highest DEC number from the CAS reservation content (no I/O).
+_cas_max_dec() {
+  [[ -n "$CAS_CONTENT" ]] || { echo 0; return; }
+  printf '%s\n' "$CAS_CONTENT" | awk -F'\t' '
+    $1 !~ /^#/ && $2 == "dec" {
+      sub(/^DEC-/, "", $1); if ($1+0 > max) max = $1+0
+    }
+    END { print max+0 }' 2>/dev/null || echo 0
+}
+
 # Fetch CAS ref before the lock. Gated on SCAN_REMOTE (both are remote operations; setting
 # GAAI_SCAN_REMOTE=0 disables the branch scan AND the CAS to keep isolated / offline runs hermetic).
 # Failure is silent — push will detect it via the unconfirmed path.
@@ -340,9 +371,19 @@ if [[ -f "$LEDGER_FILE" ]]; then
     [[ -z "$entry_id" || "$entry_id" == \#* ]] && continue
     [[ -z "$entry_kind" || -z "$entry_epoch" ]] && continue
 
-    # Prune: ID already appears in the merged backlog (landed)
-    if [[ -f "$BACKLOG_PATH" ]] && grep -q "id: ${entry_id}" "$BACKLOG_PATH" 2>/dev/null; then
-      continue
+    # Prune: landed check — kind-branch so each kind uses its own landed-signal.
+    # dec entries: landed when DEC-<N>.md exists in the decisions directory.
+    # epic/story entries: landed when they appear in the backlog (unchanged).
+    # This is a strict if/elif/else branch — NOT an OR extension of the existing
+    # backlog check, so an epic/story entry is never pruned by a coincidental DEC file.
+    if [[ "$entry_kind" == "dec" ]]; then
+      if [[ -f "${DECISIONS_PATH}/${entry_id}.md" ]]; then
+        continue
+      fi
+    else
+      if [[ -f "$BACKLOG_PATH" ]] && grep -q "id: ${entry_id}" "$BACKLOG_PATH" 2>/dev/null; then
+        continue
+      fi
     fi
 
     # Prune: reservation older than TTL (abandoned) — UNLESS the ID is still live on a remote
@@ -391,6 +432,28 @@ _backlog_max_story() {
   echo "$(( 10#${result:-0} ))"
 }
 
+# Return the highest DEC number from DEC-<N>.md filenames and _log.md entries.
+# Two sources are checked: the decisions directory (landed files) and the _log.md
+# (records decisions by number even before their file is committed).
+_decisions_max_dec() {
+  local result_files=0 result_log=0
+  if [[ -d "$DECISIONS_PATH" ]]; then
+    local r
+    r="$(ls "${DECISIONS_PATH}"/DEC-*.md 2>/dev/null \
+      | grep -oE 'DEC-[0-9]+' | grep -oE '[0-9]+$' \
+      | sort -n | tail -1)" || true
+    result_files=$(( 10#${r:-0} ))
+  fi
+  if [[ -f "${DECISIONS_PATH}/_log.md" ]]; then
+    local r
+    r="$(grep -oE 'DEC-[0-9]+' "${DECISIONS_PATH}/_log.md" 2>/dev/null \
+      | grep -oE '[0-9]+$' \
+      | sort -n | tail -1)" || true
+    result_log=$(( 10#${r:-0} ))
+  fi
+  echo "$(( result_files > result_log ? result_files : result_log ))"
+}
+
 _ledger_max_epic() {
   [[ -f "$LEDGER_FILE" ]] || { echo 0; return; }
   awk -F'\t' '$1 !~ /^#/ && $2=="epic" { sub(/^E/, "", $1); if ($1+0 > max) max=$1+0 } END { print max+0 }' \
@@ -402,6 +465,12 @@ _ledger_max_story() {
   [[ -f "$LEDGER_FILE" ]] || { echo 0; return; }
   awk -F'\t' -v p="$prefix" \
     '$1 !~ /^#/ && $2=="story" && $1 ~ ("^"p"S[0-9]+$") { sub("^"p"S0*", "", $1); if ($1+0 > max) max=$1+0 } END { print max+0 }' \
+    "$LEDGER_FILE" 2>/dev/null || echo 0
+}
+
+_ledger_max_dec() {
+  [[ -f "$LEDGER_FILE" ]] || { echo 0; return; }
+  awk -F'\t' '$1 !~ /^#/ && $2=="dec" { sub(/^DEC-/, "", $1); if ($1+0 > max) max=$1+0 } END { print max+0 }' \
     "$LEDGER_FILE" 2>/dev/null || echo 0
 }
 
@@ -438,6 +507,16 @@ _remote_max_story() {
   echo "$(( 10#${result:-0} ))"
 }
 
+# Remote-ref scan for dec is best-effort: DEC branches are often named discovery/E<n>S<nn>
+# rather than dec-<N>, so this source yields 0 in most cases. The CAS ref is authoritative.
+_remote_max_dec() {
+  [[ -n "$REMOTE_HEADS_RAW" ]] || { echo 0; return; }
+  local result
+  result="$(printf '%s\n' "$REMOTE_HEADS_RAW" | grep -oiE 'dec-[0-9]+' 2>/dev/null \
+    | grep -oE '[0-9]+$' | sort -n | tail -1)" || true
+  echo "$(( 10#${result:-0} ))"
+}
+
 # ── Compute next ID ───────────────────────────────────────────────────────────
 if [[ "$MODE" == "epic" ]]; then
   MAX_BACKLOG="$(_backlog_max_epic)"
@@ -451,7 +530,7 @@ if [[ "$MODE" == "epic" ]]; then
   MAX=$(( MAX > MAX_CAS ? MAX : MAX_CAS ))
   NEXT_NUM=$(( MAX + 1 ))
   NEW_ID="E${NEXT_NUM}"
-else
+elif [[ "$MODE" == "story" ]]; then
   MAX_BACKLOG="$(_backlog_max_story "$EPIC_PREFIX")"
   MAX_LEDGER="$(_ledger_max_story "$EPIC_PREFIX")"
   MAX_REMOTE="$(_remote_max_story "$EPIC_PREFIX")"
@@ -464,6 +543,19 @@ else
   NEXT_NUM=$(( MAX + 1 ))
   NEXT_PADDED="$(printf '%02d' "$NEXT_NUM")"
   NEW_ID="${EPIC_PREFIX}S${NEXT_PADDED}"
+else
+  # dec mode
+  MAX_BACKLOG="$(_decisions_max_dec)"
+  MAX_LEDGER="$(_ledger_max_dec)"
+  MAX_REMOTE="$(_remote_max_dec)"
+  MAX_CAS="$(_cas_max_dec)"
+  MAX_BACKLOG="${MAX_BACKLOG:-0}"; MAX_LEDGER="${MAX_LEDGER:-0}"
+  MAX_REMOTE="${MAX_REMOTE:-0}"; MAX_CAS="${MAX_CAS:-0}"
+  MAX=$(( MAX_BACKLOG > MAX_LEDGER ? MAX_BACKLOG : MAX_LEDGER ))
+  MAX=$(( MAX > MAX_REMOTE ? MAX : MAX_REMOTE ))
+  MAX=$(( MAX > MAX_CAS ? MAX : MAX_CAS ))
+  NEXT_NUM=$(( MAX + 1 ))
+  NEW_ID="DEC-${NEXT_NUM}"
 fi
 
 # ── Write reservation to ledger ───────────────────────────────────────────────
@@ -552,6 +644,9 @@ if [[ "$GAAI_RESERVATION_BACKEND" == "git-cas" && "$SCAN_REMOTE" == "true" ]] &&
     fi
 
     # NFF loss: force-fetch to reset local ref to winner's state, recompute NEW_ID.
+    # MUST call the mode-specific _cas_max_* helper — using a different mode's helper
+    # would use the wrong ID prefix/format (e.g. _cas_max_epic uses EPIC_PREFIX="" for
+    # epic mode, which is wrong for dec and would yield incorrect low IDs).
     CAS_CONTENT=""
     _fetch_cas_ref || true
 
@@ -561,12 +656,19 @@ if [[ "$GAAI_RESERVATION_BACKEND" == "git-cas" && "$SCAN_REMOTE" == "true" ]] &&
       _cas_floor=$(( MAX > _cas_retry_max ? MAX : _cas_retry_max ))
       NEXT_NUM=$(( _cas_floor + 1 ))
       NEW_ID="E${NEXT_NUM}"
-    else
+    elif [[ "$MODE" == "story" ]]; then
       _cas_retry_max="$(_cas_max_story "$EPIC_PREFIX")"
       _cas_retry_max="${_cas_retry_max:-0}"
       _cas_floor=$(( MAX > _cas_retry_max ? MAX : _cas_retry_max ))
       NEXT_NUM=$(( _cas_floor + 1 ))
       NEW_ID="${EPIC_PREFIX}S$(printf '%02d' "$NEXT_NUM")"
+    else
+      # dec mode: MUST use _cas_max_dec (not _cas_max_epic/_cas_max_story)
+      _cas_retry_max="$(_cas_max_dec)"
+      _cas_retry_max="${_cas_retry_max:-0}"
+      _cas_floor=$(( MAX > _cas_retry_max ? MAX : _cas_retry_max ))
+      NEXT_NUM=$(( _cas_floor + 1 ))
+      NEW_ID="DEC-${NEXT_NUM}"
     fi
 
     # Append updated ID to local ledger so concurrent local sessions see it.
