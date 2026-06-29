@@ -93,7 +93,7 @@ Env vars consumed by `daemon-prompt-construct.sh` + `nested-claude-spawn.js`:
 <!-- BEGIN R1-R6-CANONICAL-REF -->
 The R1-R6 context discipline preamble and NOTES.md bootstrap template live in
 `daemon-prompt-construct.sh`. This helper is the single source of truth for impl prompt
-construction, used by both the legacy orchestrator path and the 3-phase daemon path.
+construction, used by the 3-phase daemon path.
 
 **Edits to R1-R6 or the NOTES.md template MUST be made in `daemon-prompt-construct.sh`,
 NOT here.** Any copy of R1-R6 text in this workflow file is a drift hazard.
@@ -247,20 +247,4 @@ When a story enters `failed` state:
 1. Read `.gaai/project/contexts/backlog/.delivery-logs/{id}.fail-debug.jsonl` (last `phase_status`, error code, stdout/stderr tail)
 2. Identify the failure mode from the `fallback_reason` field
 3. Fix the root cause (AC gap, dependency missing, etc.)
-4. During hybrid period: re-trigger via `/gaai:deliver {id}` (legacy orchestrator path)
-5. After 3phase-default cutover: re-trigger via `backlog-scheduler.sh --set-status {id} refined`
-
----
-
-## Legacy Pipeline (DEPRECATED — to be removed when legacy pipeline is retired)
-
-- **(a)** The legacy orchestrator-coordinated workflow is preserved during the hybrid transition period. Stories with `delivery_pipeline: legacy` (or in-progress at cutover) complete via the orchestrator agent in `agents/delivery.agent.md`.
-- **(b)** Retirement: when the feature flag backlog story sets `delivery_pipeline: 3phase` as default, the legacy path can be retired.
-- **(c)** Routing table:
-
-| `delivery_pipeline` value | Execution path |
-|---|---|
-| `legacy` | Orchestrator agent (`agents/delivery.agent.md`) coordinates via Task tool sub-agents |
-| `3phase` | Daemon bash directly spawns Plan / Impl / QA as standalone `claude -p` processes (this document) |
-
-- **(d)** Cutover: a dedicated cutover story switches `delivery_pipeline` default from `legacy` to `3phase`. Removal: a subsequent cleanup story removes this section and the legacy code path.
+4. Re-trigger via `backlog-scheduler.sh --set-status {id} refined`

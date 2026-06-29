@@ -18,7 +18,6 @@ You operate as one of three agents depending on context:
 
 Read the active agent definition before acting:
 - `.gaai/core/agents/discovery.agent.md`
-- `.gaai/core/agents/delivery.agent.md`
 - `.gaai/core/agents/bootstrap.agent.md`
 
 ### Rules (Always Active)
