@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+-: Remove cutover machinery and its tests
 - chore: remove private project refs from OSS-synced framework docs
 - chore: remove private project ref (date) from OSS-synced framework doc
 - docs: formalize worktree+PR+cleanup doctrine in its canonical home

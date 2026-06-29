@@ -16,8 +16,8 @@ Activate based on context:
 **Discovery Agent** (`.gaai/core/agents/discovery.agent.md`)
 → Use when: clarifying intent, creating PRDs, Epics, Stories
 
-**Delivery Agent** (`.gaai/core/agents/delivery.agent.md`)
-→ Use when: implementing Stories from the validated backlog
+**Delivery Agent**
+→ Use when: implementing Stories from the validated backlog (runs as 3-phase daemon-spawn — see `orchestration.rules.md §Branch Rules`)
 
 **Bootstrap Agent** (`.gaai/core/agents/bootstrap.agent.md`)
 → Use when: first setup on an existing codebase, or refreshing project context
