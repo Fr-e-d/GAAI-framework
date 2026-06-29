@@ -328,7 +328,7 @@ Can you write : "This input is wrong if `<signal>` measured `< Y` within delay `
     "scope_minimum": "<smallest testable version, if EXPERIMENT or ACCEPT>",
     "rollback_plan": "<how to undo, if EXPERIMENT or ACCEPT>",
     "success_metrics": "<chiffrés, if EXPERIMENT or ACCEPT>",
-    "dec_proposed": "<next DEC ID + level + status, if formalization needed>"
+    "dec_proposed": "<next DEC ID + level + status, if formalization needed — ID obtained via `allocate-id.sh dec` (serialised allocator); note if fallback scan-verify was used instead>"
   },
   "override": {
     "available": true,

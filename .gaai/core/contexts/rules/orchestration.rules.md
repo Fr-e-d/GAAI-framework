@@ -198,6 +198,15 @@ All AI-driven execution targets the **`staging`** branch. The `production` branc
 
 A pre-push hook (`.githooks/pre-push`) enforces this rule at the git level.
 
+### Worktree lifecycle & cleanup
+
+These clauses bind **every** worktree-isolated change — daemon-spawned story delivery **and** a manual session making an isolated change. The mechanism (idempotent creation, throttled reaping, retries, locks) lives in the daemon scripts; the procedure lives in `delivery-loop.workflow.md §Commit Phase`. This section is the normative authority both implement.
+
+- **Governed merge path only.** Changes reach `staging` exclusively via `gh pr create --base staging --head story/{id}` followed by squash merge. Direct merge or push to `staging` outside a story PR, and any `gh pr merge` targeting `main`/`production`, are FORBIDDEN.
+- **Post-merge cleanup.** After a story's PR merges, its branch (`--delete-branch`) and its worktree are removed. No worktree may persist past its story's terminal state.
+- **Orphan reaping is eventually-consistent.** A worktree whose story PR is MERGED/CLOSED, or whose HEAD is an ancestor of `origin/staging`, is an orphan and MUST be reaped. Reaping is periodic/convergent, **not** synchronous — "no orphan subsists" is a convergence guarantee, not an instantaneous one. Do not assert or rely on synchronous orphan removal.
+- **Data-safety refusal (INVARIANT).** A dirty, active, or ambiguous worktree is NEVER force-removed. A cleanup that cannot proceed without risk of data loss halts and escalates rather than deleting. Data safety dominates cleanup.
+
 ---
 
 ## 🎯 Capability Readiness

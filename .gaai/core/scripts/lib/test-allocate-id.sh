@@ -355,6 +355,254 @@ else
   _fail "refs/gaai/reservations absent from remote after two CAS allocations"
 fi
 
+# ── Test 9: T-DEC-1 — dec mode basic allocation ──────────────────────────────
+echo "Test 9: T-DEC-1 — dec mode basic allocation"
+
+T9="${WORK}/t9"
+mkdir -p "$T9"
+T9_DECISIONS="${T9}/decisions"
+mkdir -p "$T9_DECISIONS"
+T9_LEDGER="${WORK}/t9.tsv"
+
+# decisions dir has DEC-5.md and DEC-12.md (max = 12) → expect DEC-13
+touch "${T9_DECISIONS}/DEC-5.md" "${T9_DECISIONS}/DEC-12.md"
+
+T9_ID="$(GAAI_DECISIONS_PATH="$T9_DECISIONS" GAAI_RESERVATION_LEDGER="$T9_LEDGER" "$ALLOCATOR" dec)"
+
+if [[ "$T9_ID" == "DEC-13" ]]; then
+  _pass "dec mode: DEC-5.md + DEC-12.md in decisions dir → ${T9_ID}"
+else
+  _fail "dec mode: expected DEC-13 (max file = 12), got: ${T9_ID}"
+fi
+
+# Second call must return DEC-14 (ledger sees DEC-13)
+T9_ID2="$(GAAI_DECISIONS_PATH="$T9_DECISIONS" GAAI_RESERVATION_LEDGER="$T9_LEDGER" "$ALLOCATOR" dec)"
+if [[ "$T9_ID2" == "DEC-14" ]]; then
+  _pass "dec mode sequential: second call → ${T9_ID2}"
+else
+  _fail "dec mode sequential: expected DEC-14, got: ${T9_ID2}"
+fi
+
+# Verify ledger contains dec-kind rows
+if grep -q $'\tdec\t' "$T9_LEDGER" 2>/dev/null; then
+  _pass "dec mode: ledger contains 'dec' kind rows"
+else
+  _fail "dec mode: ledger missing 'dec' kind rows"
+fi
+
+# ── Test 10: T-DEC-2 — dec mode concurrency (AC2) ────────────────────────────
+echo "Test 10: T-DEC-2 — dec mode concurrent allocations (5 parallel)"
+
+T10_DECISIONS="${WORK}/t10-decisions"
+mkdir -p "$T10_DECISIONS"
+T10_LEDGER="${WORK}/t10.tsv"
+T10_OUT="${WORK}/t10-out"
+mkdir -p "$T10_OUT"
+
+PIDS=()
+for i in $(seq 1 5); do
+  GAAI_DECISIONS_PATH="$T10_DECISIONS" \
+  GAAI_RESERVATION_LEDGER="$T10_LEDGER" \
+    "$ALLOCATOR" dec > "${T10_OUT}/${i}.txt" 2>/dev/null &
+  PIDS+=($!)
+done
+
+for pid in "${PIDS[@]}"; do
+  wait "$pid" || true
+done
+
+T10_RESULTS=()
+for i in $(seq 1 5); do
+  val="$(cat "${T10_OUT}/${i}.txt" 2>/dev/null || echo "")"
+  T10_RESULTS+=("$val")
+done
+
+T10_UNIQUE="$(printf '%s\n' "${T10_RESULTS[@]}" | grep -v '^$' | sort -u | wc -l | tr -d ' ')"
+T10_TOTAL="$(printf '%s\n' "${T10_RESULTS[@]}" | grep -v '^$' | wc -l | tr -d ' ')"
+
+if [[ "$T10_TOTAL" -eq 5 && "$T10_UNIQUE" -eq 5 ]]; then
+  _pass "5 concurrent dec allocations → 5 distinct IDs ($(printf '%s\n' "${T10_RESULTS[@]}" | sort | tr '\n' ' '))"
+else
+  _fail "Expected 5 unique dec IDs, got total=${T10_TOTAL} unique=${T10_UNIQUE}: $(printf '%s\n' "${T10_RESULTS[@]}" | sort | tr '\n' ' ')"
+fi
+
+# ── Test 11: T-DEC-3 — kind-branched landed-prune (AC3) ──────────────────────
+echo "Test 11: T-DEC-3 — kind-branched landed-prune (dec prune vs epic/story unchanged)"
+
+T11="${WORK}/t11"
+mkdir -p "$T11"
+T11_DECISIONS="${T11}/decisions"
+mkdir -p "$T11_DECISIONS"
+T11_BACKLOG="${T11}/active.backlog.yaml"
+
+# Backlog: E50 is landed
+cat > "$T11_BACKLOG" <<'YAML'
+- id: E50
+  epic: E50
+  title: Landed epic
+  status: done
+YAML
+
+T11_LEDGER="${WORK}/t11.tsv"
+NOW_T11="$(date +%s)"
+
+# Create decisions dir with DEC-20.md (landed) and NOT DEC-30.md (not landed)
+touch "${T11_DECISIONS}/DEC-20.md"
+
+# Ledger entries:
+#   DEC-20  dec   → file ${T11_DECISIONS}/DEC-20.md exists → should be pruned
+#   DEC-30  dec   → file ${T11_DECISIONS}/DEC-30.md absent → should be KEPT
+#   E50     epic  → in backlog → should be pruned (via backlog grep, not dec-file check)
+#   E60     epic  → not in backlog → should be KEPT
+# Key AC3 invariant: E50 is NOT pruned by the dec-file check even though DEC-20.md exists;
+# it is pruned only because it appears in the backlog (kind-branch, not OR extension).
+printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T11_LEDGER"
+printf 'DEC-20\tdec\t%s\n'  "$NOW_T11" >> "$T11_LEDGER"
+printf 'DEC-30\tdec\t%s\n'  "$NOW_T11" >> "$T11_LEDGER"
+printf 'E50\tepic\t%s\n'    "$NOW_T11" >> "$T11_LEDGER"
+printf 'E60\tepic\t%s\n'    "$NOW_T11" >> "$T11_LEDGER"
+
+# Run an epic allocation (triggers the prune loop over all entry kinds)
+RESULT_T11="$(GAAI_BACKLOG_PATH="$T11_BACKLOG" GAAI_DECISIONS_PATH="$T11_DECISIONS" \
+  GAAI_RESERVATION_LEDGER="$T11_LEDGER" "$ALLOCATOR" epic)"
+
+# Check ledger state after pruning
+T11_REMAINING="$(grep -v '^#' "$T11_LEDGER" 2>/dev/null | awk -F'\t' '{print $1}' | sort | tr '\n' ' ' || true)"
+
+# DEC-20 (dec + file exists) → pruned
+if echo "$T11_REMAINING" | grep -q "DEC-20"; then
+  _fail "T-DEC-3: DEC-20 (dec + file exists) should be pruned but is still in ledger (remaining: ${T11_REMAINING})"
+else
+  _pass "T-DEC-3: DEC-20 (dec + file exists) correctly pruned"
+fi
+
+# DEC-30 (dec + file absent) → kept
+if echo "$T11_REMAINING" | grep -q "DEC-30"; then
+  _pass "T-DEC-3: DEC-30 (dec + file absent) correctly kept"
+else
+  _fail "T-DEC-3: DEC-30 (dec + file absent) should be kept but was pruned (remaining: ${T11_REMAINING})"
+fi
+
+# E50 (epic + in backlog) → pruned via backlog grep, NOT via dec-file check
+if echo "$T11_REMAINING" | grep -qE '\bE50\b'; then
+  _fail "T-DEC-3: E50 (epic + in backlog) should be pruned but is still in ledger (remaining: ${T11_REMAINING})"
+else
+  _pass "T-DEC-3: E50 (epic + in backlog) correctly pruned via backlog check"
+fi
+
+# E60 (epic + not in backlog) → kept
+if echo "$T11_REMAINING" | grep -qE '\bE60\b'; then
+  _pass "T-DEC-3: E60 (epic + not in backlog) correctly kept"
+else
+  _fail "T-DEC-3: E60 (epic + not in backlog) should be kept but was pruned (remaining: ${T11_REMAINING})"
+fi
+
+# ── Test 12: T-DEC-4 — CAS-retry recompute via _cas_max_dec under forced NFF ─
+echo "Test 12: T-DEC-4 — CAS-retry recompute uses _cas_max_dec under forced NFF"
+
+T12_BARE="${WORK}/t12-remote.git"
+T12_SEED="${WORK}/t12-seed"
+T12_WORK_A="${WORK}/t12-work-a"
+T12_WORK_B="${WORK}/t12-work-b"
+T12_DECISIONS_A="${WORK}/t12-decisions-a"
+T12_DECISIONS_B="${WORK}/t12-decisions-b"
+mkdir -p "$T12_DECISIONS_A" "$T12_DECISIONS_B"
+
+# Initialise a bare remote and a seed repo
+git init -q --bare "$T12_BARE"
+git init -q "$T12_SEED"
+(
+  cd "$T12_SEED"
+  git config user.email t@example.test
+  git config user.name tester
+  git commit -q --allow-empty -m init
+  git remote add origin "$T12_BARE"
+  git push -q origin HEAD
+) >/dev/null 2>&1
+
+# Pre-load refs/gaai/reservations on the bare remote with a dec entry at DEC-100.
+# Both workers will fetch this and see DEC-100 as the CAS max before their own push.
+# This verifies _cas_max_dec is used: if _cas_max_epic or _cas_max_story were mistakenly
+# called instead (wrong kind match), they'd return 0 and both workers would return DEC-1,
+# producing a collision and failing the distinct-ID assertion below.
+T12_PRELOAD="${WORK}/t12-preload"
+git init -q "$T12_PRELOAD"
+(
+  cd "$T12_PRELOAD"
+  git config user.email t@example.test
+  git config user.name tester
+  git remote add origin "$T12_BARE"
+  # Build a CAS blob/tree/commit with a dec entry at DEC-100
+  _pre_blob="$(printf 'DEC-100\tdec\t1000000000\n' | git hash-object -w --stdin 2>/dev/null)"
+  _pre_tree="$(printf '100644 blob %s\treservations.tsv\n' "$_pre_blob" | git mktree 2>/dev/null)"
+  _pre_commit="$(
+    GIT_AUTHOR_NAME=gaai GIT_AUTHOR_EMAIL=gaai@localhost \
+    GIT_COMMITTER_NAME=gaai GIT_COMMITTER_EMAIL=gaai@localhost \
+    GIT_AUTHOR_DATE="1000000000 +0000" GIT_COMMITTER_DATE="1000000000 +0000" \
+    git commit-tree -m "pre-load DEC-100" "$_pre_tree" 2>/dev/null
+  )"
+  git update-ref refs/gaai/reservations "$_pre_commit" 2>/dev/null
+  git push -q --force origin refs/gaai/reservations
+) >/dev/null 2>&1
+
+git clone -q "$T12_BARE" "$T12_WORK_A" >/dev/null 2>&1
+git clone -q "$T12_BARE" "$T12_WORK_B" >/dev/null 2>&1
+
+T12_EMPTY="${WORK}/t12-empty.yaml"
+printf '# empty\n' > "$T12_EMPTY"
+T12_OUT_A="${WORK}/t12a.txt"
+T12_OUT_B="${WORK}/t12b.txt"
+
+(
+  cd "$T12_WORK_A"
+  GAAI_SCAN_REMOTE=1 GAAI_RESERVATION_BACKEND=git-cas \
+  GAAI_BACKLOG_PATH="$T12_EMPTY" GAAI_DECISIONS_PATH="$T12_DECISIONS_A" \
+  GAAI_RESERVATION_LEDGER="${WORK}/t12a.tsv" \
+    "$ALLOCATOR" dec > "$T12_OUT_A" 2>/dev/null
+) &
+T12_PID_A=$!
+
+(
+  cd "$T12_WORK_B"
+  GAAI_SCAN_REMOTE=1 GAAI_RESERVATION_BACKEND=git-cas \
+  GAAI_BACKLOG_PATH="$T12_EMPTY" GAAI_DECISIONS_PATH="$T12_DECISIONS_B" \
+  GAAI_RESERVATION_LEDGER="${WORK}/t12b.tsv" \
+    "$ALLOCATOR" dec > "$T12_OUT_B" 2>/dev/null
+) &
+T12_PID_B=$!
+
+wait "$T12_PID_A" "$T12_PID_B" 2>/dev/null || true
+
+T12_ID_A="$(cat "$T12_OUT_A" 2>/dev/null || echo "")"
+T12_ID_B="$(cat "$T12_OUT_B" 2>/dev/null || echo "")"
+
+# Both IDs must be non-empty, distinct, and > DEC-100 (proving _cas_max_dec was used)
+T12_NUM_A="${T12_ID_A#DEC-}"
+T12_NUM_B="${T12_ID_B#DEC-}"
+
+if [[ -n "$T12_ID_A" && -n "$T12_ID_B" && "$T12_ID_A" != "$T12_ID_B" ]]; then
+  _pass "CAS dec concurrent: A=${T12_ID_A}, B=${T12_ID_B} (distinct)"
+else
+  _fail "CAS dec concurrent: A='${T12_ID_A}' B='${T12_ID_B}' — expected distinct non-empty IDs"
+fi
+
+# Both must be > 100 (the pre-loaded DEC-100 was in the CAS ref — _cas_max_dec must have read it)
+if [[ "$T12_NUM_A" =~ ^[0-9]+$ && "$T12_NUM_B" =~ ^[0-9]+$ ]] \
+    && (( T12_NUM_A > 100 )) && (( T12_NUM_B > 100 )); then
+  _pass "CAS dec retry used _cas_max_dec: A=${T12_ID_A} > DEC-100, B=${T12_ID_B} > DEC-100"
+else
+  _fail "CAS dec retry did NOT use _cas_max_dec: A=${T12_ID_A} B=${T12_ID_B} — expected both > DEC-100"
+fi
+
+# Verify refs/gaai/reservations on the bare remote contains dec entries
+T12_CAS_ON_REMOTE="$(cd "$T12_WORK_A" && \
+  git ls-remote origin refs/gaai/reservations 2>/dev/null | awk '{print $1}' || echo "")"
+if [[ -n "$T12_CAS_ON_REMOTE" ]]; then
+  _pass "refs/gaai/reservations present on remote after dec CAS allocations (OID=${T12_CAS_ON_REMOTE:0:12}...)"
+else
+  _fail "refs/gaai/reservations absent from remote after dec CAS allocations"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "────────────────────────────────────────"

@@ -69,6 +69,10 @@ _reap_worktree_orphans() {
 }
 
 # ── Orphaned-worktree reaper (OSS — disk-leak guard) ──────────────────────
+# Enforces orchestration.rules.md §Branch Rules → Worktree lifecycle & cleanup:
+# "Orphan reaping is eventually-consistent" + "Data-safety refusal" (the dirty
+# guard below is that INVARIANT). This function is the mechanism; the rules file
+# is the normative authority.
 # Enumerate the worktree directories ACTUALLY ON DISK and remove any whose
 # delivery has concluded. This closes the gap in reconcile_done_merged_worktrees(),
 # which only iterates ACTIVE-backlog `done` ids and therefore never reclaims the
