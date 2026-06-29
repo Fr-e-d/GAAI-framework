@@ -46,7 +46,7 @@ available in the GAAI framework. Consumed by `gaai-status` and agent onboarding 
 
 Traverse `.gaai/core/agents/` recursively. Collect every `.md` file except `README.agents.md`.
 This includes:
-- Primary agents: `discovery.agent.md`, `bootstrap.agent.md` (plus legacy `delivery.agent.md` — still scanned until E134S22 retirement)
+- Primary agents: `discovery.agent.md`, `delivery.agent.md`, `bootstrap.agent.md`
 - Sub-agents: `sub-agents/*.sub-agent.md`
 
 Ignore non-.md files and the README.
@@ -111,6 +111,14 @@ agents:
     lifecycle: persistent
     updated_at: YYYY-MM-DD
     path: discovery.agent.md
+
+  - id: AGENT-DELIVERY-001
+    type: agent
+    role: delivery-orchestrator
+    track: delivery
+    lifecycle: persistent
+    updated_at: YYYY-MM-DD
+    path: delivery.agent.md
 
 sub_agents:
   - id: SUB-AGENT-PLANNING-001

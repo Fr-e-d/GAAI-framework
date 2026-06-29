@@ -85,7 +85,7 @@ Discovery and Delivery must **never coexist in the same context window**. The De
 
 **Runtime dependency, not a tool restriction:** `claude -p` is the execution runtime for autonomous delivery (Tier 3 of the 3-tier compatibility model). The user's choice of AI coding tool for Discovery — Claude Code, Cursor, Windsurf, or any MCP client — is independent. The daemon requires the Claude Code CLI (`claude` binary in PATH, local) as a hard dependency. Discovery and Delivery interactive (tiers 1–2) work with any tool. This requirement applies to both GAAI OSS and GAAI Cloud.
 
-Sub-agents spawned by the daemon (Planning, Implementation, QA, Specialists) each run in their own isolated context with a targeted context bundle. The 3-phase delivery model is documented in DEC-88; implemented in `scripts/daemon-dispatch.sh`.
+Sub-agents spawned by Delivery (Planning, Implementation, QA, Specialists) each run in their own isolated context with a targeted context bundle. See `agents/delivery.agent.md` for team composition and bundle definitions.
 
 ## 🗂️ Backlog Orchestration
 

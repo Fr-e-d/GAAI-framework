@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- chore: remove private project ref (date) from OSS-synced framework doc
 - docs: formalize worktree+PR+cleanup doctrine in its canonical home
 - docs: formalize worktree+PR+cleanup doctrine in its canonical home
 - docs: formalize worktree+PR+cleanup doctrine in its canonical home

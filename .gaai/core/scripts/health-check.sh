@@ -122,7 +122,7 @@ done
 # 5. Agent files (in core/)
 echo ""
 echo "[ Agent Files ]"
-for agent in "discovery.agent.md" "bootstrap.agent.md"; do
+for agent in "discovery.agent.md" "delivery.agent.md" "bootstrap.agent.md"; do
   [[ -f "$CORE_DIR/agents/$agent" ]] && check "agents/$agent" "ok" || check "agents/$agent" "MISSING"
 done
 
