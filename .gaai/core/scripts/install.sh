@@ -358,6 +358,7 @@ of all project context.
 
 Activate the correct agent based on context:
 - **Discovery Agent** → `.gaai/core/agents/discovery.agent.md`
+- **Delivery Agent** → `.gaai/core/agents/delivery.agent.md`
 - **Bootstrap Agent** → `.gaai/core/agents/bootstrap.agent.md`
 MDCEOF
       success ".cursor/rules/gaai-memory.mdc deployed"
@@ -396,6 +397,7 @@ of all project context.
 
 Activate the correct agent based on context:
 - **Discovery Agent** → `.gaai/core/agents/discovery.agent.md`
+- **Delivery Agent** → `.gaai/core/agents/delivery.agent.md`
 - **Bootstrap Agent** → `.gaai/core/agents/bootstrap.agent.md`
 MDEOF
       success ".continue/rules/gaai-memory.md deployed"

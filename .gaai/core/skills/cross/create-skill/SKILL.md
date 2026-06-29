@@ -161,9 +161,9 @@ This step is non-negotiable. A skill that is not indexed is invisible to agents.
 
 ### Step 7 — Reference in agent file
 
-If the skill is intended for a specific agent (Discovery) or a delivery sub-agent, add it to the agent's skill list in:
+If the skill is intended for a specific agent (Discovery or Delivery), add it to the agent's skill list in:
 - `.gaai/core/agents/discovery.agent.md` — Skills Used section
-- Or the relevant sub-agent file in `.gaai/core/agents/sub-agents/` (planning, impl, qa)
+- `.gaai/core/agents/delivery.agent.md` — Skills Used section
 - Or neither, if it's a general cross skill invoked opportunistically
 
 ---

@@ -43,7 +43,7 @@ GAAI intentionally limits the number of agents.
 
 > More agents = more coordination overhead + more context pollution.
 
-GAAI uses **two primary agents** and one Bootstrap agent. Delivery is executed by the daemon as a 3-phase pipeline (Plan / Impl / QA), each phase a standalone `claude -p` invocation spawned directly by the daemon — no orchestrator agent.
+GAAI uses **two primary agents** aligned with the Dual-Track model, one Bootstrap agent, and four Delivery Sub-Agents spawned by the Delivery Orchestrator.
 
 ---
 
@@ -60,6 +60,17 @@ GAAI uses **two primary agents** and one Bootstrap agent. Delivery is executed b
 
 Constraints: never writes code, never defines technical implementation. Never uses sub-agents — conversational continuity with the human is its core value.
 
+### 🛠️ Delivery Agent (`delivery.agent.md`) — Orchestrator
+
+**Purpose:** Coordinate the delivery team to turn validated Stories into working software.
+
+- a **pure orchestration agent** — it does not write code, tests, or plans
+- evaluates Story complexity, composes the team, spawns sub-agents
+- collects handoff artefacts, manages phase transitions
+- escalates to human when blocked
+
+Constraints: never redefines product intent, never adds unvalidated scope, never executes directly.
+
 ### 🏗️ Bootstrap Agent (`bootstrap.agent.md`)
 
 **Purpose:** Initialize and converge project context at the start of a project or onboarding.
@@ -75,7 +86,7 @@ Constraints: never implements features, never runs in the delivery loop.
 
 ## Delivery Sub-Agents (`sub-agents/`)
 
-Sub-agents are spawned directly by the delivery daemon. They are ephemeral: spawn → execute → handoff-artefact → die. No runtime communication between sub-agents.
+Sub-agents are spawned by the Delivery Orchestrator. They are ephemeral: spawn → execute → handoff-artefact → die. No runtime communication between sub-agents.
 
 Each sub-agent spec lives in `sub-agents/` — read the individual files for tier, purpose, and constraints.
 
@@ -111,17 +122,18 @@ Load the full `.md` body only for agents confirmed relevant in Phase 1.
 
 ## Agent Responsibilities Matrix
 
-| Concern | Discovery | Sub-Agents | Bootstrap |
-|---------|-----------|------------|-----------|
-| Product value | ✅ | ❌ | ❌ |
-| Scope decisions | ✅ | ❌ | ❌ |
-| Independent evaluation | ❌ | ✅ (Review) | ❌ |
-| Implementation | ❌ | ✅ (Impl/Micro) | ❌ |
-| Testing / QA | ❌ | ✅ (QA/Micro) | ❌ |
-| Planning | ❌ | ✅ (Planning/Micro) | ❌ |
-| Memory ingestion | ✅ | ❌ | ✅ |
-| Rule normalization | ❌ | ❌ | ✅ |
-| Project context init | ❌ | ❌ | ✅ |
+| Concern | Discovery | Delivery Orchestrator | Sub-Agents | Bootstrap |
+|---------|-----------|----------------------|------------|-----------|
+| Product value | ✅ | ❌ | ❌ | ❌ |
+| Scope decisions | ✅ | ❌ | ❌ | ❌ |
+| Independent evaluation | ❌ | ❌ | ✅ (Review) | ❌ |
+| Team composition | ❌ | ✅ | ❌ | ❌ |
+| Implementation | ❌ | ❌ | ✅ (Impl/Micro) | ❌ |
+| Testing / QA | ❌ | ❌ | ✅ (QA/Micro) | ❌ |
+| Planning | ❌ | ❌ | ✅ (Planning/Micro) | ❌ |
+| Memory ingestion | ✅ | ⚠️ (post-Story only) | ❌ | ✅ |
+| Rule normalization | ❌ | ❌ | ❌ | ✅ |
+| Project context init | ❌ | ❌ | ❌ | ✅ |
 
 ---
 
@@ -136,7 +148,7 @@ Review Sub-Agent → independent evaluation (Principle #5)
   ↓
 Artefacts (PRD → Epics → Stories)
   ↓
-Daemon → 3-phase spawn (Plan / Impl / QA)
+Delivery Orchestrator → evaluates → composes team → coordinates
   ↓
 Sub-Agents (Planning, Implementation, QA) → handoff artefacts
   ↓
@@ -159,6 +171,7 @@ They are meant to be reliable.
 ---
 
 → [discovery.agent.md](discovery.agent.md) — Discovery Agent spec
+→ [delivery.agent.md](delivery.agent.md) — Delivery Orchestrator spec
 → [bootstrap.agent.md](bootstrap.agent.md) — Bootstrap Agent spec
 → [sub-agents/](sub-agents/) — Delivery sub-agent specs (Planning, Implementation, QA, MicroDelivery)
 → [Back to GAAI.md](../GAAI.md)
