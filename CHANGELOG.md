@@ -7,17 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.49.0] - 2026-06-29
 
 ### Changed
--: Remove cutover machinery and its tests
+- feat: remove orchestrator agent and its legacy-only sub-agent files
+-: 'Remove legacy-orchestrator references from the agents
+-: Remove the legacy single-spawn execution path from the
 - chore: remove private project refs from OSS-synced framework docs
 - chore: remove private project ref (date) from OSS-synced framework doc
 - docs: formalize worktree+PR+cleanup doctrine in its canonical home
-- docs: formalize worktree+PR+cleanup doctrine in its canonical home
-- docs: formalize worktree+PR+cleanup doctrine in its canonical home
 - fix: support codex executor in bash daemon
-- fix: show codex monitor activity
 - fix: show codex monitor activity
 - fix: bake REPO_ROOT into the generated delivery wrapper (worktree nesting)
 - fix: forward REPO_ROOT/DAEMON_HOME to the per-story delivery wrapper
@@ -25,10 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix: anchor operator state + worktree base to the real checkout, not the home
 - fix: operator state (logs/locks) + worktree base anchor to REPO_ROOT, not the home
 - fix: stop auto-merge failure commit loop
-- fix: stop auto-merge failure commit loop
 - fix: address Tier-2 review on allocator remote scan
 - fix: allocator scans remote branches for in-flight IDs
 - chore: commit pending framework writes to clear working-tree drift
+
 
 ## [2.48.0] - 2026-06-15
 

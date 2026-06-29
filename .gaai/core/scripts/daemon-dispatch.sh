@@ -818,6 +818,60 @@ _emit_commit_routing_record() {
     2>/dev/null || _emit_routing_record_fallback "$trace_id" "$story_id" "commit" "$provider" "n/a" "$duration_ms" "$fallback_reason" "$impl_tag" "3phase" "$pr_url" "$auto_merge_applied"
 }
 
+# ── Cutover default pipeline reader (AC4) ────────────────────────────────
+# Reads cutover_state.default_pipeline from the top-level section in BACKLOG_FILE.
+# Returns "legacy" if the section is absent (safe default — no-op for existing deploys).
+# Re-reads the file on every call (no caching — flip takes effect on next poll without daemon restart).
+get_cutover_default_pipeline() {
+  local val
+  val=$(awk '
+    /^cutover_state:[[:space:]]*$/ { in_section=1; next }
+    in_section && /^[^[:space:]]/ { exit }
+    in_section && /^[[:space:]]+default_pipeline:/ {
+      gsub(/^[[:space:]]+default_pipeline:[[:space:]]*/, "")
+      gsub(/[[:space:]]+#.*$/, "")  # strip YAML inline comment (defensive — `#` after whitespace)
+      gsub(/[[:space:]]*$/, "")
+      gsub(/^"|"$/, "")
+      print
+      exit
+    }
+  ' "$BACKLOG_FILE" 2>/dev/null || true)
+  echo "${val:-legacy}"
+}
+
+# ── Cutover routing record (AC3) ─────────────────────────────────────────
+# Emits one JSONL record with phase: cutover + cutover-specific telemetry.
+# Arguments: trace_id cutover_from cutover_to forced operator_id pre_flip_count
+# Best-effort: audit emit failure warns but does NOT abort the flip.
+# Cohort exclusion contract: WHERE phase != 'cutover' in pipeline cohort statistics.
+_emit_cutover_routing_record() {
+  local trace_id="$1" cutover_from="$2" cutover_to="$3" forced="$4"
+  local operator_id="$5" pre_flip_count="$6"
+
+  local log_path_args=()
+  if [[ -n "${ROUTING_LOG_PATH:-}" ]]; then
+    log_path_args=(--log-path "$ROUTING_LOG_PATH")
+  fi
+
+  node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \
+    --trace-id                    "$trace_id" \
+    --story-id                    "cutover" \
+    --phase                       "cutover" \
+    --provider                    "daemon-bash" \
+    --model                       "n/a" \
+    --duration-ms                 0 \
+    --fallback-reason             "null" \
+    --impl-model-tag              "n/a" \
+    --pipeline                    "cutover" \
+    --cutover-from                "$cutover_from" \
+    --cutover-to                  "$cutover_to" \
+    --forced                      "$forced" \
+    --operator-id                 "$operator_id" \
+    --pre-flip-in-progress-count  "$pre_flip_count" \
+    ${log_path_args[@]+"${log_path_args[@]}"} \
+    2>/dev/null || true
+}
+
 # ── Worktree dependency installer ──────────────────────────────────────────
 # Ensures node_modules are populated before the PLAN phase agent spawns.
 # Idempotent: checks the @cloudflare/workers-types marker dir (empirically
