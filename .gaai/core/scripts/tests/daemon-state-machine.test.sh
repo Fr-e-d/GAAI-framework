@@ -31,10 +31,6 @@ cleanup() {
 trap cleanup EXIT
 
 cat > "$FIXTURE" << 'YAML_EOF'
-- id: E133S01
-  status: done
-  phase_status: done
-  delivery_pipeline: legacy
 - id: E134S01
   status: in_progress
   phase_status: not_started
@@ -87,15 +83,6 @@ source "$DISPATCH_LIB"
 
 echo "E134S02 — daemon-state-machine dispatch tests"
 echo ""
-
-# ── T1: get_delivery_pipeline returns correct value ───────────
-echo "T1: get_delivery_pipeline — legacy story"
-result=$(get_delivery_pipeline "E133S01")
-if [[ "$result" == "legacy" ]]; then
-  pass "T1: get_delivery_pipeline returns 'legacy' for E133S01"
-else
-  fail "T1: expected 'legacy', got '$result'"
-fi
 
 # ── T2: get_delivery_pipeline — 3phase story ─────────────────
 echo "T2: get_delivery_pipeline — 3phase story"

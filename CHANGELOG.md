@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- fix: branch each story from origin/<branch>, not the stale local ref
+
 ## [2.49.0] - 2026-06-29
 
 ### Changed
