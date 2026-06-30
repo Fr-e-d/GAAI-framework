@@ -2706,6 +2706,27 @@ ${qa_snippet}"
       [[ $merge_attempt -lt $merge_max ]] && sleep 3
     done
     if [[ "$merge_exit" -ne 0 ]]; then
+      # ── Benign-failure guard (faux AUTO_MERGE_FAILED) ──────────────────────
+      # `gh pr merge --auto --squash --delete-branch` deletes the LOCAL branch
+      # after the merge/queue step. The story branch (`story/{id}`) is still held
+      # by this delivery's worktree, so `git branch -D` fails with
+      # "cannot delete branch '...' used by worktree" and gh returns non-zero —
+      # even though the PR merged (or auto-merge is queued) server-side. The
+      # un-deleted local branch is harmless (worktree GC removes it later). Before
+      # escalating, re-read the true PR state: if it is already MERGED, or
+      # auto-merge is queued, the merge succeeded — treat as success. This mirrors
+      # the happy-path contract above where a queued autoMergeRequest counts as done.
+      if [[ -n "$pr_url" ]]; then
+        local _bf_state _bf_automerge
+        _bf_state=$(gh pr view "$pr_url" --json state --jq .state 2>/dev/null || echo "")
+        _bf_automerge=$(gh pr view "$pr_url" --json autoMergeRequest --jq .autoMergeRequest 2>/dev/null || echo "null")
+        if [[ "$_bf_state" == "MERGED" || "$_bf_automerge" != "null" ]]; then
+          echo "[INFO] ${story_id} handle_commit_phase: gh pr merge returned non-zero only at local branch-delete (branch held by worktree); PR state=${_bf_state:-unknown}, auto-merge queued=$([[ "$_bf_automerge" != "null" ]] && echo yes || echo no) — treating as merged success"
+          merge_exit=0
+        fi
+      fi
+    fi
+    if [[ "$merge_exit" -ne 0 ]]; then
       # Probe for CONFLICTING/DIRTY — attempt deterministic auto-resolve before escalating
       if [[ -n "$pr_url" ]] && gh pr view "$pr_url" --json mergeable,mergeStateStatus 2>/dev/null \
            | grep -qE '"mergeable":"CONFLICTING"|"mergeStateStatus":"DIRTY"'; then

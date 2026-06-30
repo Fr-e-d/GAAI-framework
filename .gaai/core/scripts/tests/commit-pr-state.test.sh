@@ -10,6 +10,8 @@
 # T2: MERGED PR selected by Guard 2 → phase_status reconciled to done, gh pr
 #     merge NOT called (AC3)
 # T3: OPEN PR selected by Guard 2   → gh pr merge IS called normally (AC1, regression)
+# T4: gh pr merge non-zero only at local branch-delete (branch held by worktree)
+#     while PR merged / auto-merge queued → treated as success, NOT escalated
 #
 # Run: bash .gaai/core/scripts/tests/commit-pr-state.test.sh
 # Exit 0 = all pass.
@@ -117,7 +119,10 @@ case "$subcmd" in
         exit 0
         ;;
       merge)
-        exit 0
+        # GH_MERGE_EXIT / GH_MERGE_STDERR let a test simulate the merge succeeding
+        # server-side while gh still returns non-zero at the local branch-delete step.
+        [[ -n "${GH_MERGE_STDERR:-}" ]] && echo "${GH_MERGE_STDERR}" >&2
+        exit "${GH_MERGE_EXIT:-0}"
         ;;
     esac
     ;;
@@ -254,6 +259,57 @@ if grep "gh pr merge" "$GH_CALL_LOG" 2>/dev/null | grep -q "$OPEN_URL_T3"; then
 else
   fail "T3a: gh pr merge NOT called with OPEN URL — regression in happy path"
 fi
+
+# ────────────────────────────────────────────────────────────────────────────
+# T4: gh pr merge returns non-zero ONLY at the local branch-delete step (story
+#     branch still held by the delivery worktree), while the PR merged / auto-merge
+#     is queued server-side. handle_commit_phase MUST treat this as success — NOT
+#     escalate. Regression guard for the recurring faux-AUTO_MERGE_FAILED that
+#     left already-merged stories stuck `escalated` and blocked their dependents.
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T4: faux branch-delete failure on a merged/queued PR ---"
+SID4="TST-PCS04"
+setup_story "$SID4"
+write_backlog "$SID4"
+
+OPEN_URL_T4="https://github.com/test/repo/pull/104"
+export GH_PR_STALE_URL="$OPEN_URL_T4"
+export GH_PR_STATE="OPEN"                       # PR still open at pre-merge guard
+export GH_PR_NUMBER="104"
+export GH_AUTOMERGE_RESP='{"mergeType":"SQUASH"}'  # auto-merge queued server-side
+export GAAI_AUTO_MERGE_POLICY="on"
+export GH_MERGE_EXIT="1"                         # gh returns non-zero...
+export GH_MERGE_STDERR="story/${SID4}: failed to run git: error: cannot delete branch 'story/${SID4}' used by worktree at '/tmp/wt'"
+: > "$GH_CALL_LOG"
+
+set +e
+handle_commit_phase "$SID4" "trace-t4"
+T4_RC=$?
+set -e
+
+echo "T4a: handle_commit_phase returns 0 (not escalated)"
+if [[ "$T4_RC" -eq 0 ]]; then
+  pass "T4a: handle_commit_phase returned 0"
+else
+  fail "T4a: handle_commit_phase returned $T4_RC (faux branch-delete failure escalated)"
+fi
+
+echo "T4b: phase_status=done (merge treated as success, not escalated)"
+T4_PHASE=$(grep -A 10 "id: ${SID4}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T4_PHASE" == "done" ]]; then
+  pass "T4b: phase_status=done"
+else
+  fail "T4b: phase_status='${T4_PHASE}' (expected done — guard did not absorb branch-delete failure)"
+fi
+
+echo "T4c: gh pr merge WAS attempted (regression — merge path still runs)"
+if grep -q "gh pr merge" "$GH_CALL_LOG" 2>/dev/null; then
+  pass "T4c: gh pr merge attempted"
+else
+  fail "T4c: gh pr merge NOT attempted"
+fi
+
+unset GH_MERGE_EXIT GH_MERGE_STDERR
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
