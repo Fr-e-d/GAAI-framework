@@ -818,60 +818,6 @@ _emit_commit_routing_record() {
     2>/dev/null || _emit_routing_record_fallback "$trace_id" "$story_id" "commit" "$provider" "n/a" "$duration_ms" "$fallback_reason" "$impl_tag" "3phase" "$pr_url" "$auto_merge_applied"
 }
 
-# ── Cutover default pipeline reader (AC4) ────────────────────────────────
-# Reads cutover_state.default_pipeline from the top-level section in BACKLOG_FILE.
-# Returns "legacy" if the section is absent (safe default — no-op for existing deploys).
-# Re-reads the file on every call (no caching — flip takes effect on next poll without daemon restart).
-get_cutover_default_pipeline() {
-  local val
-  val=$(awk '
-    /^cutover_state:[[:space:]]*$/ { in_section=1; next }
-    in_section && /^[^[:space:]]/ { exit }
-    in_section && /^[[:space:]]+default_pipeline:/ {
-      gsub(/^[[:space:]]+default_pipeline:[[:space:]]*/, "")
-      gsub(/[[:space:]]+#.*$/, "")  # strip YAML inline comment (defensive — `#` after whitespace)
-      gsub(/[[:space:]]*$/, "")
-      gsub(/^"|"$/, "")
-      print
-      exit
-    }
-  ' "$BACKLOG_FILE" 2>/dev/null || true)
-  echo "${val:-legacy}"
-}
-
-# ── Cutover routing record (AC3) ─────────────────────────────────────────
-# Emits one JSONL record with phase: cutover + cutover-specific telemetry.
-# Arguments: trace_id cutover_from cutover_to forced operator_id pre_flip_count
-# Best-effort: audit emit failure warns but does NOT abort the flip.
-# Cohort exclusion contract: WHERE phase != 'cutover' in pipeline cohort statistics.
-_emit_cutover_routing_record() {
-  local trace_id="$1" cutover_from="$2" cutover_to="$3" forced="$4"
-  local operator_id="$5" pre_flip_count="$6"
-
-  local log_path_args=()
-  if [[ -n "${ROUTING_LOG_PATH:-}" ]]; then
-    log_path_args=(--log-path "$ROUTING_LOG_PATH")
-  fi
-
-  node "$PROJECT_DIR/.gaai/core/adapters/claude-code/runtime-routing-logger.js" \
-    --trace-id                    "$trace_id" \
-    --story-id                    "cutover" \
-    --phase                       "cutover" \
-    --provider                    "daemon-bash" \
-    --model                       "n/a" \
-    --duration-ms                 0 \
-    --fallback-reason             "null" \
-    --impl-model-tag              "n/a" \
-    --pipeline                    "cutover" \
-    --cutover-from                "$cutover_from" \
-    --cutover-to                  "$cutover_to" \
-    --forced                      "$forced" \
-    --operator-id                 "$operator_id" \
-    --pre-flip-in-progress-count  "$pre_flip_count" \
-    ${log_path_args[@]+"${log_path_args[@]}"} \
-    2>/dev/null || true
-}
-
 # ── Worktree dependency installer ──────────────────────────────────────────
 # Ensures node_modules are populated before the PLAN phase agent spawns.
 # Idempotent: checks the @cloudflare/workers-types marker dir (empirically
@@ -1055,10 +1001,18 @@ handle_plan_phase() {
   # writes its execution-plan.md inside it. Subsequent phases (impl/qa/commit)
   # reuse the same worktree.
   if ! git -C "$PROJECT_DIR" worktree list --porcelain 2>/dev/null | grep -qE "^worktree ${worktree_path}$"; then
-    # Create story branch from staging if it doesn't exist yet (no checkout — main stays on staging per orchestration.rules.md INVARIANT)
+    # Create the story branch from the freshly-fetched REMOTE tip (origin/<branch>),
+    # NOT the local `staging` ref. The local ref is never advanced during a long
+    # daemon run (only origin/<branch> is fetched each poll), so branching from it
+    # would cut every story from the daemon's startup-era snapshot — stories would
+    # silently miss dependencies merged after the daemon started. Branching from
+    # origin/<branch> means each new story starts from the latest merged tip.
+    # (No checkout — main stays on the daemon-home branch per orchestration.rules.md INVARIANT.)
+    local _base_branch="${TARGET_BRANCH:-staging}"
+    git -C "$PROJECT_DIR" fetch origin "$_base_branch" --quiet 2>/dev/null || true
     if ! git -C "$PROJECT_DIR" rev-parse --verify "story/${story_id}" >/dev/null 2>&1; then
-      if ! git -C "$PROJECT_DIR" branch "story/${story_id}" staging 2>/dev/null; then
-        echo "[ERROR] ${story_id} handle_plan_phase: git branch story/${story_id} staging failed"
+      if ! git -C "$PROJECT_DIR" branch "story/${story_id}" "origin/${_base_branch}" 2>/dev/null; then
+        echo "[ERROR] ${story_id} handle_plan_phase: git branch story/${story_id} origin/${_base_branch} failed"
         _emit_plan_routing_record "$story_id" "$trace_id" "error" "WORKTREE_BRANCH_FAILED" "0"
         return 1
       fi
