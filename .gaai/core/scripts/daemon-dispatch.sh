@@ -733,7 +733,7 @@ _emit_plan_routing_record() {
   local story_id="$1" trace_id="$2" provider="$3" fallback_reason="$4" duration_ms="$5"
   local impl_tag model_val
   impl_tag=$(get_impl_model_tag "$story_id")
-  model_val="${CLAUDE_MODEL_PRIMARY:-claude-sonnet-4-6}"
+  model_val="${CLAUDE_MODEL_PRIMARY:-claude-sonnet-5}"
   if [[ "${GAAI_DAEMON_EXECUTOR:-claude}" == "codex" ]]; then
     [[ "$provider" == "primary" ]] && provider="codex"
     model_val="${GAAI_CODEX_MODEL:-codex-default}"
@@ -764,7 +764,7 @@ _emit_qa_routing_record() {
   local story_id="$1" trace_id="$2" provider="$3" fallback_reason="$4" duration_ms="$5"
   local impl_tag model_val
   impl_tag=$(get_impl_model_tag "$story_id")
-  model_val="${CLAUDE_MODEL_PRIMARY:-claude-sonnet-4-6}"
+  model_val="${CLAUDE_MODEL_PRIMARY:-claude-sonnet-5}"
   if [[ "${GAAI_DAEMON_EXECUTOR:-claude}" == "codex" ]]; then
     [[ "$provider" == "primary" ]] && provider="codex"
     model_val="${GAAI_CODEX_MODEL:-codex-default}"
