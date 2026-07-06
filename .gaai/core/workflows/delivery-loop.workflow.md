@@ -204,6 +204,8 @@ Deterministic bash only — no `claude -p` invocation. Implemented in `handle_co
 
 **Normative authority:** the worktree + PR + cleanup invariants are defined in `orchestration.rules.md §Branch Rules → Worktree lifecycle & cleanup`. This sequence is the procedure; the rules file is the authority. The procedure restates only hard safety boundaries (see **Safety boundary** below); it does not define invariants.
 
+**Base-source invariant:** Story and repair branches must be created from `origin/staging` after a fresh fetch, or from a local `staging` ref that has just been verified byte-equal to `origin/staging`. Do not commit or push Delivery code/content directly on `staging`; use a worktree branch, open a PR to `staging`, then squash-merge it.
+
 **Cleanup backstop:** step 7 is the happy-path removal. If it does not run (crash, dirty tree), the daemon's periodic orphan reaper (`reap_orphaned_worktrees` in `daemon-dispatch.sh`) is the eventually-consistent backstop. Orphan removal is therefore convergent, not synchronous.
 
 **Data-safety refusal:** a dirty or still-active worktree is never force-removed at step 7 or by the reaper — the reaper refuses removal and defers it (skip-and-retry next cycle) rather than risking data loss (see `orchestration.rules.md §Branch Rules`).
