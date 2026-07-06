@@ -143,10 +143,24 @@ The plan file MUST be non-empty.
 ### Scope discipline check (escalation trigger)
 
 Before finalising the plan, audit its scope. If the plan touches **>10 distinct
-files** OR has **>6 acceptance criteria** OR projects to >300 lines of code
-modification, the story is too large for reliable single-pass implementation
-on the secondary route (GLM 5.1) and at risk of hitting Sonnet's turn budget
-on the primary route.
+files** OR has **>6 acceptance criteria** OR projects to **>300 lines of
+implementation-code modification**, the story is too large for reliable
+single-pass implementation on the secondary route (GLM 5.1) and at risk of
+hitting Sonnet's turn budget on the primary route.
+
+**LOC counting basis (coordinated with the `validate-artefacts` Discovery
+gate — change both together or neither):** the ≤300 cap counts
+**implementation LOC only; test-file LOC is excluded** from the hard cap.
+Test files still count toward the >10-file cap and MUST appear among the
+plan's `## Implementation Sequence` file paths, marked `(test)`, so the full
+workload stays visible. A test file is one containing only automated test code and test-only fixtures/helpers, following the project's test naming convention (e.g. `*.test.*`, `*.spec.*`, `tests/` or `__tests__/` directories). Any file imported or executed by production code counts as implementation regardless of name or marker.
+Rationale: the cap is calibrated on implementation reasoning density (the
+single-pass coherence evidence behind this doctrine); test code mirrors the
+implementation and scales with it, so a tests-included basis would block any
+properly-tested new service (~250-line service + ~280-line test can never fit
+300 combined) while the pipeline demonstrably delivers such stories reliably.
+If projected test LOC is grossly disproportionate (more than ~3× the
+implementation LOC), flag it in the plan for QA attention — do not block on it.
 
 When the scope exceeds those thresholds, write `{id}.plan-blocked.md` at
 `$GAAI_PLAN_PATH` instead of the plan, attach a recommended decomposition
