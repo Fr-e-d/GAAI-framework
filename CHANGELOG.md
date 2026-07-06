@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - chore: LOC cap counts implementation LOC only — coordinated basis decision
+- chore: LOC cap counts implementation LOC only — coordinated basis decision
 - chore: require PR-based staging repairs
 - chore: require PR-based staging repairs
 - chore: align marketing and cloud beta copy
