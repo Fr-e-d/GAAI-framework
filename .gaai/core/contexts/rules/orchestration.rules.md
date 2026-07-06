@@ -183,10 +183,11 @@ All AI-driven execution targets the **`staging`** branch. The `production` branc
 **INVARIANT: The main working tree stays on `staging` at ALL times.** Deliveries operate in isolated worktrees (`git worktree add`). The main working tree is never checked out to another branch — the daemon and other processes depend on it remaining on staging.
 
 - AI agents MUST NOT push to, merge to, or interact with `production`
-- Delivery creates story branches from staging: `git branch story/{id} staging` (no checkout — main stays on staging)
+- Delivery creates story branches from the remote staging baseline: `git fetch origin staging` then `git branch story/{id} origin/staging` (no checkout — main stays on staging). Using a stale local `staging` ref as the branch source is forbidden unless it has just been verified to equal `origin/staging`.
 - All implementation happens in worktrees: `git worktree add "$WORKTREE_PATH" story/{id}` (absolute path resolved once at Step 0 — see `delivery-loop.workflow.md`)
 - Sub-agents work exclusively inside their worktree — never in the main repo directory
 - Squash merges back to staging are serialized via `flock`
+- Delivery code/content changes, including human repairs after escalation, MUST NOT be committed or pushed directly to `staging`. They must use an isolated worktree sourced from `origin/staging`, a dedicated branch, a PR targeting `staging`, and a squash merge.
 - Promotion staging → production is a human action via GitHub PR
 - Before creating a story branch, verify that the **previous story's PR is merged** into staging.
   If a prior story's PR is open (not yet merged), the Delivery Agent must wait before starting the next story.
@@ -202,7 +203,7 @@ A pre-push hook (`.githooks/pre-push`) enforces this rule at the git level.
 
 Scope: **worktree-isolated delivery of code/content** — daemon-spawned story delivery and any manual session making an isolated change in a worktree. The merge path here is the same one the `production`-prohibition and auto-merge clauses above already govern; this subsection does not re-assert them, it adds the lifecycle clauses those clauses omit. The mechanism (idempotent creation, throttled reaping, retries, locks) lives in the daemon scripts; the procedure lives in `delivery-loop.workflow.md §Commit Phase`. This section is the normative authority both implement.
 
-- **Governed merge path.** Worktree-originated code/content reaches `staging` only via `gh pr create --base staging --head story/{id}` then squash merge (auto-merge per the clause above). **Exempt:** Discovery's backlog/governance mutations push directly to `origin/staging` under the daemon staging lock per §Claim Protocol — that path has no story PR and is unaffected by this clause.
+- **Governed merge path.** Worktree-originated code/content reaches `staging` only via `gh pr create --base staging --head story/{id}` then squash merge (auto-merge per the clause above). Manual Delivery repairs follow the same path with a dedicated branch name if no story branch is active. **Exempt:** Discovery's backlog/governance mutations push directly to `origin/staging` under the daemon staging lock per §Claim Protocol — that path has no story PR and is unaffected by this clause.
 - **Post-merge cleanup.** After a story's PR merges, its remote branch (`gh pr merge --delete-branch`) and its worktree are removed; the daemon also drops the local branch ref. No worktree may persist past its story's terminal state.
 - **Orphan reaping is eventually-consistent.** A worktree whose story PR is MERGED/CLOSED, or whose HEAD is an ancestor of `origin/staging`, is an orphan and MUST be reaped. Reaping is periodic/convergent, **not** synchronous — "no orphan subsists" is a convergence guarantee, not an instantaneous one. Do not assert or rely on synchronous orphan removal.
 - **Data-safety refusal (INVARIANT).** A dirty or still-active worktree is NEVER force-removed. The reaper refuses removal and defers it (skip-and-retry next cycle); committed work is never lost because removal frees only the working dir, never a branch ref. Data safety dominates cleanup.

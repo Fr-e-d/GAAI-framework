@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- chore: require PR-based staging repairs
 - chore: align marketing and cloud beta copy
 - fix: forward codex executor into story wrappers
 - fix: default routing-log model tag to claude-sonnet-5
