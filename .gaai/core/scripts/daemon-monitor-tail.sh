@@ -20,6 +20,7 @@ command -v jq &>/dev/null && HAS_JQ=true
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
 DIM='\033[2m'
 NC='\033[0m'
 
@@ -284,8 +285,8 @@ parse_log() {
   local tool_count=0
   if $HAS_JQ; then
     local claude_tool_count codex_tool_count
-    claude_tool_count=$(jq -c 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use")' "$log_file" 2>/dev/null | wc -l | tr -d ' ')
-    codex_tool_count=$(jq -c 'select(.type=="item.started" and (.item.type=="command_execution"))' "$log_file" 2>/dev/null | wc -l | tr -d ' ')
+    claude_tool_count=$(jq -Rrc 'fromjson? | select(.type=="assistant") | .message.content[]? | select(.type=="tool_use")' "$log_file" 2>/dev/null | wc -l | tr -d ' ')
+    codex_tool_count=$(jq -Rrc 'fromjson? | select(.type=="item.started" and (.item.type=="command_execution"))' "$log_file" 2>/dev/null | wc -l | tr -d ' ')
     tool_count=$(( ${claude_tool_count:-0} + ${codex_tool_count:-0} ))
   else
     local claude_tool_count codex_tool_count
@@ -306,7 +307,8 @@ parse_log() {
       | jq -r '.session_id // empty' 2>/dev/null \
       | head -1 || true)
     last_event=$(tail -500 "$log_file" 2>/dev/null \
-      | jq -r --arg root_sid "$root_sid" '
+      | jq -Rr --arg root_sid "$root_sid" '
+        fromjson? |
         def clean: tostring | gsub("\n"; " ") | gsub("  +"; " ");
         def arg:
           if .name == "Bash" then (.input.command // "" | clean)
@@ -334,7 +336,8 @@ parse_log() {
     if [[ -z "$last_text" ]]; then
       local codex_event
       codex_event=$(tail -500 "$log_file" 2>/dev/null \
-        | jq -r '
+        | jq -Rr '
+          fromjson? |
           def clean: tostring | gsub("\n"; " ") | gsub("  +"; " ");
           select((.type=="item.started" or .type=="item.completed") and (.item.type=="command_execution"))
           | "MAIN" + "\t" + (.item.command // "" | clean) + "\t" + "codex"
@@ -358,7 +361,8 @@ parse_log() {
       local daemon_event
       daemon_event=$(tail -400 "$daemon_log" 2>/dev/null \
         | grep '^{"type":"assistant"' 2>/dev/null \
-        | jq -r '
+        | jq -Rr '
+            fromjson? |
             def clean: tostring | gsub("\n"; " ") | gsub("  +"; " ");
             def arg:
               if .name == "Bash" then (.input.command // "" | clean)
@@ -406,7 +410,8 @@ parse_log() {
     # the nested claude -p subprocess is the most recent actor.
     local phase_event
     phase_event=$(tail -1500 "$log_file" 2>/dev/null \
-      | jq -r --arg root_sid "$root_sid" '
+      | jq -Rr --arg root_sid "$root_sid" '
+        fromjson? |
         def signal:
           if .name == "Bash" then (.input.command // "" | tostring)
           elif (.name == "Write" or .name == "Edit") then (.input.file_path // "" | tostring)
@@ -528,7 +533,7 @@ parse_log() {
   local cost=""
   if $HAS_JQ; then
     cost=$(tail -100 "$log_file" 2>/dev/null \
-      | jq -r 'select(.costUSD) | .costUSD' 2>/dev/null \
+      | jq -Rr 'fromjson? | select(.costUSD) | .costUSD' 2>/dev/null \
       | tail -1 || true)
   fi
 
