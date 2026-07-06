@@ -127,9 +127,9 @@ echo "T7: no marker + phase_status=qa_escalated → returns QA_ESCALATED"
 result=$(BACKLOG="$BACKLOG" LOCK_DIR="$LOCK_DIR" detect_phase_3phase "TST-MON-QAESC")
 [[ "$result" == "QA_ESCALATED" ]] && pass "T7" || fail "T7: expected QA_ESCALATED, got '$result'"
 
-echo "T8: no marker + phase_status=not_started → returns IDLE @ not_started"
+echo "T8: no marker + phase_status=not_started → returns PLAN"
 result=$(BACKLOG="$BACKLOG" LOCK_DIR="$LOCK_DIR" detect_phase_3phase "TST-MON-PLAN")
-[[ "$result" == "IDLE @ not_started" ]] && pass "T8" || fail "T8: expected 'IDLE @ not_started', got '$result'"
+[[ "$result" == "PLAN" ]] && pass "T8" || fail "T8: expected PLAN, got '$result'"
 
 # ── T9–T13: Per-phase log path resolution (AC2) ───────────────────────────────
 
@@ -171,11 +171,11 @@ result=$(BACKLOG="$BACKLOG" LOCK_DIR="$LOCK_DIR" WORKTREE_BASE="$WORKTREE_BASE" 
 echo "T13: path-contract assertion — resolved path matches canonical formula"
 commit_wt_dir="${WORKTREE_BASE}/TST-MON-COMMIT-workspace/.delivery-logs"
 mkdir -p "$commit_wt_dir"
-expected_commit_log="${commit_wt_dir}/TST-MON-COMMIT.qa.log"
+expected_commit_log="${commit_wt_dir}/TST-MON-COMMIT.commit.log"
 touch "$expected_commit_log"
-# phase_status=qa_passed → active phase maps to qa (last completed = qa)
+# phase_status=qa_passed → active phase maps to commit (last completed = qa)
 result=$(BACKLOG="$BACKLOG" LOCK_DIR="$LOCK_DIR" WORKTREE_BASE="$WORKTREE_BASE" resolve_3phase_log "TST-MON-COMMIT")
-expected_formula="${WORKTREE_BASE}/TST-MON-COMMIT-workspace/.delivery-logs/TST-MON-COMMIT.qa.log"
+expected_formula="${WORKTREE_BASE}/TST-MON-COMMIT-workspace/.delivery-logs/TST-MON-COMMIT.commit.log"
 [[ "$result" == "$expected_formula" ]] && pass "T13" || fail "T13: expected $expected_formula, got '$result'"
 
 # ── T14–T16: observe-secondary.sh R2 detection from impl.log (AC4) ───────────
@@ -293,7 +293,7 @@ result=$(BACKLOG="$BACKLOG" LOCK_DIR="$LOCK_DIR" WORKTREE_BASE="$WORKTREE_BASE" 
 
 echo "T21: malformed phase_status → detect_phase_3phase returns [?]"
 mangled_backlog="$FIXTURE_DIR/mangled.backlog.yaml"
-printf '- id: TST-MANGLED\n  status: in_progress\n  phase_status: \n  delivery_pipeline: 3phase\n' > "$mangled_backlog"
+printf '%s\n' '- id: TST-MANGLED' '  status: in_progress' '  phase_status: ' '  delivery_pipeline: 3phase' > "$mangled_backlog"
 result=$(BACKLOG="$mangled_backlog" LOCK_DIR="$LOCK_DIR" detect_phase_3phase "TST-MANGLED")
 [[ "$result" == "[?]" ]] && pass "T21" || fail "T21: expected '[?]', got '$result'"
 rm -f "$mangled_backlog"
@@ -315,6 +315,26 @@ absent_routing="${FIXTURE_DIR}/nonexistent-routing.jsonl"
   echo "FAIL"
   exit 1
 ) | grep -q "^PASS" && pass "T23" || fail "T23: absent routing.jsonl handling"
+
+# ── T24–T25: Codex mixed JSONL parsing ───────────────────────────────────────
+
+echo ""
+echo "=== T24-T25: Codex mixed JSONL parsing ==="
+
+codex_log="${FIXTURE_DIR}/codex-mixed.log"
+cat > "$codex_log" << 'JSONL_EOF'
+2026-07-06T01:15:58.334718Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Auth(AuthorizationRequired)
+{"type":"thread.started","thread_id":"t-codex"}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc \"rg -n seat workers\"","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc \"rg -n seat workers\"","aggregated_output":"workers/x.ts:1:seat\n","exit_code":0,"status":"completed"}}
+JSONL_EOF
+
+echo "T24: parse_log counts Codex command_execution after non-JSON stderr line"
+result=$(parse_log "$codex_log" "TST-MON-IMPL" "3phase" "IMPL" 2>/dev/null || true)
+printf '%s\n' "$result" | grep -q "1 tools" && pass "T24" || fail "T24: expected '1 tools' in parse_log output, got '$result'"
+
+echo "T25: parse_log renders latest Codex command activity after non-JSON stderr line"
+printf '%s\n' "$result" | grep -q 'rg -n seat workers' && pass "T25" || fail "T25: expected latest Codex command activity, got '$result'"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
