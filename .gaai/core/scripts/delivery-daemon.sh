@@ -2727,6 +2727,11 @@ export SCHEDULER="$SCHEDULER"
 export LOCK_DIR="$LOCK_DIR"
 export LOG_DIR="$LOG_DIR"
 export TARGET_BRANCH="$TARGET_BRANCH"
+export GAAI_DAEMON_EXECUTOR="${GAAI_DAEMON_EXECUTOR:-claude}"
+export GAAI_CODEX_MODEL="${GAAI_CODEX_MODEL:-}"
+export GAAI_CODEX_SANDBOX="${GAAI_CODEX_SANDBOX:-}"
+export GAAI_CODEX_EPHEMERAL="${GAAI_CODEX_EPHEMERAL:-}"
+export GAAI_CODEX_IGNORE_USER_CONFIG="${GAAI_CODEX_IGNORE_USER_CONFIG:-}"
 export GAAI_CLAUDE_PROXY_BASE_URL="${GAAI_CLAUDE_PROXY_BASE_URL:-}"
 if [[ -n "\${GAAI_CLAUDE_PROXY_BASE_URL:-}" ]]; then
   export ANTHROPIC_BASE_URL="\${GAAI_CLAUDE_PROXY_BASE_URL}"
@@ -2817,6 +2822,11 @@ WRAPPER_EOF
   [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
   [[ -n "${GAAI_AUTO_MERGE_POLICY:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_POLICY=${GAAI_AUTO_MERGE_POLICY}")
   [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
+  [[ -n "${GAAI_DAEMON_EXECUTOR:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_EXECUTOR=${GAAI_DAEMON_EXECUTOR}")
+  [[ -n "${GAAI_CODEX_MODEL:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_MODEL=${GAAI_CODEX_MODEL}")
+  [[ -n "${GAAI_CODEX_SANDBOX:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_SANDBOX=${GAAI_CODEX_SANDBOX}")
+  [[ -n "${GAAI_CODEX_EPHEMERAL:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_EPHEMERAL=${GAAI_CODEX_EPHEMERAL}")
+  [[ -n "${GAAI_CODEX_IGNORE_USER_CONFIG:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_IGNORE_USER_CONFIG=${GAAI_CODEX_IGNORE_USER_CONFIG}")
   # The delivery wrapper runs in its OWN tmux session and creates the per-story worktree.
   # It MUST inherit the operator's real checkout + the daemon home, or its worktree-base
   # derivation falls back to PROJECT_DIR (= the home when the daemon binary runs from the
