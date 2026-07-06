@@ -70,7 +70,9 @@ This is the **mandatory gate** between Discovery and Delivery. No Story proceeds
 ### Story Scope Pre-Flight (Plan contract symmetry)
 
 The Plan phase agent enforces hard scope caps before producing an execution plan:
-**>10 distinct files modified OR created**, **>6 acceptance criteria**, or **>300 lines of code projected** all trigger a plan-block + decomposition demand and waste a full Delivery cycle (worktree spin, branch chore commit, then PLAN exit non-zero with `plan-blocked.md`). To prevent this Discovery → Refined → Plan-blocked round-trip, this skill enforces the **same caps** at the Discovery gate. The Refined contract MUST guarantee Plan-feasibility upstream.
+**>10 distinct files modified OR created**, **>6 acceptance criteria**, or **>300 lines of implementation code projected** all trigger a plan-block + decomposition demand and waste a full Delivery cycle (worktree spin, branch chore commit, then PLAN exit non-zero with `plan-blocked.md`). To prevent this Discovery → Refined → Plan-blocked round-trip, this skill enforces the **same caps** at the Discovery gate. The Refined contract MUST guarantee Plan-feasibility upstream.
+
+**LOC counting basis (coordinated decision, 2026-07-06 — mirrored verbatim in the Plan agent prompt; change both together or neither):** the ≤300 LOC cap counts **implementation LOC only; test-file LOC is excluded**. Test files still count toward the ≤10-file cap and must appear in the File Inventory marked `(test)`. Basis rationale: the cap is calibrated on single-pass implementation coherence; test code mirrors the implementation it covers, so a tests-included basis would make any properly-tested new service unshippable (~250-line service + ~280-line test always exceeds 300 combined) while empirical deliveries (e.g. a 246-impl/298-test billing story) pass reliably. Grossly disproportionate test scope (>~3× impl LOC) is flagged for review, not blocked. A test file is one containing only automated test code and test-only fixtures/helpers, following the project's test naming convention (e.g. `*.test.*`, `*.spec.*`, `tests/` or `__tests__/` directories). Any file imported or executed by production code counts as implementation regardless of name or marker.
 
 **Cap enforcement is hard, not advisory.**
 
@@ -78,7 +80,7 @@ The Plan phase agent enforces hard scope caps before producing an execution plan
 |---|---|---|
 | Files | ≤ 10 distinct files modified or created | `## File Inventory` section (mandatory for any multi-file story) |
 | Acceptance criteria | ≤ 6 | counted from `## Acceptance Criteria` bullets |
-| LOC projection | ≤ 300 | optional `loc_estimate` line in File Inventory, summed |
+| LOC projection | ≤ 300 **implementation LOC only — rows marked `(test)` are excluded from the sum** | optional `loc_estimate` line in File Inventory, summed over non-test rows |
 
 **Multi-file detection (when File Inventory is mandatory):**
 
@@ -87,7 +89,7 @@ A story requires a `## File Inventory` section if BOTH of the following are true
 - (signal 1 — language) Title or body contains at least one of: "migrate ... to", "centralise", "eliminate ... regex", "scan-and-replace", "audit across", "every consumer", "all sites", "all callers", "across the codebase", or analogous explicit cross-cutting framing
 - (signal 2 — concrete references) The story body OR acceptance criteria reference at least **2 distinct file paths** (e.g. `path/to/foo.sh` + `path/to/bar.sh`). A single-file refactor mentioning one file fails this signal and is NOT subject to the File Inventory requirement.
 
-When BOTH signals match, the story body MUST contain a `## File Inventory` section listing each file to be modified or created, with a 1-line scope note per file (and an optional `loc_estimate` per row). Stories matching the detection criteria without this section are BLOCKED — the validator cannot compute the file cap without an explicit list.
+When BOTH signals match, the story body MUST contain a `## File Inventory` section listing each file to be modified or created, with a 1-line scope note per file, an optional `loc_estimate` per row, and the literal marker `(test)` on any test-file row (test rows are excluded from the LOC cap but count toward the file cap). Stories matching the detection criteria without this section are BLOCKED — the validator cannot compute the file cap without an explicit list.
 
 A `## File Inventory` listing more than 10 files is BLOCKED. Discovery must decompose before re-running this skill. This is the PLAN contract symmetry — any story that would plan-block at Delivery MUST be caught here instead. There is no escape hatch in V1: the cap mirrors the Plan agent's hard cap exactly, and the Plan agent does not honor exemption flags. Truly atomic cross-file refactors are vanishingly rare ; if encountered, raise the cap in BOTH this skill AND the Plan agent prompt as a single coordinated decision.
 
@@ -200,7 +202,7 @@ The skill MUST block progression if:
 - A multi-file story (both detection signals match) is missing the `## File Inventory` section
 - A `## File Inventory` lists more than 10 files (no V1 escape hatch — decompose)
 - Acceptance criteria count exceeds 6 (Plan contract symmetry)
-- A `loc_estimate` total in File Inventory exceeds 300 (Plan contract symmetry)
+- A `loc_estimate` total over non-test File Inventory rows exceeds 300 (Plan contract symmetry — implementation LOC only; test rows are excluded from the cap but MUST still be listed and marked `(test)`, and they count toward the ≤10-file cap)
 - `required_skills` entry present without a co-declared output AC in the story body
   (unbound contract — per the contract-carried delivery invariant)
 - `required_skills` entry does not resolve to an existing custom skill in
