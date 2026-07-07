@@ -59,7 +59,7 @@ echo "=== AC2: is_locked runs before drift-defer — live wrapper never drift-de
 
 L_DIR="$FIXTURE_DIR/live-project"
 L_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
-L_STORY="TST-E222S07-LIVE"
+L_STORY="TST-RC-LIVE"
 L_LOCK_DIR="$FIXTURE_DIR/live-locks"
 L_LOG="$FIXTURE_DIR/live-daemon.log"
 mkdir -p "$L_LOCK_DIR"
@@ -83,7 +83,7 @@ L_WT_YAML="items:
 printf '%s\n' "$L_WT_YAML" > "$L_DIR/$L_BACKLOG_REL"
 echo "12345" > "$L_LOCK_DIR/${L_STORY}.lock"
 
-L_HARNESS=$(mktemp /tmp/e222s07-live-harness-XXXXXX.sh)
+L_HARNESS=$(mktemp /tmp/rc-reorder-live-harness-XXXXXX.sh)
 cat > "$L_HARNESS" <<HARNESS
 #!/usr/bin/env bash
 set -uo pipefail
@@ -185,7 +185,7 @@ fi
 echo ""
 echo "=== AC3/AC5: crash-recovery-scan reorder + cwd fix (real cwd-bug regression) ==="
 
-CWD_STORY="TST-E222S07-CWD"
+CWD_STORY="TST-RC-CWD"
 CWD_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
 CWD_HOME_DIR="$FIXTURE_DIR/cwd-daemon-home"
 CWD_WRONG_DIR="$FIXTURE_DIR/cwd-wrong-cwd"
@@ -232,7 +232,7 @@ fi
 # No lock file for this sid (dead wrapper). No .interrupted / .agent-hang.marker
 # (rules out graceful-stop and crash-drift-signature branches, isolating the
 # generic drift-commit path this story fixes).
-CWD_HARNESS=$(mktemp /tmp/e222s07-cwd-harness-XXXXXX.sh)
+CWD_HARNESS=$(mktemp /tmp/rc-reorder-cwd-harness-XXXXXX.sh)
 cat > "$CWD_HARNESS" <<HARNESS
 #!/usr/bin/env bash
 set -uo pipefail
@@ -350,7 +350,7 @@ fi
 echo ""
 echo "=== AC6: retry-counter accumulates across death reverts, resets on graceful stop ==="
 
-R_STORY="TST-E222S07-RETRY"
+R_STORY="TST-RC-RETRY"
 R_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
 R_DIR="$FIXTURE_DIR/retry-project"
 R_LOCK_DIR="$FIXTURE_DIR/retry-locks"
@@ -366,7 +366,7 @@ setup_git_repo "$R_DIR" "$R_HEAD_YAML"
 run_revert() {
   local reset_phase="$1" reason="$2"
   local h
-  h=$(mktemp /tmp/e222s07-retry-harness-XXXXXX.sh)
+  h=$(mktemp /tmp/rc-reorder-retry-harness-XXXXXX.sh)
   cat > "$h" <<HARNESS
 #!/usr/bin/env bash
 set -uo pipefail
