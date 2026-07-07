@@ -1892,6 +1892,9 @@ RSTEOF
     # recovery-death revert ("no-progress"/"missing-plan") must NOT purge, or
     # the caller's immediately-following increment_retry() always lands on an
     # absent entry and a repeatedly-dying story never reaches MAX_RETRIES.
+    # A new call site that death-reverts (i.e. always follows with
+    # increment_retry()) must be added to the no-purge list below, or its
+    # retries will silently reset to zero every time instead of accumulating.
     case "$reason" in
       no-progress|missing-plan) : ;;
       *)

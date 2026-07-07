@@ -319,6 +319,27 @@ else
   fail "T5: daemon-home WT still dirty — drift commit ran against the wrong cwd (pre-fix behavior)"
 fi
 
+# T5b pins the cwd fix specifically. _recovery_revert_refined's own chore-commit
+# path independently re-sweeps any leftover uncommitted drift as a "pre-mark"
+# commit (correctly cd'd, since that path already worked before this story) —
+# so T5/T6 alone would still pass even if the scan-level call above silently
+# no-op'd against the wrong cwd and left the sweep to that downstream safety
+# net. Assert the scan-level commit — subject-tagged "[recovery-scan <sid>]",
+# distinct from the downstream "[pre-mark <sid>]" tag — actually landed, so a
+# future regression that reintroduces the missing-cd bug fails T5b even though
+# T5/T6 would not catch it.
+echo "T5b: the scan-level drift commit itself landed (not just the downstream pre-mark sweep)"
+# Captured into a variable before grep (not piped directly): under `set -o
+# pipefail`, `grep -q` exits as soon as it finds a match, SIGPIPEs the
+# upstream `git log`, and pipefail then reports the pipeline's status as
+# git's SIGPIPE death — not grep's success — producing a false FAIL here.
+CWD_ALL_LOG=$(git -C "$CWD_HOME_DIR" log --oneline --all 2>/dev/null)
+if printf '%s\n' "$CWD_ALL_LOG" | grep -qF "[recovery-scan $CWD_STORY]"; then
+  pass "T5b: '[recovery-scan $CWD_STORY]' commit found — the scan-level call committed the drift itself"
+else
+  fail "T5b: no '[recovery-scan $CWD_STORY]' commit found — the scan-level drift-commit call never actually ran against \$PROJECT_DIR (silently masked by the downstream pre-mark sweep)"
+fi
+
 echo "T6: story reverted to refined on origin (became re-dispatchable)"
 CWD_ORIGIN_STATUS=$(git -C "$CWD_HOME_DIR" show "origin/main:$CWD_BACKLOG_REL" 2>/dev/null \
   | grep -A2 "id: $CWD_STORY" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"\r' || echo "")
