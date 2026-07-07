@@ -1304,6 +1304,17 @@ crash_recovery_scan() {
     sid="${pair%%|*}"
     ps="${pair##*|}"
 
+    # ── Path 2 (moved) : live wrapper survived restart → skip ─────────────
+    # Evaluated first, before drift-defer/interrupted classification, so a live
+    # wrapper is never misreported as "relaunch deferred" nor reverted (AC2).
+    # clean_stale_locks() already ran earlier this tick, so a lock file here
+    # reflects a live PID.
+    if is_locked "$sid"; then
+      log "${BLUE}[RECOVERY] $sid : live wrapper detected — skipping (will continue independently)${NC}"
+      ((skipped++))
+      continue
+    fi
+
     # ── AC1: per-story working-tree drift check (in_progress targets only) ───────────
     # HEAD says in_progress; compare WT status/phase_status. Only checks stories that
     # are already in in_progress_pairs (HEAD status == in_progress). Benign edits on
@@ -1370,17 +1381,29 @@ except Exception:
             fi
           fi
           local _drift_rc=0
-          _commit_accumulated_backlog_drift "$sid" "$BACKLOG_REL" "${TARGET_BRANCH:-staging}" "recovery-scan" \
+          ( cd "$PROJECT_DIR" && _commit_accumulated_backlog_drift "$sid" "$BACKLOG_REL" "${TARGET_BRANCH:-staging}" "recovery-scan" ) \
             || _drift_rc=$?
           if [[ "$_drift_rc" -ne 0 ]]; then
             log "${YELLOW}[RECOVERY] $sid : working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) — drift commit failed (rc=$_drift_rc), writing drift-marker${NC}"
             _write_drift_marker "scan" "drift-$sid"
             drift_detected=1
-          else
-            log "${GREEN}[RECOVERY] $sid : committed accumulated backlog drift (HEAD=in_progress/${ps:-empty}) — relaunch deferred to next scan${NC}"
+            continue
+          elif [[ "$wt_status" == "in_progress" ]]; then
+            # phase_status-only drift: commit landed, re-evaluate this story under
+            # its now-current phase_status instead of deferring another scan cycle
+            # (was an unconditional continue that never reverted a dead not_started
+            # story and never cleared the daemon-home drift).
+            log "${GREEN}[RECOVERY] $sid : committed accumulated backlog drift (HEAD=in_progress/${wt_ps:-empty}) — evaluating phase_status${NC}"
+            ps="$wt_ps"
             _clear_drift_marker_if_clean
+            # no continue — fall through to phase_status classification below
+          else
+            # WT status itself moved away from in_progress — not a safe fallthrough
+            # target this cycle; keep the conservative defer-to-next-scan.
+            log "${GREEN}[RECOVERY] $sid : committed accumulated backlog drift (status changed to ${wt_status:-?}) — relaunch deferred to next scan${NC}"
+            _clear_drift_marker_if_clean
+            continue
           fi
-          continue
         fi
       fi
     fi
@@ -1400,13 +1423,6 @@ except Exception:
       else
         log "${RED}[RECOVERY] $sid : revert refined failed — manual intervention${NC}"
       fi
-      continue
-    fi
-
-    # ── Path 2 : live wrapper survived restart → skip ─────────────────────
-    if is_locked "$sid"; then
-      log "${BLUE}[RECOVERY] $sid : live wrapper detected — skipping (will continue independently)${NC}"
-      ((skipped++))
       continue
     fi
 
@@ -1870,10 +1886,20 @@ RSTEOF
     _write_drift_marker "commit" "revert-refined-$sid"
   fi
   if [[ "$rc" -eq 0 ]]; then
-    # AC2: purge retry-counter entry so re-delivery starts from zero (idempotent)
-    if [[ -f "$RETRY_FILE" ]]; then
-      sed_inplace "/^${sid}=/d" "$RETRY_FILE" 2>/dev/null || true
-    fi
+    # AC2: purge retry-counter entry so re-delivery starts from zero (idempotent).
+    # Gated on reason: a graceful operator stop ("interrupted") or an
+    # unclassified future reason resets to zero (safe — same as today); a
+    # recovery-death revert ("no-progress"/"missing-plan") must NOT purge, or
+    # the caller's immediately-following increment_retry() always lands on an
+    # absent entry and a repeatedly-dying story never reaches MAX_RETRIES.
+    case "$reason" in
+      no-progress|missing-plan) : ;;
+      *)
+        if [[ -f "$RETRY_FILE" ]]; then
+          sed_inplace "/^${sid}=/d" "$RETRY_FILE" 2>/dev/null || true
+        fi
+        ;;
+    esac
     # AC3: remove stale worktree and story branch so next delivery takes fresh-worktree path
     local wt_path
     wt_path=$(_recovery_resolve_worktree "$sid")
