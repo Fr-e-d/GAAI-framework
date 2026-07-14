@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: guard ((x++)) increments against set -e (poll loop crash)
 - fix: make EPOCHREALTIME→ms conversion locale-independent
 - chore: LOC cap counts implementation LOC only — coordinated basis decision
 - chore: LOC cap counts implementation LOC only — coordinated basis decision

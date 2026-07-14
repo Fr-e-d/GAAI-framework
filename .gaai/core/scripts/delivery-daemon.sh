@@ -640,7 +640,7 @@ with_staging_lock() {
     local waited=0
     while ! mkdir "$lockdir" 2>/dev/null; do
       sleep 1
-      ((waited++))
+      ((waited++)) || true
       if (( waited >= 60 )); then
         log "${RED}Staging lock timeout after 60s${NC}"
         return 1
@@ -1008,7 +1008,7 @@ active_count() {
   local count=0
   for lock in "$LOCK_DIR"/*.lock; do
     [[ -f "$lock" ]] || continue
-    ((count++))
+    ((count++)) || true
   done
   echo "$count"
 }
@@ -1311,7 +1311,7 @@ crash_recovery_scan() {
     # reflects a live PID.
     if is_locked "$sid"; then
       log "${BLUE}[RECOVERY] $sid : live wrapper detected — skipping (will continue independently)${NC}"
-      ((skipped++))
+      ((skipped++)) || true
       continue
     fi
 
@@ -1374,7 +1374,7 @@ except Exception:
               if _reconcile_merged_pr "$sid" "$_dr_merged_at"; then
                 rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
                 _clear_drift_marker_if_clean
-                ((reconciled++))
+                ((reconciled++)) || true
                 continue
               fi
               log "${YELLOW}[RECOVERY] $sid : merged-PR reconcile failed — falling through to drift-skip${NC}"
@@ -1414,12 +1414,12 @@ except Exception:
       log "${YELLOW}[RECOVERY] $sid : .interrupted present — graceful stop, reverting refined (keep phase_status=${ps:-empty})${NC}"
       if $DRY_RUN; then
         log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined + rm .interrupted${NC}"
-        ((interrupted++))
+        ((interrupted++)) || true
         continue
       fi
       if _recovery_revert_refined "$sid" "false" "interrupted"; then
         rm -f "$interrupted_marker"
-        ((interrupted++))
+        ((interrupted++)) || true
       else
         log "${RED}[RECOVERY] $sid : revert refined failed — manual intervention${NC}"
       fi
@@ -1437,11 +1437,11 @@ except Exception:
         log "${GREEN}[RECOVERY] $sid : phase_status=done — reconciling YAML status${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=done${NC}"
-          ((reconciled++))
+          ((reconciled++)) || true
           continue
         fi
         if _recovery_set_status "$sid" "done" "reconcile-done"; then
-          ((reconciled++))
+          ((reconciled++)) || true
         fi
         # Secondary triage safety-net: fires only if primary was skipped (AC2, AC3).
         if declare -f _run_triage_for_story >/dev/null 2>&1; then
@@ -1455,11 +1455,11 @@ except Exception:
         log "${YELLOW}[RECOVERY] $sid : phase_status=failed — reconciling YAML status${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=failed${NC}"
-          ((reconciled++))
+          ((reconciled++)) || true
           continue
         fi
         if _recovery_set_status "$sid" "failed" "reconcile-failed"; then
-          ((reconciled++))
+          ((reconciled++)) || true
         fi
         ;;
       escalated|qa_escalated)
@@ -1469,16 +1469,16 @@ except Exception:
         log "${YELLOW}[RECOVERY] $sid : phase_status=$ps — reconciling YAML status escalated${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=escalated${NC}"
-          ((reconciled++))
+          ((reconciled++)) || true
           continue
         fi
         if _recovery_set_status "$sid" "escalated" "reconcile-escalated"; then
-          ((reconciled++))
+          ((reconciled++)) || true
         fi
         ;;
       commit_stalled)
         log "${YELLOW}[RECOVERY] $sid : phase_status=commit_stalled — skipping relaunch, operator must inspect and reset${NC}"
-        ((skipped++))
+        ((skipped++)) || true
         ;;
       qa_passed)
         rm -f "$LOCK_DIR/.qa-spawn-deaths-${sid}" "$LOCK_DIR/.qa-spawn-deaths-${sid}.head" \
@@ -1511,9 +1511,9 @@ except Exception:
             log "${GREEN}[RECOVERY] $sid : phase_status=qa_passed but PR #${_rg_number} already merged ($_rg_merged_at) — reconciling to done instead of re-launching${NC}"
             if _reconcile_merged_pr "$sid" "$_rg_merged_at"; then
               rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
-              ((reconciled++))
+              ((reconciled++)) || true
             else
-              ((skipped++))
+              ((skipped++)) || true
             fi
             continue
           fi
@@ -1547,16 +1547,16 @@ except Exception:
             log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid commit_stalled${NC}"
           fi
           rm -f "$_cd_file" "$_cd_head_file" 2>/dev/null || true
-          ((skipped++))
+          ((skipped++)) || true
         else
           log "${GREEN}[RECOVERY] $sid : phase_status=qa_passed deaths=${_cd_new} — re-launching wrapper${NC}"
           if $DRY_RUN; then
             log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
-            ((resumed++))
+            ((resumed++)) || true
             continue
           fi
           if _recovery_relaunch "$sid"; then
-            ((resumed++))
+            ((resumed++)) || true
           fi
         fi
         ;;
@@ -1595,7 +1595,7 @@ except Exception:
               else
                 log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid failed (qa-spawn-exhausted)${NC}"
               fi
-              ((skipped++))
+              ((skipped++)) || true
               continue
             fi
             log "${GREEN}[RECOVERY] $sid : phase_status=implemented spawn-deaths=${_qsd_new}/${_qsd_max} — re-launching${NC}"
@@ -1607,11 +1607,11 @@ except Exception:
         fi
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
-          ((resumed++))
+          ((resumed++)) || true
           continue
         fi
         if _recovery_relaunch "$sid"; then
-          ((resumed++))
+          ((resumed++)) || true
         fi
         ;;
       planned)
@@ -1620,22 +1620,22 @@ except Exception:
           log "${GREEN}[RECOVERY] $sid : phase_status=planned + execution-plan.md present — re-launching${NC}"
           if $DRY_RUN; then
             log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
-            ((resumed++))
+            ((resumed++)) || true
             continue
           fi
           if _recovery_relaunch "$sid"; then
-            ((resumed++))
+            ((resumed++)) || true
           fi
         else
           log "${YELLOW}[RECOVERY] $sid : phase_status=planned but no execution-plan.md — revert refined + reset phase_status${NC}"
           if $DRY_RUN; then
             log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined + reset phase_status${NC}"
-            ((reverted++))
+            ((reverted++)) || true
             continue
           fi
           if _recovery_revert_refined "$sid" "true" "missing-plan"; then
             increment_retry "$sid"
-            ((reverted++))
+            ((reverted++)) || true
           fi
         fi
         ;;
@@ -1665,9 +1665,9 @@ except Exception:
             log "${GREEN}[RECOVERY] $sid : phase_status=${ps:-empty} but PR #${_ns_number} already merged ($_ns_merged_at) — reconciling to done instead of reverting${NC}"
             if _reconcile_merged_pr "$sid" "$_ns_merged_at"; then
               rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
-              ((reconciled++))
+              ((reconciled++)) || true
             else
-              ((skipped++))
+              ((skipped++)) || true
             fi
             continue
           fi
@@ -1675,28 +1675,28 @@ except Exception:
         log "${YELLOW}[RECOVERY] $sid : phase_status=${ps:-empty} — revert refined + retry++${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined${NC}"
-          ((reverted++))
+          ((reverted++)) || true
           continue
         fi
         if _recovery_revert_refined "$sid" "false" "no-progress"; then
           increment_retry "$sid"
-          ((reverted++))
+          ((reverted++)) || true
         fi
         ;;
       worktree_recovery_failed)
         # environment problem detected pre-spawn — do not re-launch
         # operator must inspect worktree + stash, then re-refine if needed
         log "${YELLOW}[RECOVERY] $sid : phase_status=worktree_recovery_failed — environment problem, not re-launching (operator must resolve)${NC}"
-        ((skipped++))
+        ((skipped++)) || true
         ;;
       *)
         # Stuck-story classifier — final layer when no existing recovery path matched
         local _cls_rc=0
         classify_stuck_story "$sid" "$ps" || _cls_rc=$?
         case "$_cls_rc" in
-          0) ((resumed++)) ;;  # auto-recovered
-          2) ((skipped++)) ;;  # no-op (S02/S03 already handled, or prior successful recovery)
-          *) ((skipped++)) ;;  # 1=escalated, or unexpected — incident report written
+          0) ((resumed++)) || true ;;  # auto-recovered
+          2) ((skipped++)) || true ;;  # no-op (S02/S03 already handled, or prior successful recovery)
+          *) ((skipped++)) || true ;;  # 1=escalated, or unexpected — incident report written
         esac
         ;;
     esac
@@ -2904,7 +2904,7 @@ WRAPPER_EOF
   local i=0
   while [[ $i -lt 10 ]] && [[ ! -f "$LOCK_DIR/${story_id}.lock" ]]; do
     sleep 0.2
-    ((i++))
+    ((i++)) || true
   done
 
   log "${GREEN}Launched 3phase: $story_id (tmux: gaai-deliver-${story_id})${NC}"
@@ -3143,7 +3143,7 @@ while true; do
 
     if $DRY_RUN; then
       log "${YELLOW}[DRY RUN] Would launch: $story_id (retry $(get_retry_count "$story_id")/$MAX_RETRIES)${NC}"
-      ((launched++))
+      ((launched++)) || true
       continue
     fi
 
@@ -3197,7 +3197,11 @@ while true; do
       || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
       || echo "$(date +%s)-$$-$RANDOM")
     launch_3phase_in_tmux "$story_id" "$_trace_id"
-    ((launched++))
+    # `|| true`: under `set -euo pipefail`, `((launched++))` returns exit 1 when the
+    # pre-increment value is 0 (arithmetic result is falsy). On the first launch of a
+    # poll cycle launched==0, so the bare form killed the entire daemon right after
+    # spawning the first ready story's wrapper. Applied to every ((x++)) in this file.
+    ((launched++)) || true
 
   done <<< "$ready_stories"
 
