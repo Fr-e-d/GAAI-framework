@@ -125,9 +125,9 @@ echo ""
 echo "=== T1b: skip path timing ≤100ms ==="
 
 if [[ -n "${EPOCHREALTIME:-}" ]]; then
-  t0=$(( ${EPOCHREALTIME/./} / 1000 ))
+  t0=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   ensure_wt_dependencies_installed "T1b-STORY" "T1b-TRACE" "$WT_PATH" >/dev/null
-  t1=$(( ${EPOCHREALTIME/./} / 1000 ))
+  t1=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   elapsed=$(( t1 - t0 ))
   if [[ $elapsed -le 100 ]]; then
     pass "T1b: skip path elapsed ${elapsed}ms ≤ 100ms"

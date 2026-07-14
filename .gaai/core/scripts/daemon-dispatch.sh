@@ -841,7 +841,7 @@ ensure_wt_dependencies_installed() {
   echo "[${ts}] ${story_id} ${trace_id} [wt-deps] wt_deps_install_started timeout_s=${timeout_s}"
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
-    t_start=$(( ${EPOCHREALTIME/./} / 1000 ))
+    t_start=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   else
     t_start=$(( $(date +%s) * 1000 ))
   fi
@@ -871,7 +871,7 @@ ensure_wt_dependencies_installed() {
   fi
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
-    t_end=$(( ${EPOCHREALTIME/./} / 1000 ))
+    t_end=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   else
     t_end=$(( $(date +%s) * 1000 ))
   fi
@@ -926,7 +926,7 @@ _ensure_worktree_deps_fresh() {
   echo "[COMMIT-PHASE] ${story_id} : worktree deps stale or absent — running pnpm install --frozen-lockfile"
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
-    t_start_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+    t_start_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   else
     t_start_ms=$(( $(date +%s) * 1000 ))
   fi
@@ -956,7 +956,7 @@ _ensure_worktree_deps_fresh() {
   fi
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
-    t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+    t_end_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   else
     t_end_ms=$(( $(date +%s) * 1000 ))
   fi
@@ -1182,7 +1182,7 @@ Justify each marker in one line. Err toward REVISE over KEEP when uncertain.'
   # ── Spawn claude -p (AC1) ─────────────────────────────────────────────────
   # Duration measurement (AC4) — bash 5+ EPOCHREALTIME (microseconds); fallback date +%s
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
-    t_start_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+    t_start_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   else
     t_start_ms=$(( $(date +%s) * 1000 ))
   fi
@@ -1207,7 +1207,7 @@ Justify each marker in one line. Err toward REVISE over KEEP when uncertain.'
   claude_exit=$?
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
-    t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+    t_end_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   else
     t_end_ms=$(( $(date +%s) * 1000 ))
   fi
@@ -1450,7 +1450,7 @@ handle_impl_phase() {
   if [[ "${GAAI_DAEMON_EXECUTOR:-claude}" == "codex" ]]; then
     local codex_exit t_start_ms t_end_ms duration_ms
     if [[ -n "${EPOCHREALTIME:-}" ]]; then
-      t_start_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+      t_start_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
     else
       t_start_ms=$(( $(date +%s) * 1000 ))
     fi
@@ -1467,7 +1467,7 @@ handle_impl_phase() {
     codex_exit=$?
 
     if [[ -n "${EPOCHREALTIME:-}" ]]; then
-      t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+      t_end_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
     else
       t_end_ms=$(( $(date +%s) * 1000 ))
     fi
@@ -1705,7 +1705,7 @@ handle_qa_phase() {
 
   # ── Duration measurement ──────────────────────────────────────────────────
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
-    t_start_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+    t_start_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   else
     t_start_ms=$(( $(date +%s) * 1000 ))
   fi
@@ -1735,7 +1735,7 @@ handle_qa_phase() {
   claude_exit=$?
 
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
-    t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+    t_end_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   else
     t_end_ms=$(( $(date +%s) * 1000 ))
   fi
@@ -2237,7 +2237,7 @@ handle_commit_phase() {
 
   # ── Duration measurement ──────────────────────────────────────────────────
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
-    t_start_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+    t_start_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   else
     t_start_ms=$(( $(date +%s) * 1000 ))
   fi
@@ -2802,7 +2802,7 @@ ${qa_snippet}"
 
   # ── Duration end ─────────────────────────────────────────────────────────
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
-    t_end_ms=$(( ${EPOCHREALTIME/./} / 1000 ))
+    t_end_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
   else
     t_end_ms=$(( $(date +%s) * 1000 ))
   fi
