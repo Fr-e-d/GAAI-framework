@@ -2930,6 +2930,34 @@ shutdown() {
 
 trap shutdown SIGINT SIGTERM
 
+# ── Crash visibility: turn a silent daemon death into a loud one ──────────
+# The main loop runs under `set -euo pipefail`, so any unguarded non-zero
+# command (a bare `((counter++))` at 0, a transient git failure, an unbound
+# var under `set -u`) terminates the daemon SILENTLY — no log line, no
+# notification — leaving stories stuck `in_progress` while in-flight wrappers
+# finish independently. That silent-death mode has repeatedly masked real
+# outages. The ERR trap records the failing line + command; the EXIT trap
+# reports it loudly on ABNORMAL exit only. `shutdown()` exits 0, so a clean
+# SIGINT/SIGTERM stop stays quiet. Both traps are observational — they never
+# alter control flow (set -e still exits on the same commands as before).
+_daemon_err_line=""
+_daemon_err_cmd=""
+trap '_daemon_err_line=$LINENO; _daemon_err_cmd=$BASH_COMMAND' ERR
+_daemon_on_exit() {
+  local rc=$?
+  [[ "$rc" -eq 0 ]] && return 0
+  log "${RED}[DAEMON-CRASH] main process exited abnormally (rc=$rc) at line ${_daemon_err_line:-?}: '${_daemon_err_cmd:-unknown}'. Delivery HALTED — restart via daemon-start.sh (in-flight wrappers continue independently).${NC}" 2>/dev/null || true
+  printf '%s rc=%s line=%s cmd=%s\n' \
+    "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo unknown-time)" \
+    "$rc" "${_daemon_err_line:-?}" "${_daemon_err_cmd:-unknown}" \
+    > "$LOCK_DIR/.daemon-crash" 2>/dev/null || true
+  if declare -f notify_escalation >/dev/null 2>&1; then
+    notify_escalation "daemon" "daemon_crash_rc_${rc}" \
+      "Main loop died at line ${_daemon_err_line:-?} (cmd: ${_daemon_err_cmd:-unknown}) — restart with daemon-start.sh" 2>/dev/null || true
+  fi
+}
+trap _daemon_on_exit EXIT
+
 # ── Save config for monitor ──────────────────────────────────────────────
 DISPLAY_MODEL="$CLAUDE_MODEL"
 if [[ "${GAAI_DAEMON_EXECUTOR:-claude}" == "codex" ]]; then
@@ -3197,10 +3225,8 @@ while true; do
       || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
       || echo "$(date +%s)-$$-$RANDOM")
     launch_3phase_in_tmux "$story_id" "$_trace_id"
-    # `|| true`: under `set -euo pipefail`, `((launched++))` returns exit 1 when the
-    # pre-increment value is 0 (arithmetic result is falsy). On the first launch of a
-    # poll cycle launched==0, so the bare form killed the entire daemon right after
-    # spawning the first ready story's wrapper. Applied to every ((x++)) in this file.
+    # Under set -e, a post-increment returns status 1 when its initial value is 0.
+    # The counter side effect is still required; only the control-flow status is ignored.
     ((launched++)) || true
 
   done <<< "$ready_stories"
