@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - fix: surface silent main-loop deaths via ERR/EXIT trap
+- fix: surface silent main-loop deaths via ERR/EXIT trap
 - fix: guard ((x++)) increments against set -e (poll loop crash)
 - fix: make EPOCHREALTIME→ms conversion locale-independent
 - chore: LOC cap counts implementation LOC only — coordinated basis decision
