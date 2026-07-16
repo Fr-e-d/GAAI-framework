@@ -2940,20 +2940,33 @@ trap shutdown SIGINT SIGTERM
 # reports it loudly on ABNORMAL exit only. `shutdown()` exits 0, so a clean
 # SIGINT/SIGTERM stop stays quiet. Both traps are observational — they never
 # alter control flow (set -e still exits on the same commands as before).
+#
+# errtrace (set -E) makes the ERR trap fire for fatal failures INSIDE called
+# functions / sourced files too — the daemon's real death sites (e.g. `((i++))`
+# in launch_3phase_in_tmux, anything in daemon-dispatch.sh). Without it, ERR
+# only fires at top level and the capture below is empty for the most common
+# crashes. Verified: it does NOT fire for `|| true`-guarded failures (ERR
+# firing stays coupled to set -e firing), so no false captures / stale vars,
+# and it does not change which commands are fatal.
+set -o errtrace
 _daemon_err_line=""
 _daemon_err_cmd=""
-trap '_daemon_err_line=$LINENO; _daemon_err_cmd=$BASH_COMMAND' ERR
+_daemon_err_src=""
+# Capture the failing file too (basename via parameter expansion — no fork):
+# a fatal command may live in a sourced file where a bare line number would
+# misread as a delivery-daemon.sh line.
+trap '_daemon_err_line=$LINENO; _daemon_err_cmd=$BASH_COMMAND; _daemon_err_src=${BASH_SOURCE[0]:-?}; _daemon_err_src=${_daemon_err_src##*/}' ERR
 _daemon_on_exit() {
   local rc=$?
   [[ "$rc" -eq 0 ]] && return 0
-  log "${RED}[DAEMON-CRASH] main process exited abnormally (rc=$rc) at line ${_daemon_err_line:-?}: '${_daemon_err_cmd:-unknown}'. Delivery HALTED — restart via daemon-start.sh (in-flight wrappers continue independently).${NC}" 2>/dev/null || true
-  printf '%s rc=%s line=%s cmd=%s\n' \
+  log "${RED}[DAEMON-CRASH] main process exited abnormally (rc=$rc) at ${_daemon_err_src:-?}:${_daemon_err_line:-?}: '${_daemon_err_cmd:-unknown}'. Delivery HALTED — restart via daemon-start.sh (in-flight wrappers continue independently).${NC}" 2>/dev/null || true
+  printf '%s rc=%s src=%s line=%s cmd=%s\n' \
     "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo unknown-time)" \
-    "$rc" "${_daemon_err_line:-?}" "${_daemon_err_cmd:-unknown}" \
+    "$rc" "${_daemon_err_src:-?}" "${_daemon_err_line:-?}" "${_daemon_err_cmd:-unknown}" \
     > "$LOCK_DIR/.daemon-crash" 2>/dev/null || true
   if declare -f notify_escalation >/dev/null 2>&1; then
     notify_escalation "daemon" "daemon_crash_rc_${rc}" \
-      "Main loop died at line ${_daemon_err_line:-?} (cmd: ${_daemon_err_cmd:-unknown}) — restart with daemon-start.sh" 2>/dev/null || true
+      "Main loop died at ${_daemon_err_src:-?}:${_daemon_err_line:-?} (cmd: ${_daemon_err_cmd:-unknown}) — restart with daemon-start.sh" 2>/dev/null || true
   fi
 }
 trap _daemon_on_exit EXIT
