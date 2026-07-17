@@ -287,6 +287,38 @@ if [[ ! -f "$GAAI_PLAN_PATH" ]]; then
   exit 1
 fi
 
+# ── Section 1b: one-shot execution mode constraint ────────────────────────
+# The impl agent runs as a single non-interactive `claude -p` invocation :
+# when it ends its turn, the process exits — there is no next turn. Newer
+# agent harnesses expose background-task affordances (run_in_background,
+# monitors, scheduled wake-ups) whose mental model assumes a resumable
+# session. Agents that launch the test suite in the background and end the
+# turn "waiting for the wake-up" terminate the run before the impl-report
+# exists, and the daemon discards the entire attempt as NO_ARTEFACT_PRODUCED
+# (observed repeatedly: same story dying 3-4 consecutive attempts with all
+# code changes applied but no report). Emitted unconditionally, before the
+# input artefacts, so it is read before any execution begins.
+cat <<ONESHOT_MODE
+=== EXECUTION MODE — SINGLE NON-INTERACTIVE RUN (read before acting) ===
+
+You are running as a one-shot non-interactive invocation: when you end your
+turn, the process exits immediately. There is NO next turn, NO wake-up, and
+NO background-task notification will ever reach you.
+
+Therefore :
+  - Run every verification command (test suite, typecheck, lint) in the
+    FOREGROUND and wait for its output within the same tool call.
+  - NEVER launch a command in the background to "check on it later", NEVER
+    set up a monitor or a scheduled wake-up, and NEVER end your turn while
+    any step of your work — including the mandatory handoff artefact — is
+    still pending.
+  - Ending your turn with work "waiting on a background task" discards this
+    entire run: all applied changes are treated as a failed attempt.
+
+=== END EXECUTION MODE ===
+
+ONESHOT_MODE
+
 if [[ "$SECONDARY_ROUTE" == "true" ]]; then
   cat <<INPUT_REFS
 === INPUT ARTEFACTS — READ THESE FIRST (chunked, per R4) ===
@@ -480,6 +512,10 @@ The report MUST contain :
 This is the ONLY signal the daemon uses to advance phase_status to
 'implemented'. Skipping it = phase failure regardless of how much code
 you committed. Use the Write tool with the path above as file_path.
+
+Reminder (one-shot mode): run your final test suite in the FOREGROUND and
+write this report BEFORE ending your turn. A turn that ends "waiting for a
+background test run to finish" exits the process and discards this attempt.
 
 === END HANDOFF ===
 
