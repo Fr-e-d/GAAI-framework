@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: inject one-shot execution-mode constraint into impl prompt
 - fix: surface silent main-loop deaths via ERR/EXIT trap
 - fix: surface silent main-loop deaths via ERR/EXIT trap
 - fix: guard ((x++)) increments against set -e (poll loop crash)
