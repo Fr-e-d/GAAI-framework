@@ -288,7 +288,8 @@ if [[ ! -f "$GAAI_PLAN_PATH" ]]; then
 fi
 
 # ── Section 1b: one-shot execution mode constraint ────────────────────────
-# The impl agent runs as a single non-interactive `claude -p` invocation :
+# The impl agent runs as a single non-interactive executor invocation
+# (claude -p direct, nested-claude-spawn.js, or codex exec — all one-shot) :
 # when it ends its turn, the process exits — there is no next turn. Newer
 # agent harnesses expose background-task affordances (run_in_background,
 # monitors, scheduled wake-ups) whose mental model assumes a resumable
@@ -311,7 +312,9 @@ Therefore :
   - NEVER launch a command in the background to "check on it later", NEVER
     set up a monitor or a scheduled wake-up, and NEVER end your turn while
     any step of your work — including the mandatory handoff artefact — is
-    still pending.
+    still pending. (Backgrounding a long-lived helper process — e.g. a dev
+    server your tests query — and using it within the SAME turn is fine;
+    what is forbidden is ending the turn to wait on background work.)
   - Ending your turn with work "waiting on a background task" discards this
     entire run: all applied changes are treated as a failed attempt.
 
