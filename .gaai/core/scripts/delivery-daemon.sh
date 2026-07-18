@@ -2471,9 +2471,24 @@ RECONCILE_EOF
   rm -f "$reconcile_script" 2>/dev/null || true
 
   if [[ $rc -ne 0 ]]; then
-    log "${RED}[PR-WATCHER] $sid : chore-commit failed (rc=$rc) — leaving in_progress, will retry next cycle${NC}"
+    # AC3: distinct error class via a surviving channel (this daemon log line +
+    # marker file), independent of the reconcile script's own discarded stderr
+    # (invoked above with `2>/dev/null`) — rate-limited so a persistent failure
+    # doesn't spam every ~35s cycle, but always fires on first occurrence
+    # (mirrors the .reconcile-sweep.unmerged.${sid} marker pattern at ~2181).
+    local _unlanded_marker="$LOCK_DIR/.reconcile-unlanded.${sid}"
+    local _now_ts _last_ts _quiet_for
+    _now_ts=$(date +%s)
+    _last_ts=0
+    [[ -f "$_unlanded_marker" ]] && _last_ts=$(cat "$_unlanded_marker" 2>/dev/null || echo 0)
+    _quiet_for=$(( _now_ts - _last_ts ))
+    if (( _quiet_for >= 3600 )); then
+      log "${RED}[PR-WATCHER] $sid : RECONCILE_UNLANDED — chore-commit failed to land backlog write on origin (rc=$rc), leaving in_progress, will retry next cycle (log throttled 1h)${NC}"
+      echo "$_now_ts" > "$_unlanded_marker"
+    fi
     return 1
   fi
+  rm -f "$LOCK_DIR/.reconcile-unlanded.${sid}" 2>/dev/null || true
 
   # HIGH-F3: cleanup after successful chore-commit
   local worktree_path
