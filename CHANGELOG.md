@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+-: landed-or-preserved guard at all daemon branch-deletion sites
 - fix: pass pr_number as arg to _reconcile_merged_pr (fix unbound-var crash)
 - review: generic executor wording in comment + same-turn background-helper nuance
 - fix: inject one-shot execution-mode constraint into impl prompt

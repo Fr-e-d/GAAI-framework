@@ -1,19 +1,28 @@
 #!/usr/bin/env bash
 # lib/worktree-integrity.sh — worktree corruption detection + safe-base re-fetch
 #
-# Sourceable library. Two public functions:
+# Sourceable library. Public functions:
 #   _check_worktree_integrity <worktree_path> <expected_base> [<sid>]
 #     Returns: 0=clean, 1=corruption suspected, 2=unrecoverable (fsck failure)
 #   _recover_worktree_safe_base <sid> <worktree_path> <expected_base>
 #     Returns: 0=recovered cleanly, 1=cherry-pick conflicts, 2=unrecoverable
+#   _worktree_branch_is_landed <sid> <branch>
+#     Returns: 0=landed (safe to hard-delete), 1=not verifiably landed (fail-closed)
+#   _worktree_branch_delete_or_preserve <sid> <branch> <caller_tag>
+#     Returns: 0=branch handled (deleted, or already gone), 1=preserved by rename
 #
 # Env vars (all optional, have defaults):
 #   GAAI_WORKTREE_COMMITS_AHEAD_MAX  — commits-ahead threshold (default 100)
 #   GAAI_WORKTREE_BASE_LAG_MAX       — acceptable lag behind base (default 5)
 #   GAAI_WORKTREE_DELETIONS_MAX      — phantom-deletion threshold (default 50)
 #   GAAI_WORKTREE_RECOVERY_TIMEOUT_SEC — wall-clock recovery timeout (default 120)
-#   PROJECT_DIR                      — repo root (required by _recover_worktree_safe_base)
+#   PROJECT_DIR                      — repo root (required by _recover_worktree_safe_base
+#                                       and the branch-guard functions)
 #   LOCK_DIR                         — for audit log (optional, falls back to PROJECT_DIR)
+#   TARGET_BRANCH                    — remote backlog branch checked by the landed test
+#                                       (optional, defaults to staging)
+#   BACKLOG_REL                      — repo-relative backlog path checked by the landed
+#                                       test (optional, defaults to the standard path)
 
 [[ -n "${_WORKTREE_INTEGRITY_SH_SOURCED:-}" ]] && return 0
 _WORKTREE_INTEGRITY_SH_SOURCED=1
@@ -140,8 +149,12 @@ _recover_worktree_safe_base() {
 
   # ── Step 4: Recreate worktree from current origin/<base> (clean base) ─────
   git -C "$_project_dir" --no-pager fetch origin "${_base_branch}" --quiet 2>/dev/null || true
-  # Unconditional -D: bypass git "unmerged commits" safety check (we have the stash)
-  git -C "$_project_dir" --no-pager branch -D "story/${sid}" 2>/dev/null || true
+  # Landed-or-preserved guard (orchestration.rules.md §Branch Rules → Worktree
+  # lifecycle & cleanup): by construction this tip is mid-recovery and usually
+  # unpushed, so this call legitimately preserves-by-rename on most safe-base
+  # recoveries — expected, not a defect (the guard's own log throttle bounds
+  # the operator-visible noise). Never special-case this site to hard-delete.
+  _worktree_branch_delete_or_preserve "$sid" "story/${sid}" "worktree-recovery" || true
   local _wt_add_out
   if ! _wt_add_out=$(git -C "$_project_dir" --no-pager worktree add "$worktree_path" \
       -b "story/${sid}" "${_remote_ref}" 2>&1); then
@@ -192,4 +205,114 @@ _recover_worktree_safe_base() {
     >> "$_audit_log" 2>/dev/null || true
   echo "[WORKTREE-RECOVER] ${sid} : recovery success in ${_duration}s — commits_recovered=${#_commits[@]}"
   return 0
+}
+
+# ── Landed-or-preserved branch guard ────────────────────────────────────────
+# Squash-merge means commit-SHA ancestry from origin/<target> is NEVER a valid
+# "is this branch's work safe to lose" test (squashed branches are never
+# reachable). The correct test is: is the work landed (PR merged, or the
+# story reconciled to done on the remote backlog), or does a remote copy of
+# this exact branch exist (pushed-but-not-yet-merged)? Any check that cannot
+# be verified (network/gh/remote-read failure) simply does not affirm —
+# the predicate naturally fails closed if nothing confirms landed.
+_worktree_branch_is_landed() {
+  local sid="$1" branch="$2"
+  local _project_dir="${PROJECT_DIR:-}"
+  local _target="${TARGET_BRANCH:-staging}"
+  local _backlog_rel="${BACKLOG_REL:-.gaai/project/contexts/backlog/active.backlog.yaml}"
+
+  # (a1) remote backlog status:done — read from origin so an uncommitted
+  # local edit can never mask a still-in_progress story on origin.
+  local _remote_backlog_tmp _remote_status
+  _remote_backlog_tmp=$(mktemp)
+  if git -C "$_project_dir" show "origin/${_target}:${_backlog_rel}" > "$_remote_backlog_tmp" 2>/dev/null; then
+    if [[ -z "${_BACKLOG_YAML_SH_SOURCED:-}" ]]; then
+      local _wti_dir
+      _wti_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      # shellcheck source=backlog-yaml.sh
+      source "${_wti_dir}/backlog-yaml.sh" && _BACKLOG_YAML_SH_SOURCED=1
+    fi
+    _remote_status=$(backlog_status "$sid" "$_remote_backlog_tmp" 2>/dev/null || echo "")
+    if [[ "$_remote_status" == "done" ]]; then
+      rm -f "$_remote_backlog_tmp" 2>/dev/null || true
+      return 0
+    fi
+  fi
+  rm -f "$_remote_backlog_tmp" 2>/dev/null || true
+
+  # (a2) PR state MERGED via gh — absent/unauthenticated gh silently no-ops
+  # (empty output), which correctly does not affirm.
+  local _pr_json _pr_state
+  _pr_json=$(gh pr list --state all --head "$branch" --json state --limit 1 2>/dev/null || echo "")
+  if [[ -n "$_pr_json" && "$_pr_json" != "[]" ]]; then
+    _pr_state=$(printf '%s' "$_pr_json" | grep -oE '"state":"[A-Z]+"' | head -1 | cut -d'"' -f4)
+    [[ "$_pr_state" == "MERGED" ]] && return 0
+  fi
+
+  # (b) local branch tip present on a remote ref (pushed-but-not-yet-merged
+  # is also safe to drop the LOCAL ref for — a remote copy still exists).
+  # ls-remote queries live remote state directly, no local fetch required.
+  local _local_tip _remote_tip
+  _local_tip=$(git -C "$_project_dir" rev-parse --verify -q "$branch" 2>/dev/null || echo "")
+  _remote_tip=$(git -C "$_project_dir" ls-remote origin "refs/heads/${branch}" 2>/dev/null | awk '{print $1}')
+  if [[ -n "$_local_tip" && -n "$_remote_tip" && "$_local_tip" == "$_remote_tip" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+# Deletes a story branch if its work is landed-or-preserved (see
+# _worktree_branch_is_landed); otherwise preserves it by rename so the
+# commits are never destroyed. Preservation frees the original branch name
+# for the retry path (a fresh story/<sid> can be created without silently
+# resurrecting failed-attempt state) while keeping the old tip inspectable.
+# caller_tag is a free-text label recorded in the audit trail (which call
+# site triggered this) — not used for branching logic.
+# Returns: 0 = branch handled (deleted, or was already gone), 1 = preserved.
+_worktree_branch_delete_or_preserve() {
+  local sid="$1" branch="$2" caller_tag="${3:-unknown}"
+  local _project_dir="${PROJECT_DIR:-}"
+  local _lock_dir="${LOCK_DIR:-${_project_dir}/.gaai/project/contexts/backlog/.delivery-locks}"
+  local _audit_log="${_lock_dir}/.branch-preserved.audit"
+
+  # Already gone (deleted by a concurrent path, or never existed) — no-op,
+  # matches the pre-existing "|| true" semantics at every call site.
+  if ! git -C "$_project_dir" rev-parse --verify -q "$branch" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if _worktree_branch_is_landed "$sid" "$branch"; then
+    git -C "$_project_dir" branch -D "$branch" 2>/dev/null || true
+    return 0
+  fi
+
+  # Not verifiably landed — preserve by rename, never destroy.
+  local _tip _preserved_name
+  _tip=$(git -C "$_project_dir" rev-parse "$branch" 2>/dev/null || echo "unknown")
+  _preserved_name="${branch}-preserved-$(date -u +%Y%m%dT%H%M%SZ)"
+
+  git -C "$_project_dir" branch -m "$branch" "$_preserved_name" 2>/dev/null || true
+
+  mkdir -p "$_lock_dir" 2>/dev/null || true
+  printf '%s|%s|%s|%s|%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" "$_preserved_name" "$_tip" "$caller_tag" \
+    >> "$_audit_log" 2>/dev/null || true
+
+  # AC4: single-fire log throttle per sid (mirrors the reconcile-sweep
+  # unmerged-marker pattern) — the audit line above is always written (every
+  # preservation is a distinct, real data-safety event); only the
+  # operator-facing log line is rate-limited.
+  local _throttle_marker="${_lock_dir}/.branch-preserve-log.${sid}"
+  local _now_ts _last_ts
+  _now_ts=$(date +%s)
+  _last_ts=0
+  [[ -f "$_throttle_marker" ]] && _last_ts=$(cat "$_throttle_marker" 2>/dev/null || echo 0)
+  [[ "$_last_ts" =~ ^[0-9]+$ ]] || _last_ts=0
+  if (( _now_ts - _last_ts >= 3600 )); then
+    echo "[WORKTREE-GUARD] ${sid} : branch ${branch} not verifiably landed — preserved as ${_preserved_name} (caller=${caller_tag})"
+    echo "$_now_ts" > "$_throttle_marker" 2>/dev/null || true
+  fi
+
+  return 1
 }
