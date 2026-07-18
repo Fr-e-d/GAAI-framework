@@ -1910,8 +1910,8 @@ RSTEOF
       git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
     fi
     # Landed-or-preserved guard (orchestration.rules.md §Branch Rules → Worktree
-    # lifecycle & cleanup) — this is the confirmed 2026-07-17 incident path: a
-    # death-revert during commit phase must never destroy unpushed work.
+    # lifecycle & cleanup) — this is the observed incident path: a death-revert
+    # during commit phase must never destroy unpushed work.
     _worktree_branch_delete_or_preserve "$sid" "story/${sid}" "recovery-death-revert" || true
   fi
   return $rc
