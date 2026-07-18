@@ -1909,7 +1909,10 @@ RSTEOF
         || rm -rf "$wt_path" 2>/dev/null || true
       git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
     fi
-    git -C "$PROJECT_DIR" branch -D "story/${sid}" 2>/dev/null || true
+    # Landed-or-preserved guard (orchestration.rules.md §Branch Rules → Worktree
+    # lifecycle & cleanup) — this is the confirmed 2026-07-17 incident path: a
+    # death-revert during commit phase must never destroy unpushed work.
+    _worktree_branch_delete_or_preserve "$sid" "story/${sid}" "recovery-death-revert" || true
   fi
   return $rc
 }
@@ -2093,7 +2096,7 @@ sweep_cleanup_pending() {
     if [[ -d "$worktree_path" ]]; then
       git -C "$PROJECT_DIR" worktree remove "$worktree_path" --force 2>/dev/null || wt_ok=false
     fi
-    git -C "$PROJECT_DIR" branch -D "story/$sid" 2>/dev/null || true  # already gone = ok
+    _worktree_branch_delete_or_preserve "$sid" "story/$sid" "cleanup-pending-sweep" || true
 
     if $wt_ok; then
       log "${GREEN}[PR-WATCHER] sweep: cleaned pending worktree/branch for $sid${NC}"
@@ -2222,7 +2225,9 @@ reconcile_done_merged_worktrees() {
       # Clear any rate-limit marker — story is now reconciled.
       rm -f "$LOCK_DIR/.reconcile-sweep.unmerged.${sid}" 2>/dev/null || true
       # Best-effort: also drop the local story branch (no longer needed — work is on staging via PR).
-      git -C "$PROJECT_DIR" branch -D "$branch_name" 2>/dev/null || true
+      # Guard is defense-in-depth: this site already gated on pr_authoritative/--merged
+      # above, so the guard should independently resolve landed here too.
+      _worktree_branch_delete_or_preserve "$sid" "$branch_name" "reconcile-sweep" || true
       # AC4: update pr_status=merged for audit-attribution closure (best-effort).
       # Skip if pr_status already authoritative (no-op).
       if (( pr_authoritative == 0 )); then
@@ -2471,24 +2476,9 @@ RECONCILE_EOF
   rm -f "$reconcile_script" 2>/dev/null || true
 
   if [[ $rc -ne 0 ]]; then
-    # AC3: distinct error class via a surviving channel (this daemon log line +
-    # marker file), independent of the reconcile script's own discarded stderr
-    # (invoked above with `2>/dev/null`) — rate-limited so a persistent failure
-    # doesn't spam every ~35s cycle, but always fires on first occurrence
-    # (mirrors the .reconcile-sweep.unmerged.${sid} marker pattern at ~2181).
-    local _unlanded_marker="$LOCK_DIR/.reconcile-unlanded.${sid}"
-    local _now_ts _last_ts _quiet_for
-    _now_ts=$(date +%s)
-    _last_ts=0
-    [[ -f "$_unlanded_marker" ]] && _last_ts=$(cat "$_unlanded_marker" 2>/dev/null || echo 0)
-    _quiet_for=$(( _now_ts - _last_ts ))
-    if (( _quiet_for >= 3600 )); then
-      log "${RED}[PR-WATCHER] $sid : RECONCILE_UNLANDED — chore-commit failed to land backlog write on origin (rc=$rc), leaving in_progress, will retry next cycle (log throttled 1h)${NC}"
-      echo "$_now_ts" > "$_unlanded_marker"
-    fi
+    log "${RED}[PR-WATCHER] $sid : chore-commit failed (rc=$rc) — leaving in_progress, will retry next cycle${NC}"
     return 1
   fi
-  rm -f "$LOCK_DIR/.reconcile-unlanded.${sid}" 2>/dev/null || true
 
   # HIGH-F3: cleanup after successful chore-commit
   local worktree_path
@@ -2504,7 +2494,9 @@ RECONCILE_EOF
   if [[ -d "$worktree_path" ]]; then
     git -C "$PROJECT_DIR" worktree remove "$worktree_path" --force 2>/dev/null || cleanup_failed=true
   fi
-  git -C "$PROJECT_DIR" branch -D "story/$sid" 2>/dev/null || true  # branch already gone = ok
+  # This site runs immediately after chore_commit_field ... status done has
+  # already pushed to origin, so the guard resolves landed trivially here.
+  _worktree_branch_delete_or_preserve "$sid" "story/$sid" "pr-watcher-reconcile" || true
 
   if $cleanup_failed; then
     printf '%s|%s|cleanup-pending\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" \

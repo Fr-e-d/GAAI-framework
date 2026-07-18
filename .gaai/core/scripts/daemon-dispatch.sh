@@ -173,7 +173,9 @@ reap_orphaned_worktrees() {
     # Remove. --force: the branch ref still exists; the dir is clean (guarded above).
     if git -C "$PROJECT_DIR" worktree remove --force "$_wt" 2>/dev/null; then
       log "${CYAN:-}[WT-REAP] ${_sid}: removed ${_wt} (${_reason})${NC:-}"
-      git -C "$PROJECT_DIR" branch -D "story/${_sid}" 2>/dev/null || true
+      # Defense-in-depth: this site already gated on PR MERGED/CLOSED or
+      # HEAD-integrated above; the guard independently resolves landed too.
+      _worktree_branch_delete_or_preserve "$_sid" "story/${_sid}" "orphan-reap" || true
     else
       log "${YELLOW:-}[WT-REAP] ${_sid}: remove failed ${_wt} (lock contention?) — retry next interval${NC:-}"
     fi
