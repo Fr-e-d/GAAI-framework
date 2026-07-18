@@ -1175,7 +1175,7 @@ except Exception:
         # Merged PR: reconcile to done instead of stale-failing (AC3a)
         if [[ -n "$_stale_merged_at" && "$_stale_merged_at" != "-" ]]; then
           log "${GREEN}[STALE-CHECK] $sid : delivery PR #${_stale_pr_number} already merged ($_stale_merged_at) — reconciling to done instead of stale-failing${NC}"
-          if _reconcile_merged_pr "$sid" "$_stale_merged_at"; then
+          if _reconcile_merged_pr "$sid" "$_stale_merged_at" "$_stale_pr_number"; then
             notify_escalation "$sid" "Auto-reconciled merged story (stale guard)" "Delivery PR was merged; status reconciled to done automatically"
             track_for_resolution "$sid" "done"
           fi
@@ -1371,7 +1371,7 @@ except Exception:
             fi
             if [[ -n "$_dr_merged_at" && "$_dr_merged_at" != "-" ]]; then
               log "${GREEN}[RECOVERY] $sid : working-tree drift but delivery PR #${_dr_number} already merged (${_dr_merged_at}) — reconciling to done instead of skipping${NC}"
-              if _reconcile_merged_pr "$sid" "$_dr_merged_at"; then
+              if _reconcile_merged_pr "$sid" "$_dr_merged_at" "$_dr_number"; then
                 rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
                 _clear_drift_marker_if_clean
                 ((reconciled++)) || true
@@ -1507,9 +1507,8 @@ except Exception:
     print('- -')" 2>/dev/null || echo "- -")
           fi
           if [[ -n "$_rg_merged_at" && "$_rg_merged_at" != "-" ]]; then
-            pr_number="$_rg_number"
             log "${GREEN}[RECOVERY] $sid : phase_status=qa_passed but PR #${_rg_number} already merged ($_rg_merged_at) — reconciling to done instead of re-launching${NC}"
-            if _reconcile_merged_pr "$sid" "$_rg_merged_at"; then
+            if _reconcile_merged_pr "$sid" "$_rg_merged_at" "$_rg_number"; then
               rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
               ((reconciled++)) || true
             else
@@ -1661,9 +1660,8 @@ except Exception:
     print('- -')" 2>/dev/null || echo "- -")
           fi
           if [[ -n "$_ns_merged_at" && "$_ns_merged_at" != "-" ]]; then
-            pr_number="$_ns_number"
             log "${GREEN}[RECOVERY] $sid : phase_status=${ps:-empty} but PR #${_ns_number} already merged ($_ns_merged_at) — reconciling to done instead of reverting${NC}"
-            if _reconcile_merged_pr "$sid" "$_ns_merged_at"; then
+            if _reconcile_merged_pr "$sid" "$_ns_merged_at" "$_ns_number"; then
               rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
               ((reconciled++)) || true
             else
@@ -2389,7 +2387,7 @@ for line in content.splitlines():
 
     # Merge detected: reconcile backlog + clean up
     if [[ -n "$merged_at" && "$base_ref" == "$effective_target" ]]; then
-      _reconcile_merged_pr "$sid" "$merged_at"
+      _reconcile_merged_pr "$sid" "$merged_at" "$pr_num"
     fi
 
   done <<< "$story_pr_pairs"
@@ -2397,7 +2395,12 @@ for line in content.splitlines():
 
 # Atomic reconciliation when a PR merge is detected for story <sid>.
 _reconcile_merged_pr() {
-  local sid="$1" merged_at="$2"
+  # pr_number is passed by callers ($3) for the chore-commit message. It defaults
+  # to empty so the status reconcile ALWAYS lands even when a caller cannot supply
+  # a PR number — the number is cosmetic in the commit subject, never load-bearing.
+  # (Was previously read from an ambient global that only 2 of 5 callers set, so the
+  # pr-watcher/stale/drift paths crashed under `set -u` with "pr_number: unbound".)
+  local sid="$1" merged_at="$2" pr_number="${3:-}"
 
   # AC1: pre-check reads from origin so an uncommitted local 'done' edit
   # cannot mask a still-in_progress reconcile on origin (mirrors watcher read at ~2153).
