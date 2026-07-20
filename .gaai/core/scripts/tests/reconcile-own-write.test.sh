@@ -8,6 +8,9 @@
 # T2: recovery-scan path    — same assertion via the helper directly
 # T3: push-race simulation  — fetch+rebase+retry succeeds, rc=0, no drift-marker
 # T4: genuine conflict      — rebase conflict → rc=6, drift-marker IS written
+# T5: push-race double-fail — retry push ALSO fails (2nd concurrent commit lands
+#     between rebase and retry) → rc=7, local drift commit discarded, origin
+#     unchanged, no false "committed accumulated backlog drift" success framing
 #
 # Run: bash .gaai/core/scripts/tests/reconcile-own-write.test.sh
 # Exit 0 = all pass.
@@ -223,6 +226,95 @@ if [[ -f "$T4_DRIFT_MARKER" ]]; then
   pass "T4: drift-marker written by caller on rc=6 (AC3 fallback)"
 else
   fail "T4: drift-marker not written — fallback signal lost"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# T5: push-race double-fail — retry push ALSO fails → rc=7, discard not success (AC4)
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== T5: push-race double-fail — retry push also fails, rc=7 ==="
+
+T5_PROJ="$SANDBOX/t5-project"
+T5_REMOTE="${T5_PROJ}_remote.git"
+setup_git_repo "$T5_PROJ"
+
+# 1. Modify local backlog (our pending drift)
+sed -i.bak 's/qa_passed/done/' "$T5_PROJ/$BACKLOG_REL" 2>/dev/null \
+  || python3 -c "import sys; d=open('$T5_PROJ/$BACKLOG_REL').read().replace('qa_passed','done'); open('$T5_PROJ/$BACKLOG_REL','w').write(d)" 2>/dev/null || true
+rm -f "$T5_PROJ/$BACKLOG_REL.bak" 2>/dev/null || true
+
+# 2. Push a first race commit (non-conflicting file) so the initial push fails
+#    non-fast-forward, forcing the fetch+rebase+retry-push path.
+local_race1="$SANDBOX/t5-race1"
+git clone --quiet "$T5_REMOTE" "$local_race1" 2>/dev/null
+git -C "$local_race1" config user.email "race1@gaai.local"
+git -C "$local_race1" config user.name "Race1 Writer"
+git -C "$local_race1" checkout -q staging 2>/dev/null || true
+echo "race1-file" > "$local_race1/race1.txt"
+git -C "$local_race1" add race1.txt
+git -C "$local_race1" commit -q -m "race1: concurrent commit to staging"
+git -C "$local_race1" push -q origin staging
+
+# 3. A `git` wrapper that, on the SECOND `push` invocation (the retry push, after
+#    rebase has already succeeded against race1), injects a SECOND race commit
+#    straight onto origin before forwarding to the real git binary — deterministically
+#    reproducing "another commit lands between rebase and retry push".
+T5_BIN="$SANDBOX/t5-bin"
+mkdir -p "$T5_BIN"
+REAL_GIT="$(command -v git)"
+T5_PUSH_COUNT_FILE="$SANDBOX/t5-push-count"
+echo 0 > "$T5_PUSH_COUNT_FILE"
+cat > "$T5_BIN/git" <<GITWRAP_EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "push" ]]; then
+  count=\$(cat "$T5_PUSH_COUNT_FILE" 2>/dev/null || echo 0)
+  count=\$(( count + 1 ))
+  echo "\$count" > "$T5_PUSH_COUNT_FILE"
+  if [[ "\$count" -eq 2 ]]; then
+    race2="$SANDBOX/t5-race2"
+    rm -rf "\$race2"
+    "$REAL_GIT" clone --quiet "$T5_REMOTE" "\$race2" 2>/dev/null
+    "$REAL_GIT" -C "\$race2" config user.email "race2@gaai.local"
+    "$REAL_GIT" -C "\$race2" config user.name "Race2 Writer"
+    "$REAL_GIT" -C "\$race2" checkout -q staging 2>/dev/null || true
+    echo "race2-file" > "\$race2/race2.txt"
+    "$REAL_GIT" -C "\$race2" add race2.txt
+    "$REAL_GIT" -C "\$race2" commit -q -m "race2: concurrent commit before retry push"
+    "$REAL_GIT" -C "\$race2" push -q origin staging
+  fi
+fi
+exec "$REAL_GIT" "\$@"
+GITWRAP_EOF
+chmod +x "$T5_BIN/git"
+
+T5_RC=0
+T5_STDERR="$SANDBOX/t5.stderr"
+( cd "$T5_PROJ" && PATH="$T5_BIN:$PATH" _commit_accumulated_backlog_drift "E999T-01" "$BACKLOG_REL" "staging" "push-race-double-test" ) \
+  2>"$T5_STDERR" || T5_RC=$?
+
+if [[ "$T5_RC" -eq 7 ]]; then
+  pass "T5: helper returned rc=7 on push-race double-fail (AC4)"
+else
+  fail "T5: expected rc=7, got rc=$T5_RC"
+fi
+
+T5_ORIGIN_PS=$(git -C "$T5_PROJ" show "origin/staging:$BACKLOG_REL" 2>/dev/null | grep phase_status | head -1 || echo "")
+if echo "$T5_ORIGIN_PS" | grep -q "done"; then
+  fail "T5: origin/staging unexpectedly shows 'done' — discarded commit should NOT have landed (AC4)"
+else
+  pass "T5: origin/staging does not contain the discarded drift content (AC4)"
+fi
+
+if grep -q "committed accumulated backlog drift" "$T5_STDERR" 2>/dev/null; then
+  fail "T5: false 'committed accumulated backlog drift' success framing emitted despite discard"
+else
+  pass "T5: no false success framing emitted (AC4)"
+fi
+
+if grep -q "push-race re-sync" "$T5_STDERR" 2>/dev/null; then
+  pass "T5: push-race discard logged"
+else
+  fail "T5: push-race discard NOT logged"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════

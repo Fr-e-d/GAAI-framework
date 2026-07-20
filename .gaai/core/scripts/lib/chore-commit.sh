@@ -25,7 +25,10 @@ _CHORE_HELPER_AVAILABLE=0
 
 # _commit_accumulated_backlog_drift <story_id> <backlog_rel> <target_branch> <context>
 # Commits any uncommitted backlog diff and pushes with push-race rebase+retry.
-# Returns: 0 = success (no diff OR diff committed+pushed), 6 = genuine rebase-conflict|commit-failure.
+# Returns: 0 = success (no diff OR diff committed+pushed), 6 = genuine rebase-conflict|commit-failure,
+#          7 = push-race discard (rebase succeeded but the retry push also failed — the local drift
+#          commit was reset away and never landed on origin; distinct from 6 so callers can tell a
+#          discarded-but-otherwise-clean commit apart from a genuine conflict/commit failure).
 # Must be called with cwd=PROJECT_DIR (callers are responsible for cd).
 _commit_accumulated_backlog_drift() {
   local story_id="$1" backlog_rel="$2" target_branch="$3" context="${4:-daemon}"
@@ -40,7 +43,8 @@ _commit_accumulated_backlog_drift() {
       if git rebase "origin/$target_branch" --quiet 2>/dev/null; then
         if ! git push origin "HEAD:$target_branch" --quiet 2>/dev/null; then
           git reset --hard "origin/$target_branch" --quiet 2>/dev/null || true
-          echo "[COMMIT-DRIFT] $story_id : push-race re-sync to origin [$context]" >&2
+          echo "[COMMIT-DRIFT] $story_id : push-race re-sync to origin — local drift commit discarded, NOT landed [$context]" >&2
+          return 7
         fi
       else
         git rebase --abort 2>/dev/null || true
@@ -127,27 +131,43 @@ _chore_option_a_fallback() {
   local _cad_rc=0
   _commit_accumulated_backlog_drift "$story_id" "$backlog_rel" "$target_branch" "pre-mark" \
     || _cad_rc=$?
-  if [[ "$_cad_rc" -ne 0 ]]; then
+  if [[ "$_cad_rc" -eq 6 ]]; then
     _chore_a_done 6
     return $?
+  elif [[ "$_cad_rc" -eq 7 ]]; then
+    # A different story's drift commit was discarded by a push-race (see
+    # _commit_accumulated_backlog_drift rc=7). That is not a reason to refuse
+    # THIS story's own write — record it for audit and proceed to the field
+    # write below (non-blocking; the discarded drift itself is reported by
+    # whichever caller owns it as its own failure).
+    printf '%s|%s|pre-mark-drift-discarded-rc7\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" "$story_id" \
+      >> "${LOCK_DIR:-.}/.chore-drift-discarded.audit" 2>/dev/null || true
+    echo "[CHORE-COMMIT] $story_id : pre-mark drift discarded by push-race (rc=7) — proceeding with own write" >&2
   fi
   while [[ $# -ge 2 ]]; do
     "${SCHEDULER:-}" --set-field "$story_id" "$1" "$2" "$backlog_file" 2>/dev/null || true
     shift 2
   done
   git add "$backlog_rel" 2>/dev/null
-  if git diff --cached --quiet; then
-    _chore_a_done 0
-    return $?
-  fi
-  if ! git commit -m "$commit_subject" --quiet -- "$backlog_rel" 2>/dev/null; then
-    # Transactional rollback : commit failed → revert disk write to prevent
-    # orphan drift blocking subsequent stories (RC: prior orphan-drift incident).
-    git reset HEAD -- "$backlog_rel" 2>/dev/null || true
-    git checkout HEAD -- "$backlog_rel" 2>/dev/null || true
-    echo "[CHORE-COMMIT] $story_id : commit failed — disk write rolled back" >&2
-    _chore_a_done 1
-    return $?
+  # NOTE: no early-return on "no new staged diff" here. A clean cached-diff can
+  # mean either (a) truly nothing to do, OR (b) the target value is already
+  # committed to local HEAD but was never pushed (committed-but-unpushed flip —
+  # the deadlock this story fixes). Both cases must still attempt the push
+  # below so origin gets verified/landed either way; success is never reported
+  # on local state alone (AC1/AC2).
+  local _committed_now=0
+  if ! git diff --cached --quiet; then
+    if ! git commit -m "$commit_subject" --quiet -- "$backlog_rel" 2>/dev/null; then
+      # Transactional rollback : commit failed → revert disk write to prevent
+      # orphan drift blocking subsequent stories (RC: prior orphan-drift incident).
+      git reset HEAD -- "$backlog_rel" 2>/dev/null || true
+      git checkout HEAD -- "$backlog_rel" 2>/dev/null || true
+      echo "[CHORE-COMMIT] $story_id : commit failed — disk write rolled back" >&2
+      _chore_a_done 1
+      return $?
+    fi
+    _committed_now=1
   fi
   if ! git push origin "HEAD:$target_branch" --quiet 2>/dev/null; then
     # Push failed → try rebase-retry once
@@ -157,13 +177,16 @@ _chore_option_a_fallback() {
       _chore_a_done 0
       return $?
     fi
-    # Rebase or retry-push failed → reset the local commit + restore disk to HEAD
-    # (HEAD here is post-fetch origin/branch since rebase failed cleanly aborted)
+    # Rebase or retry-push failed → cannot land on origin.
     git rebase --abort 2>/dev/null || true
-    git reset --soft HEAD~1 2>/dev/null || true
-    git reset HEAD -- "$backlog_rel" 2>/dev/null || true
-    git checkout HEAD -- "$backlog_rel" 2>/dev/null || true
-    echo "[CHORE-COMMIT] $story_id : push failed — local commit + disk rolled back" >&2
+    if [[ "$_committed_now" -eq 1 ]]; then
+      # Only roll back a commit THIS call made — a pre-existing (not-ours)
+      # committed-but-unpushed HEAD must be left in place, not discarded.
+      git reset --soft HEAD~1 2>/dev/null || true
+      git reset HEAD -- "$backlog_rel" 2>/dev/null || true
+      git checkout HEAD -- "$backlog_rel" 2>/dev/null || true
+    fi
+    echo "[CHORE-COMMIT] $story_id : push failed — cannot land on origin (RECONCILE_UNLANDED)" >&2
     _chore_a_done 1
     return $?
   fi
