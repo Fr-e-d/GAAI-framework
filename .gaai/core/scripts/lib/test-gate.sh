@@ -254,7 +254,10 @@ _test_gate_append_report() {
 }
 
 # Restores the worktree to $branch. Never errors the caller (best-effort) —
-# registered via `trap ... RETURN` in the orchestrator so it always fires.
+# called explicitly at each orchestrator return point after the baseline
+# checkout (NOT via `trap ... RETURN`: that trap is not function-scoped in
+# bash — it re-fires on every ancestor function's return for the rest of the
+# call chain, using whatever `$worktree_path`/`$branch` are in scope there).
 _test_gate_restore() {
   local worktree_path="$1" branch="$2"
   git -C "$worktree_path" checkout --quiet "$branch" >/dev/null 2>&1 || true
@@ -324,11 +327,11 @@ _run_deterministic_test_gate() {
   head_fail_list=$(_test_gate_run_units "$worktree_path" "$units")
 
   # ── Step 4.5: detached-checkout baseline, run same units, restore ────────
-  # trap registered BEFORE the checkout so any exit path (including a crash)
-  # restores the worktree to its story branch — never left stranded detached.
+  # _test_gate_restore is called explicitly at every return point below
+  # (checkout-failure / differential-blocked / PASS) instead of via
+  # `trap ... RETURN` — see the comment on _test_gate_restore for why.
   local branch
   branch=$(git -C "$worktree_path" rev-parse --abbrev-ref HEAD)
-  trap '_test_gate_restore "$worktree_path" "$branch"' RETURN
 
   if ! git -C "$worktree_path" checkout --quiet --detach "$base_ref" 2>/dev/null; then
     _test_gate_append_report "$qa_report_path" "ESCALATED" "$base_ref" "$base_sha" "" "" \
@@ -339,12 +342,13 @@ _run_deterministic_test_gate() {
       notify_escalation_inline "$story_id" "test_gate_baseline_checkout_failed" \
         "git checkout --detach ${base_ref} failed in ${worktree_path}"
     fi
+    # No detached checkout took hold (the command above failed) — nothing to restore.
     return 1
   fi
 
   local base_fail_list
   base_fail_list=$(_test_gate_run_units "$worktree_path" "$units")
-  # worktree restore fires automatically here via the RETURN trap above.
+  _test_gate_restore "$worktree_path" "$branch"
 
   # ── Step 5-9: differential compare + report + terminal routing ───────────
   local new_failures
