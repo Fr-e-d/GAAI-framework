@@ -192,7 +192,7 @@ _DISPATCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   source "${_DISPATCH_SCRIPT_DIR}/lib/worktree-integrity.sh" 2>/dev/null && \
   _WORKTREE_INTEGRITY_SH_SOURCED=1
 
-# ── Deterministic test gate helper (E1058S03) ────────────────────
+# ── Deterministic test gate helper ──────────────────────────────
 # Sourced here so dispatch's handle_commit_phase can run the differential
 # test gate before push. Same optional-source contract as worktree-integrity.
 [[ -z "${_TEST_GATE_SH_SOURCED:-}" ]] && \
@@ -2452,7 +2452,7 @@ ${qa_snippet}"
     fi
   fi
 
-  # ── Deterministic test gate (AC1-AC6, E1058S03) ──────────────────
+  # ── Deterministic test gate (AC1-AC6) ────────────────────────────
   if declare -f _run_deterministic_test_gate >/dev/null 2>&1; then
     if ! _run_deterministic_test_gate "$story_id" "$worktree_path" "$qa_report_path"; then
       echo "[ERROR] ${story_id} handle_commit_phase: test gate blocked commit [class=TEST_GATE_BLOCKED]"

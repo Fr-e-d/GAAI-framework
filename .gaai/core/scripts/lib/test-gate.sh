@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lib/test-gate.sh — deterministic differential test gate (E1058S03)
+# lib/test-gate.sh — deterministic differential test gate
 #
 # Sourceable library. Public entry point:
 #   _run_deterministic_test_gate <story_id> <worktree_path> <qa_report_path>
