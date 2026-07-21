@@ -50,11 +50,25 @@ _check_worktree_integrity() {
   # Best-effort fetch — check still runs on stale refs if offline
   git -C "$worktree_path" --no-pager fetch origin "${_base_branch}" --quiet 2>/dev/null || true
 
-  # fsck: object corruption is unrecoverable — return 2 immediately
-  if ! _fsck_out=$(git -C "$worktree_path" --no-pager fsck --no-dangling 2>&1); then
-    echo "[WORKTREE-CHECK] ${sid} : CORRUPTION SUSPECTED — commits_ahead=? deletions=? fsck=FAIL"
-    echo "[WORKTREE-CHECK] ${sid} : fsck output: ${_fsck_out: -300}"
-    return 2
+  # Object corruption is unrecoverable — return 2 immediately.
+  #
+  # Scoped to THIS worktree's own HEAD on purpose. A bare `git fsck` walks the
+  # shared object store AND every worktree's index cache-tree; a sibling worktree
+  # that is mid-write (its cache-tree referencing objects not yet flushed to the
+  # store) makes the bare fsck fail, and the failure is misattributed to the story
+  # under check — parallel deliveries then stall each other's commit phase with a
+  # false-positive corruption verdict. Passing an explicit object (HEAD) replaces
+  # fsck's default reachability roots (refs + all worktree indexes) with just this
+  # commit, so the check verifies only that this story's own reachable objects are
+  # present. `--connectivity-only` confirms presence of every referenced tree/blob
+  # without the (irrelevant here) full SHA re-hash. If HEAD does not resolve yet
+  # (worktree present but nothing committed), there is nothing to validate — skip.
+  if git -C "$worktree_path" --no-pager rev-parse --verify -q HEAD >/dev/null 2>&1; then
+    if ! _fsck_out=$(git -C "$worktree_path" --no-pager fsck --connectivity-only --no-dangling HEAD 2>&1); then
+      echo "[WORKTREE-CHECK] ${sid} : CORRUPTION SUSPECTED — commits_ahead=? deletions=? head-fsck=FAIL"
+      echo "[WORKTREE-CHECK] ${sid} : head-fsck output: ${_fsck_out: -300}"
+      return 2
+    fi
   fi
 
   # Commits-ahead: wrapper producing >100 commits is almost certainly stuck on wrong base

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: scope worktree-integrity fsck to the story HEAD (stop cross-worktree false positives)
 -: landed-or-preserved guard at all daemon branch-deletion sites
 - fix: pass pr_number as arg to _reconcile_merged_pr (fix unbound-var crash)
 - review: generic executor wording in comment + same-turn background-helper nuance
