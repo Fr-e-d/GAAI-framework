@@ -61,14 +61,29 @@ _check_worktree_integrity() {
   # fsck's default reachability roots (refs + all worktree indexes) with just this
   # commit, so the check verifies only that this story's own reachable objects are
   # present. `--connectivity-only` confirms presence of every referenced tree/blob
-  # without the (irrelevant here) full SHA re-hash. If HEAD does not resolve yet
-  # (worktree present but nothing committed), there is nothing to validate — skip.
+  # without the (irrelevant here) full SHA re-hash.
+  #
+  # HEAD state must distinguish two cases that both make `rev-parse --verify HEAD`
+  # fail, so a corrupt tip is never silently classified as clean:
+  #   - genuinely unborn branch (HEAD symref → a ref that has no commit yet):
+  #     nothing to validate — skip.
+  #   - HEAD ref exists but its commit object is absent/unreadable (or detached at
+  #     a missing commit): that IS corruption — return 2.
   if git -C "$worktree_path" --no-pager rev-parse --verify -q HEAD >/dev/null 2>&1; then
+    # HEAD resolves to a present commit — run the scoped integrity check.
     if ! _fsck_out=$(git -C "$worktree_path" --no-pager fsck --connectivity-only --no-dangling HEAD 2>&1); then
       echo "[WORKTREE-CHECK] ${sid} : CORRUPTION SUSPECTED — commits_ahead=? deletions=? head-fsck=FAIL"
       echo "[WORKTREE-CHECK] ${sid} : head-fsck output: ${_fsck_out: -300}"
       return 2
     fi
+  elif git -C "$worktree_path" --no-pager symbolic-ref -q HEAD >/dev/null 2>&1 \
+       && ! git -C "$worktree_path" --no-pager show-ref -q --verify "$(git -C "$worktree_path" --no-pager symbolic-ref -q HEAD)" 2>/dev/null; then
+    # Unborn branch — no commit yet, nothing to validate.
+    echo "[WORKTREE-CHECK] ${sid} : unborn branch (no commit) — skipping fsck (clean)"
+  else
+    # HEAD ref present but its commit object is missing/unreadable — real corruption.
+    echo "[WORKTREE-CHECK] ${sid} : CORRUPTION SUSPECTED — HEAD commit object missing/unreadable"
+    return 2
   fi
 
   # Commits-ahead: wrapper producing >100 commits is almost certainly stuck on wrong base
