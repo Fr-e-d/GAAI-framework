@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: tolerate flaky test flips via runner-native retry
 - review: harden HEAD guard — surface missing tip commit as corruption (not silent-clean)
 - fix: scope worktree-integrity fsck to the story HEAD (stop cross-worktree false positives)
 -: landed-or-preserved guard at all daemon branch-deletion sites
