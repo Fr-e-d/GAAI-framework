@@ -93,11 +93,25 @@ _test_gate_pkg_script() {
 # resolved command), so the differential stays honest. Only appended when the
 # resolved script actually runs vitest — other runners take a different retry
 # flag, so for them the gate keeps its no-retry behaviour (stack-agnostic).
+#
+# `<pm> run <script> -- --retry=N` forwards the flag to the END of the script
+# string, so it only lands on vitest when the script is a SINGLE vitest command.
+# For a chained script (`vitest run … && tsc …`) the flag would attach to the
+# trailing command instead (unknown flag → that command errors on both runs),
+# so chained scripts are left untouched (no retry, prior behaviour). Best-effort
+# for vitest + npm/pnpm; on yarn the passthrough may be ignored (retry simply
+# not applied — still symmetric, never a false block).
 # Args: script_body, base_cmd. Prints base_cmd, plus ` -- --retry=N` for vitest.
 _test_gate_flaky_retry_suffix() {
   local script_body="$1" base_cmd="$2"
   local retries="${TEST_GATE_FLAKY_RETRIES:-2}"
-  if [[ "$retries" -gt 0 && "$script_body" == *vitest* ]]; then
+  # Honour only a plain integer — never feed an arbitrary env string to bash
+  # arithmetic ([[ -gt ]] evaluates array-subscript syntax = an eval class);
+  # any non-integer disables retry rather than crashing the gate.
+  [[ "$retries" =~ ^[0-9]+$ ]] || retries=0
+  if [[ "$retries" -gt 0 && "$script_body" == *vitest* \
+        && "$script_body" != *'&&'* && "$script_body" != *';'* \
+        && "$script_body" != *'|'* ]]; then
     echo "${base_cmd} -- --retry=${retries}"
   else
     echo "$base_cmd"
