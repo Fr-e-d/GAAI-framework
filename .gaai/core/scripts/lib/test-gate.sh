@@ -10,12 +10,17 @@
 # Differential semantics (must stay aligned with qa-review skill Step 4):
 # only a test that PASSES on origin/<TARGET_BRANCH> and FAILS on the story's
 # HEAD is a blocking regression. A test already red on the baseline (rot,
-# documented flaky) never blocks. Fail-safe direction throughout: on any
-# ambiguity (no baseline, no resolvable test command) this gate escalates —
-# it never silently passes and never loops/retries.
+# documented flaky) never blocks. Concurrency-flaky tests that merely flip
+# between the two runs are absorbed by the runner's native per-test retry
+# (vitest `--retry`, see _test_gate_flaky_retry_suffix) so a single flip is
+# not mistaken for a diff-introduced regression. Fail-safe direction
+# throughout: on any ambiguity (no baseline, no resolvable test command) this
+# gate escalates — it never silently passes and never loops the whole gate.
 #
 # Env vars (all optional, have defaults):
 #   TARGET_BRANCH  — remote branch compared against (default: staging)
+#   TEST_GATE_FLAKY_RETRIES — vitest per-test retries on both runs (default: 2;
+#                             0 disables). Only applied to vitest-based scripts.
 #   SCHEDULER      — absolute path to backlog-scheduler.sh (required by caller)
 #   BACKLOG_FILE   — absolute path to active.backlog.yaml (required by caller)
 #
@@ -77,6 +82,28 @@ _test_gate_pkg_script() {
   ' 2>/dev/null
 }
 
+# ── Flaky-tolerance: append the runner's native per-test retry ──────────────
+# A differential gate blocks on a test that fails on HEAD but passed on the
+# baseline run. Concurrency-sensitive tests (DO alarm / Workers-pool timing)
+# flip between runs on their own, so a single flip is falsely read as a new
+# regression introduced by the diff. Vitest can retry a failing test in-place
+# (`--retry=N`) and reports the final outcome — a flaky test that passes on a
+# retry never enters the fail list, while a genuine failure still fails every
+# attempt. The suffix is applied to BOTH the HEAD and baseline runs (same
+# resolved command), so the differential stays honest. Only appended when the
+# resolved script actually runs vitest — other runners take a different retry
+# flag, so for them the gate keeps its no-retry behaviour (stack-agnostic).
+# Args: script_body, base_cmd. Prints base_cmd, plus ` -- --retry=N` for vitest.
+_test_gate_flaky_retry_suffix() {
+  local script_body="$1" base_cmd="$2"
+  local retries="${TEST_GATE_FLAKY_RETRIES:-2}"
+  if [[ "$retries" -gt 0 && "$script_body" == *vitest* ]]; then
+    echo "${base_cmd} -- --retry=${retries}"
+  else
+    echo "$base_cmd"
+  fi
+}
+
 # ── Unit resolution (bash + JS/TS surfaces, AC3+AC4) ────────────────────────
 # Args: worktree_path, changed_files (newline list, repo-relative, from
 # `git diff --name-only`). Emits `<type>|<label>|<cmd>` lines (type in
@@ -133,12 +160,12 @@ _test_gate_resolve_units() {
     fi
     script=$(_test_gate_pkg_script "$abs_dir" "test:ci")
     if [[ -n "$script" ]]; then
-      echo "junit|${abs_dir}|$(_test_gate_pm_cmd "$pm" "$abs_dir" "test:ci")"
+      echo "junit|${abs_dir}|$(_test_gate_flaky_retry_suffix "$script" "$(_test_gate_pm_cmd "$pm" "$abs_dir" "test:ci")")"
       continue
     fi
     script=$(_test_gate_pkg_script "$abs_dir" "test")
     if [[ -n "$script" ]]; then
-      echo "pm|${abs_dir}|$(_test_gate_pm_cmd "$pm" "$abs_dir" "test")"
+      echo "pm|${abs_dir}|$(_test_gate_flaky_retry_suffix "$script" "$(_test_gate_pm_cmd "$pm" "$abs_dir" "test")")"
       continue
     fi
     unresolved+=("$d (no test:ci or test script declared)")
