@@ -143,7 +143,18 @@ MAX_TURNS="${GAAI_MAX_TURNS:-200}"                    # primary safety net
 CLAUDE_MODEL="${GAAI_CLAUDE_MODEL:-sonnet}"           # model (sonnet = cost-effective)
 HEARTBEAT_STALE="${GAAI_HEARTBEAT_STALE:-1800}"       # 30min no output = stuck (allows long MCP calls like deep research)
 STALENESS_THRESHOLD="${GAAI_STALENESS_THRESHOLD:-}"   # auto-computed below
-AGENT_HANG_THRESHOLD_SEC="${GAAI_AGENT_HANG_THRESHOLD_SEC:-480}"
+# Default 1200s (20min). The log-mtime detector only monitors the plan/impl/qa
+# phase logs; during the COMMIT phase (a wrapper resumed at qa_passed) all three
+# are frozen at their last-phase mtime while the deterministic differential
+# test-gate runs the affected suite twice (HEAD + detached baseline). For a
+# large suite that quiet stretch exceeds the old 480s, so the detector fired a
+# false "hang" mid-gate and SIGKILLed the wrapper every 8min — an unkillable
+# re-launch loop for any story whose commit-phase test-gate runs long. 1200s
+# covers the double-run with margin; genuine "alive but stuck" agents are still
+# caught here (and a fully-dead agent by the 1800s heartbeat-stale detector).
+# The precise fix (a commit-phase liveness signal the detector can see) is a
+# tracked follow-up; this raises the blanket bound to stop the loop safely.
+AGENT_HANG_THRESHOLD_SEC="${GAAI_AGENT_HANG_THRESHOLD_SEC:-1200}"
 if (( AGENT_HANG_THRESHOLD_SEC < 60 )); then AGENT_HANG_THRESHOLD_SEC=60; fi
 # Suspend/resume robustness: a poll cycle whose wall-clock gap exceeds this is
 # treated as a host suspend (or daemon pause), not a normal tick. Liveness
