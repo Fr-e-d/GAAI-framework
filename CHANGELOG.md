@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: raise agent-hang threshold to cover commit-phase test-gate
 - fix: harden flaky-retry suffix (review follow-up)
 - fix: tolerate flaky test flips via runner-native retry
 - review: harden HEAD guard — surface missing tip commit as corruption (not silent-clean)
