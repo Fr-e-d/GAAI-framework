@@ -1095,6 +1095,21 @@ handle_plan_phase() {
 
   prompt_file=$(mktemp "/tmp/gaai-plan-prompt-${story_id}-XXXXXX")
   cat "$agent_prompt_src" > "$prompt_file"
+  # Guard an EMPTY prompt file from a transient /tmp write failure: an empty stdin
+  # makes the agent no-op ("I don't see a request") and exit success, which the
+  # pipeline mistakes for a wrapper death and burns a delivery retry (3x -> permanent
+  # retry cap on a perfectly healthy story). Retry the write, then fail fast+loud.
+  local _pf_try=0
+  while [[ ! -s "$prompt_file" && $_pf_try -lt 3 ]]; do
+    _pf_try=$((_pf_try+1)); sleep 1
+    cat "$agent_prompt_src" > "$prompt_file" 2>/dev/null || true
+  done
+  if [[ ! -s "$prompt_file" ]]; then
+    echo "[ERROR] ${story_id} handle_plan_phase: prompt file empty after retries (transient /tmp write failure?) — refusing to spawn agent with an empty prompt"
+    _emit_plan_routing_record "$story_id" "$trace_id" "error" "PLAN_PROMPT_EMPTY" "0"
+    rm -f "$prompt_file" 2>/dev/null || true
+    return 1
+  fi
 
   # ── Cross-cycle qa-report injection: PLAN route (replan routing contract) ────
   # Appends prior qa-report + prior artefacts + delta-aware marker framing to
@@ -1455,6 +1470,18 @@ handle_impl_phase() {
   local prompt_file
   prompt_file=$(mktemp "/tmp/gaai-impl-prompt-${story_id}-XXXXXX")
   printf '%s' "$prompt_content" > "$prompt_file"
+  # Guard an empty prompt file from a transient /tmp write failure (see handle_plan_phase).
+  local _pf_try=0
+  while [[ ! -s "$prompt_file" && $_pf_try -lt 3 ]]; do
+    _pf_try=$((_pf_try+1)); sleep 1
+    printf '%s' "$prompt_content" > "$prompt_file" 2>/dev/null || true
+  done
+  if [[ ! -s "$prompt_file" ]]; then
+    echo "[ERROR] ${story_id} handle_impl_phase: prompt file empty after retries (transient /tmp write failure or empty prompt_content?) — refusing to spawn agent with an empty prompt"
+    _emit_routing_record "$story_id" "$trace_id" "impl" "error" "IMPL_PROMPT_EMPTY"
+    rm -f "$prompt_file" 2>/dev/null || true
+    return 1
+  fi
 
   if [[ "${GAAI_DAEMON_EXECUTOR:-claude}" == "codex" ]]; then
     local codex_exit t_start_ms t_end_ms duration_ms
@@ -1711,6 +1738,18 @@ handle_qa_phase() {
   local prompt_file
   prompt_file=$(mktemp "/tmp/gaai-qa-prompt-${story_id}-XXXXXX")
   cat "$agent_prompt_src" > "$prompt_file"
+  # Guard an empty prompt file from a transient /tmp write failure (see handle_plan_phase).
+  local _pf_try=0
+  while [[ ! -s "$prompt_file" && $_pf_try -lt 3 ]]; do
+    _pf_try=$((_pf_try+1)); sleep 1
+    cat "$agent_prompt_src" > "$prompt_file" 2>/dev/null || true
+  done
+  if [[ ! -s "$prompt_file" ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: prompt file empty after retries (transient /tmp write failure?) — refusing to spawn agent with an empty prompt"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_PROMPT_EMPTY" "0"
+    rm -f "$prompt_file" 2>/dev/null || true
+    return 1
+  fi
 
   # ── Duration measurement ──────────────────────────────────────────────────
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
