@@ -1746,6 +1746,10 @@ handle_qa_phase() {
   done
   if [[ ! -s "$prompt_file" ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: prompt file empty after retries (transient /tmp write failure?) — refusing to spawn agent with an empty prompt"
+    # Parity with the sibling QA_SPAWN_FAILED pre-spawn paths: set the bounded-death
+    # marker so a persistent (non-transient) failure escalates via the capped
+    # .qa-spawn-deaths counter instead of the unbounded resume-relaunch branch.
+    touch "${LOCK_DIR}/.qa-spawn-death-pending-${story_id}" 2>/dev/null || true
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_PROMPT_EMPTY" "0"
     rm -f "$prompt_file" 2>/dev/null || true
     return 1

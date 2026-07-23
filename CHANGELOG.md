@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - fix: guard empty phase-prompt files so a transient write failure can't silently retry-cap a healthy story
+- fix: guard empty phase-prompt files so a transient write failure can't silently retry-cap a healthy story
 - fix: raise agent-hang threshold to cover commit-phase test-gate
 - fix: harden flaky-retry suffix (review follow-up)
 - fix: tolerate flaky test flips via runner-native retry
