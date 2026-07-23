@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.50.0] - 2026-07-23
+
+### Changed
+- fix: don't charge a retry for a graceful interrupt during planning
+- feat: make plan/qa phase model configurable via GAAI_PLAN_MODEL / GAAI_QA_MODEL
+
+
 ## [2.49.0] - 2026-07-23
 
 ### Changed
