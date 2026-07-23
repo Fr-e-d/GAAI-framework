@@ -1422,13 +1422,25 @@ except Exception:
     # ── Path 1 : .interrupted touch (graceful daemon-start.sh --stop, OSS-3) ─────────
     local interrupted_marker="$LOCK_DIR/${sid}.interrupted"
     if [[ -f "$interrupted_marker" ]]; then
-      log "${YELLOW}[RECOVERY] $sid : .interrupted present — graceful stop, reverting refined (keep phase_status=${ps:-empty})${NC}"
+      # A graceful interrupt (daemon --stop, or a host suspend/resume that trips
+      # the graceful-stop path) is NOT a delivery failure and must never charge a
+      # retry. It does not itself increment the retry count. BUT when it hits during
+      # the `planned` phase, the execution-plan.md is worktree-local and does not
+      # survive the fresh-pickup re-launch — so keeping phase_status=planned makes
+      # the NEXT recovery scan (marker already removed) see "planned but no
+      # execution-plan.md" and wrongly charge a retry via the missing-plan path.
+      # Reset the phase to not_started for `planned` so the story re-plans cleanly
+      # with no spurious retry; preserve durable phases (implemented/qa_passed —
+      # their work is committed to the story branch, so a resume is safe and cheap).
+      local _int_reset="false"
+      [[ "$ps" == "planned" ]] && _int_reset="true"
+      log "${YELLOW}[RECOVERY] $sid : .interrupted present — graceful stop, reverting refined (phase_status=${ps:-empty}, reset=${_int_reset})${NC}"
       if $DRY_RUN; then
-        log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined + rm .interrupted${NC}"
+        log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined (reset_phase=${_int_reset}) + rm .interrupted${NC}"
         ((interrupted++)) || true
         continue
       fi
-      if _recovery_revert_refined "$sid" "false" "interrupted"; then
+      if _recovery_revert_refined "$sid" "$_int_reset" "interrupted"; then
         rm -f "$interrupted_marker"
         ((interrupted++)) || true
       else
