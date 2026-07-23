@@ -1222,7 +1222,7 @@ Justify each marker in one line. Err toward REVISE over KEEP when uncertain.'
   GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
     _run_claude_with_loop_breaker \
       "$story_id" "plan" "$log_path" "$prompt_file" "$worktree_path" \
-      --model sonnet \
+      --model "${GAAI_PLAN_MODEL:-sonnet}" \
       --max-turns 60 \
       --output-format stream-json \
       --verbose \
@@ -1778,7 +1778,7 @@ handle_qa_phase() {
   GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
     _run_claude_with_loop_breaker \
       "$story_id" "qa" "$log_path" "$prompt_file" "$worktree_path" \
-      --model sonnet \
+      --model "${GAAI_QA_MODEL:-sonnet}" \
       --max-turns "$GAAI_QA_MAX_TURNS" \
       --output-format stream-json \
       --verbose \
