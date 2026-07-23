@@ -7,33 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.49.0] - 2026-07-23
 
 ### Changed
-- fix: guard empty phase-prompt files so a transient write failure can't silently retry-cap a healthy story
+- feat: make plan/qa phase model configurable via GAAI_PLAN_MODEL / GAAI_QA_MODEL
 - fix: guard empty phase-prompt files so a transient write failure can't silently retry-cap a healthy story
 - fix: raise agent-hang threshold to cover commit-phase test-gate
 - fix: harden flaky-retry suffix (review follow-up)
 - fix: tolerate flaky test flips via runner-native retry
 - review: harden HEAD guard — surface missing tip commit as corruption (not silent-clean)
 - fix: scope worktree-integrity fsck to the story HEAD (stop cross-worktree false positives)
--: landed-or-preserved guard at all daemon branch-deletion sites
 - fix: pass pr_number as arg to _reconcile_merged_pr (fix unbound-var crash)
 - review: generic executor wording in comment + same-turn background-helper nuance
 - fix: inject one-shot execution-mode constraint into impl prompt
 - fix: surface silent main-loop deaths via ERR/EXIT trap
-- fix: surface silent main-loop deaths via ERR/EXIT trap
 - fix: guard ((x++)) increments against set -e (poll loop crash)
 - fix: make EPOCHREALTIME→ms conversion locale-independent
 - chore: LOC cap counts implementation LOC only — coordinated basis decision
-- chore: LOC cap counts implementation LOC only — coordinated basis decision
-- chore: require PR-based staging repairs
 - chore: require PR-based staging repairs
 - chore: align marketing and cloud beta copy
 - fix: forward codex executor into story wrappers
 - fix: default routing-log model tag to claude-sonnet-5
 - fix: don't escalate when auto-merge fails only at local branch-delete
 - fix: branch each story from origin/<branch>, not the stale local ref
+
 
 ## [2.49.0] - 2026-06-29
 
