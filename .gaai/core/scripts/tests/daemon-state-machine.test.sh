@@ -14,6 +14,30 @@ FAIL_COUNT=0
 pass() { echo "  PASS: $1"; PASS_COUNT=$(( PASS_COUNT + 1 )); }
 fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 
+# Real git binary, captured before any shim is prepended to PATH. The commit
+# tests put a push-faking git shim on PATH (intercepts `push` -> exit 0 without
+# pushing); routing the setup push below through it would silently no-op and
+# leave origin/staging unfetchable in re-run fixtures.
+_REAL_GIT_BIN="$(command -v git)"
+
+# Give a test repo an `origin` remote whose `staging` branch matches the given
+# start-point (default HEAD), so `origin/staging` resolves as a remote-tracking
+# ref. Required since #2045 made handle_plan_phase branch each story from
+# `origin/<base>` (not the stale local ref), and the commit test-gate fetches
+# `origin/staging` as its differential baseline.
+_setup_origin_staging() {
+  local repo="$1" start_ref="${2:-HEAD}"
+  local bare="${repo%/}.origin.git"
+  rm -rf "$bare" 2>/dev/null || true
+  "$_REAL_GIT_BIN" init -q --bare "$bare"
+  "$_REAL_GIT_BIN" -C "$repo" remote remove origin 2>/dev/null || true
+  "$_REAL_GIT_BIN" -C "$repo" remote add origin "$bare"
+  # staging (daemon default base) + preview (a non-staging target some tests
+  # set via TARGET_BRANCH, e.g. T43) so origin/<target> resolves either way.
+  "$_REAL_GIT_BIN" -C "$repo" push -q origin "${start_ref}:refs/heads/staging" "${start_ref}:refs/heads/preview"
+  "$_REAL_GIT_BIN" -C "$repo" fetch -q origin
+}
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DISPATCH_LIB="$SCRIPT_DIR/../daemon-dispatch.sh"
 SCHEDULER="$SCRIPT_DIR/../backlog-scheduler.sh"
@@ -128,6 +152,7 @@ git -C "$DISPATCH_FIXTURE_DIR" config user.name "Test"
 git -C "$DISPATCH_FIXTURE_DIR" add . >/dev/null
 git -C "$DISPATCH_FIXTURE_DIR" commit -m "dispatch fixture" --quiet
 git -C "$DISPATCH_FIXTURE_DIR" checkout -B staging -q
+_setup_origin_staging "$DISPATCH_FIXTURE_DIR"
 
 DISPATCH_PROJECT_DIR="$DISPATCH_FIXTURE_DIR"
 DISPATCH_WORKTREES_BASE="$DISPATCH_FIXTURE_DIR/worktrees"
@@ -438,6 +463,7 @@ git -C "$PLAN_PROJECT_DIR" config user.name "Test"
 git -C "$PLAN_PROJECT_DIR" add . >/dev/null
 git -C "$PLAN_PROJECT_DIR" commit -m "plan fixture" --quiet
 git -C "$PLAN_PROJECT_DIR" checkout -B staging -q
+_setup_origin_staging "$PLAN_PROJECT_DIR"
 
 PLAN_WORKTREE="$PLAN_WORKTREES_BASE/${PLAN_STORY_ID}-workspace"
 PLAN_PATH="$PLAN_WORKTREE/.gaai/project/contexts/artefacts/plans/${PLAN_STORY_ID}.execution-plan.md"
@@ -1336,6 +1362,10 @@ YAML_COMMIT
 make_commit_worktree() {
   local sid="$1" auto_merge_val="${2:-}"
   local wt="$COMMIT_FIXTURE_DIR/${sid}-workspace"
+  # Idempotent: several tests re-create the same worktree to reset it for a
+  # re-run. Start from a clean slate so a prior commit-phase run's mutations
+  # never leak into the next.
+  rm -rf "$wt" "${wt%/}.origin.git" 2>/dev/null || true
   mkdir -p "$wt/.gaai/project/contexts/artefacts/stories"
   mkdir -p "$wt/.gaai/project/contexts/artefacts/qa-reports"
   {
@@ -1356,6 +1386,9 @@ make_commit_worktree() {
   git -C "$wt" config user.name "Test"
   git -C "$wt" commit --allow-empty -m "init" --quiet
   git -C "$wt" checkout -B "story/${sid}" -q
+  # origin/staging baseline = the init commit -> the commit test-gate's
+  # differential diff (origin/staging...HEAD) is a clean no-op for these fixtures.
+  _setup_origin_staging "$wt"
 }
 
 # Create worktrees for all commit test stories (TST-COMMIT-SKIPMERGE created separately below)
