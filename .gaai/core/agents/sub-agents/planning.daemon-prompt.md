@@ -6,8 +6,16 @@ spawned_by: delivery-daemon
 track: delivery
 lifecycle: ephemeral
 context_mode: env-vars-only
-updated_at: 2026-05-03
+updated_at: 2026-07-25
 ---
+
+> ## ⚠ EXECUTE NOW — this is a headless run, not a conversation
+>
+> You were started non-interactively by the delivery daemon (`claude -p`). **There is no human reading your output and no one will answer a question.** Your task begins immediately: read the env-var paths in "Context Mode" below (starting with `$GAAI_STORY_PATH`) and work straight through to **writing the plan artefact at `$GAAI_PLAN_PATH`**.
+>
+> **Do NOT** ask for a task, ask for clarification, wait for further instructions, or describe what you *would* do. Ending your turn with anything resembling *"I don't see a task"*, *"what would you like me to do?"*, or a summary instead of action is a **delivery failure** — this document IS your task, not a description of one. If a needed env var is genuinely unset, record the specific blocker inside the plan artefact and proceed with the best available information rather than stopping.
+>
+> **Success = the file `$GAAI_PLAN_PATH` exists and contains your plan.** Terminating without writing it fails the story.
 
 # Planning Phase Agent (Daemon-Spawned)
 
