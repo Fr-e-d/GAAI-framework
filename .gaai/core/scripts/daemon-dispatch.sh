@@ -283,6 +283,59 @@ except Exception:
 " 2>/dev/null
 }
 
+# ── Daemon-prompt template expansion (executor-portable context contract) ──
+# Copies $1 (template source) to $2 (destination prompt file), replacing each
+# literal "$NAME" token with its resolved value, where each remaining
+# argument is a "NAME=value" pair. Substitution is a plain bash string
+# replace (${content//search/replace}) — not glob/regex — so template prose,
+# code fences, and path values with special characters (/, &, etc.) are
+# handled without escaping. Preserves the source's trailing newline.
+#
+# Why this exists: the Plan/QA daemon-prompt templates carry literal
+# "$GAAI_*" references and previously relied on the spawned executor's own
+# tool/shell context inheriting the daemon's process env to resolve them.
+# That holds for `claude -p` by coincidence but is not guaranteed for other
+# executors (e.g. `codex exec`), producing a silent missing-daemon-context
+# failure. Resolving the tokens into the prompt bytes at construction time
+# makes the prompt executor-invariant.
+_expand_daemon_prompt_template() {
+  local src="$1" dst="$2"
+  shift 2
+  local content
+  content=$(cat "$src"; printf 'x')
+  content="${content%x}"
+  local pair name value
+  for pair in "$@"; do
+    name="${pair%%=*}"
+    value="${pair#*=}"
+    content="${content//\$${name}/${value}}"
+  done
+  printf '%s' "$content" > "$dst"
+}
+
+# ── Post-substitution tripwire ────────────────────────────────────────────
+# Aborts the phase (loud, terminal, auditable) if any $GAAI_* token survived
+# template substitution. Should never fire in normal operation — it exists
+# to convert a silent broken-contract failure (agent receives literal $-token
+# text and has to self-detect) into a deterministic pre-spawn daemon abort.
+_assert_prompt_context_resolved() {
+  local prompt_file="$1" phase="$2" story_id="$3" trace_id="$4"
+  local leftover
+  leftover=$(grep -oE '\$GAAI_[A-Z_]+' "$prompt_file" 2>/dev/null | sort -u | tr '\n' ' ')
+  leftover="${leftover% }"
+  if [[ -n "$leftover" ]]; then
+    echo "[ERROR] ${story_id} ${phase}-context-unresolved: unresolved variable(s) [${leftover}] remain in the ${phase} prompt (executor=${GAAI_DAEMON_EXECUTOR:-claude})"
+    if [[ "$phase" == "plan" ]]; then
+      _emit_plan_routing_record "$story_id" "$trace_id" "error" "PLAN_CONTEXT_UNRESOLVED" "0"
+    else
+      _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_CONTEXT_UNRESOLVED" "0"
+    fi
+    "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+    return 1
+  fi
+  return 0
+}
+
 # ── Loop-breaker wrapper around `claude -p` ──────────────────────────────
 # Replaces the synchronous `claude -p ... | tee -a "$log_path"` pattern with
 # a streaming reader that:
@@ -1094,7 +1147,12 @@ handle_plan_phase() {
   fi
 
   prompt_file=$(mktemp "/tmp/gaai-plan-prompt-${story_id}-XXXXXX")
-  cat "$agent_prompt_src" > "$prompt_file"
+  _expand_daemon_prompt_template "$agent_prompt_src" "$prompt_file" \
+    "GAAI_STORY_ID=${story_id}" \
+    "GAAI_WORKTREE_PATH=${worktree_path}" \
+    "GAAI_STORY_PATH=${story_path}" \
+    "GAAI_PLAN_PATH=${plan_path}" \
+    "GAAI_EPIC_PATH=${epic_path}"
   # Guard an EMPTY prompt file from a transient /tmp write failure: an empty stdin
   # makes the agent no-op ("I don't see a request") and exit success, which the
   # pipeline mistakes for a wrapper death and burns a delivery retry (3x -> permanent
@@ -1102,11 +1160,27 @@ handle_plan_phase() {
   local _pf_try=0
   while [[ ! -s "$prompt_file" && $_pf_try -lt 3 ]]; do
     _pf_try=$((_pf_try+1)); sleep 1
-    cat "$agent_prompt_src" > "$prompt_file" 2>/dev/null || true
+    _expand_daemon_prompt_template "$agent_prompt_src" "$prompt_file" \
+      "GAAI_STORY_ID=${story_id}" \
+      "GAAI_WORKTREE_PATH=${worktree_path}" \
+      "GAAI_STORY_PATH=${story_path}" \
+      "GAAI_PLAN_PATH=${plan_path}" \
+      "GAAI_EPIC_PATH=${epic_path}" 2>/dev/null || true
   done
   if [[ ! -s "$prompt_file" ]]; then
     echo "[ERROR] ${story_id} handle_plan_phase: prompt file empty after retries (transient /tmp write failure?) — refusing to spawn agent with an empty prompt"
     _emit_plan_routing_record "$story_id" "$trace_id" "error" "PLAN_PROMPT_EMPTY" "0"
+    rm -f "$prompt_file" 2>/dev/null || true
+    return 1
+  fi
+
+  # ── Prompt-context tripwire (AC1, AC4) ────────────────────────────────────
+  # Must run BEFORE the cross-cycle qa-report append below — the appended
+  # content is free-form prior qa-report/plan/impl-report text and could
+  # legitimately contain the literal substring "$GAAI_..." (e.g. a prior QA
+  # finding quoting this exact defect). The tripwire validates the template
+  # substitution, not arbitrary appended narrative.
+  if ! _assert_prompt_context_resolved "$prompt_file" "plan" "$story_id" "$trace_id"; then
     rm -f "$prompt_file" 2>/dev/null || true
     return 1
   fi
@@ -1737,12 +1811,28 @@ handle_qa_phase() {
 
   local prompt_file
   prompt_file=$(mktemp "/tmp/gaai-qa-prompt-${story_id}-XXXXXX")
-  cat "$agent_prompt_src" > "$prompt_file"
+  _expand_daemon_prompt_template "$agent_prompt_src" "$prompt_file" \
+    "GAAI_STORY_PATH=${story_path}" \
+    "GAAI_PLAN_PATH=${plan_path}" \
+    "GAAI_IMPL_REPORT_PATH=${impl_report_path}" \
+    "GAAI_QA_REPORT_PATH=${qa_report_path}" \
+    "GAAI_EPIC_PATH=${epic_path}" \
+    "GAAI_BASE_REF=${base_ref}" \
+    "GAAI_WORKTREE_PATH=${worktree_path}" \
+    "GAAI_MEMORY_DELTA_PATH=${memory_delta_path}"
   # Guard an empty prompt file from a transient /tmp write failure (see handle_plan_phase).
   local _pf_try=0
   while [[ ! -s "$prompt_file" && $_pf_try -lt 3 ]]; do
     _pf_try=$((_pf_try+1)); sleep 1
-    cat "$agent_prompt_src" > "$prompt_file" 2>/dev/null || true
+    _expand_daemon_prompt_template "$agent_prompt_src" "$prompt_file" \
+      "GAAI_STORY_PATH=${story_path}" \
+      "GAAI_PLAN_PATH=${plan_path}" \
+      "GAAI_IMPL_REPORT_PATH=${impl_report_path}" \
+      "GAAI_QA_REPORT_PATH=${qa_report_path}" \
+      "GAAI_EPIC_PATH=${epic_path}" \
+      "GAAI_BASE_REF=${base_ref}" \
+      "GAAI_WORKTREE_PATH=${worktree_path}" \
+      "GAAI_MEMORY_DELTA_PATH=${memory_delta_path}" 2>/dev/null || true
   done
   if [[ ! -s "$prompt_file" ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: prompt file empty after retries (transient /tmp write failure?) — refusing to spawn agent with an empty prompt"
@@ -1751,6 +1841,12 @@ handle_qa_phase() {
     # .qa-spawn-deaths counter instead of the unbounded resume-relaunch branch.
     touch "${LOCK_DIR}/.qa-spawn-death-pending-${story_id}" 2>/dev/null || true
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_PROMPT_EMPTY" "0"
+    rm -f "$prompt_file" 2>/dev/null || true
+    return 1
+  fi
+
+  # ── Prompt-context tripwire (AC2, AC4) ────────────────────────────────────
+  if ! _assert_prompt_context_resolved "$prompt_file" "qa" "$story_id" "$trace_id"; then
     rm -f "$prompt_file" 2>/dev/null || true
     return 1
   fi
