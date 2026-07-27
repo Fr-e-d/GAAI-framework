@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+-: resolve Plan/QA daemon-prompt $GAAI_* tokens at construction time
 - test: repair 37 pre-existing daemon-state-machine failures (origin/staging fixtures)
 - fix: reconcile plan-prompt EXECUTE-NOW block with sanctioned plan-blocked exits
 - fix: harden plan/qa phase prompts against conversational bail
