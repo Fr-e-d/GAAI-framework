@@ -108,18 +108,18 @@ Auxiliary states: `deferred`, `blocked`, `cancelled`, `superseded`, `escalated`.
 
 ## Backlog Archiving Rules
 
-A `done` item may be archived (moved from `active.backlog.yaml` to `done/`) once it is terminal. Archiving is a **file split, not a deletion**: the archive lives in the same repository, under version control, and is never pruned.
+An item may be archived (moved from `active.backlog.yaml` to `done/`) once its status is `done`, `cancelled`, or `superseded`. Archiving is a **file split, not a deletion**: the archive lives in the same repository, under version control, and is never pruned.
 
-**The resolution set is `active.backlog.yaml` ∪ `done/*.yaml`.** After archiving, verify: every `dependencies` entry across the active backlog resolves to an item present in **that union**. An id that exists in neither is a broken ref — **zero broken refs allowed**.
+**A dependency id resolves if it names a row in any backlog file — `active.backlog.yaml`, `blocked.backlog.yaml`, or `done/*.yaml`.** An id that names a row in none of them is a broken ref: **zero broken refs allowed**. Note this is an *existence* test, not a *satisfaction* test — resolving proves the referenced item is findable, not that it is complete. Whether a dependency is satisfied is a separate, status-based question the scheduler answers.
 
 Dependencies on `done` items are historical (execution order) but must be preserved for traceability — never cleared or stripped. Archiving an item therefore never invalidates an edge pointing at it, and never requires pulling a dependency closure back into the active backlog.
 
 Two further invariants, both mechanically checkable:
 
 1. An id must appear **at most once** in `active.backlog.yaml`. Per-story tooling is id-keyed and silently takes the first match, so a duplicate desynchronises recorded status from actual delivery.
-2. An archived item must not be **re-added** to the active backlog under the same id while its archived row still exists, except as a deliberate minimal traceability stub. Prefer moving over copying.
+2. An id must live in **exactly one** backlog file. Do not copy a row into the active backlog to make a reference resolve — the resolution set above already covers it, and a second copy violates the single-source-of-truth rule in `backlog.rules.md`. Move, never duplicate.
 
-> **Amended 2026-07-28.** Step 4 previously required every dependency to resolve inside `active.backlog.yaml` alone, which forced a `done` item's entire transitive closure to stay unarchived for as long as any non-terminal item depended on it. Three findings drove the amendment: the scheduler already resolves dependencies over the union (archived ids count as satisfied), so the stricter reading protected nothing operationally; the strict form fought the archive's own purpose, since one live item could pin an arbitrarily large closure in the active file indefinitely; and it was being worked around in practice rather than followed. A rule that is unenforceable, unenforced, and generates churn is worse than one that matches the tooling. The traceability the old step 4 protected is preserved by the union plus the never-strip-edges rule.
+> **Amended 2026-07-28.** Step 4 previously required every dependency to resolve inside `active.backlog.yaml` alone, which forced a `done` item's entire transitive closure to stay unarchived for as long as any non-terminal item depended on it. Three findings drove the amendment: the scheduler already resolves dependencies over the union (archived ids count as satisfied), so the stricter reading protected nothing operationally; the strict form fought the archive's own purpose, since one live item could pin an arbitrarily large closure in the active file indefinitely; and it was being worked around in practice rather than followed. A rule that is unenforceable, unenforced, and generates churn is worse than one that matches the tooling. The traceability the old step 4 protected is preserved by the union plus the never-strip-edges rule. A consumer sweep found no tool that resolves dependencies from the active backlog without also reading the archive.
 
 ---
 
