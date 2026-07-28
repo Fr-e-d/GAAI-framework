@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: name the entry tier Starter
 - fix: correct the amended rule and the core hook after review FAIL
 -: resolve Plan/QA daemon-prompt $GAAI_* tokens at construction time
 - test: repair 37 pre-existing daemon-state-machine failures (origin/staging fixtures)
