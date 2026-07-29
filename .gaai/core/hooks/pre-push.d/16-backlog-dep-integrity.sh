@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-push validator : backlog dependency integrity.
+# Pre-push validator : backlog integrity — dependencies and row structure.
 #
 # Checks two things from base.rules.md § Backlog Archiving Rules that a machine
 # can decide. Both were prose-only for a long time, and both had been violated in
@@ -9,6 +9,16 @@
 #   ERROR — a dependency id that names a row in NO backlog file (active, blocked,
 #           or any done/*.yaml). Genuinely dangling: a typo, or an item deleted
 #           instead of archived. Nothing can ever resolve it.
+#
+#   ERROR — a row whose `artefact` filename names a DIFFERENT row. Editing a
+#           backlog by hand can displace a row's tail onto its neighbour: the
+#           YAML stays valid, so nothing complains, while a row now carries
+#           another story's artefact, dependencies and notes. A `refined` row in
+#           that state dispatches the wrong story under its own id.
+#
+#   ERROR — a row with no `status`. The 3-phase dispatcher reads status on every
+#           poll and dies on an absent one, leaving the entry stuck — and a row
+#           only loses its status by being damaged, never by being written.
 #
 #   ERROR — a duplicate id WITHIN active.backlog.yaml. Per-story tooling is
 #           id-keyed and silently takes the first match, so a duplicate
@@ -94,6 +104,28 @@ for path in sibling_files:
     except Exception:
         continue
 
+# Structural damage from hand-editing. Both were real: a Discovery run once
+# inserted rows and rotated the artefact-to-notes tail of thirteen rows across
+# four epics, deleting the status block of six of them. Every check below held
+# — valid YAML, resolvable dependencies, unique ids — and it went unnoticed for
+# a day, until two `refined` rows were found pointing at another epic's stories.
+import re
+
+ID_LIKE = re.compile(r"^E\d+(S\d+[a-z]?)?$")
+mispointed, statusless = [], []
+for item in active:
+    if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+        continue
+    art = item.get("artefact")
+    if isinstance(art, str) and art.strip():
+        stem = os.path.basename(art).split(".")[0]
+        # Only compare when the filename is itself an id — plenty of artefacts are
+        # legitimately named for a topic rather than a row.
+        if ID_LIKE.match(stem) and stem != item["id"]:
+            mispointed.append((item["id"], os.path.basename(art)))
+    if item.get("status") in (None, ""):
+        statusless.append(item["id"])
+
 seen, duplicates = set(), set()
 for item in active:
     if not isinstance(item, dict) or not isinstance(item.get("id"), str):
@@ -128,7 +160,26 @@ if dangling:
     print("   done/*.yaml: a typo, or an item deleted instead of archived.", file=sys.stderr)
     print("   Fix the id, or correct that item's dependency list in the backlog.", file=sys.stderr)
 
-if duplicates or dangling:
+if mispointed:
+    print("", file=sys.stderr)
+    print("❌ pre-push: rows whose artefact belongs to another row — push aborted.", file=sys.stderr)
+    for sid, fn in mispointed:
+        print(f"     {sid} -> {fn}", file=sys.stderr)
+    print("   This is the signature of a displaced row tail: the artefact, and usually", file=sys.stderr)
+    print("   the dependencies and notes with it, sit on the wrong row. A `refined` row", file=sys.stderr)
+    print("   in this state delivers a different story under its own id.", file=sys.stderr)
+    print("   Fix: give each row back its own tail — do not just rewrite the path.", file=sys.stderr)
+
+if statusless:
+    print("", file=sys.stderr)
+    print("❌ pre-push: backlog rows with no status — push aborted.", file=sys.stderr)
+    for sid in statusless:
+        print(f"     {sid}", file=sys.stderr)
+    print("   The 3-phase dispatcher reads status on every poll and dies on an absent", file=sys.stderr)
+    print("   one. A row does not lose its status by being written, only by being", file=sys.stderr)
+    print("   damaged — so check what else that row lost before restoring the field.", file=sys.stderr)
+
+if duplicates or dangling or mispointed or statusless:
     print("", file=sys.stderr)
     sys.exit(1)
 
