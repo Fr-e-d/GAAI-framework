@@ -10,6 +10,15 @@
 #           or any done/*.yaml). Genuinely dangling: a typo, or an item deleted
 #           instead of archived. Nothing can ever resolve it.
 #
+#   ERROR — the document is not a mapping carrying `items:`. The daemon's shell
+#           helpers query the backlog with `yq '.items[] | ...'`; a bare
+#           top-level sequence makes every one of them fail. PyYAML is happy
+#           either way, so a checker written in Python will not notice — which
+#           is exactly how this shipped: a repair script rebuilt the file from
+#           its rows and silently dropped the `cutover_state:` / `items:`
+#           header, and the recovery scan went blind for hours while reporting
+#           that it had nothing to evaluate.
+#
 #   ERROR — a row whose `artefact` filename names a DIFFERENT row. Editing a
 #           backlog by hand can displace a row's tail onto its neighbour: the
 #           YAML stays valid, so nothing complains, while a row now carries
@@ -63,6 +72,17 @@ def load(path):
     if isinstance(doc, dict) and "items" in doc:
         return doc["items"] or []
     return doc or []
+
+
+def top_level_shape(path):
+    """The shape the daemon's yq queries require, not the shape PyYAML tolerates."""
+    with open(path, encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh)
+    if not isinstance(doc, dict):
+        return f"a top-level {type(doc).__name__}, not a mapping"
+    if "items" not in doc:
+        return "a mapping with no `items:` key"
+    return None
 
 
 try:
@@ -125,6 +145,19 @@ for item in active:
             mispointed.append((item["id"], os.path.basename(art)))
     if item.get("status") in (None, ""):
         statusless.append(item["id"])
+
+shape_problem = top_level_shape(active_path)
+if shape_problem:
+    print("", file=sys.stderr)
+    print(f"❌ pre-push: {os.path.basename(active_path)} is {shape_problem} — push aborted.",
+          file=sys.stderr)
+    print("   The daemon queries this file with `yq '.items[] | ...'`, which fails outright", file=sys.stderr)
+    print("   on a bare sequence — every shell helper then returns empty, and the recovery", file=sys.stderr)
+    print("   scan reports it has nothing to evaluate while stories sit stranded.", file=sys.stderr)
+    print("   PyYAML accepts both shapes, so this survives any Python-side check.", file=sys.stderr)
+    print("   Fix: restore the `cutover_state:` block and the `items:` key above the rows.", file=sys.stderr)
+    print("", file=sys.stderr)
+    sys.exit(1)
 
 seen, duplicates = set(), set()
 for item in active:
