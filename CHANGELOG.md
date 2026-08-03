@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: stream test-gate unit output live instead of buffering
 - fix: hang-detector was blind to commit-phase activity
 - fix: name the entry tier Starter
 - fix: correct the amended rule and the core hook after review FAIL
