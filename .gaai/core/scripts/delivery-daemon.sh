@@ -937,16 +937,28 @@ check_agent_activity_stale() {
     # mtime stays frozen at its prior-phase value. Using only impl.log produces
     # false-positive hangs on every resumed-from-implemented wrapper. Track the
     # max mtime across all phase logs as the true "agent activity" signal.
+    #
+    # COMMIT phase is not one of plan/impl/qa: handle_commit_phase (daemon-
+    # dispatch.sh) writes its differential-test-gate output straight into the
+    # wrapper's own persistent log ($LOG_DIR/${sid}.wrapper.log), not into a
+    # worktree phase-log. Without tracking that file too, plan/impl/qa mtimes
+    # stay frozen at whatever they were when QA finished, so every commit-phase
+    # attempt gets killed once it runs past AGENT_HANG_THRESHOLD_SEC — even one
+    # that is actively running a long differential test suite — producing a
+    # repeat 20-ish-minute kill/relaunch loop until COMMIT_PHASE_REPEATED_FAILURE
+    # stalls the story (observed in practice on a story with a long
+    # differential test suite).
     local worktree_path
     worktree_path=$(_recovery_resolve_worktree "$sid")
     local impl_log="${worktree_path}/.delivery-logs/${sid}.impl.log"
     local plan_log="${worktree_path}/.delivery-logs/${sid}.plan.log"
     local qa_log="${worktree_path}/.delivery-logs/${sid}.qa.log"
+    local wrapper_log="${LOG_DIR}/${sid}.wrapper.log"
 
     local _latest_log=""
     local _latest_mtime=0
     local _phase_log _m
-    for _phase_log in "$plan_log" "$impl_log" "$qa_log"; do
+    for _phase_log in "$plan_log" "$impl_log" "$qa_log" "$wrapper_log"; do
       [[ -f "$_phase_log" ]] || continue
       _m=$(file_mtime "$_phase_log")
       if (( _m > _latest_mtime )); then
