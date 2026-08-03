@@ -238,14 +238,20 @@ _test_gate_parse_junit_failures() {
 _test_gate_run_units() {
   local worktree_path="$1" units="$2"
   local -a failed=()
-  local type label cmd out exit_code
+  local type label cmd exit_code
 
   while IFS='|' read -r type label cmd; do
     [[ -z "$type" ]] && continue
-    out=$(cd "$worktree_path" && eval "$cmd" 2>&1)
-    exit_code=$?
+    # Stream live instead of buffering the whole run in a `$(...)` capture:
+    # a full-suite unit can legitimately take longer than the wrapper's
+    # hang-detector threshold, and `out=$(... 2>&1)` produces zero output
+    # until the command exits — indistinguishable from a real hang on the
+    # log-mtime signal the detector watches. PIPESTATUS[0] preserves the
+    # actual command's exit code (not tee's).
+    echo "[TEST-GATE] unit=${label} type=${type} starting" >&2
+    (cd "$worktree_path" && eval "$cmd") 2>&1 | tee -a /dev/stderr >/dev/null
+    exit_code=${PIPESTATUS[0]}
     echo "[TEST-GATE] unit=${label} type=${type} exit=${exit_code}" >&2
-    printf '%s\n' "$out" | tail -40 >&2
 
     case "$type" in
       bash|pm)
