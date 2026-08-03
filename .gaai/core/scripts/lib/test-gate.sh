@@ -249,7 +249,16 @@ _test_gate_run_units() {
     # log-mtime signal the detector watches. PIPESTATUS[0] preserves the
     # actual command's exit code (not tee's).
     echo "[TEST-GATE] unit=${label} type=${type} starting" >&2
-    (cd "$worktree_path" && eval "$cmd") 2>&1 | tee -a /dev/stderr >/dev/null
+    # Deprioritise: this can spawn several workerd-backed vitest workers at
+    # 100%+ CPU each, run twice per commit-phase attempt (HEAD + baseline),
+    # with up to MAX_CONCURRENT deliveries in parallel — background test
+    # execution otherwise competes evenly with the operator's foreground work
+    # for CPU scheduling. renice on $$ (this subshell) before spawning the
+    # test process; child processes inherit the lowered niceness. macOS/Linux
+    # still grant it idle CPU when nothing else needs it, so total suite
+    # wall-clock is not meaningfully affected — only scheduling priority
+    # under contention changes.
+    (renice -n 15 -p $$ >/dev/null 2>&1; cd "$worktree_path" && eval "$cmd") 2>&1 | tee -a /dev/stderr >/dev/null
     exit_code=${PIPESTATUS[0]}
     echo "[TEST-GATE] unit=${label} type=${type} exit=${exit_code}" >&2
 
