@@ -253,12 +253,18 @@ _test_gate_run_units() {
     # 100%+ CPU each, run twice per commit-phase attempt (HEAD + baseline),
     # with up to MAX_CONCURRENT deliveries in parallel — background test
     # execution otherwise competes evenly with the operator's foreground work
-    # for CPU scheduling. renice on $$ (this subshell) before spawning the
-    # test process; child processes inherit the lowered niceness. macOS/Linux
-    # still grant it idle CPU when nothing else needs it, so total suite
-    # wall-clock is not meaningfully affected — only scheduling priority
-    # under contention changes.
-    (renice -n 15 -p $$ >/dev/null 2>&1; cd "$worktree_path" && eval "$cmd") 2>&1 | tee -a /dev/stderr >/dev/null
+    # for CPU scheduling. Renice THIS subshell before spawning the test
+    # process so its children inherit the lowered niceness — must target
+    # $BASHPID, not $$: inside `( ... )`, $$ still resolves to the PARENT
+    # shell's PID (bash never rebinds it for subshells), so `renice -p $$`
+    # relabels a process that already forked this subshell before the call
+    # ran and has no effect on anything forked from here. Verified: children
+    # spawned after `renice -p $$` stayed at nice 0; after `renice -p
+    # $BASHPID` they correctly inherit 15. macOS/Linux still grant idle CPU
+    # when nothing else needs it, so total suite wall-clock is not
+    # meaningfully affected — only scheduling priority under contention
+    # changes.
+    (renice -n 15 -p $BASHPID >/dev/null 2>&1; cd "$worktree_path" && eval "$cmd") 2>&1 | tee -a /dev/stderr >/dev/null
     exit_code=${PIPESTATUS[0]}
     echo "[TEST-GATE] unit=${label} type=${type} exit=${exit_code}" >&2
 
