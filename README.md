@@ -75,7 +75,7 @@ your-project/
     │   ├── QUICK-REFERENCE.md ← daily cheat sheet
     │   ├── VERSION
     │   ├── agents/            ← Discovery + Delivery + Bootstrap agent specs
-    │   ├── skills/            ← 47 execution units
+    │   ├── skills/            ← execution units
     │   ├── contexts/rules/    ← framework rules
     │   ├── workflows/         ← delivery loop, bootstrap, handoffs
     │   ├── scripts/           ← bash utilities
@@ -148,7 +148,7 @@ git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai && \
 `/gaai-deliver` delivers a single Story in the current session. `/gaai-daemon` launches the Delivery Daemon, which delivers Stories autonomously. Requires a git repo with a `staging` branch:
 
 - Polls the backlog for `refined` stories
-- Launches parallel Claude Code sessions in tmux (default: 3 slots, configurable)
+- Launches parallel Claude Code or Codex sessions in tmux (default: 3 slots, configurable)
 - Coordinates across devices via git push
 - Monitors health, retries failures, archives completed work
 - Auto-opens a monitoring dashboard (tmux split: daemon config + active deliveries)
@@ -172,9 +172,9 @@ bash .gaai/core/scripts/daemon-setup.sh
 
 > `/gaai-deliver` = one Story, current session. `/gaai-daemon` = background daemon, parallel delivery.
 
-> Requires: git repo, `staging` branch, **Claude Code CLI (`claude` in PATH)**, python3, tmux (recommended) or Terminal.app (macOS fallback).
+> Requires: git repo, `staging` branch, **Claude Code CLI (`claude` in PATH, default) or Codex CLI (`codex` in PATH, via `GAAI_DAEMON_EXECUTOR=codex`)**, python3, tmux (recommended) or Terminal.app (macOS fallback).
 >
-> **Note:** The Delivery Daemon requires the `claude` binary regardless of which AI tool you use for Discovery. Discovery and governance work with any tool — autonomous delivery requires Claude Code CLI.
+> **Note:** The Delivery Daemon explicitly supports two local headless executors — Claude Code CLI (default) and Codex CLI. An unknown or unavailable executor stops before governed work begins with an actionable error. Discovery and governance work with any AI tool — this requirement applies only to autonomous delivery.
 >
 > **Tested on:** macOS (Apple Silicon). Linux and WSL (Windows) are expected to work but not yet validated — issues and feedback welcome.
 
@@ -222,7 +222,7 @@ One canonical source (`.gaai/`). Thin adapters per tool. No duplication. Discove
 - [Core Concepts](docs/02-core-concepts.md) — dual track, backlog, memory, skills, artefacts
 - [Vibe Coder Guide](docs/guides/vibe-coder-guide.md) — fast daily workflow
 - [Senior Engineer Guide](docs/guides/senior-engineer-guide.md) — governance, rules, CI
-- [Skills Index](.gaai/core/skills/README.skills.md) — all 47 skills
+- [Skills Index](.gaai/core/skills/README.skills.md) — full skill catalog
 - [Tool Compatibility](docs/reference/tool-compatibility.md) — Claude Code, OpenCode, Codex CLI, Gemini CLI, Antigravity, Cursor, Windsurf
 - [Design Decisions](docs/architecture/design-decisions.md) — why GAAI is structured the way it is (ADRs + research basis)
 
