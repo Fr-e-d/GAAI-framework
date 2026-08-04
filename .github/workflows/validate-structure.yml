@@ -15,8 +15,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate .gaai/ structure
-        run: bash .gaai/core/scripts/health-check.sh
+      - name: Report checked-out ref
+        run: echo "Validating checked-out ref $(git rev-parse HEAD)"
 
-      - name: Validate artefact references
-        run: bash .gaai/core/scripts/artefact-sync.sh
+      - name: Validate public release
+        run: bash .gaai/core/scripts/validate-public-release.sh
