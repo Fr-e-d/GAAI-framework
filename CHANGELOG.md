@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - fix: renice test-gate subshell via $BASHPID, not $$
+- fix: renice test-gate subshell via $BASHPID, not $$
 - fix: lower CPU priority of test-gate unit runs
 - fix: stream test-gate unit output live instead of buffering
 - fix: hang-detector was blind to commit-phase activity

@@ -272,6 +272,9 @@ _cas_max_epic() {
     $1 !~ /^#/ && $2 == "epic" {
       sub(/^E/, "", $1); if ($1+0 > max) max = $1+0
     }
+    $1 !~ /^#/ && $2 == "story" && $1 ~ /^E[0-9]+S[0-9]+$/ {
+      e=$1; sub(/S[0-9]+$/, "", e); sub(/^E/, "", e); if (e+0 > max) max = e+0
+    }
     END { print max+0 }' 2>/dev/null || echo 0
 }
 
@@ -296,6 +299,22 @@ _cas_max_dec() {
     END { print max+0 }' 2>/dev/null || echo 0
 }
 
+# Warn (to stderr) about any row in CAS_CONTENT that does not parse as a reservation (id present
+# but kind or epoch field empty after tab-split). Read-only — never mutates CAS_CONTENT; the
+# existing write path already forwards prior CAS content verbatim, so survival (AC5) requires no
+# change there, only this warning.
+_warn_malformed_cas_rows() {
+  [[ -n "$CAS_CONTENT" ]] || return 0
+  local raw_line c_id c_kind c_epoch
+  while IFS= read -r raw_line; do
+    [[ -z "$raw_line" || "$raw_line" == \#* ]] && continue
+    IFS=$'\t' read -r c_id c_kind c_epoch <<< "$raw_line" || true
+    if [[ -n "$c_id" && ( -z "$c_kind" || -z "$c_epoch" ) ]]; then
+      echo "allocate-id.sh: WARNING: malformed row in shared reservation record (${GIT_CAS_REF} on ${GAAI_REMOTE}): '${raw_line}' — ignored for max computation, left unchanged in the record" >&2
+    fi
+  done <<< "$CAS_CONTENT"
+}
+
 # Fetch CAS ref before the lock. Gated on SCAN_REMOTE (both are remote operations; setting
 # GAAI_SCAN_REMOTE=0 disables the branch scan AND the CAS to keep isolated / offline runs hermetic).
 # Failure is silent — push will detect it via the unconfirmed path.
@@ -303,6 +322,7 @@ CAS_CONTENT=""
 if [[ "$GAAI_RESERVATION_BACKEND" == "git-cas" && "$SCAN_REMOTE" == "true" ]] && \
     git remote get-url "$GAAI_REMOTE" >/dev/null 2>&1; then
   _fetch_cas_ref || true
+  [[ -n "$CAS_CONTENT" ]] && _warn_malformed_cas_rows
 fi
 
 # ── Ensure ledger directory exists ────────────────────────────────────────────
@@ -366,10 +386,21 @@ _id_on_remote() {
 }
 
 if [[ -f "$LEDGER_FILE" ]]; then
-  while IFS=$'\t' read -r entry_id entry_kind entry_epoch; do
+  while IFS= read -r raw_line; do
     # Skip blank lines and comment/header lines
-    [[ -z "$entry_id" || "$entry_id" == \#* ]] && continue
-    [[ -z "$entry_kind" || -z "$entry_epoch" ]] && continue
+    [[ -z "$raw_line" || "$raw_line" == \#* ]] && continue
+
+    IFS=$'\t' read -r entry_id entry_kind entry_epoch <<< "$raw_line" || true
+
+    # Malformed row (AC5): id present but kind or epoch field missing after tab-split. Earlier
+    # this shape was silently dropped by the rewrite below; now it is warned about and kept
+    # verbatim, with no landed/TTL check (there is no reliable kind to branch on).
+    if [[ -n "$entry_id" && ( -z "$entry_kind" || -z "$entry_epoch" ) ]]; then
+      echo "allocate-id.sh: WARNING: malformed row in local ledger (${LEDGER_FILE}): '${raw_line}' — kept as-is, ignored for max computation" >&2
+      LEDGER_KEPT="${LEDGER_KEPT}${raw_line}"$'\n'
+      continue
+    fi
+    [[ -z "$entry_id" ]] && continue
 
     # Prune: landed check — kind-branch so each kind uses its own landed-signal.
     # dec entries: landed when DEC-<N>.md exists in the decisions directory.
@@ -456,7 +487,12 @@ _decisions_max_dec() {
 
 _ledger_max_epic() {
   [[ -f "$LEDGER_FILE" ]] || { echo 0; return; }
-  awk -F'\t' '$1 !~ /^#/ && $2=="epic" { sub(/^E/, "", $1); if ($1+0 > max) max=$1+0 } END { print max+0 }' \
+  awk -F'\t' '
+    $1 !~ /^#/ && $2=="epic" { sub(/^E/, "", $1); if ($1+0 > max) max=$1+0 }
+    $1 !~ /^#/ && $2=="story" && $1 ~ /^E[0-9]+S[0-9]+$/ {
+      e=$1; sub(/S[0-9]+$/, "", e); sub(/^E/, "", e); if (e+0 > max) max=e+0
+    }
+    END { print max+0 }' \
     "$LEDGER_FILE" 2>/dev/null || echo 0
 }
 
