@@ -412,8 +412,8 @@ T4_INCIDENT=\$(ls -t "${T4_GAAI_PROJ}/contexts/artefacts/incidents/incident-${T4
 printf 'INCIDENT_EXISTS=%s\n' "\$([ -n "\$T4_INCIDENT" ] && [ -f "\$T4_INCIDENT" ] && echo yes || echo no)"
 if [ -f "\$T4_INCIDENT" ]; then
   printf 'INCIDENT_CLASS=%s\n' "\$(grep -m1 '^class:' "\$T4_INCIDENT" | awk '{print \$2}' || true)"
-  printf 'HAS_EVIDENCE=%s\n' "\$(grep -c '## Evidence Collected' "\$T4_INCIDENT" 2>/dev/null || echo 0)"
-  printf 'HAS_RATIONALE=%s\n' "\$(grep -c '## Classification Rationale' "\$T4_INCIDENT" 2>/dev/null || echo 0)"
+  printf 'HAS_EVIDENCE=%s\n' "\$(grep -c '## Evidence Collected' "\$T4_INCIDENT" 2>/dev/null || true)"
+  printf 'HAS_RATIONALE=%s\n' "\$(grep -c '## Classification Rationale' "\$T4_INCIDENT" 2>/dev/null || true)"
 fi
 T4APPEND
 

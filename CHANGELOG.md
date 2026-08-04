@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: stop `grep -c ... || echo 0` from emitting two counts
+- fix: resolve the worktree deps marker without a project path
+- fix: stop daemon-state-machine reaching into the host repo
 - fix: make the OSS test corpus pass on Linux and macOS
 - chore: raise phase timeouts for Sonnet 5 + bound test-gate unit runs
 -: State ELv2 licensing publicly without open-source ambiguity

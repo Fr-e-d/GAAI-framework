@@ -24,12 +24,14 @@ DISPATCH="$SCRIPT_DIR/../daemon-dispatch.sh"
 # ── Fixture setup ──────────────────────────────────────────────────────────────
 FIXTURE_DIR="/tmp/gaai-wt-deps-test-$$"
 WT_PATH="$FIXTURE_DIR/worktree"
-MARKER_DIR="$WT_PATH/workers/gaai-cloud/api/node_modules/@cloudflare/workers-types"
+# Mirrors _wt_deps_marker_dir's default (pnpm's virtual store at the workspace
+# root). Previously a hardcoded product path, which only ever existed in one repo.
+MARKER_DIR="$WT_PATH/node_modules/.pnpm"
 MOCK_BIN="$FIXTURE_DIR/bin"
 PNPM_LOG="$FIXTURE_DIR/pnpm-calls.log"
 ROUTING_LOG="$FIXTURE_DIR/routing-records.log"
 
-mkdir -p "$MOCK_BIN" "$WT_PATH/workers/gaai-cloud/api/node_modules"
+mkdir -p "$MOCK_BIN" "$WT_PATH/node_modules"
 touch "$PNPM_LOG" "$ROUTING_LOG"
 
 cleanup() { rm -rf "$FIXTURE_DIR"; }

@@ -231,7 +231,7 @@ else
   fail "T4a: expected 2 audit entries for T4, got ${_t4_audit_count}"
 fi
 
-_t4_log_lines=$(printf '%s\n%s\n' "$_t4_out1" "$_t4_out2" | grep -c '\[WORKTREE-GUARD\]' || echo 0)
+_t4_log_lines=$(printf '%s\n%s\n' "$_t4_out1" "$_t4_out2" | grep -c '\[WORKTREE-GUARD\]' || true)
 if [[ "$_t4_log_lines" -eq 1 ]]; then
   pass "T4b: [WORKTREE-GUARD] log line printed exactly once across both calls (throttled)"
 else

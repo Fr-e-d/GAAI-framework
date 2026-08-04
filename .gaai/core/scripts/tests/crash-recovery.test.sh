@@ -382,7 +382,7 @@ else
 fi
 
 echo "T8: specific drift story edits are still M (modified)"
-drift1_in_diff=$(git -C "$AC6_DIR" diff HEAD -- "$AC6_BACKLOG_REL" 2>/dev/null | grep -c "operator-edited notes" || echo 0)
+drift1_in_diff=$(git -C "$AC6_DIR" diff HEAD -- "$AC6_BACKLOG_REL" 2>/dev/null | grep -c "operator-edited notes" || true)
 if [[ "$drift1_in_diff" -gt 0 ]]; then
   pass "T8: drift story 1 edits preserved in WT diff"
 else

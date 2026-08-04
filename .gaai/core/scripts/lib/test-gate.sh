@@ -207,7 +207,7 @@ _test_gate_resolve_units() {
 _test_gate_parse_junit_failures() {
   local xml_path="$1" dir_label="$2"
   local tc_count=0
-  [[ -s "$xml_path" ]] && tc_count=$(grep -c '<testcase' "$xml_path" 2>/dev/null || echo 0)
+  [[ -s "$xml_path" ]] && tc_count=$(grep -c '<testcase' "$xml_path" 2>/dev/null || true)
   [[ "${tc_count:-0}" -eq 0 ]] && return 1
 
   awk -v dir="$dir_label" '

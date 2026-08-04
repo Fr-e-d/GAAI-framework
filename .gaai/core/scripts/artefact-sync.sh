@@ -98,8 +98,8 @@ for artefact_type in "epics" "stories" "plans" "prd"; do
     [[ "$artefact_file" == *"_template"* ]] && continue
     [[ "$artefact_file" == *".gitkeep" ]] && continue
 
-    has_type=$(grep -c "^type: artefact" "$artefact_file" 2>/dev/null || echo 0)
-    has_id=$(grep -c "^id:" "$artefact_file" 2>/dev/null || echo 0)
+    has_type=$(grep -c "^type: artefact" "$artefact_file" 2>/dev/null || true)
+    has_id=$(grep -c "^id:" "$artefact_file" 2>/dev/null || true)
     name=$(basename "$artefact_file")
 
     if [[ "$has_type" -gt 0 && "$has_id" -gt 0 ]]; then
