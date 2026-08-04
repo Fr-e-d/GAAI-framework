@@ -603,6 +603,309 @@ else
   _fail "refs/gaai/reservations absent from remote after dec CAS allocations"
 fi
 
+# ── Test 13: AC1 — story-only ledger rows raise the epic max ─────────────────
+echo "Test 13: AC1 — ledger-only story rows (no epic row) raise the epic max"
+
+T13="${WORK}/t13"
+mkdir -p "$T13"
+T13_EMPTY="${T13}/active.backlog.yaml"; _empty_backlog "$T13_EMPTY"
+T13_LEDGER="${WORK}/t13.tsv"
+T13_EPIC="E70"
+NOW_T13="$(date +%s)"
+
+# A run of story rows under the test epic prefix is reserved, with no epic row for it at all.
+printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T13_LEDGER"
+for n in 01 02 03 04 05 06 07; do
+  printf '%sS%s\tstory\t%s\n' "$T13_EPIC" "$n" "$NOW_T13" >> "$T13_LEDGER"
+done
+
+RESULT_T13="$(GAAI_BACKLOG_PATH="$T13_EMPTY" GAAI_RESERVATION_LEDGER="$T13_LEDGER" "$ALLOCATOR" epic)"
+
+if [[ "$RESULT_T13" == "E71" ]]; then
+  _pass "Story-only reservations for ${T13_EPIC} fold into epic max → ${RESULT_T13}"
+else
+  _fail "Expected E71 (epic max must reflect ${T13_EPIC}'s story rows), got: ${RESULT_T13}"
+fi
+
+# Boundary: a single story row alone (not a run) must still raise the max.
+T13B_LEDGER="${WORK}/t13b.tsv"
+T13B_EPIC="E80"
+printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T13B_LEDGER"
+printf '%sS01\tstory\t%s\n' "$T13B_EPIC" "$NOW_T13" >> "$T13B_LEDGER"
+
+RESULT_T13B="$(GAAI_BACKLOG_PATH="$T13_EMPTY" GAAI_RESERVATION_LEDGER="$T13B_LEDGER" "$ALLOCATOR" epic)"
+if [[ "$RESULT_T13B" == "E81" ]]; then
+  _pass "Single story row for ${T13B_EPIC} still raises epic max → ${RESULT_T13B}"
+else
+  _fail "Expected E81 (single story row must raise epic max), got: ${RESULT_T13B}"
+fi
+
+# ── Test 14: AC2 — CAS-only story rows (no epic row) raise the epic max ──────
+echo "Test 14: AC2 — CAS-only story rows (hermetic local bare remote) raise the epic max"
+
+T14_BARE="${WORK}/t14-remote.git"
+T14_PRELOAD="${WORK}/t14-preload"
+T14_WORK="${WORK}/t14-work"
+T14_EPIC="E90"
+
+git init -q --bare "$T14_BARE"
+git init -q "$T14_PRELOAD"
+(
+  cd "$T14_PRELOAD"
+  git config user.email t@example.test
+  git config user.name tester
+  git remote add origin "$T14_BARE"
+  # Preload refs/gaai/reservations with story-only rows for T14_EPIC (no epic row).
+  _pre_blob="$(printf '%sS01\tstory\t1000000000\n%sS05\tstory\t1000000000\n' "$T14_EPIC" "$T14_EPIC" \
+    | git hash-object -w --stdin 2>/dev/null)"
+  _pre_tree="$(printf '100644 blob %s\treservations.tsv\n' "$_pre_blob" | git mktree 2>/dev/null)"
+  _pre_commit="$(
+    GIT_AUTHOR_NAME=gaai GIT_AUTHOR_EMAIL=gaai@localhost \
+    GIT_COMMITTER_NAME=gaai GIT_COMMITTER_EMAIL=gaai@localhost \
+    GIT_AUTHOR_DATE="1000000000 +0000" GIT_COMMITTER_DATE="1000000000 +0000" \
+    git commit-tree -m "pre-load story-only rows" "$_pre_tree" 2>/dev/null
+  )"
+  git update-ref refs/gaai/reservations "$_pre_commit" 2>/dev/null
+  git push -q --force origin refs/gaai/reservations
+) >/dev/null 2>&1
+
+git clone -q "$T14_BARE" "$T14_WORK" >/dev/null 2>&1
+T14_EMPTY="${WORK}/t14-empty.yaml"; _empty_backlog "$T14_EMPTY"
+
+RESULT_T14="$(cd "$T14_WORK" && GAAI_SCAN_REMOTE=1 GAAI_RESERVATION_BACKEND=git-cas \
+  GAAI_BACKLOG_PATH="$T14_EMPTY" GAAI_RESERVATION_LEDGER="${WORK}/t14.tsv" "$ALLOCATOR" epic)"
+
+if [[ "$RESULT_T14" == "E91" ]]; then
+  _pass "CAS-only story rows for ${T14_EPIC} fold into epic max → ${RESULT_T14}"
+else
+  _fail "Expected E91 (CAS epic max must reflect ${T14_EPIC}'s story rows), got: ${RESULT_T14}"
+fi
+
+# ── Test 15: AC3 — mixed epic + story rows, max over either kind ─────────────
+echo "Test 15: AC3 — mixed epic-kind and story-kind rows, max wins regardless of kind"
+
+T15="${WORK}/t15"
+mkdir -p "$T15"
+T15_EMPTY="${T15}/active.backlog.yaml"; _empty_backlog "$T15_EMPTY"
+NOW_T15="$(date +%s)"
+T15_LOW_EPIC="E10"
+T15_HIGH_EPIC="E15"
+
+# Case A: story row's epic number (high) exceeds the epic-kind row's number (low).
+T15A_LEDGER="${WORK}/t15a.tsv"
+printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T15A_LEDGER"
+printf '%s\tepic\t%s\n'   "$T15_LOW_EPIC"  "$NOW_T15" >> "$T15A_LEDGER"
+printf '%sS02\tstory\t%s\n' "$T15_HIGH_EPIC" "$NOW_T15" >> "$T15A_LEDGER"
+
+RESULT_T15A="$(GAAI_BACKLOG_PATH="$T15_EMPTY" GAAI_RESERVATION_LEDGER="$T15A_LEDGER" "$ALLOCATOR" epic)"
+if [[ "$RESULT_T15A" == "E16" ]]; then
+  _pass "Story row for ${T15_HIGH_EPIC} outranks epic row ${T15_LOW_EPIC} → ${RESULT_T15A}"
+else
+  _fail "Expected E16 (story row's epic number must win), got: ${RESULT_T15A}"
+fi
+
+# Case B: reversed — the epic-kind row's own number (high) still wins over a lower story row.
+T15B_LEDGER="${WORK}/t15b.tsv"
+printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T15B_LEDGER"
+printf '%s\tepic\t%s\n'   "$T15_HIGH_EPIC" "$NOW_T15" >> "$T15B_LEDGER"
+printf '%sS02\tstory\t%s\n' "$T15_LOW_EPIC"  "$NOW_T15" >> "$T15B_LEDGER"
+
+RESULT_T15B="$(GAAI_BACKLOG_PATH="$T15_EMPTY" GAAI_RESERVATION_LEDGER="$T15B_LEDGER" "$ALLOCATOR" epic)"
+if [[ "$RESULT_T15B" == "E16" ]]; then
+  _pass "Epic row ${T15_HIGH_EPIC} still wins over lower story row for ${T15_LOW_EPIC} → ${RESULT_T15B}"
+else
+  _fail "Expected E16 (epic row's own number must still win), got: ${RESULT_T15B}"
+fi
+
+# ── Test 16: AC4 — no story ID of the returned epic exists in any source ─────
+echo "Test 16: AC4 — returned epic exceeds the max across all four sources at once"
+
+T16="${WORK}/t16"
+mkdir -p "$T16"
+T16_BARE="${WORK}/t16-remote.git"
+T16_SEED="${WORK}/t16-seed"
+T16_WORK="${WORK}/t16-work"
+T16_BACKLOG_EPIC="E30"
+T16_REMOTE_EPIC="E40"
+T16_LEDGER_EPIC="E50"
+T16_CAS_EPIC="E60"
+
+# Four different epic numbers, one per source, all via story-shaped rows/tokens where applicable:
+#   backlog:       T16_BACKLOG_EPIC (story-shaped token)
+#   remote branch: T16_REMOTE_EPIC
+#   ledger:        T16_LEDGER_EPIC (story row)
+#   CAS:           T16_CAS_EPIC (story row, highest)
+cat > "${T16}/active.backlog.yaml" <<YAML
+- id: ${T16_BACKLOG_EPIC}S01
+  epic: ${T16_BACKLOG_EPIC}
+  title: Backlog story token
+  status: draft
+YAML
+
+git init -q --bare "$T16_BARE"
+git init -q "$T16_SEED"
+(
+  cd "$T16_SEED"
+  git config user.email t@example.test; git config user.name tester
+  git commit -q --allow-empty -m init
+  git branch "story/${T16_REMOTE_EPIC}S01"
+  git remote add origin "$T16_BARE"
+  git push -q origin --all
+) >/dev/null 2>&1
+git init -q "$T16_WORK"
+( cd "$T16_WORK"; git remote add testremote "$T16_BARE" ) >/dev/null 2>&1
+
+T16_LEDGER="${WORK}/t16.tsv"
+NOW_T16="$(date +%s)"
+printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T16_LEDGER"
+printf '%sS01\tstory\t%s\n' "$T16_LEDGER_EPIC" "$NOW_T16" >> "$T16_LEDGER"
+
+# Preload CAS with the highest story-shaped row on the same bare remote.
+(
+  cd "$T16_SEED"
+  _pre_blob="$(printf '%sS01\tstory\t1000000000\n' "$T16_CAS_EPIC" | git hash-object -w --stdin 2>/dev/null)"
+  _pre_tree="$(printf '100644 blob %s\treservations.tsv\n' "$_pre_blob" | git mktree 2>/dev/null)"
+  _pre_commit="$(
+    GIT_AUTHOR_NAME=gaai GIT_AUTHOR_EMAIL=gaai@localhost \
+    GIT_COMMITTER_NAME=gaai GIT_COMMITTER_EMAIL=gaai@localhost \
+    GIT_AUTHOR_DATE="1000000000 +0000" GIT_COMMITTER_DATE="1000000000 +0000" \
+    git commit-tree -m "pre-load highest story-shaped row" "$_pre_tree" 2>/dev/null
+  )"
+  git update-ref refs/gaai/reservations "$_pre_commit" 2>/dev/null
+  git push -q --force origin refs/gaai/reservations
+) >/dev/null 2>&1
+
+RESULT_T16="$(cd "$T16_WORK" && GAAI_SCAN_REMOTE=1 GAAI_REMOTE=testremote GAAI_RESERVATION_BACKEND=git-cas \
+  GAAI_BACKLOG_PATH="${T16}/active.backlog.yaml" GAAI_RESERVATION_LEDGER="$T16_LEDGER" "$ALLOCATOR" epic)"
+
+# Highest of the four sources is the CAS epic number → expect that +1.
+if [[ "$RESULT_T16" == "E61" ]]; then
+  _pass "Epic max correctly reflects the highest of all four sources (CAS ${T16_CAS_EPIC}) → ${RESULT_T16}"
+else
+  _fail "Expected E61 (max across backlog=30/remote=40/ledger=50/CAS=60), got: ${RESULT_T16}"
+fi
+
+# ── Test 17: AC5 — malformed ledger row: warn, keep max, survive ─────────────
+echo "Test 17: AC5 — malformed local-ledger row is warned about, ignored for max, and kept"
+
+T17="${WORK}/t17"
+mkdir -p "$T17"
+T17_EMPTY="${T17}/active.backlog.yaml"; _empty_backlog "$T17_EMPTY"
+T17_LEDGER="${WORK}/t17.tsv"
+NOW_T17="$(date +%s)"
+
+# Well-formed E5 epic row + a kind-less malformed row (id only, no tabs) — kind-less so it is
+# invisible to every $2=="epic"/$2=="story" awk pattern, making "does not lower the max" a real
+# assertion rather than a tautology (per the plan's Edge Cases note).
+printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T17_LEDGER"
+printf 'E5\tepic\t%s\n' "$NOW_T17" >> "$T17_LEDGER"
+printf 'garbage-malformed-row\n' >> "$T17_LEDGER"
+
+T17_STDERR="${WORK}/t17.stderr"
+RESULT_T17="$(GAAI_BACKLOG_PATH="$T17_EMPTY" GAAI_RESERVATION_LEDGER="$T17_LEDGER" "$ALLOCATOR" epic 2>"$T17_STDERR")"
+
+if [[ "$RESULT_T17" == "E6" ]]; then
+  _pass "Malformed row did not lower/raise the max → ${RESULT_T17}"
+else
+  _fail "Expected E6 (malformed row must not affect max=5), got: ${RESULT_T17}"
+fi
+
+if grep -q "malformed row in local ledger" "$T17_STDERR" 2>/dev/null; then
+  _pass "Warning emitted for malformed local-ledger row"
+else
+  _fail "Expected 'malformed row in local ledger' warning on stderr, got: $(cat "$T17_STDERR" 2>/dev/null)"
+fi
+
+if grep -qF "garbage-malformed-row" "$T17_LEDGER" 2>/dev/null; then
+  _pass "Malformed row survives in the ledger (not dropped)"
+else
+  _fail "Malformed row was dropped from the ledger — should survive per AC5"
+fi
+
+# ── Test 18: AC5 — malformed CAS row: warn, keep max, survive ────────────────
+echo "Test 18: AC5 — malformed shared-record (CAS) row is warned about, ignored for max, kept"
+
+T18_BARE="${WORK}/t18-remote.git"
+T18_PRELOAD="${WORK}/t18-preload"
+T18_WORK="${WORK}/t18-work"
+
+git init -q --bare "$T18_BARE"
+git init -q "$T18_PRELOAD"
+(
+  cd "$T18_PRELOAD"
+  git config user.email t@example.test
+  git config user.name tester
+  git remote add origin "$T18_BARE"
+  # Preload with a well-formed E5 epic row + a kind-less malformed row (id only, no tabs).
+  _pre_blob="$(printf 'E5\tepic\t1000000000\ngarbage-malformed-row\n' | git hash-object -w --stdin 2>/dev/null)"
+  _pre_tree="$(printf '100644 blob %s\treservations.tsv\n' "$_pre_blob" | git mktree 2>/dev/null)"
+  _pre_commit="$(
+    GIT_AUTHOR_NAME=gaai GIT_AUTHOR_EMAIL=gaai@localhost \
+    GIT_COMMITTER_NAME=gaai GIT_COMMITTER_EMAIL=gaai@localhost \
+    GIT_AUTHOR_DATE="1000000000 +0000" GIT_COMMITTER_DATE="1000000000 +0000" \
+    git commit-tree -m "pre-load malformed row" "$_pre_tree" 2>/dev/null
+  )"
+  git update-ref refs/gaai/reservations "$_pre_commit" 2>/dev/null
+  git push -q --force origin refs/gaai/reservations
+) >/dev/null 2>&1
+
+git clone -q "$T18_BARE" "$T18_WORK" >/dev/null 2>&1
+T18_EMPTY="${WORK}/t18-empty.yaml"; _empty_backlog "$T18_EMPTY"
+
+T18_STDERR="${WORK}/t18.stderr"
+RESULT_T18="$(cd "$T18_WORK" && GAAI_SCAN_REMOTE=1 GAAI_RESERVATION_BACKEND=git-cas \
+  GAAI_BACKLOG_PATH="$T18_EMPTY" GAAI_RESERVATION_LEDGER="${WORK}/t18.tsv" "$ALLOCATOR" epic 2>"$T18_STDERR")"
+
+if [[ "$RESULT_T18" == "E6" ]]; then
+  _pass "Malformed CAS row did not affect the max (well-formed E5 → E6) → ${RESULT_T18}"
+else
+  _fail "Expected E6 (malformed CAS row must not affect max=5), got: ${RESULT_T18}"
+fi
+
+if grep -q "malformed row in shared reservation record" "$T18_STDERR" 2>/dev/null; then
+  _pass "Warning emitted for malformed shared-record (CAS) row"
+else
+  _fail "Expected 'malformed row in shared reservation record' warning on stderr, got: $(cat "$T18_STDERR" 2>/dev/null)"
+fi
+
+# Verify the malformed row still appears in the CAS ref content on the bare remote after the run.
+T18_CAS_CONTENT="$(cd "$T18_WORK" && git fetch -q origin '+refs/gaai/reservations:refs/gaai/reservations' 2>/dev/null; \
+  git show refs/gaai/reservations:reservations.tsv 2>/dev/null || true)"
+if printf '%s' "$T18_CAS_CONTENT" | grep -qF "garbage-malformed-row"; then
+  _pass "Malformed row survives in the shared CAS record (not dropped)"
+else
+  _fail "Malformed row missing from the CAS record after the run — should survive per AC5"
+fi
+
+# ── Test 19: AC6 — story-mode regression + malformed-row inertness ───────────
+echo "Test 19: AC6 — story-mode allocation under an existing epic is unaffected"
+
+T19="${WORK}/t19"
+mkdir -p "$T19"
+T19_EMPTY="${T19}/active.backlog.yaml"; _empty_backlog "$T19_EMPTY"
+T19_LEDGER="${WORK}/t19.tsv"
+T19_EPIC="E99"
+
+STORY_T19_A="$(GAAI_BACKLOG_PATH="$T19_EMPTY" GAAI_RESERVATION_LEDGER="$T19_LEDGER" "$ALLOCATOR" story "$T19_EPIC")"
+STORY_T19_B="$(GAAI_BACKLOG_PATH="$T19_EMPTY" GAAI_RESERVATION_LEDGER="$T19_LEDGER" "$ALLOCATOR" story "$T19_EPIC")"
+
+if [[ "$STORY_T19_A" == "${T19_EPIC}S01" && "$STORY_T19_B" == "${T19_EPIC}S02" ]]; then
+  _pass "Story-mode sequence unaffected: A=${STORY_T19_A}, B=${STORY_T19_B}"
+else
+  _fail "Expected ${T19_EPIC}S01/${T19_EPIC}S02, got: A=${STORY_T19_A} B=${STORY_T19_B}"
+fi
+
+# A malformed row already in the ledger (from an unrelated prior allocation) must not break,
+# hang, or misallocate a story-mode allocation — it is inert for story-mode exactly as for epic.
+printf 'unrelated-garbage-row\n' >> "$T19_LEDGER"
+STORY_T19_C="$(GAAI_BACKLOG_PATH="$T19_EMPTY" GAAI_RESERVATION_LEDGER="$T19_LEDGER" "$ALLOCATOR" story "$T19_EPIC" 2>/dev/null)"
+
+if [[ "$STORY_T19_C" == "${T19_EPIC}S03" ]]; then
+  _pass "Story-mode allocation inert to a malformed ledger row → ${STORY_T19_C}"
+else
+  _fail "Expected ${T19_EPIC}S03 (malformed row must not break story-mode), got: ${STORY_T19_C}"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "────────────────────────────────────────"
