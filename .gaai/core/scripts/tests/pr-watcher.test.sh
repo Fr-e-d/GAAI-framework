@@ -38,7 +38,13 @@ setup_git_repo() {
   git -C "$project_dir" checkout -b staging -q 2>/dev/null || git -C "$project_dir" checkout staging -q
   local backlog_dir="$project_dir/.gaai/project/contexts/backlog"
   mkdir -p "$backlog_dir"
-  printf '%s\n' "$content" > "$backlog_dir/active.backlog.yaml"
+  # Callers pass a bare story sequence. The real backlog nests it under a
+  # top-level "items:" key, and story selection now runs through
+  # backlog_in_progress_ids, whose yq query is ".items[] | select(...)". A bare
+  # sequence matched the daemon's pre-yq grep/sed reads but returns nothing from
+  # that query, so every watcher fixture selected zero stories and the code under
+  # test no-opped. Wrap here so all fixtures are schema-valid at one site.
+  printf 'items:\n%s\n' "$content" > "$backlog_dir/active.backlog.yaml"
   git -C "$project_dir" add .
   git -C "$project_dir" commit -m "initial" -q
   git -C "$project_dir" push -u origin staging -q
@@ -123,6 +129,22 @@ log() {
 
 with_staging_lock() { "\$@"; }
 file_mtime() { stat -f %m "\$1" 2>/dev/null || stat -c %Y "\$1" 2>/dev/null || echo 0; }
+
+# watch_pr_merge_status selects its candidate stories through
+# backlog_in_progress_ids, which lives in lib/backlog-yaml.sh since the yq
+# migration. Without this source the call resolved to nothing, its trailing
+# "|| true" swallowed the error, the candidate list came back empty, and the
+# watcher returned before reconciling anything — leaving T2 to report the story
+# as still in_progress against a code path that had silently no-opped.
+#
+# NOTE: this heredoc is unquoted, so backticks here would be command-substituted
+# at generation time. Keep this comment backtick-free.
+# shellcheck source=../lib/backlog-yaml.sh
+source "$SCRIPT_DIR/../lib/backlog-yaml.sh"
+# The lib declares "set -euo pipefail", and source is not scope-limited, so it
+# would impose -e on this harness. The daemon functions under test rely on
+# non-zero commands staying non-fatal, so restore the harness's own options.
+set +e
 
 # Extract the three new watcher functions from delivery-daemon.sh
 eval "\$(awk '

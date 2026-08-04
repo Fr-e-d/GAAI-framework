@@ -109,6 +109,13 @@ with_staging_lock() { "\$@"; }
 notify_escalation()  { return 0; }
 is_locked()          { [[ -f "$LOCK_DIR/\$1.lock" ]]; }
 
+# Branch disposal moved out of the daemon into lib/worktree-integrity.sh.
+# _recovery_revert_refined delegates to _worktree_branch_delete_or_preserve,
+# so without this source the call resolved to "command not found", the
+# branch was left untouched, and T6 failed against a step that never ran.
+# shellcheck source=../lib/worktree-integrity.sh
+source "$SCRIPTS/lib/worktree-integrity.sh"
+
 # Extract required functions from the daemon source
 eval "\$(awk '
   /^sed_inplace\(\)/{p=1; depth=0}
@@ -189,11 +196,32 @@ else
   pass "T5: worktree removed"
 fi
 
-echo "T6: story branch deleted"
-if git -C "$PROJ" branch --list "story/$SID" 2>/dev/null | grep -q "story/$SID"; then
-  fail "T6: branch story/$SID still exists"
+# T6 asserted "branch deleted". That was the pre-E1057 contract, and deleting an
+# unlanded branch is exactly the data-loss bug E1057 fixed:
+# _worktree_branch_delete_or_preserve now deletes only a verifiably landed branch
+# and otherwise renames it to <branch>-preserved-<utc>, freeing the original name
+# for the retry path while keeping the commits inspectable. This fixture's branch
+# is never pushed and its story is not done on origin, so preservation is the
+# correct outcome — assert the freed name plus the surviving commits, which is
+# what "clears stale state" means under the current contract.
+echo "T6: story branch name freed, commits preserved (not destroyed)"
+if git -C "$PROJ" branch --list "story/$SID" 2>/dev/null | grep -q "story/$SID$"; then
+  fail "T6: branch story/$SID still occupies the original name"
 else
-  pass "T6: branch story/$SID deleted"
+  pass "T6: original name story/$SID freed for retry"
+fi
+
+PRESERVED=$(git -C "$PROJ" branch --list "story/$SID-preserved-*" 2>/dev/null | tr -d ' *')
+if [[ -n "$PRESERVED" ]]; then
+  pass "T6b: commits preserved as $PRESERVED"
+else
+  fail "T6b: no story/$SID-preserved-* branch — unlanded commits were destroyed"
+fi
+
+if [[ -s "$LOCK_DIR/.branch-preserved.audit" ]] && grep -q "$SID" "$LOCK_DIR/.branch-preserved.audit"; then
+  pass "T6c: preservation recorded in .branch-preserved.audit"
+else
+  fail "T6c: preservation not recorded in .branch-preserved.audit"
 fi
 
 echo "T7: non-target story YAML untouched (cross-story drift guard)"

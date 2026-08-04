@@ -124,7 +124,7 @@ render_phase_metrics() {
       if [[ -f "${LOCK_DIR}/${story_id}.${_ph}.active" ]]; then
         running_phase="$_ph"
         if [[ "$(uname)" == "Darwin" ]]; then
-          _mtime=$(stat -f %m "${LOCK_DIR}/${story_id}.${_ph}.active" 2>/dev/null || echo 0)
+          _mtime=$(stat -c %Y "${LOCK_DIR}/${story_id}.${_ph}.active" 2>/dev/null || stat -f %m "${LOCK_DIR}/${story_id}.${_ph}.active" 2>/dev/null || echo 0)
         else
           _mtime=$(stat -c %Y "${LOCK_DIR}/${story_id}.${_ph}.active" 2>/dev/null || echo 0)
         fi

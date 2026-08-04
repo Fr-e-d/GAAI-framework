@@ -255,7 +255,7 @@ parse_log() {
   # ── Log age & health ──
   local mod_time now age_s age_label color
   if [[ "$(uname)" == "Darwin" ]]; then
-    mod_time=$(stat -f %m "$log_file" 2>/dev/null || echo 0)
+    mod_time=$(stat -c %Y "$log_file" 2>/dev/null || stat -f %m "$log_file" 2>/dev/null || echo 0)
   else
     mod_time=$(stat -c %Y "$log_file" 2>/dev/null || echo 0)
   fi
@@ -383,8 +383,8 @@ parse_log() {
       if [[ -n "$daemon_model" ]] && [[ "$daemon_model" != "$last_model" ]]; then
         local daemon_mtime story_mtime
         if [[ "$(uname)" == "Darwin" ]]; then
-          daemon_mtime=$(stat -f %m "$daemon_log" 2>/dev/null || echo 0)
-          story_mtime=$(stat -f %m "$log_file" 2>/dev/null || echo 0)
+          daemon_mtime=$(stat -c %Y "$daemon_log" 2>/dev/null || stat -f %m "$daemon_log" 2>/dev/null || echo 0)
+          story_mtime=$(stat -c %Y "$log_file" 2>/dev/null || stat -f %m "$log_file" 2>/dev/null || echo 0)
         else
           daemon_mtime=$(stat -c %Y "$daemon_log" 2>/dev/null || echo 0)
           story_mtime=$(stat -c %Y "$log_file" 2>/dev/null || echo 0)
@@ -490,8 +490,8 @@ parse_log() {
       # Cache stale when log was recreated after cache was written (new delivery run)
       local cache_mtime log_mtime
       if [[ "$(uname)" == "Darwin" ]]; then
-        cache_mtime=$(stat -f %m "$cache_file" 2>/dev/null || echo 0)
-        log_mtime=$(stat -f %m "$log_file" 2>/dev/null || echo 0)
+        cache_mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null || echo 0)
+        log_mtime=$(stat -c %Y "$log_file" 2>/dev/null || stat -f %m "$log_file" 2>/dev/null || echo 0)
       else
         cache_mtime=$(stat -c %Y "$cache_file" 2>/dev/null || echo 0)
         log_mtime=$(stat -c %Y "$log_file" 2>/dev/null || echo 0)

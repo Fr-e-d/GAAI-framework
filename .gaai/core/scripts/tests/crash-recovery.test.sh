@@ -37,16 +37,42 @@ trap cleanup EXIT
 
 # ── Git repo helpers ───────────────────────────────────────────────────────────
 # Sets up a bare remote + local clone, commits the given YAML as HEAD.
+# Emits a schema-valid backlog document for a fixture: the real file nests its
+# story sequence under a top-level "items:" key, which every yq-backed helper
+# (backlog_in_progress_ids, backlog_status, ...) queries as ".items[]".
+# Idempotent — content that already carries the header is returned unchanged.
+backlog_fixture() {
+  local content="$1"
+  if [[ "$content" == items:* ]]; then
+    printf '%s' "$content"
+  else
+    printf 'items:\n%s' "$content"
+  fi
+}
+
 setup_git_repo() {
   local project_dir="$1" content="$2"
   local remote_dir="${project_dir}_remote.git"
   rm -rf "$project_dir" "$remote_dir"
-  git init --bare "$remote_dir" -q
+  # -b main is explicit on purpose: these fixtures push to and read from
+  # origin/main, but a bare init otherwise takes the branch name from the
+  # host's init.defaultBranch. Developers who set it to main saw this pass
+  # while CI runners, which keep git's built-in default, produced a repo with
+  # no main ref at all — every fixture push then failed with "couldn't find
+  # remote ref main" and the code under test never ran.
+  git init --bare -b main "$remote_dir" -q
   git clone "$remote_dir" "$project_dir" -q
   git -C "$project_dir" config user.email "test@gaai.local"
   git -C "$project_dir" config user.name "GAAI Test"
   mkdir -p "$project_dir/.gaai/project/contexts/backlog"
-  printf '%s\n' "$content" > "$project_dir/.gaai/project/contexts/backlog/active.backlog.yaml"
+  # Most callers pass a bare story sequence. The real backlog nests it under a
+  # top-level "items:" key, and recovery now selects stories through
+  # backlog_in_progress_ids, whose yq query is ".items[] | select(...)". A bare
+  # sequence returns nothing from that query, so recovery saw an empty backlog
+  # and reported "No in_progress stories to evaluate" instead of exercising the
+  # drift path under test. AC4 already supplies its own "items:" header, so wrap
+  # only when it is absent.
+  printf '%s\n' "$(backlog_fixture "$content")" > "$project_dir/.gaai/project/contexts/backlog/active.backlog.yaml"
   git -C "$project_dir" add .
   git -C "$project_dir" commit -m "initial" -q
   git -C "$project_dir" push origin HEAD -q
@@ -75,7 +101,7 @@ AC5_WT_YAML="- id: $AC5_STORY
   status: refined
   phase_status: not_started
   delivery_pipeline: 3phase"
-printf '%s\n' "$AC5_WT_YAML" > "$AC5_DIR/$AC5_BACKLOG_REL"
+printf '%s\n' "$(backlog_fixture "$AC5_WT_YAML")" > "$AC5_DIR/$AC5_BACKLOG_REL"
 # Verify working-tree differs from HEAD (pre-condition)
 if git -C "$AC5_DIR" diff --quiet HEAD -- "$AC5_BACKLOG_REL"; then
   fail "AC5-precondition: expected WT diff, found none — test setup broken"
@@ -165,6 +191,18 @@ _recovery_resolve_worktree() { echo "/nonexistent/\$1-workspace"; }
 _recovery_relaunch() { return 0; }
 _recovery_revert_refined() { return 0; }
 _recovery_set_status() { return 0; }
+
+# crash_recovery_scan selects its candidate stories through
+# backlog_in_progress_ids, which lives in lib/backlog-yaml.sh since the yq
+# migration. Without this source the call resolved to nothing, its trailing
+# "|| true" swallowed the error, and the scan logged "No in_progress stories to
+# evaluate" instead of reaching the drift-marker path this AC exercises.
+# NOTE: this heredoc is unquoted — keep comments here backtick-free.
+# shellcheck source=../lib/backlog-yaml.sh
+source "$SCRIPT_DIR/../lib/backlog-yaml.sh"
+# The lib declares "set -euo pipefail" and source is not scope-limited; the
+# extracted daemon functions rely on non-zero commands staying non-fatal.
+set +e
 
 # Include the drift marker helpers and crash_recovery_scan from delivery-daemon.sh.
 # We extract relevant function definitions via awk to avoid executing top-level code.
@@ -272,7 +310,7 @@ AC6_WT_YAML="- id: $AC6_STORY
   phase_status: not_started
   delivery_pipeline: 3phase
   priority: high"
-printf '%s\n' "$AC6_WT_YAML" > "$AC6_DIR/$AC6_BACKLOG_REL"
+printf '%s\n' "$(backlog_fixture "$AC6_WT_YAML")" > "$AC6_DIR/$AC6_BACKLOG_REL"
 
 # Verify WT has operator edits (pre-condition)
 if git -C "$AC6_DIR" diff --quiet HEAD -- "$AC6_BACKLOG_REL"; then
@@ -554,18 +592,37 @@ SCRIPT
   bash "$T14_HARNESS" 2>/dev/null || T14_RC=$?
   rm -f "$T14_HARNESS"
 
-  if [[ "$T14_RC" -eq 6 ]]; then
-    pass "T14: exit code 6 on cross-story drift"
+  # T14 asserted rc=6 ("refuse the write when an unrelated story is dirty").
+  # chore_commit_field no longer takes that path: _CHORE_HELPER_AVAILABLE is
+  # pinned to 0 (the yq -i route is disabled because it reformats the whole
+  # file and defeats the drift checks), so every call routes to
+  # _chore_option_a_fallback. That function deliberately replaced refuse-on-drift
+  # with a pre-commit drift sweep — its own comment records that refusing on ANY
+  # backlog drift "deadlocked every NEW" story once concurrent wrappers started
+  # accumulating uncommitted progress writes.
+  #
+  # So the contract under test moved from "refuse" to "absorb safely". Assert the
+  # property that actually protects the operator: the unrelated edit is committed
+  # rather than silently discarded, and the target story's own write still lands.
+  if [[ "$T14_RC" -eq 0 ]]; then
+    pass "T14: cross-story drift absorbed without deadlock (rc=0)"
   else
-    fail "T14: expected exit code 6, got $T14_RC"
+    fail "T14: expected rc=0 (drift absorbed), got $T14_RC"
   fi
-  # Verify no commit for story B was created
+  # The target story's own write must land despite the unrelated dirty edit.
   T14_STATUS=$(git -C "$AC4_DIR" show HEAD:"$AC4_BACKLOG_REL" 2>/dev/null \
     | grep -A 4 "id: $AC4_STORY_B" | grep "status:" | head -1 | sed 's/.*status: *//' | tr -d '"' || echo "")
-  if [[ "$T14_STATUS" == "refined" ]]; then
-    pass "T14b: story B still refined in HEAD (commit correctly refused)"
+  if [[ "$T14_STATUS" == "in_progress" ]]; then
+    pass "T14b: story B write landed in HEAD despite unrelated drift"
   else
-    fail "T14b: story B status in HEAD is '$T14_STATUS' (expected refined)"
+    fail "T14b: story B status in HEAD is '$T14_STATUS' (expected in_progress)"
+  fi
+  # The operator's unrelated edit must be committed, never silently dropped —
+  # this is the data-safety property that replaced the old refuse-on-drift.
+  if git -C "$AC4_DIR" show HEAD:"$AC4_BACKLOG_REL" 2>/dev/null | grep -q "notes: operator-edited"; then
+    pass "T14c: unrelated operator edit preserved in HEAD (absorbed, not discarded)"
+  else
+    fail "T14c: unrelated operator edit lost — drift sweep discarded it"
   fi
 fi
 # Reset WT before T15
@@ -933,7 +990,7 @@ CD_WT_YAML="items:
   status: in_progress
   phase_status: implemented
   delivery_pipeline: 3phase"
-printf '%s\n' "$CD_WT_YAML" > "$CD_DIR/$CD_BACKLOG_REL"
+printf '%s\n' "$(backlog_fixture "$CD_WT_YAML")" > "$CD_DIR/$CD_BACKLOG_REL"
 
 # Verify WT differs from HEAD (pre-condition)
 if git -C "$CD_DIR" diff --quiet HEAD -- "$CD_BACKLOG_REL"; then
@@ -1143,7 +1200,7 @@ DSR_ORIGIN_YAML="- id: $DSR_STORY_A
   status: in_progress
   phase_status: implemented
   delivery_pipeline: 3phase"
-printf '%s\n' "$DSR_ORIGIN_YAML" > "$DSR_DIR/$DSR_BACKLOG_REL"
+printf '%s\n' "$(backlog_fixture "$DSR_ORIGIN_YAML")" > "$DSR_DIR/$DSR_BACKLOG_REL"
 git -C "$DSR_DIR" add "$DSR_BACKLOG_REL"
 git -C "$DSR_DIR" commit -m "chore($DSR_STORY_B): implemented [daemon]" -q
 git -C "$DSR_DIR" push origin HEAD -q
@@ -1158,7 +1215,7 @@ DSR_DRIFT_YAML="- id: $DSR_STORY_A
   status: in_progress
   phase_status: planned
   delivery_pipeline: 3phase"
-printf '%s\n' "$DSR_DRIFT_YAML" > "$DSR_DIR/$DSR_BACKLOG_REL"
+printf '%s\n' "$(backlog_fixture "$DSR_DRIFT_YAML")" > "$DSR_DIR/$DSR_BACKLOG_REL"
 
 DSR_HARNESS="$FIXTURE_DIR/dsr-harness.sh"
 cat > "$DSR_HARNESS" <<DSR_HEREDOC
@@ -1233,7 +1290,7 @@ SLC_ORIGIN_YAML="- id: $SLC_STORY
   status: done
   phase_status: done
   delivery_pipeline: 3phase"
-printf '%s\n' "$SLC_ORIGIN_YAML" > "$SLC_DIR/$SLC_BACKLOG_REL"
+printf '%s\n' "$(backlog_fixture "$SLC_ORIGIN_YAML")" > "$SLC_DIR/$SLC_BACKLOG_REL"
 git -C "$SLC_DIR" add "$SLC_BACKLOG_REL"
 git -C "$SLC_DIR" commit -m "chore($SLC_STORY): done [pr-watcher]" -q
 git -C "$SLC_DIR" push origin HEAD -q
@@ -1243,7 +1300,7 @@ SLC_DRIFT_YAML="- id: $SLC_STORY
   status: refined
   phase_status: not_started
   delivery_pipeline: 3phase"
-printf '%s\n' "$SLC_DRIFT_YAML" > "$SLC_DIR/$SLC_BACKLOG_REL"
+printf '%s\n' "$(backlog_fixture "$SLC_DRIFT_YAML")" > "$SLC_DIR/$SLC_BACKLOG_REL"
 
 SLC_HARNESS="$FIXTURE_DIR/slc-harness.sh"
 cat > "$SLC_HARNESS" <<SLC_HEREDOC
@@ -1270,10 +1327,16 @@ else
   fail "T-SLC-1: expected rc=6, got rc=$SLC_RC — log: $(head -5 "$SLC_LOG" 2>/dev/null | tr '\n' '|')"
 fi
 
-if grep -qi "genuine rebase conflict.*operator resolve required" "$SLC_LOG" 2>/dev/null; then
+# The helper's conflict line is emitted by _commit_accumulated_backlog_drift as
+# "[COMMIT-DRIFT] <sid> : genuine rebase conflict [<context>]". The trailing
+# ", operator resolve required" this asserted no longer appears anywhere in the
+# scripts — the message carries the caller context in brackets instead. What AC2
+# actually pins is that the conflict is reported by the shared helper rather than
+# a bespoke per-caller deadlock string, so match the helper's real format.
+if grep -qi "\[COMMIT-DRIFT\].*genuine rebase conflict" "$SLC_LOG" 2>/dev/null; then
   pass "T-SLC-2: helper conflict message present (AC2 — no bespoke deadlock string)"
 else
-  fail "T-SLC-2: expected 'genuine rebase conflict, operator resolve required' — log: $(head -5 "$SLC_LOG" 2>/dev/null | tr '\n' '|')"
+  fail "T-SLC-2: expected '[COMMIT-DRIFT] ... genuine rebase conflict' — log: $(head -5 "$SLC_LOG" 2>/dev/null | tr '\n' '|')"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════

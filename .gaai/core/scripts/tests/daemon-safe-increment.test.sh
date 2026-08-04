@@ -24,9 +24,15 @@ echo "=== Safe post-increment regression guard ==="
 # A bare arithmetic post-increment exits 1 when its pre-increment value is zero.
 # Under set -e that stops the caller, so every post-increment command in the daemon
 # must explicitly neutralise that status.
+#
+# Comment lines are skipped: the scan looks for post-increment *commands*, and the
+# daemon documents this very hazard in prose that quotes `((counter++))` and
+# `((i++))`. Matching those made the guard flag its own documentation — the scan
+# reported them as unguarded commands because a comment can carry no `|| true`.
 POST_INCREMENT_LINES=$(awk '
   {
     line = $0
+    if (line ~ /^[[:space:]]*#/) next
     if (line ~ /(^|[^[:alnum:]_])\(\([[:space:]]*[[:alpha:]_][[:alnum:]_]*[[:space:]]*\+\+[[:space:]]*\)\)/) {
       print NR ":" line
     }
