@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+-: allocator ledger/lock key off common git dir, shared across worktrees
 -: Make capability documentation follow shipped runtime and filesystem truth
 - fix: renice test-gate subshell via $BASHPID, not $$
 - fix: renice test-gate subshell via $BASHPID, not $$

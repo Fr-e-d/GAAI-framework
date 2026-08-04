@@ -906,6 +906,407 @@ else
   _fail "Expected ${T19_EPIC}S03 (malformed row must not break story-mode), got: ${STORY_T19_C}"
 fi
 
+# ── Test 20: AC1 — shared ledger across worktrees, per-worktree backlog/decisions ────
+echo "Test 20: AC1 — shared ledger across worktrees, per-worktree backlog/decisions (overrides unset)"
+
+T20_HOME="${WORK}/t20-home"; mkdir -p "$T20_HOME"
+T20_REPO="${WORK}/t20-repo"
+git init -q "$T20_REPO"
+( cd "$T20_REPO"; git config user.email t@example.test; git config user.name tester; git commit -q --allow-empty -m init )
+
+mkdir -p "${T20_REPO}/.gaai/project/contexts/backlog"
+cat > "${T20_REPO}/.gaai/project/contexts/backlog/active.backlog.yaml" <<'YAML'
+- id: E5
+  epic: E5
+  title: Main checkout epic
+  status: done
+YAML
+
+T20_WT="${WORK}/t20-wt"
+( cd "$T20_REPO" && git worktree add -q -b t20-wt-branch "$T20_WT" ) >/dev/null 2>&1
+mkdir -p "${T20_WT}/.gaai/project/contexts/backlog"
+cat > "${T20_WT}/.gaai/project/contexts/backlog/active.backlog.yaml" <<'YAML'
+- id: E2
+  epic: E2
+  title: Worktree epic (lower than main checkout — must not leak across worktrees)
+  status: done
+YAML
+
+ID_20A="$(
+  cd "$T20_REPO"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T20_HOME"; "$ALLOCATOR" epic
+)"
+ID_20B="$(
+  cd "$T20_WT"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T20_HOME"; "$ALLOCATOR" epic
+)"
+
+T20_LEDGER_COUNT="$(find "${T20_HOME}/.gaai/reservations" -maxdepth 1 -name '*.tsv' 2>/dev/null | wc -l | tr -d ' ')"
+
+if [[ "$ID_20A" == "E6" && "$ID_20B" == "E7" && "$T20_LEDGER_COUNT" -eq 1 ]]; then
+  _pass "Shared ledger across worktrees: main=${ID_20A} (own backlog max E5), worktree=${ID_20B} (sequential, not repeated), exactly 1 ledger file"
+else
+  _fail "Expected main=E6 worktree=E7 with 1 ledger file; got main=${ID_20A} worktree=${ID_20B} ledger_count=${T20_LEDGER_COUNT}"
+fi
+
+# ── Test 21: AC2 — cross-worktree sequential + concurrent uniqueness, shared lock ────
+echo "Test 21: AC2 — cross-worktree sequential + concurrent uniqueness (shared lock)"
+
+T21_REPO="${WORK}/t21-repo"
+git init -q "$T21_REPO"
+( cd "$T21_REPO"; git config user.email t@example.test; git config user.name tester; git commit -q --allow-empty -m init )
+mkdir -p "${T21_REPO}/.gaai/project/contexts/backlog"
+_empty_backlog "${T21_REPO}/.gaai/project/contexts/backlog/active.backlog.yaml"
+
+T21_WT_A="${WORK}/t21-wt-a"
+T21_WT_B="${WORK}/t21-wt-b"
+( cd "$T21_REPO" && git worktree add -q -b t21-wt-a-branch "$T21_WT_A" ) >/dev/null 2>&1
+( cd "$T21_REPO" && git worktree add -q -b t21-wt-b-branch "$T21_WT_B" ) >/dev/null 2>&1
+mkdir -p "${T21_WT_A}/.gaai/project/contexts/backlog" "${T21_WT_B}/.gaai/project/contexts/backlog"
+_empty_backlog "${T21_WT_A}/.gaai/project/contexts/backlog/active.backlog.yaml"
+_empty_backlog "${T21_WT_B}/.gaai/project/contexts/backlog/active.backlog.yaml"
+
+T21_HOME_SEQ="${WORK}/t21-home-seq"; mkdir -p "$T21_HOME_SEQ"
+ID_21A="$(
+  cd "$T21_WT_A"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T21_HOME_SEQ"; "$ALLOCATOR" epic
+)"
+ID_21B="$(
+  cd "$T21_WT_B"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T21_HOME_SEQ"; "$ALLOCATOR" epic
+)"
+ID_21C="$(
+  cd "$T21_REPO"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T21_HOME_SEQ"; "$ALLOCATOR" epic
+)"
+
+if [[ "$ID_21A" != "$ID_21B" && "$ID_21B" != "$ID_21C" && "$ID_21A" != "$ID_21C" ]]; then
+  _pass "Sequential cross-worktree: A(wt)=${ID_21A}, B(wt)=${ID_21B}, C(main)=${ID_21C} — all distinct"
+else
+  _fail "Sequential cross-worktree collision: A=${ID_21A} B=${ID_21B} C=${ID_21C}"
+fi
+
+# Concurrent — the test that actually proves the lock moved with the ledger: a lock still keyed
+# the old (per-worktree) way would let both writes race independently.
+T21_HOME_CONC="${WORK}/t21-home-conc"; mkdir -p "$T21_HOME_CONC"
+T21_OUT_A="${WORK}/t21-out-a.txt"
+T21_OUT_B="${WORK}/t21-out-b.txt"
+
+(
+  cd "$T21_WT_A"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T21_HOME_CONC"; "$ALLOCATOR" epic > "$T21_OUT_A" 2>/dev/null
+) &
+PID_21A=$!
+(
+  cd "$T21_WT_B"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T21_HOME_CONC"; "$ALLOCATOR" epic > "$T21_OUT_B" 2>/dev/null
+) &
+PID_21B=$!
+wait "$PID_21A" "$PID_21B" 2>/dev/null || true
+
+CONC_A="$(cat "$T21_OUT_A" 2>/dev/null || echo "")"
+CONC_B="$(cat "$T21_OUT_B" 2>/dev/null || echo "")"
+
+if [[ -n "$CONC_A" && -n "$CONC_B" && "$CONC_A" != "$CONC_B" ]]; then
+  _pass "Concurrent cross-worktree allocation: A=${CONC_A}, B=${CONC_B} — distinct (lock genuinely shared)"
+else
+  _fail "Concurrent cross-worktree allocation collided or failed: A='${CONC_A}' B='${CONC_B}'"
+fi
+
+# ── Test 22: AC3 — repo isolation across hosts + cwd independence within one worktree ─
+echo "Test 22: AC3 — separate repos keep separate ledgers; one worktree is cwd-independent"
+
+T22_HOME="${WORK}/t22-home"; mkdir -p "$T22_HOME"
+T22_REPO_A="${WORK}/t22-repo-a"
+T22_REPO_B="${WORK}/t22-repo-b"
+git init -q "$T22_REPO_A"
+git init -q "$T22_REPO_B"
+for r in "$T22_REPO_A" "$T22_REPO_B"; do
+  ( cd "$r"; git config user.email t@example.test; git config user.name tester; git commit -q --allow-empty -m init )
+  mkdir -p "${r}/.gaai/project/contexts/backlog"
+  _empty_backlog "${r}/.gaai/project/contexts/backlog/active.backlog.yaml"
+done
+
+ID_22A="$(
+  cd "$T22_REPO_A"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T22_HOME"; "$ALLOCATOR" epic
+)"
+ID_22B="$(
+  cd "$T22_REPO_B"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T22_HOME"; "$ALLOCATOR" epic
+)"
+
+if [[ "$ID_22A" == "E1" && "$ID_22B" == "E1" ]]; then
+  _pass "Two unrelated repos on the same host keep separate ledgers: A=${ID_22A}, B=${ID_22B} (both E1)"
+else
+  _fail "Expected both A and B to be E1 (separate ledgers, fix must not merge repos); got A=${ID_22A} B=${ID_22B}"
+fi
+
+mkdir -p "${T22_REPO_A}/sub/dir"
+ID_22C="$(
+  cd "${T22_REPO_A}/sub/dir"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T22_HOME"; "$ALLOCATOR" epic
+)"
+
+if [[ "$ID_22C" == "E2" ]]; then
+  _pass "cwd-independent: allocation from a subdirectory sees repo A's prior reservation → ${ID_22C}"
+else
+  _fail "Expected E2 (subdirectory invocation must derive the same ledger path as repo root), got: ${ID_22C}"
+fi
+
+# ── Test 23: AC4 — migration of legacy per-worktree-keyed ledgers ────────────
+echo "Test 23: AC4 — migration of legacy per-worktree-keyed ledgers (happy/idempotent/prunable/lost)"
+
+_legacy_hash() {
+  local input="$1"
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$input" | shasum -a 256 | cut -c1-12
+  elif command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$input" | sha256sum | cut -c1-12
+  else
+    printf '%s' "$input" | base64 2>/dev/null | tr -dc 'a-zA-Z0-9' | cut -c1-12
+  fi
+}
+
+T23_HOME="${WORK}/t23-home"; mkdir -p "${T23_HOME}/.gaai/reservations"
+T23_REPO="${WORK}/t23-repo"
+git init -q "$T23_REPO"
+( cd "$T23_REPO"; git config user.email t@example.test; git config user.name tester; git commit -q --allow-empty -m init )
+mkdir -p "${T23_REPO}/.gaai/project/contexts/backlog"
+_empty_backlog "${T23_REPO}/.gaai/project/contexts/backlog/active.backlog.yaml"
+
+T23_WT="${WORK}/t23-wt"
+( cd "$T23_REPO" && git worktree add -q -b t23-wt-branch "$T23_WT" ) >/dev/null 2>&1
+mkdir -p "${T23_WT}/.gaai/project/contexts/backlog"
+_empty_backlog "${T23_WT}/.gaai/project/contexts/backlog/active.backlog.yaml"
+
+NOW_T23="$(date +%s)"
+T23_WT_REALPATH="$(cd "$T23_WT" && pwd -P)"
+T23_LEGACY_ID="$(_legacy_hash "$T23_WT_REALPATH")"
+T23_LEGACY_LEDGER="${T23_HOME}/.gaai/reservations/${T23_LEGACY_ID}.tsv"
+printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T23_LEGACY_LEDGER"
+printf 'E40\tepic\t%s\n' "$NOW_T23" >> "$T23_LEGACY_LEDGER"
+
+# Run from the MAIN checkout (not the worktree whose legacy ledger was seeded) — proves
+# migration is driven by the repo's worktree list, not "which worktree ran the command".
+ID_23A="$(
+  cd "$T23_REPO"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T23_HOME"; "$ALLOCATOR" epic
+)"
+
+if [[ "$ID_23A" == "E41" ]]; then
+  _pass "Legacy ledger (seeded E40) migrated and folded into the max → ${ID_23A}"
+else
+  _fail "Expected E41 (migrated legacy E40 must raise the max), got: ${ID_23A}"
+fi
+
+T23_NEW_LEDGER="$(find "${T23_HOME}/.gaai/reservations" -maxdepth 1 -name '*.tsv' ! -name "${T23_LEGACY_ID}.tsv" | head -1)"
+if [[ -n "$T23_NEW_LEDGER" ]] && awk -F'\t' '$1=="E40" && $2=="epic"{f=1} END{exit !f}' "$T23_NEW_LEDGER" 2>/dev/null; then
+  _pass "Migrated row physically present in the new common-git-dir-keyed ledger"
+else
+  _fail "Migrated E40 row not found physically in the new ledger"
+fi
+
+# Idempotency: run again — migrated row is not re-added (still exactly one copy).
+ID_23B="$(
+  cd "$T23_REPO"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T23_HOME"; "$ALLOCATOR" epic
+)"
+T23_E40_COUNT="$(awk -F'\t' '$1=="E40"{c++} END{print c+0}' "$T23_NEW_LEDGER" 2>/dev/null)"
+if [[ "$ID_23B" == "E42" && "$T23_E40_COUNT" -eq 1 ]]; then
+  _pass "Idempotent second run: sequential allocation → ${ID_23B}; E40 still appears exactly once"
+else
+  _fail "Expected E42 with E40 appearing once; got ID=${ID_23B} E40_count=${T23_E40_COUNT}"
+fi
+
+# Boundary (prunable): worktree directory removed directly (not via `git worktree remove`) —
+# still reported by `git worktree list --porcelain` as prunable; its legacy ledger must migrate.
+T23_WT_PRUNABLE="${WORK}/t23-wt-prunable"
+( cd "$T23_REPO" && git worktree add -q -b t23-wt-prunable-branch "$T23_WT_PRUNABLE" ) >/dev/null 2>&1
+T23_PRUNABLE_REALPATH="$(cd "$T23_WT_PRUNABLE" && pwd -P)"
+T23_PRUNABLE_LEGACY_ID="$(_legacy_hash "$T23_PRUNABLE_REALPATH")"
+T23_PRUNABLE_LEGACY_LEDGER="${T23_HOME}/.gaai/reservations/${T23_PRUNABLE_LEGACY_ID}.tsv"
+printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T23_PRUNABLE_LEGACY_LEDGER"
+printf 'E80\tepic\t%s\n' "$NOW_T23" >> "$T23_PRUNABLE_LEGACY_LEDGER"
+
+rm -rf "$T23_WT_PRUNABLE"
+
+T23_PRUNABLE_LISTED="$(cd "$T23_REPO" && git worktree list --porcelain 2>/dev/null | grep -c "^worktree ${T23_PRUNABLE_REALPATH}\$" || true)"
+if [[ "$T23_PRUNABLE_LISTED" -ge 1 ]]; then
+  _pass "Fixture sanity: git worktree list still reports the prunable worktree"
+else
+  _fail "Fixture sanity failed: git worktree list no longer reports the removed-but-not-pruned worktree"
+fi
+
+ID_23C="$(
+  cd "$T23_REPO"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T23_HOME"; "$ALLOCATOR" epic
+)"
+if [[ "$ID_23C" == "E81" ]]; then
+  _pass "Prunable worktree's legacy ledger (E80) still migrated → ${ID_23C}"
+else
+  _fail "Expected E81 (prunable-worktree legacy E80 must still migrate), got: ${ID_23C}"
+fi
+
+# Error path (accepted loss, stated not silent): worktree fully removed via
+# `git worktree remove --force` no longer appears in the list at all — its legacy ledger is
+# NOT migrated, and the run still succeeds without error.
+T23_WT_GONE="${WORK}/t23-wt-gone"
+( cd "$T23_REPO" && git worktree add -q -b t23-wt-gone-branch "$T23_WT_GONE" ) >/dev/null 2>&1
+T23_GONE_REALPATH="$(cd "$T23_WT_GONE" && pwd -P)"
+T23_GONE_LEGACY_ID="$(_legacy_hash "$T23_GONE_REALPATH")"
+T23_GONE_LEGACY_LEDGER="${T23_HOME}/.gaai/reservations/${T23_GONE_LEGACY_ID}.tsv"
+printf '# GAAI ID reservation ledger — do not edit manually\n' > "$T23_GONE_LEGACY_LEDGER"
+printf 'E95\tepic\t%s\n' "$NOW_T23" >> "$T23_GONE_LEGACY_LEDGER"
+
+( cd "$T23_REPO" && git worktree remove --force "$T23_WT_GONE" ) >/dev/null 2>&1
+
+ID_23D="$(
+  cd "$T23_REPO"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T23_HOME"; "$ALLOCATOR" epic
+)"
+if [[ "$ID_23D" == "E82" ]]; then
+  _pass "Fully-removed worktree's legacy ledger (E95) correctly NOT migrated (accepted loss) → ${ID_23D}"
+else
+  _fail "Expected E82 (E95 from a fully-removed worktree must NOT be migrated — would be E96 if it were), got: ${ID_23D}"
+fi
+
+# ── Test 24: AC5 — resolution-failure guard (both directions) ────────────────
+echo "Test 24: AC5 — resolution-failure guard (command fails / relative / empty)"
+
+REAL_GIT="$(command -v git)"
+T24_REPO="${WORK}/t24-repo"
+git init -q "$T24_REPO"
+( cd "$T24_REPO"; git config user.email t@example.test; git config user.name tester; git commit -q --allow-empty -m init )
+
+# Shim 1: git rev-parse --git-common-dir FAILS (non-zero, no output); everything else passes through.
+T24_HOME1="${WORK}/t24-home1"; mkdir -p "$T24_HOME1"
+T24_SHIM1="${WORK}/t24-shim1"; mkdir -p "$T24_SHIM1"
+cat > "${T24_SHIM1}/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "rev-parse" && "\$2" == "--git-common-dir" ]]; then
+  exit 1
+fi
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "${T24_SHIM1}/git"
+
+T24_STDERR1="${WORK}/t24-stderr1.txt"
+set +e
+( cd "$T24_REPO"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T24_HOME1"; PATH="${T24_SHIM1}:${PATH}" "$ALLOCATOR" epic ) >/dev/null 2>"$T24_STDERR1"
+T24_RC1=$?
+set -e
+
+if [[ "$T24_RC1" -ne 0 ]]; then
+  _pass "Failing git-common-dir resolution exits non-zero (rc=${T24_RC1})"
+else
+  _fail "Expected non-zero exit when git-common-dir resolution fails, got rc=0"
+fi
+if grep -q "cannot resolve the repository's common git directory" "$T24_STDERR1" 2>/dev/null; then
+  _pass "Failure message names the resolution step that failed"
+else
+  _fail "Expected an informative message naming the failed resolution step, got: $(cat "$T24_STDERR1" 2>/dev/null)"
+fi
+if [[ ! -d "${T24_HOME1}/.gaai/reservations" || -z "$(ls -A "${T24_HOME1}/.gaai/reservations" 2>/dev/null)" ]]; then
+  _pass "No ledger file created under the fixture HOME after the failed run"
+else
+  _fail "A ledger file was created despite the resolution failure: $(ls -A "${T24_HOME1}/.gaai/reservations" 2>/dev/null)"
+fi
+
+# Shim 2: git rev-parse --git-common-dir prints a RELATIVE, non-existent path (cd fails).
+T24_HOME2="${WORK}/t24-home2"; mkdir -p "$T24_HOME2"
+T24_SHIM2="${WORK}/t24-shim2"; mkdir -p "$T24_SHIM2"
+cat > "${T24_SHIM2}/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "rev-parse" && "\$2" == "--git-common-dir" ]]; then
+  echo "nonexistent-relative-dir-xyz/.git"
+  exit 0
+fi
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "${T24_SHIM2}/git"
+
+T24_STDERR2="${WORK}/t24-stderr2.txt"
+set +e
+( cd "$T24_REPO"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T24_HOME2"; PATH="${T24_SHIM2}:${PATH}" "$ALLOCATOR" epic ) >/dev/null 2>"$T24_STDERR2"
+T24_RC2=$?
+set -e
+
+if [[ "$T24_RC2" -ne 0 ]]; then
+  _pass "Relative/non-existent git-common-dir result exits non-zero (rc=${T24_RC2})"
+else
+  _fail "Expected non-zero exit for a relative/non-existent git-common-dir result, got rc=0"
+fi
+if grep -qE "cannot resolve the repository's common git directory to an absolute path|resolved to a relative or empty value" "$T24_STDERR2" 2>/dev/null; then
+  _pass "Failure message names the problem (relative/unresolvable value)"
+else
+  _fail "Expected a message naming the relative/unresolvable value, got: $(cat "$T24_STDERR2" 2>/dev/null)"
+fi
+if [[ ! -d "${T24_HOME2}/.gaai/reservations" || -z "$(ls -A "${T24_HOME2}/.gaai/reservations" 2>/dev/null)" ]]; then
+  _pass "No ledger file created under the fixture HOME after the relative-path failure"
+else
+  _fail "A ledger file was created despite the relative-path failure: $(ls -A "${T24_HOME2}/.gaai/reservations" 2>/dev/null)"
+fi
+
+# Shim 3: git rev-parse --git-common-dir prints NOTHING (empty result, exit 0).
+T24_HOME3="${WORK}/t24-home3"; mkdir -p "$T24_HOME3"
+T24_SHIM3="${WORK}/t24-shim3"; mkdir -p "$T24_SHIM3"
+cat > "${T24_SHIM3}/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "rev-parse" && "\$2" == "--git-common-dir" ]]; then
+  printf ''
+  exit 0
+fi
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "${T24_SHIM3}/git"
+
+T24_STDERR3="${WORK}/t24-stderr3.txt"
+set +e
+( cd "$T24_REPO"; unset GAAI_RESERVATION_LEDGER GAAI_BACKLOG_PATH GAAI_DECISIONS_PATH
+  export HOME="$T24_HOME3"; PATH="${T24_SHIM3}:${PATH}" "$ALLOCATOR" epic ) >/dev/null 2>"$T24_STDERR3"
+T24_RC3=$?
+set -e
+
+if [[ "$T24_RC3" -ne 0 ]]; then
+  _pass "Empty git-common-dir result exits non-zero (rc=${T24_RC3})"
+else
+  _fail "Expected non-zero exit for an empty git-common-dir result, got rc=0"
+fi
+if grep -q "resolved to an empty value" "$T24_STDERR3" 2>/dev/null; then
+  _pass "Failure message names the empty-value problem"
+else
+  _fail "Expected a message naming the empty-value problem, got: $(cat "$T24_STDERR3" 2>/dev/null)"
+fi
+if [[ ! -d "${T24_HOME3}/.gaai/reservations" || -z "$(ls -A "${T24_HOME3}/.gaai/reservations" 2>/dev/null)" ]]; then
+  _pass "No ledger file created under the fixture HOME after the empty-value failure"
+else
+  _fail "A ledger file was created despite the empty-value failure: $(ls -A "${T24_HOME3}/.gaai/reservations" 2>/dev/null)"
+fi
+
+# ── Test 25: AC6 — header documents the actual cross-worktree mechanism ──────
+echo "Test 25: AC6 — header documents the actual cross-worktree mechanism"
+
+if grep -q "keyed by a 12-char hash of the repo root path" "$ALLOCATOR" 2>/dev/null; then
+  _fail "Header still contains the old inaccurate phrase ('keyed by a 12-char hash of the repo root path')"
+else
+  _pass "Old inaccurate header phrase is gone"
+fi
+
+if grep -qi "git-common-dir\|common git directory" "$ALLOCATOR" 2>/dev/null; then
+  _pass "Header references the common-git-directory mechanism"
+else
+  _fail "Header does not mention the common-git-directory mechanism"
+fi
+
+if grep -qi "migrat" "$ALLOCATOR" 2>/dev/null; then
+  _pass "Header documents the migration of legacy per-worktree-keyed reservations"
+else
+  _fail "Header does not mention migration of legacy reservations"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "────────────────────────────────────────"
