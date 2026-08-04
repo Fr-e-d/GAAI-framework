@@ -107,7 +107,7 @@ The **Delivery Daemon** automates delivery end-to-end:
 - Monitors session health via heartbeat and `--max-turns` safety limits
 - Auto-opens a monitoring dashboard (tmux split: daemon config + active deliveries)
 
-**Runtime model:** The delivery workflow is portable to sub-agent-capable AI coding runtimes. Claude Code is the reference implementation — the daemon uses `claude -p` (binary in PATH, local) because Claude Code was the first coding agent to expose sub-agent primitives (isolated contexts per sub-task, required for Planning → Implementation → QA separation). Other runtimes can be adopted as they expose equivalent primitives. Discovery and interactive Delivery work with any AI coding tool. See `core/compat/COMPAT.md` for the full 3-tier compatibility model.
+**Runtime model:** Claude and Codex are both explicitly supported OSS autonomous delivery executors, under one governed Plan/Impl/QA phase contract. Claude remains the default (`GAAI_DAEMON_EXECUTOR` unset → `claude`, binary in PATH, local); set `GAAI_DAEMON_EXECUTOR=codex` to use the Codex headless adapter (`codex` binary in PATH, local). An unknown or unavailable executor stops before governed work begins with an actionable error — the daemon never silently crosses from one executor to the other. Both executors share identical isolation, backlog authority, QA gates, and PR lifecycle; adapter syntax differs, Story/AC/permission authority does not. Discovery and interactive Delivery work with any AI coding tool. See `core/compat/COMPAT.md` for the full 3-tier compatibility model.
 
 Usage: `/gaai-daemon` to start, `/gaai-daemon --stop` to stop. One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`.
 

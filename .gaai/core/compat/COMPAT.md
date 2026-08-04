@@ -8,15 +8,15 @@ The installer (`core/scripts/install.sh`) deploys the correct adapter to the rig
 
 ## Delivery Runtime
 
-GAAI tool compatibility follows a 3-tier model. This applies to both GAAI OSS and GAAI Cloud.
+GAAI tool compatibility follows a 3-tier model for GAAI OSS autonomous delivery.
 
 | Tier | Mode | Tool requirement |
 |---|---|---|
 | 1 | Discovery / governance (interactive) | Any AI coding tool or MCP client |
 | 2 | Delivery interactive (manual) | Any AI coding tool or MCP client |
-| 3 | Delivery autonomous (daemon) | Claude Code CLI (`claude` binary) |
+| 3 | Delivery autonomous (daemon) | Claude Code CLI (`claude` binary, default) or Codex CLI (`codex` binary, via `GAAI_DAEMON_EXECUTOR=codex`) |
 
-Discovery (Tier 1) and Delivery interactive (Tier 2) work with any AI coding tool — Cursor, Windsurf, Codex CLI, Gemini CLI, or any tool with MCP support. The daemon (Tier 3) requires the Claude Code CLI (`claude` binary in PATH, local). This is a hard runtime dependency — not a preference or recommendation. Users without Claude CLI can still use GAAI for Discovery and manual Delivery (tiers 1–2). This requirement applies to both GAAI OSS and GAAI Cloud: even Cloud users need Claude CLI locally for autonomous delivery (the LLM runs client-side, not on the server).
+Discovery (Tier 1) and Delivery interactive (Tier 2) work with any AI coding tool — Cursor, Windsurf, Codex CLI, Gemini CLI, or any tool with MCP support. The daemon (Tier 3) explicitly supports two local headless executors: `claude` (Claude Code CLI, the backwards-compatible default when `GAAI_DAEMON_EXECUTOR` is unset) and `codex` (Codex CLI, via `GAAI_DAEMON_EXECUTOR=codex`). An unknown or unavailable executor stops before governed work begins with an actionable error — the daemon never silently falls back from one executor to the other. Users without either CLI can still use GAAI for Discovery and manual Delivery (tiers 1–2). GAAI Cloud executor selection is governed separately and is not described here.
 
 ---
 
