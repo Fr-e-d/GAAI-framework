@@ -134,7 +134,13 @@ mkdir -p "$DISPATCH_FIXTURE_DIR/.gaai/project/contexts/artefacts/stories"
 mkdir -p "$DISPATCH_FIXTURE_DIR/.gaai/project/contexts/artefacts/plans"
 mkdir -p "$DISPATCH_FIXTURE_DIR/.delivery-logs"
 cp -R "$PROJECT_DIR/.gaai/core" "$DISPATCH_FIXTURE_DIR/.gaai/core"
-cp "$PROJECT_DIR/package.json" "$DISPATCH_FIXTURE_DIR/package.json"
+# Synthesised, not copied from $PROJECT_DIR. The fixture only needs a parseable
+# package.json for lib/test-gate.sh's scripts[] lookup; its contents are never
+# asserted. Copying the host repo's file made this test depend on the host
+# being a Node project — true in the dogfood repo, false in the published
+# framework repo, which ships .gaai/core with no package.json at all, so the
+# test died on a missing file the moment CI ran it there.
+printf '{"name":"gaai-test-fixture","private":true,"version":"0.0.0"}\n' > "$DISPATCH_FIXTURE_DIR/package.json"
 cat > "$DISPATCH_FIXTURE_DIR/.gaai/project/contexts/artefacts/stories/E134S01.story.md" << 'DISPATCH_STORY_EOF'
 ---
 type: artefact
@@ -203,7 +209,7 @@ chmod +x "$DISPATCH_SHIM_DIR/gh"
 
 cat > "$DISPATCH_SHIM_DIR/pnpm" << 'DISPATCH_PNPM_SHIM_EOF'
 #!/usr/bin/env bash
-mkdir -p workers/gaai-cloud/api/node_modules/@cloudflare/workers-types
+mkdir -p node_modules/.pnpm  # _wt_deps_marker_dir default — deps-installed marker
 exit 0
 DISPATCH_PNPM_SHIM_EOF
 chmod +x "$DISPATCH_SHIM_DIR/pnpm"
@@ -439,7 +445,13 @@ PLAN_PROJECT_DIR="$PLAN_FIXTURE_DIR/project"
 PLAN_WORKTREES_BASE="$PLAN_FIXTURE_DIR/worktrees"
 mkdir -p "$PLAN_PROJECT_DIR/.gaai/project/contexts/artefacts/stories" "$PLAN_WORKTREES_BASE"
 cp -R "$PROJECT_DIR/.gaai/core" "$PLAN_PROJECT_DIR/.gaai/core"
-cp "$PROJECT_DIR/package.json" "$PLAN_PROJECT_DIR/package.json"
+# Synthesised, not copied from $PROJECT_DIR. The fixture only needs a parseable
+# package.json for lib/test-gate.sh's scripts[] lookup; its contents are never
+# asserted. Copying the host repo's file made this test depend on the host
+# being a Node project — true in the dogfood repo, false in the published
+# framework repo, which ships .gaai/core with no package.json at all, so the
+# test died on a missing file the moment CI ran it there.
+printf '{"name":"gaai-test-fixture","private":true,"version":"0.0.0"}\n' > "$PLAN_PROJECT_DIR/package.json"
 
 # Fixture story file (minimal — just needs 'epic:' field parseable by grep)
 PLAN_STORY_ID="TST-PLAN-01"
@@ -483,7 +495,7 @@ mkdir -p "$SHIM_DIR"
 
 cat > "$SHIM_DIR/pnpm" << 'PLAN_PNPM_SHIM_EOF'
 #!/usr/bin/env bash
-mkdir -p workers/gaai-cloud/api/node_modules/@cloudflare/workers-types
+mkdir -p node_modules/.pnpm  # _wt_deps_marker_dir default — deps-installed marker
 exit 0
 PLAN_PNPM_SHIM_EOF
 chmod +x "$SHIM_DIR/pnpm"

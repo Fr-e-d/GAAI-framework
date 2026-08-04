@@ -68,11 +68,11 @@ fi
 # Active backlog count
 ACTIVE_BACKLOG="$GAAI_DIR/contexts/backlog/active.backlog.yaml"
 if [[ -f "$ACTIVE_BACKLOG" ]]; then
-  total=$(grep -c "^  - id:" "$ACTIVE_BACKLOG" 2>/dev/null || echo 0)
+  total=$(grep -c "^  - id:" "$ACTIVE_BACKLOG" 2>/dev/null || true)
   refined_ids=$(backlog_ids_by_status "refined" "$ACTIVE_BACKLOG" 2>/dev/null || true)
-  refined=$(echo "$refined_ids" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)
+  refined=$(echo "$refined_ids" | grep -c '[^[:space:]]' 2>/dev/null || true)
   in_progress_ids=$(backlog_in_progress_ids "$ACTIVE_BACKLOG" 2>/dev/null || true)
-  in_progress=$(echo "$in_progress_ids" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)
+  in_progress=$(echo "$in_progress_ids" | grep -c '[^[:space:]]' 2>/dev/null || true)
   echo "── Active Backlog ──────────────────────"
   echo "  Total items : $total"
   echo "  Refined     : $refined"

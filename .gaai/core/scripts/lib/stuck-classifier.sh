@@ -76,7 +76,7 @@ classify_stuck_story() {
     || _classify_run_timed "$_classify_timeout" \
        git -C "$PROJECT_DIR" log "${TARGET_BRANCH}..story/${sid}" --oneline 2>/dev/null \
     || true)
-  branch_commit_count=$(echo "$branch_commits" | grep -c . 2>/dev/null || echo 0)
+  branch_commit_count=$(echo "$branch_commits" | grep -c . 2>/dev/null || true)
   [[ -z "$branch_commits" ]] && branch_commit_count=0
 
   # Phantom deletes: files removed on story branch vs TARGET_BRANCH

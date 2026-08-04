@@ -893,17 +893,37 @@ _emit_commit_routing_record() {
     2>/dev/null || _emit_routing_record_fallback "$trace_id" "$story_id" "commit" "$provider" "n/a" "$duration_ms" "$fallback_reason" "$impl_tag" "3phase" "$pr_url" "$auto_merge_applied"
 }
 
+# ── Worktree dependency marker ─────────────────────────────────────────────
+# Resolves the directory whose presence proves a worktree's dependencies are
+# installed. Default is pnpm's own virtual store at the workspace root, which
+# every successful `pnpm install` creates in any pnpm project.
+#
+# This used to be a hardcoded ${worktree_path}/workers/<some-app>/node_modules/
+# <some-dep> path. That directory exists only in the repo the constant was read
+# off, so everywhere else the marker was permanently absent: the idempotence
+# check below reported "not installed" on EVERY handle_plan_phase entry and
+# reinstalled from scratch, and the freshness marker in handle_commit_phase
+# could never be seeded. It also put a project-specific path in the OSS
+# substrate, which auto-syncs to the public framework repo.
+#
+# GAAI_WT_DEPS_MARKER overrides it with a worktree-relative path, for layouts
+# where the root store is not a sufficient proof (e.g. a workspace whose
+# packages are installed selectively).
+_wt_deps_marker_dir() {
+  local worktree_path="$1"
+  printf '%s/%s' "$worktree_path" "${GAAI_WT_DEPS_MARKER:-node_modules/.pnpm}"
+}
+
 # ── Worktree dependency installer ──────────────────────────────────────────
 # Ensures node_modules are populated before the PLAN phase agent spawns.
-# Idempotent: checks the @cloudflare/workers-types marker dir (empirically
-# verified path where pnpm installs this dep for workers/gaai-cloud/api).
+# Idempotent: checks the marker dir resolved by _wt_deps_marker_dir.
 # Called on EVERY handle_plan_phase entry (fresh + resumed worktrees).
 ensure_wt_dependencies_installed() {
   local story_id="$1" trace_id="$2" worktree_path="$3"
   local timeout_s marker_dir ts t_start t_end duration_ms install_exit timeout_cmd
 
   timeout_s="${GAAI_PNPM_INSTALL_TIMEOUT:-120}"
-  marker_dir="${worktree_path}/workers/gaai-cloud/api/node_modules/@cloudflare/workers-types"
+  marker_dir="$(_wt_deps_marker_dir "$worktree_path")"
   ts=$(date '+%H:%M:%S')
 
   if [[ -d "$marker_dir" ]]; then
@@ -2372,8 +2392,8 @@ TRIAGE_PROMPT_EOF
 
   local overall_verdict candidates_count escalated_count
   overall_verdict=$(grep "^overall:" "$triage_log" 2>/dev/null | head -1 | sed 's/overall: *//' | tr -d ' ')
-  candidates_count=$(grep -c "candidate_id:" "$triage_log" 2>/dev/null || echo "0")
-  escalated_count=$(grep -c "verdict: ESCALATE" "$triage_log" 2>/dev/null || echo "0")
+  candidates_count=$(grep -c "candidate_id:" "$triage_log" 2>/dev/null || true)
+  escalated_count=$(grep -c "verdict: ESCALATE" "$triage_log" 2>/dev/null || true)
 
   echo "[TRIAGE] Triage complete for ${story_id}: overall=${overall_verdict}, candidates=${candidates_count}, escalated=${escalated_count}"
   touch "$done_marker" 2>/dev/null || true
@@ -2430,7 +2450,7 @@ handle_commit_phase() {
     fi
     # AC3/AC6: seed marker only when recreated worktree has BOTH populated node_modules AND
     # lockfile hash match — a hash-only seed would write a false-fresh marker (forbidden by AC6)
-    local _wt_marker_dir="${worktree_path}/workers/gaai-cloud/api/node_modules/@cloudflare/workers-types"
+    local _wt_marker_dir; _wt_marker_dir="$(_wt_deps_marker_dir "$worktree_path")"
     local _wt_marker_path="${worktree_path}/.gaai-pnpm-install-marker"
     local _wt_lockfile="${worktree_path}/pnpm-lock.yaml"
     if [[ -d "$_wt_marker_dir" ]] && [[ -f "$_wt_lockfile" ]]; then

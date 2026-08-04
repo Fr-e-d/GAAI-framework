@@ -56,7 +56,7 @@ count_bash_no_tail() {
 count_tools() {
   local log="$1"
   [[ ! -f "$log" ]] && { echo 0; return; }
-  grep -c '"type":"tool_use"' "$log" 2>/dev/null || echo 0
+  grep -c '"type":"tool_use"' "$log" 2>/dev/null || true
 }
 
 # Story complexity from artefact

@@ -104,7 +104,7 @@ else
 fi
 
 # Verify the call appears inside handle_commit_phase (not just the legacy legacy on_exit path)
-DISPATCH_CALL_COUNT=$(grep -c "_run_triage_for_story" "$DISPATCH_LIB" 2>/dev/null || echo "0")
+DISPATCH_CALL_COUNT=$(grep -c "_run_triage_for_story" "$DISPATCH_LIB" 2>/dev/null || true)
 if [[ "$DISPATCH_CALL_COUNT" -ge 2 ]]; then
   pass "_run_triage_for_story referenced ${DISPATCH_CALL_COUNT}x in daemon-dispatch.sh (definition + call in handle_commit_phase)"
 else

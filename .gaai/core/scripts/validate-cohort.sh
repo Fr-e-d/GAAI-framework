@@ -320,7 +320,7 @@ PYEOF
 COHORT_STORY_IDS="$(echo "$COHORT_STORY_IDS_RAW" | grep -v '^WARN:' || true)"
 
 if [[ -n "$COHORT_STORY_IDS" ]]; then
-  COHORT_COUNT="$(echo "$COHORT_STORY_IDS" | grep -c . || echo 0)"
+  COHORT_COUNT="$(echo "$COHORT_STORY_IDS" | grep -c . || true)"
 else
   COHORT_STORY_IDS=""
   COHORT_COUNT=0

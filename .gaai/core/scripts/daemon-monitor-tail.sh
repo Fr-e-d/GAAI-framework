@@ -290,8 +290,8 @@ parse_log() {
     tool_count=$(( ${claude_tool_count:-0} + ${codex_tool_count:-0} ))
   else
     local claude_tool_count codex_tool_count
-    claude_tool_count=$(grep -c '"type":"tool_use"' "$log_file" 2>/dev/null || echo 0)
-    codex_tool_count=$(grep -c '"type":"item.started".*"type":"command_execution"' "$log_file" 2>/dev/null || echo 0)
+    claude_tool_count=$(grep -c '"type":"tool_use"' "$log_file" 2>/dev/null || true)
+    codex_tool_count=$(grep -c '"type":"item.started".*"type":"command_execution"' "$log_file" 2>/dev/null || true)
     tool_count=$(( ${claude_tool_count:-0} + ${codex_tool_count:-0} ))
   fi
 
