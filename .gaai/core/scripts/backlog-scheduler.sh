@@ -30,7 +30,10 @@ set -euo pipefail
 #   --set-field <id> <field> <value>  Set any field on a backlog
 #                   item. Updates if exists, inserts after delivery
 #                   metadata fields if not. Numbers and null/true/
-#                   false stay bare; strings are auto-quoted.
+#                   false stay bare; safe flow-style sequences of
+#                   plain scalars are normalized and stay bare;
+#                   bracket-delimited values are interpreted as
+#                   sequences, and other strings are auto-quoted.
 #                   Requires file path (not --stdin).
 #   --stdin         Read YAML from stdin instead of file
 #
@@ -503,8 +506,9 @@ if block_start < 0:
     print(f'Error: item {target_id} not found', file=sys.stderr)
     sys.exit(1)
 
-# Format value: numbers stay bare, null/true/false/[] stay bare, simple
-# snake_case identifiers stay bare (in_progress, refined, qa_passed, done...),
+# Format value: numbers stay bare, null/true/false/[] stay bare, safe
+# flow-style sequences of plain scalars stay bare, simple snake_case
+# identifiers stay bare (in_progress, refined, qa_passed, done...), and
 # everything else gets quoted.
 #
 # Why bare identifiers matter: naive readers elsewhere in the daemon use
@@ -514,6 +518,30 @@ if block_start < 0:
 # Symmetric fix: writer emits canonical bare for simple identifiers (matches
 # what --set-status produces + matches what yq -i + manual edits produce);
 # readers strip quotes defensively. Postel's law applied to YAML.
+def normalize_safe_flow_sequence(value):
+    if not (value.startswith('[') and value.endswith(']')):
+        return None
+
+    inner = value[1:-1].strip()
+    if not inner:
+        return '[]'
+
+    items = [item.strip() for item in inner.split(',')]
+    safe_plain_scalar = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]*$')
+    if any(not item or not safe_plain_scalar.fullmatch(item) for item in items):
+        raise ValueError(
+            'flow sequences accept only comma-separated plain scalars '
+            'starting with a letter or digit, then using only letters, '
+            'digits, dot, underscore, or hyphen'
+        )
+    return '[' + ', '.join(items) + ']'
+
+try:
+    flow_sequence = normalize_safe_flow_sequence(field_value)
+except ValueError as exc:
+    print(f'Error: unsafe --set-field flow sequence: {exc}', file=sys.stderr)
+    sys.exit(1)
+
 try:
     float(field_value)
     formatted = field_value
@@ -529,12 +557,47 @@ except ValueError:
         # leading non-alpha) — escape inner double quotes and wrap.
         formatted = '\"' + field_value.replace('\\\\', '\\\\\\\\').replace('\"', '\\\\\"') + '\"'
 
+if flow_sequence is not None:
+    formatted = flow_sequence
+
 # Look for existing field within the block
 field_found = False
 for i in range(block_start + 1, block_end):
-    m = re.match(r'^(\s+)' + re.escape(field_name) + r':\s', lines[i])
+    m = re.match(
+        r'^([ \t]+)' + re.escape(field_name) + r':[ \t]*(.*?)(?:\r?\n)?$',
+        lines[i],
+    )
     if m:
         indent = m.group(1)
+        existing_value = m.group(2)
+        block_scalar_header = re.fullmatch(r'[|>][1-9+-]{0,2}', existing_value)
+        if block_scalar_header:
+            print(
+                f'Error: {target_id}.{field_name} uses block-style YAML; '
+                'refusing a partial --set-field rewrite',
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if not existing_value:
+            field_indent = len(indent)
+            for following in lines[i + 1:block_end]:
+                if not following.strip():
+                    continue
+                if following.lstrip().startswith('#'):
+                    continue
+                following_indent = len(following) - len(following.lstrip(' \t'))
+                same_indent_sequence = (
+                    following_indent == field_indent
+                    and following.strip().startswith('- ')
+                )
+                if following_indent > field_indent or same_indent_sequence:
+                    print(
+                        f'Error: {target_id}.{field_name} uses block-style YAML; '
+                        'refusing a partial --set-field rewrite',
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                break
         lines[i] = f'{indent}{field_name}: {formatted}\n'
         field_found = True
         break
@@ -563,6 +626,15 @@ if not field_found:
 
     new_line = f'{indent}{field_name}: {formatted}\n'
     lines.insert(insert_after + 1, new_line)
+
+try:
+    import yaml
+    yaml.safe_load(''.join(lines))
+except ImportError:
+    pass
+except Exception as exc:
+    print(f'Error: --set-field would produce invalid YAML: {exc}', file=sys.stderr)
+    sys.exit(1)
 
 with open(file_path, 'w') as f:
     f.writelines(lines)
