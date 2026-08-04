@@ -23,8 +23,12 @@ _TMPDIR="${_TMPDIR%/}"
 
 FIXTURE="${_TMPDIR}/backlog-yaml.test.yaml"
 
+# Bin directory used by T6 to make yq genuinely unresolvable — see T6.
+YQLESS_BIN="${_TMPDIR}/backlog-yaml.test.yqless-bin"
+
 cleanup() {
   rm -f "$FIXTURE"
+  rm -rf "$YQLESS_BIN"
 }
 trap cleanup EXIT
 
@@ -113,9 +117,23 @@ assert() {
 
 # ── T6-T8: yq-absent path (Python fallback) ─────────────────────────────
 
-# T6: yq-absent advisory warning — restricted PATH excludes /opt/homebrew/bin (yq) but keeps /usr/bin (python3)
+# T6: yq-absent advisory warning.
+#
+# PATH is narrowed to a fixture bin directory holding nothing but a python3
+# symlink — the Python fallback's sole external dependency — so `command -v yq`
+# genuinely resolves nothing, wherever the host happens to install yq.
+#
+# The previous form narrowed PATH to "/usr/bin:/bin:/usr/sbin:/sbin" on the
+# assumption that this hides yq. That only holds where yq sits outside those
+# directories (Homebrew's /opt/homebrew/bin on macOS). GitHub's ubuntu runners
+# ship mikefarah yq at /usr/bin/yq, which the narrowed PATH still resolved, so
+# the lib reported yq-present, emitted no advisory, and the assertion failed —
+# passing on every developer's Mac and failing in CI.
+mkdir -p "$YQLESS_BIN"
+ln -sf "$(command -v python3)" "$YQLESS_BIN/python3"
+
 output=$(
-  export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+  export PATH="$YQLESS_BIN"
   unset _BACKLOG_YQ_AVAILABLE
   source "$LIB"
   backlog_status "TST-STATUS-UNQUOTED" "$FIXTURE" 2>&1 >/dev/null
