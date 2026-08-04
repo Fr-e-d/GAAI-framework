@@ -211,7 +211,7 @@ One canonical source (`.gaai/`). Thin adapters per tool. No duplication. Discove
 - Discovery is conversational and intentionally lightweight. It helps you structure what you know — it does not replace deep product research or collaborative brainstorming across a team.
 - Trivial tasks still need a backlog item. You can make it a one-liner, but the gate is always there.
 - The framework relies on the agent following the files. There is no programmatic enforcement.
-- The repo is freshly open-sourced. Community is just getting started.
+- The repo was recently published under ELv2. Community is just getting started.
 
 ---
 
@@ -228,7 +228,7 @@ One canonical source (`.gaai/`). Thin adapters per tool. No duplication. Discove
 
 ---
 
-ELv2 — see [LICENSE](LICENSE)
+**source-available under the Elastic License 2.0 (ELv2)** — see [LICENSE](LICENSE) for the full terms.
 
 ---
 
