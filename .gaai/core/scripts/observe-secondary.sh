@@ -83,7 +83,7 @@ notes_status() {
   local size mtime now
   size=$(wc -c < "$notes_path" | tr -d ' ')
   if [[ "$(uname)" == "Darwin" ]]; then
-    mtime=$(stat -f %m "$notes_path")
+    mtime=$(stat -c %Y "$notes_path" 2>/dev/null || stat -f %m "$notes_path" 2>/dev/null || echo 0)
   else
     mtime=$(stat -c %Y "$notes_path")
   fi

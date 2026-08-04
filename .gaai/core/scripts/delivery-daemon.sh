@@ -269,7 +269,7 @@ fi
 # Cross-platform: file modification time (epoch seconds)
 file_mtime() {
   if [[ "$PLATFORM" == "Darwin" ]]; then
-    stat -f %m "$1" 2>/dev/null || echo "0"
+    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo "0"
   else
     stat -c %Y "$1" 2>/dev/null || echo "0"
   fi
@@ -1166,7 +1166,7 @@ check_stale_in_progress() {
       if [[ -f "$_rip_marker" ]]; then
         local _rip_mtime=0
         if [[ "$(uname)" == "Darwin" ]]; then
-          _rip_mtime=$(stat -f %m "$_rip_marker" 2>/dev/null || echo 0)
+          _rip_mtime=$(stat -c %Y "$_rip_marker" 2>/dev/null || stat -f %m "$_rip_marker" 2>/dev/null || echo 0)
         else
           _rip_mtime=$(stat -c %Y "$_rip_marker" 2>/dev/null || echo 0)
         fi
@@ -3326,7 +3326,7 @@ while true; do
       fi
       # No live wrapper — apply mtime grace (600s).
       if [[ "$(uname)" == "Darwin" ]]; then
-        _stale_mtime=$(stat -f %m "$_stale_marker" 2>/dev/null || echo 0)
+        _stale_mtime=$(stat -c %Y "$_stale_marker" 2>/dev/null || stat -f %m "$_stale_marker" 2>/dev/null || echo 0)
       else
         _stale_mtime=$(stat -c %Y "$_stale_marker" 2>/dev/null || echo 0)
       fi

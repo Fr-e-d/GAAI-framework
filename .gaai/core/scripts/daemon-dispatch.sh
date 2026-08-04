@@ -146,9 +146,18 @@ reap_orphaned_worktrees() {
     tmux has-session -t "gaai-deliver-${_sid}" 2>/dev/null && continue
 
     # Live guard 2: a fresh heartbeat (<120s) means a detached wrapper is running.
+    #
+    # mtime probes GNU first, BSD second, and that order is load-bearing. GNU
+    # stat has no -f format flag: "stat -f %m FILE" reads %m as a *filename*, so
+    # it prints the filesystem block for FILE on stdout AND exits non-zero for
+    # the bogus "%m" operand. Putting it first therefore fires the || arm while
+    # having already emitted junk, and the capture becomes that junk plus the
+    # real value — non-numeric, forced to 0 by the guard below, which reads as an
+    # ancient heartbeat and reaps the worktree of a live wrapper. BSD stat has no
+    # -c, fails cleanly with no stdout, and falls through correctly.
     _hb="${LOCK_DIR}/${_sid}.heartbeat"
     if [[ -f "$_hb" ]]; then
-      _hb_mtime=$(stat -f %m "$_hb" 2>/dev/null || stat -c %Y "$_hb" 2>/dev/null || echo 0)
+      _hb_mtime=$(stat -c %Y "$_hb" 2>/dev/null || stat -f %m "$_hb" 2>/dev/null || echo 0)
       [[ "$_hb_mtime" =~ ^[0-9]+$ ]] || _hb_mtime=0
       (( _now - _hb_mtime < 120 )) && continue
     fi

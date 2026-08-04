@@ -39,7 +39,13 @@ setup_git_repo() {
   local project_dir="$1" content="$2"
   local remote_dir="${project_dir}_remote.git"
   rm -rf "$project_dir" "$remote_dir"
-  git init --bare "$remote_dir" -q
+  # -b main is explicit on purpose: these fixtures push to and read from
+  # origin/main, but a bare init otherwise takes the branch name from the
+  # host's init.defaultBranch. Developers who set it to main saw this pass
+  # while CI runners, which keep git's built-in default, produced a repo with
+  # no main ref at all — every fixture push then failed with "couldn't find
+  # remote ref main" and the code under test never ran.
+  git init --bare -b main "$remote_dir" -q
   git clone "$remote_dir" "$project_dir" -q
   git -C "$project_dir" config user.email "test@gaai.local"
   git -C "$project_dir" config user.name "GAAI Test"
