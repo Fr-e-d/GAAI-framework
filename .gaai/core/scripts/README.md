@@ -63,8 +63,8 @@ This script is automatically invoked by the Git post-commit hook (`.git/hooks/po
 📝 Detected SKILL.md changes, checking skills index...
 ℹ️  Detected modification: .gaai/core/skills/cross/idiomatic-translate/SKILL.md
 🔄 Regenerating skills index...
-✅ Core index: 48 skills → .gaai/core/skills/skills-index.yaml
-✅ Project index: 21 skills → .gaai/project/skills/skills-index.yaml
+✅ Core index: <N> skills → .gaai/core/skills/skills-index.yaml
+✅ Project index: <N> skills → .gaai/project/skills/skills-index.yaml
 ✅ Index updated, adding to git...
    (amended previous commit with updated indices)
 ```

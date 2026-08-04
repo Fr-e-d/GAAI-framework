@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+-: Make capability documentation follow shipped runtime and filesystem truth
 - fix: renice test-gate subshell via $BASHPID, not $$
 - fix: renice test-gate subshell via $BASHPID, not $$
 - fix: lower CPU priority of test-gate unit runs
