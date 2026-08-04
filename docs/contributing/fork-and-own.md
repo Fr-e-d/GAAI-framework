@@ -77,7 +77,7 @@ Most value from GAAI is in the structure and conventions — not in constantly f
 
 ## What We Ask
 
-GAAI is ELv2 licensed. You can do anything with your fork — the only restriction is you may not offer it as a competing hosted or managed service.
+GAAI is source-available under the Elastic License 2.0 (ELv2) — see [LICENSE](../../LICENSE) for the governing terms.
 
 If you find bugs or documentation errors in the upstream framework, please report them at [GitHub Issues](https://github.com/gaai-framework/gaai-framework/issues).
 
