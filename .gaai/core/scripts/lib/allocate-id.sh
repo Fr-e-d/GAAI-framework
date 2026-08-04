@@ -23,8 +23,15 @@
 # reservation row before returning, and prunes stale/landed entries on each run.
 #
 # Cross-worktree visibility: the ledger lives under ~/.gaai/reservations/ (outside any git
-# worktree) and is keyed by a 12-char hash of the repo root path, so all local worktrees of
-# the same repo share it before any branch merges.
+# worktree) and is keyed by a 12-char hash of the repository's absolute, symlink-resolved
+# common git directory (git rev-parse --git-common-dir, resolved via cd + pwd -P) — a value
+# that is identical for the main checkout and every linked worktree, so all local worktrees of
+# the same repo genuinely share the ledger and lock before any branch merges. Reservations
+# recorded under the previous (per-worktree-path) key are migrated forward, on each run, from
+# every worktree the repository's live `git worktree list` still reports — including entries
+# marked prunable (directory gone, path still listed); reservations belonging to worktrees
+# already fully removed from that list are not recoverable by this route and are accepted as
+# lost.
 #
 # Cross-host visibility: the ledger is host-local and TTL-pruned, so it cannot see IDs reserved
 # on another machine (a daemon host, a second clone, Cloud) nor an ID whose PR has stayed open
@@ -119,19 +126,52 @@ else
   exit 1
 fi
 
+# ── Hashing helper (shared by the live key and the legacy-key recomputation during migration) ──
+_hash12() {
+  local input="$1"
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$input" | shasum -a 256 | cut -c1-12
+  elif command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$input" | sha256sum | cut -c1-12
+  else
+    printf '%s' "$input" | base64 2>/dev/null | tr -dc 'a-zA-Z0-9' | cut -c1-12
+  fi
+}
+
 # ── Repo identity (stable key across all worktrees of the same repo) ──────────
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "allocate-id.sh: not inside a git repository" >&2
   exit 1
 }
 
-if command -v shasum >/dev/null 2>&1; then
-  REPO_ID="$(printf '%s' "$REPO_ROOT" | shasum -a 256 | cut -c1-12)"
-elif command -v sha256sum >/dev/null 2>&1; then
-  REPO_ID="$(printf '%s' "$REPO_ROOT" | sha256sum | cut -c1-12)"
-else
-  REPO_ID="$(printf '%s' "$REPO_ROOT" | base64 2>/dev/null | tr -dc 'a-zA-Z0-9' | cut -c1-12)"
+# ── Repository common git directory: identical from the main checkout and every linked
+# worktree (unlike REPO_ROOT/--show-toplevel above, which returns each linked worktree's OWN
+# path). This is the value the ledger/lock key is derived from below — kept in a SEPARATE
+# variable so REPO_ROOT, and everything that derives from it (BACKLOG_PATH/DECISIONS_PATH
+# defaults, further down), is left byte-for-byte unchanged. No --path-format=absolute flag
+# (version-gated on newer git); cd + pwd -P achieves the same absolute, symlink-resolved result
+# with no version floor.
+RAW_GIT_COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null)" || {
+  echo "allocate-id.sh: cannot resolve the repository's common git directory (git rev-parse --git-common-dir failed)" >&2
+  exit 1
+}
+
+if [[ -z "$RAW_GIT_COMMON_DIR" ]]; then
+  echo "allocate-id.sh: repository common git directory resolved to an empty value — refusing: an empty value would merge every repository on the host onto one reservation key" >&2
+  exit 1
 fi
+
+REPO_COMMON_DIR="$(cd "$RAW_GIT_COMMON_DIR" 2>/dev/null && pwd -P)" || {
+  echo "allocate-id.sh: cannot resolve the repository's common git directory to an absolute path (cd/pwd -P failed on '${RAW_GIT_COMMON_DIR}')" >&2
+  exit 1
+}
+
+if [[ -z "$REPO_COMMON_DIR" || "${REPO_COMMON_DIR:0:1}" != "/" ]]; then
+  echo "allocate-id.sh: repository common git directory resolved to a relative or empty value ('${REPO_COMMON_DIR}') — refusing: a relative or empty value would merge every repository on the host onto one reservation key" >&2
+  exit 1
+fi
+
+REPO_ID="$(_hash12 "$REPO_COMMON_DIR")"
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 DEFAULT_BACKLOG="${REPO_ROOT}/.gaai/project/contexts/backlog/active.backlog.yaml"
@@ -140,6 +180,11 @@ BACKLOG_PATH="${GAAI_BACKLOG_PATH:-$DEFAULT_BACKLOG}"
 DEFAULT_DECISIONS="${REPO_ROOT}/.gaai/project/contexts/memory/decisions"
 DECISIONS_PATH="${GAAI_DECISIONS_PATH:-$DEFAULT_DECISIONS}"
 
+if [[ -n "${GAAI_RESERVATION_LEDGER:-}" ]]; then
+  LEDGER_OVERRIDDEN=true
+else
+  LEDGER_OVERRIDDEN=false
+fi
 LEDGER_FILE="${GAAI_RESERVATION_LEDGER:-${HOME}/.gaai/reservations/${REPO_ID}.tsv}"
 LOCK_FILE="${LEDGER_FILE}.lock"
 LOCK_DIR="${LOCK_FILE}.d"
@@ -325,6 +370,65 @@ if [[ "$GAAI_RESERVATION_BACKEND" == "git-cas" && "$SCAN_REMOTE" == "true" ]] &&
   [[ -n "$CAS_CONTENT" ]] && _warn_malformed_cas_rows
 fi
 
+# ── Migrate legacy per-worktree-path-keyed ledgers into the shared common-git-dir-keyed ledger ──
+# Only when the ledger path was NOT explicitly overridden (AC4: "with the ledger path override
+# unset") — a caller-supplied ledger path is never touched by migration. Additive and idempotent:
+# never deletes/renames a legacy ledger; a second run finds every id already migrated and adds
+# nothing.
+_migrate_legacy_worktree_ledger() {
+  local wt_path="$1"
+  [[ -n "$wt_path" ]] || return 0
+
+  local old_id
+  old_id="$(_hash12 "$wt_path")"
+  [[ "$old_id" != "$REPO_ID" ]] || return 0   # already the live key — nothing to migrate
+
+  local old_ledger="${HOME}/.gaai/reservations/${old_id}.tsv"
+  [[ -f "$old_ledger" ]] || return 0
+
+  local added=0
+  local raw_line entry_id entry_kind entry_epoch
+  while IFS= read -r raw_line; do
+    [[ -z "$raw_line" || "$raw_line" == \#* ]] && continue
+    IFS=$'\t' read -r entry_id entry_kind entry_epoch <<< "$raw_line" || true
+    [[ -z "$entry_id" ]] && continue
+
+    # id-existence check against the ledger content as migrated so far this run — avoids
+    # inserting the same id twice even if it appears in more than one legacy ledger.
+    if [[ -f "$LEDGER_FILE" ]] && awk -F'\t' -v id="$entry_id" '$1==id{f=1} END{exit !f}' "$LEDGER_FILE" 2>/dev/null; then
+      continue
+    fi
+
+    {
+      [[ -f "$LEDGER_FILE" ]] || printf '# GAAI ID reservation ledger — do not edit manually\n'
+      printf '%s\n' "$raw_line"
+    } >> "$LEDGER_FILE" 2>/dev/null || true
+    added=$(( added + 1 ))
+  done < "$old_ledger" || true
+
+  if (( added > 0 )); then
+    echo "allocate-id.sh: migrated ${added} reservation(s) from legacy ledger ${old_ledger} into ${LEDGER_FILE}" >&2
+  fi
+}
+
+# Discover every worktree path the repository's worktree list still reports — including entries
+# git marks 'prunable' (directory gone, path line still emitted) — and migrate each one's legacy
+# ledger. Worktrees already fully removed via `git worktree remove` (no longer reported at all)
+# are unrecoverable by this route — accepted as lost, per AC4.
+_migrate_all_legacy_worktree_ledgers() {
+  [[ "$LEDGER_WRITABLE" == "true" && "$LEDGER_OVERRIDDEN" == "false" ]] || return 0
+
+  local wt_line wt_path
+  while IFS= read -r wt_line; do
+    case "$wt_line" in
+      worktree\ *)
+        wt_path="${wt_line#worktree }"
+        _migrate_legacy_worktree_ledger "$wt_path"
+        ;;
+    esac
+  done < <(git worktree list --porcelain 2>/dev/null) || true
+}
+
 # ── Ensure ledger directory exists ────────────────────────────────────────────
 LEDGER_WRITABLE=true
 if ! mkdir -p "$(dirname "$LEDGER_FILE")" 2>/dev/null; then
@@ -371,6 +475,10 @@ if [[ "$LEDGER_WRITABLE" == "true" ]]; then
 else
   echo "allocate-id.sh: WARNING: flock unavailable — allocation not atomic across concurrent sessions" >&2
 fi
+
+# ── Migrate legacy per-worktree-path-keyed ledgers (must run under the lock, before the prune
+# block below reads $LEDGER_FILE, so migrated rows are visible to this run's max computation) ──
+_migrate_all_legacy_worktree_ledgers
 
 # ── Prune stale and landed ledger entries ─────────────────────────────────────
 NOW_EPOCH="$(date +%s 2>/dev/null)" || NOW_EPOCH="0"
