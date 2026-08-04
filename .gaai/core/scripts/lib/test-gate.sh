@@ -21,6 +21,14 @@
 #   TARGET_BRANCH  — remote branch compared against (default: staging)
 #   TEST_GATE_FLAKY_RETRIES — vitest per-test retries on both runs (default: 2;
 #                             0 disables). Only applied to vitest-based scripts.
+#   GAAI_TEST_UNIT_TIMEOUT_SEC — per-unit wall-clock backstop (default: 2400 =
+#                             40 min). Deliberately generous: this does NOT
+#                             replace the streaming-output design below (that
+#                             solves the hang-detector false-positive on
+#                             legitimately slow full-suite runs); it only
+#                             bounds a unit that stops producing output
+#                             entirely (deadlock, hung process waiting on
+#                             stdin/network) — the case streaming cannot help.
 #   SCHEDULER      — absolute path to backlog-scheduler.sh (required by caller)
 #   BACKLOG_FILE   — absolute path to active.backlog.yaml (required by caller)
 #
@@ -264,7 +272,15 @@ _test_gate_run_units() {
     # when nothing else needs it, so total suite wall-clock is not
     # meaningfully affected — only scheduling priority under contention
     # changes.
-    (renice -n 15 -p $BASHPID >/dev/null 2>&1; cd "$worktree_path" && eval "$cmd") 2>&1 | tee -a /dev/stderr >/dev/null
+    local _tg_to_cmd
+    _tg_to_cmd=$(declare -F _resolve_timeout_cmd >/dev/null 2>&1 && _resolve_timeout_cmd || true)
+    (renice -n 15 -p $BASHPID >/dev/null 2>&1
+     cd "$worktree_path" || exit
+     if [[ -n "$_tg_to_cmd" ]]; then
+       $_tg_to_cmd "${GAAI_TEST_UNIT_TIMEOUT_SEC:-2400}" bash -c "$cmd"
+     else
+       eval "$cmd"
+     fi) 2>&1 | tee -a /dev/stderr >/dev/null
     exit_code=${PIPESTATUS[0]}
     echo "[TEST-GATE] unit=${label} type=${type} exit=${exit_code}" >&2
 

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- chore: raise phase timeouts for Sonnet 5 + bound test-gate unit runs
 -: State ELv2 licensing publicly without open-source ambiguity
 -: allocator ledger/lock key off common git dir, shared across worktrees
 -: Make capability documentation follow shipped runtime and filesystem truth

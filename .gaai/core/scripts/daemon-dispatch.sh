@@ -15,9 +15,13 @@
 # only fires on identical consecutive errors) cannot catch — silent network
 # stalls, MCP server deadlocks, agent that produces output but never
 # converges. Override via env when needed (longer impl on giant stories).
-GAAI_TIMEOUT_PLAN_SEC="${GAAI_TIMEOUT_PLAN_SEC:-1800}"     # 30 min
-GAAI_TIMEOUT_IMPL_SEC="${GAAI_TIMEOUT_IMPL_SEC:-5400}"     # 90 min
-GAAI_TIMEOUT_QA_SEC="${GAAI_TIMEOUT_QA_SEC:-1800}"         # 30 min
+# Raised (30/90/30 -> 40/120/45 min) — newer model generations can run
+# measurably slower per turn than prior ones, especially under extended
+# thinking; observed genuinely-active (non-hung) impl sessions past a
+# too-tight cap. Re-tune here if model latency characteristics shift again.
+GAAI_TIMEOUT_PLAN_SEC="${GAAI_TIMEOUT_PLAN_SEC:-2400}"     # 40 min
+GAAI_TIMEOUT_IMPL_SEC="${GAAI_TIMEOUT_IMPL_SEC:-7200}"     # 120 min
+GAAI_TIMEOUT_QA_SEC="${GAAI_TIMEOUT_QA_SEC:-2700}"         # 45 min
 GAAI_TIMEOUT_COMMIT_SEC="${GAAI_TIMEOUT_COMMIT_SEC:-600}"  # 10 min (commit-phase
                                                             # is bash-only; this
                                                             # is informational)
