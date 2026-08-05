@@ -206,8 +206,9 @@ _DISPATCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   _WORKTREE_INTEGRITY_SH_SOURCED=1
 
 # ── Deterministic test gate helper ──────────────────────────────
-# Sourced here so dispatch's handle_commit_phase can run the differential
-# test gate before push. Same optional-source contract as worktree-integrity.
+# Sourced here so dispatch's handle_commit_phase can gate the merge step
+# (post-push, post-PR-create) on the CI or local differential test gate.
+# Same optional-source contract as worktree-integrity.
 [[ -z "${_TEST_GATE_SH_SOURCED:-}" ]] && \
   source "${_DISPATCH_SCRIPT_DIR}/lib/test-gate.sh" 2>/dev/null && \
   _TEST_GATE_SH_SOURCED=1
@@ -2204,6 +2205,76 @@ _auto_resolve_push() {
   return 0
 }
 
+# Merge exactly one validated PR head without enabling a persistent auto-merge
+# request or entering a merge queue. The REST merge endpoint's `sha` field is
+# the atomic server-side precondition; the follow-up read verifies the durable
+# outcome before the daemon records success.
+#
+# Returns: 0 = exact head is MERGED, 1 = unavailable/rejected after retries,
+#          2 = PR head moved away from expected_head_sha.
+_merge_exact_pr_head() {
+  local story_id="$1" pr_url="$2" pr_number="$3" expected_head_sha="$4"
+  if [[ ! "$pr_number" =~ ^[0-9]+$ || ! "$expected_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "[ERROR] ${story_id} exact-head merge: invalid PR number or head SHA"
+    return 1
+  fi
+
+  local merge_attempt=0 merge_max=12 merge_out merge_rc
+  local observed observed_state observed_head
+  while [[ "$merge_attempt" -lt "$merge_max" ]]; do
+    merge_attempt=$(( merge_attempt + 1 ))
+    merge_out=$(gh api --method PUT "repos/{owner}/{repo}/pulls/${pr_number}/merge" \
+      -f merge_method=squash -f sha="$expected_head_sha" --jq '.merged' 2>&1)
+    merge_rc=$?
+
+    observed=$(gh pr view "$pr_url" --json state,headRefOid \
+      --jq '[.state,.headRefOid] | @tsv' 2>/dev/null || echo "")
+    observed_state=""; observed_head=""
+    IFS=$'\t' read -r observed_state observed_head <<< "$observed"
+
+    if [[ "$observed_head" =~ ^[0-9a-fA-F]{40}$ && "$observed_head" != "$expected_head_sha" ]]; then
+      echo "[ERROR] ${story_id} exact-head merge: PR head moved (${observed_head}, expected ${expected_head_sha})"
+      return 2
+    fi
+    if [[ "$observed_state" == "MERGED" && "$observed_head" == "$expected_head_sha" ]]; then
+      return 0
+    fi
+
+    # A success response without a verified MERGED state is not accepted. In
+    # particular, it cannot authorize an implicit auto-merge or merge-queue
+    # entry on repositories whose target branch requires one.
+    if [[ "$merge_rc" -eq 0 && "$merge_out" == "true" ]]; then
+      echo "[WARN] ${story_id} exact-head merge: API reported success but durable MERGED state is not visible yet"
+    else
+      echo "[WARN] ${story_id} exact-head merge attempt ${merge_attempt}/${merge_max} rejected: ${merge_out: -200}"
+    fi
+    [[ "$merge_attempt" -lt "$merge_max" ]] && sleep 5
+  done
+
+  # Opt-in trust-arc escape hatch for protected branches. `--admin` bypasses a
+  # merge queue, and the same exact-head durable-state verification still
+  # applies before success is returned.
+  if [[ "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-false}" == "true" ]]; then
+    echo "[INFO] ${story_id} exact-head merge: attempting admin fallback"
+    merge_out=$(gh pr merge --admin --squash --match-head-commit \
+      "$expected_head_sha" "$pr_url" 2>&1)
+    merge_rc=$?
+    observed=$(gh pr view "$pr_url" --json state,headRefOid \
+      --jq '[.state,.headRefOid] | @tsv' 2>/dev/null || echo "")
+    observed_state=""; observed_head=""
+    IFS=$'\t' read -r observed_state observed_head <<< "$observed"
+    if [[ "$observed_head" =~ ^[0-9a-fA-F]{40}$ && "$observed_head" != "$expected_head_sha" ]]; then
+      return 2
+    fi
+    if [[ "$observed_state" == "MERGED" && "$observed_head" == "$expected_head_sha" ]]; then
+      return 0
+    fi
+    echo "[WARN] ${story_id} exact-head merge: admin fallback failed (rc=${merge_rc}): ${merge_out: -200}"
+  fi
+
+  return 1
+}
+
 # ── Autonomous post-delivery triage hook (AC2, AC3, AC4, AC5) ────────────────
 # Primary invocation: handle_commit_phase, after --set-status done (fires on every
 # 3-phase done transition — both auto-merge and pending-review paths).
@@ -2624,15 +2695,6 @@ ${qa_snippet}"
     fi
   fi
 
-  # ── Deterministic test gate (AC1-AC6) ────────────────────────────
-  if declare -f _run_deterministic_test_gate >/dev/null 2>&1; then
-    if ! _run_deterministic_test_gate "$story_id" "$worktree_path" "$qa_report_path"; then
-      echo "[ERROR] ${story_id} handle_commit_phase: test gate blocked commit [class=TEST_GATE_BLOCKED]"
-      _emit_commit_routing_record "$story_id" "$trace_id" "error" "TEST_GATE_BLOCKED" "0" "" "false"
-      return 1
-    fi
-  fi
-
   # ── git push with retry-backoff (AC1-iii + AC5-a) ────────────────────────
   # Note : stderr captured (NOT 2>/dev/null) so push errors are diagnosable.
   # Empirical : silent stderr previously hid stalls (auth prompts, network
@@ -2651,6 +2713,13 @@ ${qa_snippet}"
   done
   if [[ "$push_exit" -ne 0 ]]; then
     echo "[ERROR] ${story_id} handle_commit_phase: git push failed after ${push_max} attempts: ${push_stderr: -300} [class=PUSH_FAILED]"
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "PUSH_FAILED" "0" "" "false"
+    return 1
+  fi
+  local pushed_head_sha
+  pushed_head_sha=$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null || true)
+  if [[ ! "$pushed_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "[ERROR] ${story_id} handle_commit_phase: pushed HEAD SHA could not be resolved [class=PUSH_FAILED]"
     _emit_commit_routing_record "$story_id" "$trace_id" "error" "PUSH_FAILED" "0" "" "false"
     return 1
   fi
@@ -2700,13 +2769,14 @@ ${qa_snippet}"
   # ── PR-state guard: never merge a CLOSED or MERGED PR (AC1-AC4) ──────────
   # Guard 1/2 use --state all and may select a historical CLOSED or MERGED PR
   # on a recreated story/<id> branch. Re-read the selected PR's state before
-  # proceeding to gh pr merge. Mirrors the pattern at L154-160 (reap_orphaned_worktrees).
+  # proceeding to the exact-head merge. Mirrors the pattern at L154-160
+  # (reap_orphaned_worktrees).
   if [[ "$_skip_pr_create" -eq 1 && -n "$pr_url" ]]; then
     local _selected_pr_state
     _selected_pr_state=$(gh pr view "$pr_url" --json state --jq .state 2>/dev/null || echo "OPEN")
     case "$_selected_pr_state" in
       OPEN)
-        :  # nominal path — fall through to gh pr merge
+        :  # nominal path — fall through to exact-head merge
         ;;
       MERGED)
         # AC3: PR already merged (including squash-merge, which Guard 1 misses)
@@ -2777,16 +2847,13 @@ ${qa_snippet}"
   fi  # end _skip_pr_create guard
 
   # ── Persist pr_url + pr_number (AC2) ─────────────────────────────────────
-  # MUST commit + push to the target branch BEFORE auto-merge (below)
-  # deletes the story branch via --delete-branch. The earlier implementation
-  # used `scheduler --set-field` against the worktree YAML only ; once
-  # auto-merge deleted the branch, those writes were lost forever, the PR
-  # watcher (which only tracks stories whose origin-side YAML carries
-  # pr_url) could not see the merged PR, and the story stayed at
-  # status=in_progress indefinitely.
+  # Resolve metadata from the exact selected URL, not from the head branch:
+  # one branch can have PRs to multiple bases, and the merge endpoint must be
+  # identity-bound to the same PR that the CI gate observed. Persist before
+  # merge so the PR watcher can reconcile the durable server-side result.
   if [[ -n "$pr_url" ]]; then
     local pr_number
-    pr_number=$(gh pr view "$branch" --json number --jq .number 2>/dev/null || true)
+    pr_number=$(gh pr view "$pr_url" --json number --jq .number 2>/dev/null || true)
     local _pr_commit_rc=0
     if declare -f chore_commit_multi_field >/dev/null 2>&1 && [[ -n "$pr_number" ]]; then
       chore_commit_multi_field "$story_id" pr_url "$pr_url" pr_number "$pr_number" \
@@ -2811,6 +2878,15 @@ ${qa_snippet}"
       echo "[WARN] ${story_id} handle_commit_phase: chore_commit_field(pr_url/pr_number) failed (rc=${_pr_commit_rc}) — falling back to worktree-only set-field; PR watcher may not track this story"
       "$SCHEDULER" --set-field "$story_id" pr_url "$pr_url" "$BACKLOG_FILE" 2>/dev/null || true
       [[ -n "$pr_number" ]] && "$SCHEDULER" --set-field "$story_id" pr_number "$pr_number" "$BACKLOG_FILE" 2>/dev/null || true
+    fi
+  fi
+
+  # ── CI-delegated merge test gate, local fallback ──────────────────────────
+  if declare -f _run_merge_test_gate >/dev/null 2>&1; then
+    if ! _run_merge_test_gate "$story_id" "$worktree_path" "$qa_report_path" "$pr_url" "$pushed_head_sha"; then
+      echo "[ERROR] ${story_id} handle_commit_phase: merge test gate blocked commit [class=TEST_GATE_BLOCKED]"
+      _emit_commit_routing_record "$story_id" "$trace_id" "error" "TEST_GATE_BLOCKED" "0" "$pr_url" "false"
+      return 1
     fi
   fi
 
@@ -2853,83 +2929,63 @@ ${qa_snippet}"
     fi
   fi
 
-  # ── Apply auto-merge if resolved (AC3) ───────────────────────────────────
+  # ── Apply daemon-authorized merge if resolved (AC3) ──────────────────────
   if [[ "$auto_merge_applied" == "true" ]] && [[ -n "$pr_url" ]]; then
-    local merge_exit=1 merge_attempt=0 merge_max=3 merge_stderr
-    while [[ $merge_attempt -lt $merge_max ]]; do
-      merge_attempt=$(( merge_attempt + 1 ))
-      merge_stderr=$(gh pr merge --auto --squash --delete-branch "$pr_url" 2>&1)
-      merge_exit=$?
-      if [[ "$merge_exit" -eq 0 ]]; then
-        # AC5-e: verify autoMergeRequest actually queued
-        local merge_check
-        merge_check=$(gh pr view "$pr_url" --json autoMergeRequest --jq .autoMergeRequest 2>/dev/null || echo "null")
-        if [[ "$merge_check" == "null" ]]; then
-          # Free-tier fallback (opt-in) : branch protection unavailable → use --admin
-          # GAAI_AUTO_MERGE_ADMIN_FALLBACK=true bypasses GitHub-side checks but
-          # daemon QA phase still validates ACs. Trust-arc opt-in, default off.
-          if [[ "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-false}" == "true" ]]; then
-            echo "[INFO] ${story_id} handle_commit_phase: branch protection unavailable, attempting admin fallback merge"
-            local admin_stderr admin_exit
-            admin_stderr=$(gh pr merge --admin --squash --delete-branch "$pr_url" 2>&1)
-            admin_exit=$?
-            if [[ "$admin_exit" -eq 0 ]]; then
-              echo "[INFO] ${story_id} handle_commit_phase: admin fallback merge succeeded"
-              auto_merge_skipped_reason="null"
-              # auto_merge_applied stays true
-            else
-              echo "[WARN] ${story_id} handle_commit_phase: admin fallback merge failed: ${admin_stderr: -200}"
-              auto_merge_applied=false; auto_merge_skipped_reason="admin_fallback_failed"
-            fi
-          else
-            echo "[WARN] ${story_id} handle_commit_phase: auto-merge requested but branch protection not configured — PR remains manual [auto_merge_skipped_reason=branch_protection_missing]"
-            auto_merge_applied=false; auto_merge_skipped_reason="branch_protection_missing"
-          fi
-        fi
-        break
+    local merge_exit=1
+    _merge_exact_pr_head "$story_id" "$pr_url" "$pr_number" "$pushed_head_sha"
+    merge_exit=$?
+    if [[ "$merge_exit" -eq 2 ]]; then
+      echo "[ERROR] ${story_id} handle_commit_phase: PR head moved during merge; refusing authorization [class=TEST_GATE_BLOCKED]"
+      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      if declare -F notify_escalation_inline >/dev/null 2>&1; then
+        notify_escalation_inline "$story_id" "test_gate_head_moved" \
+          "PR head no longer matches tested commit ${pushed_head_sha} for ${pr_url}"
       fi
-      # AC5-g: "already enabled" is idempotent success
-      if printf '%s\n' "$merge_stderr" | grep -qi "already enabled\|already queued"; then
-        merge_exit=0; break
-      fi
-      echo "[WARN] ${story_id} handle_commit_phase: gh pr merge --auto attempt ${merge_attempt}/${merge_max} failed: ${merge_stderr: -200}"
-      [[ $merge_attempt -lt $merge_max ]] && sleep 3
-    done
-    if [[ "$merge_exit" -ne 0 ]]; then
-      # ── Benign-failure guard (faux AUTO_MERGE_FAILED) ──────────────────────
-      # `gh pr merge --auto --squash --delete-branch` deletes the LOCAL branch
-      # after the merge/queue step. The story branch (`story/{id}`) is still held
-      # by this delivery's worktree, so `git branch -D` fails with
-      # "cannot delete branch '...' used by worktree" and gh returns non-zero —
-      # even though the PR merged (or auto-merge is queued) server-side. The
-      # un-deleted local branch is harmless (worktree GC removes it later). Before
-      # escalating, re-read the true PR state: if it is already MERGED, or
-      # auto-merge is queued, the merge succeeded — treat as success. This mirrors
-      # the happy-path contract above where a queued autoMergeRequest counts as done.
-      if [[ -n "$pr_url" ]]; then
-        local _bf_state _bf_automerge
-        _bf_state=$(gh pr view "$pr_url" --json state --jq .state 2>/dev/null || echo "")
-        _bf_automerge=$(gh pr view "$pr_url" --json autoMergeRequest --jq .autoMergeRequest 2>/dev/null || echo "null")
-        if [[ "$_bf_state" == "MERGED" || "$_bf_automerge" != "null" ]]; then
-          echo "[INFO] ${story_id} handle_commit_phase: gh pr merge returned non-zero only at local branch-delete (branch held by worktree); PR state=${_bf_state:-unknown}, auto-merge queued=$([[ "$_bf_automerge" != "null" ]] && echo yes || echo no) — treating as merged success"
-          merge_exit=0
-        fi
-      fi
+      _emit_commit_routing_record "$story_id" "$trace_id" "error" "TEST_GATE_BLOCKED" "0" "$pr_url" "false"
+      return 1
     fi
     if [[ "$merge_exit" -ne 0 ]]; then
       # Probe for CONFLICTING/DIRTY — attempt deterministic auto-resolve before escalating
       if [[ -n "$pr_url" ]] && gh pr view "$pr_url" --json mergeable,mergeStateStatus 2>/dev/null \
            | grep -qE '"mergeable":"CONFLICTING"|"mergeStateStatus":"DIRTY"'; then
         if _auto_resolve_pr_conflicts "$pr_url" "$branch" "$worktree_path" "$story_id" "$trace_id"; then
-          # Resolved: one more gh pr merge --auto attempt (DEC-76 §11 gates remain active)
-          local resolve_merge_out resolve_merge_exit
-          resolve_merge_out=$(gh pr merge --auto --squash --delete-branch "$pr_url" 2>&1)
+          # Conflict resolution creates and pushes a new merge commit. Treat it
+          # as a new candidate: resolve its identity and gate that exact SHA
+          # before making the final, atomically head-matched merge attempt.
+          local resolved_head_sha
+          resolved_head_sha=$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null || true)
+          if [[ ! "$resolved_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "[ERROR] ${story_id} handle_commit_phase: resolved PR head SHA could not be resolved [class=PUSH_FAILED]"
+            _emit_commit_routing_record "$story_id" "$trace_id" "error" "PUSH_FAILED" "0" "$pr_url" "false"
+            return 1
+          fi
+          if declare -f _run_merge_test_gate >/dev/null 2>&1; then
+            if ! _run_merge_test_gate "$story_id" "$worktree_path" "$qa_report_path" "$pr_url" "$resolved_head_sha"; then
+              echo "[ERROR] ${story_id} handle_commit_phase: resolved head failed merge test gate [class=TEST_GATE_BLOCKED]"
+              _emit_commit_routing_record "$story_id" "$trace_id" "error" "TEST_GATE_BLOCKED" "0" "$pr_url" "false"
+              return 1
+            fi
+          fi
+          pushed_head_sha="$resolved_head_sha"
+
+          # Resolved and re-gated: use the same retry, durable verification,
+          # moved-head handling, and optional admin fallback as the initial SHA.
+          local resolve_merge_exit
+          _merge_exact_pr_head "$story_id" "$pr_url" "$pr_number" "$pushed_head_sha"
           resolve_merge_exit=$?
-          if [[ "$resolve_merge_exit" -eq 0 ]] || \
-             printf '%s\n' "$resolve_merge_out" | grep -qi "already enabled\|already queued"; then
+          if [[ "$resolve_merge_exit" -eq 0 ]]; then
             merge_exit=0  # fall through to post-merge path below
+          elif [[ "$resolve_merge_exit" -eq 2 ]]; then
+            echo "[ERROR] ${story_id} handle_commit_phase: PR head moved after conflict resolution [class=TEST_GATE_BLOCKED]"
+            "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+            if declare -F notify_escalation_inline >/dev/null 2>&1; then
+              notify_escalation_inline "$story_id" "test_gate_head_moved" \
+                "PR head no longer matches re-tested commit ${pushed_head_sha} for ${pr_url}"
+            fi
+            _emit_commit_routing_record "$story_id" "$trace_id" "error" "TEST_GATE_BLOCKED" "0" "$pr_url" "false"
+            return 1
           else
-            echo "[ERROR] ${story_id} handle_commit_phase: gh pr merge --auto failed after resolve: ${resolve_merge_out: -200} [class=AUTO_MERGE_FAILED]"
+            echo "[ERROR] ${story_id} handle_commit_phase: exact-head merge failed after resolve [class=AUTO_MERGE_FAILED]"
             _emit_commit_routing_record "$story_id" "$trace_id" "error" "AUTO_MERGE_FAILED" "0" "$pr_url" "false"
             "$SCHEDULER" --set-phase-status "$story_id" escalated "$BACKLOG_FILE" 2>/dev/null || true
             return 1
@@ -2941,8 +2997,8 @@ ${qa_snippet}"
         fi
       fi
       if [[ "$merge_exit" -ne 0 ]]; then
-        # Non-conflict failure (network, rate-limit, branch-protection) — original path unchanged
-        echo "[ERROR] ${story_id} handle_commit_phase: gh pr merge --auto failed after ${merge_max} attempts [class=AUTO_MERGE_FAILED]"
+        # Non-conflict failure (network, rate-limit, branch protection).
+        echo "[ERROR] ${story_id} handle_commit_phase: exact-head merge failed [class=AUTO_MERGE_FAILED]"
         _emit_commit_routing_record "$story_id" "$trace_id" "error" "AUTO_MERGE_FAILED" "0" "$pr_url" "false"
         "$SCHEDULER" --set-phase-status "$story_id" escalated "$BACKLOG_FILE" 2>/dev/null || true
         return 1

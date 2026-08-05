@@ -2,16 +2,16 @@
 # commit-pr-state.test.sh — AC5 regression for E222S02
 #
 # Asserts that handle_commit_phase guards the merge path by re-reading the
-# selected PR's state (via `gh pr view --json state`) before calling
-# `gh pr merge --auto`, when Guard 1 or 2 has selected a PR via --state all.
+# selected PR's state (via `gh pr view --json state`) before calling the
+# head-matched direct merge, when Guard 1 or 2 selected a PR via --state all.
 #
 # T1: CLOSED PR selected by Guard 2 → gh pr create is called (fresh PR), gh pr
 #     merge is NOT called with the closed URL (AC2)
 # T2: MERGED PR selected by Guard 2 → phase_status reconciled to done, gh pr
 #     merge NOT called (AC3)
-# T3: OPEN PR selected by Guard 2   → gh pr merge IS called normally (AC1, regression)
-# T4: gh pr merge non-zero only at local branch-delete (branch held by worktree)
-#     while PR merged / auto-merge queued → treated as success, NOT escalated
+# T3: OPEN PR selected by Guard 2   → exact-SHA REST merge is called normally
+# T4: merge API transport fails after the exact tested head merged → success
+# T5: PR head moves during merge → TEST_GATE_BLOCKED / failed, never escalated
 #
 # Run: bash .gaai/core/scripts/tests/commit-pr-state.test.sh
 # Exit 0 = all pass.
@@ -89,9 +89,12 @@ YAML
 # Uses env vars to control what each call returns; records every call to GH_CALL_LOG.
 #   GH_PR_STALE_URL   — URL returned for `gh pr list` (Guard 2 hit)
 #   GH_PR_STATE       — state returned for `gh pr view <url> --json state`
+#   GH_PR_STATE_AFTER_MERGE — optional state after the stub observes a merge call
 #   GH_PR_NUMBER      — number returned for `gh pr view <branch> --json number`
+#   GH_BRANCH_PR_NUMBER / GH_URL_PR_NUMBER — optional divergent lookup results
+#   GH_PR_HEAD_SHA    — head SHA returned for `gh pr view <url> --json headRefOid`
+#   GH_PR_HEAD_SHA_AFTER_MERGE — optional head after the stub observes a merge call
 #   GH_PR_FRESH_URL   — URL returned by `gh pr create`
-#   GH_AUTOMERGE_RESP — response for `gh pr view --json autoMergeRequest`
 cat > "$STUB_BIN/gh" <<'GHEOF'
 #!/usr/bin/env bash
 echo "gh $*" >> "$GH_CALL_LOG"
@@ -106,9 +109,32 @@ case "$subcmd" in
       view)
         _target="${1:-}"; shift
         _args="$*"
-        if   [[ "$_args" == *"--json state"* ]];            then echo "${GH_PR_STATE:-OPEN}"
-        elif [[ "$_args" == *"--json number"* ]];           then echo "${GH_PR_NUMBER:-99}"
-        elif [[ "$_args" == *"--json autoMergeRequest"* ]]; then echo "${GH_AUTOMERGE_RESP:-null}"
+        _merge_seen=false
+        grep -qE "gh api --method PUT .*pulls/[0-9]+/merge|gh pr merge" "$GH_CALL_LOG" 2>/dev/null && _merge_seen=true
+        if   [[ "$_args" == *"--json state,headRefOid"* ]]; then
+          _state="${GH_PR_STATE:-OPEN}"
+          _head="${GH_PR_HEAD_SHA:-missing}"
+          [[ "$_merge_seen" == "true" && -n "${GH_PR_STATE_AFTER_MERGE:-}" ]] && _state="$GH_PR_STATE_AFTER_MERGE"
+          [[ "$_merge_seen" == "true" && -n "${GH_PR_HEAD_SHA_AFTER_MERGE:-}" ]] && _head="$GH_PR_HEAD_SHA_AFTER_MERGE"
+          printf '%s\t%s\n' "$_state" "$_head"
+        elif [[ "$_args" == *"--json state"* ]];            then
+          if [[ "$_merge_seen" == "true" && -n "${GH_PR_STATE_AFTER_MERGE:-}" ]]; then
+            echo "$GH_PR_STATE_AFTER_MERGE"
+          else
+            echo "${GH_PR_STATE:-OPEN}"
+          fi
+        elif [[ "$_args" == *"--json number"* ]];           then
+          if [[ "$_target" == http* ]]; then
+            echo "${GH_URL_PR_NUMBER:-${GH_PR_NUMBER:-99}}"
+          else
+            echo "${GH_BRANCH_PR_NUMBER:-${GH_PR_NUMBER:-99}}"
+          fi
+        elif [[ "$_args" == *"--json headRefOid"* ]];       then
+          if [[ "$_merge_seen" == "true" && -n "${GH_PR_HEAD_SHA_AFTER_MERGE:-}" ]]; then
+            echo "$GH_PR_HEAD_SHA_AFTER_MERGE"
+          else
+            echo "${GH_PR_HEAD_SHA:-missing}"
+          fi
         elif [[ "$_args" == *"--json mergeable"* ]];        then echo '{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
         elif [[ "$_args" == *"--json url"* ]];              then echo "${GH_PR_STALE_URL:-}"
         else echo '{}'
@@ -119,12 +145,16 @@ case "$subcmd" in
         exit 0
         ;;
       merge)
-        # GH_MERGE_EXIT / GH_MERGE_STDERR let a test simulate the merge succeeding
-        # server-side while gh still returns non-zero at the local branch-delete step.
+        # Admin-fallback behavior can be controlled separately when exercised.
         [[ -n "${GH_MERGE_STDERR:-}" ]] && echo "${GH_MERGE_STDERR}" >&2
         exit "${GH_MERGE_EXIT:-0}"
         ;;
     esac
+    ;;
+  api)
+    [[ -n "${GH_MERGE_STDERR:-}" ]] && echo "${GH_MERGE_STDERR}" >&2
+    [[ -z "${GH_MERGE_EXIT:-}" ]] && echo "${GH_MERGE_API_RESP:-true}"
+    exit "${GH_MERGE_EXIT:-0}"
     ;;
 esac
 GHEOF
@@ -167,12 +197,13 @@ echo "=== commit-pr-state: AC5 — PR-state guard in handle_commit_phase ==="
 echo ""
 
 # ────────────────────────────────────────────────────────────────────────────
-# T1: CLOSED PR selected → gh pr create called, gh pr merge NOT called
+# T1: CLOSED PR selected → gh pr create called, merge endpoint NOT called
 # ────────────────────────────────────────────────────────────────────────────
 echo "--- T1: CLOSED PR ---"
 SID1="TST-PCS01"
 setup_story "$SID1"
 write_backlog "$SID1"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID1")"
 
 STALE_T1="https://github.com/test/repo/pull/97"
 export GH_PR_STALE_URL="$STALE_T1"
@@ -193,20 +224,21 @@ else
   fail "T1a: gh pr create NOT called — CLOSED guard did not clear _skip_pr_create"
 fi
 
-echo "T1b: gh pr merge NOT called with the closed URL"
-if grep "gh pr merge" "$GH_CALL_LOG" 2>/dev/null | grep -q "$STALE_T1"; then
-  fail "T1b: gh pr merge was called with closed URL ($STALE_T1)"
+echo "T1b: merge endpoint NOT called for the closed PR"
+if grep -qE "gh api --method PUT .*pulls/97/merge|gh pr merge.*${STALE_T1}" "$GH_CALL_LOG"; then
+  fail "T1b: merge was attempted for closed PR ($STALE_T1)"
 else
-  pass "T1b: gh pr merge NOT called with closed URL"
+  pass "T1b: no merge attempted for closed PR"
 fi
 
 # ────────────────────────────────────────────────────────────────────────────
-# T2: MERGED PR selected → reconcile to done, gh pr merge NOT called
+# T2: MERGED PR selected → reconcile to done, merge endpoint NOT called
 # ────────────────────────────────────────────────────────────────────────────
 echo "--- T2: MERGED PR ---"
 SID2="TST-PCS02"
 setup_story "$SID2"
 write_backlog "$SID2"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID2")"
 
 STALE_T2="https://github.com/test/repo/pull/98"
 export GH_PR_STALE_URL="$STALE_T2"
@@ -218,11 +250,11 @@ set +e
 handle_commit_phase "$SID2" "trace-t2"
 set -e
 
-echo "T2a: gh pr merge NOT called for MERGED PR"
-if grep -q "gh pr merge" "$GH_CALL_LOG" 2>/dev/null; then
-  fail "T2a: gh pr merge was called even though selected PR is MERGED"
+echo "T2a: merge endpoint NOT called for MERGED PR"
+if grep -qE "gh api --method PUT .*pulls/98/merge|gh pr merge" "$GH_CALL_LOG"; then
+  fail "T2a: merge was called even though selected PR is MERGED"
 else
-  pass "T2a: gh pr merge NOT called"
+  pass "T2a: merge endpoint NOT called"
 fi
 
 echo "T2b: phase_status=done after MERGED reconcile"
@@ -234,18 +266,21 @@ else
 fi
 
 # ────────────────────────────────────────────────────────────────────────────
-# T3: OPEN PR selected → gh pr merge IS called (regression — happy path unchanged)
+# T3: OPEN PR selected → exact-head merge endpoint is called
 # ────────────────────────────────────────────────────────────────────────────
 echo "--- T3: OPEN PR ---"
 SID3="TST-PCS03"
 setup_story "$SID3"
 write_backlog "$SID3"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID3")"
 
 OPEN_URL_T3="https://github.com/test/repo/pull/99"
 export GH_PR_STALE_URL="$OPEN_URL_T3"
 export GH_PR_STATE="OPEN"
+export GH_PR_STATE_AFTER_MERGE="MERGED"
 export GH_PR_NUMBER="99"
-export GH_AUTOMERGE_RESP='{"mergeType":"SQUASH"}'
+export GH_BRANCH_PR_NUMBER="777"  # sibling PR for the same branch, different base
+export GH_URL_PR_NUMBER="99"      # exact selected/gated PR
 export GAAI_AUTO_MERGE_POLICY="on"
 : > "$GH_CALL_LOG"
 
@@ -253,33 +288,55 @@ set +e
 handle_commit_phase "$SID3" "trace-t3"
 set -e
 
-echo "T3a: gh pr merge called with the OPEN URL (happy path unchanged)"
-if grep "gh pr merge" "$GH_CALL_LOG" 2>/dev/null | grep -q "$OPEN_URL_T3"; then
-  pass "T3a: gh pr merge called with OPEN URL"
+echo "T3a: direct REST merge called for the selected PR"
+if grep -q "gh api --method PUT repos/{owner}/{repo}/pulls/99/merge" "$GH_CALL_LOG"; then
+  pass "T3a: exact PR merge API called"
 else
-  fail "T3a: gh pr merge NOT called with OPEN URL — regression in happy path"
+  fail "T3a: exact PR merge API was not called"
 fi
 
+echo "T3b: merge API pins the expected head SHA"
+if grep "gh api --method PUT" "$GH_CALL_LOG" 2>/dev/null | grep -q -- "sha=$GH_PR_HEAD_SHA"; then
+  pass "T3b: merge API sends the exact sha precondition"
+else
+  fail "T3b: merge API did not pin the expected head SHA"
+fi
+
+echo "T3c: normal merge path never enables persistent auto-merge"
+if grep "gh pr merge" "$GH_CALL_LOG" 2>/dev/null | grep -q -- "--auto"; then
+  fail "T3c: gh pr merge still uses --auto"
+else
+  pass "T3c: no --auto request was made"
+fi
+
+echo "T3d: sibling PR discovered by branch lookup is never merged"
+if grep -q "pulls/777/merge" "$GH_CALL_LOG"; then
+  fail "T3d: merge targeted sibling branch PR #777"
+else
+  pass "T3d: merge remained bound to selected URL's PR #99"
+fi
+
+unset GH_PR_STATE_AFTER_MERGE
+unset GH_BRANCH_PR_NUMBER GH_URL_PR_NUMBER
+
 # ────────────────────────────────────────────────────────────────────────────
-# T4: gh pr merge returns non-zero ONLY at the local branch-delete step (story
-#     branch still held by the delivery worktree), while the PR merged / auto-merge
-#     is queued server-side. handle_commit_phase MUST treat this as success — NOT
-#     escalate. Regression guard for the recurring faux-AUTO_MERGE_FAILED that
-#     left already-merged stories stuck `escalated` and blocked their dependents.
+# T4: the merge API's transport reports failure after the server merged the
+#     exact tested head. Durable verification MUST treat this as success.
 # ────────────────────────────────────────────────────────────────────────────
-echo "--- T4: faux branch-delete failure on a merged/queued PR ---"
+echo "--- T4: merge response fails after the expected head merged ---"
 SID4="TST-PCS04"
 setup_story "$SID4"
 write_backlog "$SID4"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID4")"
 
 OPEN_URL_T4="https://github.com/test/repo/pull/104"
 export GH_PR_STALE_URL="$OPEN_URL_T4"
-export GH_PR_STATE="OPEN"                       # PR still open at pre-merge guard
+export GH_PR_STATE="OPEN"                       # PR is open at the pre-merge guard
+export GH_PR_STATE_AFTER_MERGE="MERGED"         # server merged before local cleanup failed
 export GH_PR_NUMBER="104"
-export GH_AUTOMERGE_RESP='{"mergeType":"SQUASH"}'  # auto-merge queued server-side
 export GAAI_AUTO_MERGE_POLICY="on"
 export GH_MERGE_EXIT="1"                         # gh returns non-zero...
-export GH_MERGE_STDERR="story/${SID4}: failed to run git: error: cannot delete branch 'story/${SID4}' used by worktree at '/tmp/wt'"
+export GH_MERGE_STDERR="transport closed after server accepted merge"
 : > "$GH_CALL_LOG"
 
 set +e
@@ -291,7 +348,7 @@ echo "T4a: handle_commit_phase returns 0 (not escalated)"
 if [[ "$T4_RC" -eq 0 ]]; then
   pass "T4a: handle_commit_phase returned 0"
 else
-  fail "T4a: handle_commit_phase returned $T4_RC (faux branch-delete failure escalated)"
+  fail "T4a: handle_commit_phase returned $T4_RC (durable merged state ignored)"
 fi
 
 echo "T4b: phase_status=done (merge treated as success, not escalated)"
@@ -299,17 +356,61 @@ T4_PHASE=$(grep -A 10 "id: ${SID4}" "$BACKLOG_FILE" | grep "phase_status:" | hea
 if [[ "$T4_PHASE" == "done" ]]; then
   pass "T4b: phase_status=done"
 else
-  fail "T4b: phase_status='${T4_PHASE}' (expected done — guard did not absorb branch-delete failure)"
+  fail "T4b: phase_status='${T4_PHASE}' (expected done — durable merge verification failed)"
 fi
 
-echo "T4c: gh pr merge WAS attempted (regression — merge path still runs)"
-if grep -q "gh pr merge" "$GH_CALL_LOG" 2>/dev/null; then
-  pass "T4c: gh pr merge attempted"
+echo "T4c: merge API WAS attempted"
+if grep -q "gh api --method PUT" "$GH_CALL_LOG" 2>/dev/null; then
+  pass "T4c: merge API attempted"
 else
-  fail "T4c: gh pr merge NOT attempted"
+  fail "T4c: merge API NOT attempted"
 fi
 
-unset GH_MERGE_EXIT GH_MERGE_STDERR
+unset GH_MERGE_EXIT GH_MERGE_STDERR GH_PR_STATE_AFTER_MERGE
+
+# ────────────────────────────────────────────────────────────────────────────
+# T5: head changes after the gate but before the merge can land. This is a
+#     TEST_GATE_BLOCKED failure, not a generic auto-merge escalation.
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T5: PR head moves during exact-head merge ---"
+SID5="TST-PCS05"
+setup_story "$SID5"
+write_backlog "$SID5"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID5")"
+
+OPEN_URL_T5="https://github.com/test/repo/pull/105"
+export GH_PR_STALE_URL="$OPEN_URL_T5"
+export GH_PR_STATE="OPEN"
+export GH_PR_STATE_AFTER_MERGE="OPEN"
+export GH_PR_HEAD_SHA_AFTER_MERGE="$(printf '%040d' 3)"
+export GH_PR_NUMBER="105"
+export GH_MERGE_EXIT="1"
+export GH_MERGE_STDERR="head sha does not match"
+export GAAI_AUTO_MERGE_POLICY="on"
+: > "$GH_CALL_LOG"
+
+set +e
+handle_commit_phase "$SID5" "trace-t5"
+T5_RC=$?
+set -e
+
+echo "T5a: moved head blocks the commit phase"
+if [[ "$T5_RC" -ne 0 ]]; then
+  pass "T5a: handle_commit_phase returned non-zero"
+else
+  fail "T5a: moved PR head was authorized"
+fi
+
+echo "T5b: moved head uses failed phase_status, not generic escalation"
+T5_PHASE=$(grep -A 10 "id: ${SID5}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T5_PHASE" == "failed" ]]; then
+  pass "T5b: phase_status=failed (TEST_GATE_BLOCKED semantics)"
+else
+  fail "T5b: phase_status='${T5_PHASE}' (expected failed)"
+fi
+
+unset GH_MERGE_EXIT GH_MERGE_STDERR GH_PR_STATE_AFTER_MERGE \
+  GH_PR_HEAD_SHA_AFTER_MERGE
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
