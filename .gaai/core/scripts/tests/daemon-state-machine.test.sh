@@ -193,11 +193,22 @@ DISPATCH_GIT_SHIM_EOF
 chmod +x "$DISPATCH_SHIM_DIR/git"
 
 # gh shim for commit phase (T7c): returns fake PR URL
+export GAAI_DISPATCH_MERGE_SHA_FILE="$DISPATCH_FIXTURE_DIR/merge-sha"
 cat > "$DISPATCH_SHIM_DIR/gh" << 'DISPATCH_GH_SHIM_EOF'
 #!/usr/bin/env bash
 case "${1:-} ${2:-}" in
+  "api --method")
+    for _arg in "$@"; do
+      [[ "$_arg" == sha=* ]] && printf '%s\n' "${_arg#sha=}" > "$GAAI_DISPATCH_MERGE_SHA_FILE"
+    done
+    echo "true"
+    exit 0 ;;
   "pr create") echo "https://github.com/test/repo/pull/999"; exit 0 ;;
   "pr view")
+    if [[ "$*" == *"--json state,headRefOid"* ]]; then
+      printf 'MERGED\t%s\n' "$(cat "$GAAI_DISPATCH_MERGE_SHA_FILE" 2>/dev/null)"
+      exit 0
+    fi
     [[ "$*" == *"--json url"* ]] && { echo "https://github.com/test/repo/pull/999"; exit 0; }
     [[ "$*" == *"--json number"* ]] && { echo "999"; exit 0; }
     [[ "$*" == *"--json autoMergeRequest"* ]] && { echo '{"mergeMethod":"squash"}'; exit 0; }
@@ -1462,6 +1473,7 @@ GIT_SHIM_EOF
 chmod +x "$COMMIT_SHIM_DIR/git"
 
 COMMIT_CALL_LOG="$COMMIT_FIXTURE_DIR/gh-calls.log"
+export GAAI_COMMIT_MERGE_SHA_FILE="$COMMIT_FIXTURE_DIR/merge-sha"
 
 cat > "$COMMIT_SHIM_DIR/gh" << 'GH_SHIM_EOF'
 #!/usr/bin/env bash
@@ -1472,6 +1484,15 @@ _args=("$@")
 _cmd="${_args[0]:-} ${_args[1]:-}"
 
 case "$_cmd" in
+  "api --method")
+    if [[ "${GAAI_SHIM_AUTOMERGE_FAIL:-0}" == "1" ]]; then
+      echo "merge failed" >&2; exit 1
+    fi
+    for _arg in "$@"; do
+      [[ "$_arg" == sha=* ]] && printf '%s\n' "${_arg#sha=}" > "$GAAI_COMMIT_MERGE_SHA_FILE"
+    done
+    echo "true"
+    exit 0 ;;
   "pr create")
     echo "$@" >> "$PR_CREATE_CALLED_FILE"
     if [[ "${GAAI_SHIM_GH_AUTH_FAIL:-0}" == "1" ]]; then
@@ -1483,6 +1504,10 @@ case "$_cmd" in
     echo "https://github.com/test/repo/pull/999"
     exit 0 ;;
   "pr view")
+    if [[ "$*" == *"--json state,headRefOid"* ]]; then
+      printf 'MERGED\t%s\n' "$(cat "$GAAI_COMMIT_MERGE_SHA_FILE" 2>/dev/null)"
+      exit 0
+    fi
     if [[ "$*" == *"--json url"* ]]; then
       echo "https://github.com/test/repo/pull/999"
       exit 0

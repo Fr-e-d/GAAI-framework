@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 # lib/test-gate.sh — deterministic differential test gate
 #
-# Sourceable library. Public entry point:
+# Sourceable library. Public entry points:
 #   _run_deterministic_test_gate <story_id> <worktree_path> <qa_report_path>
-#     Returns: 0 = not blocked (caller proceeds to push), 1 = blocked/escalated
-#       (caller must stop the push; this function already performs the
-#       scheduler --set-phase-status + notify_escalation_inline side effects).
+#     Returns: 0 = not blocked, 1 = blocked/escalated (caller must stop;
+#       this function already performs the scheduler --set-phase-status +
+#       notify_escalation_inline side effects). Used directly as the local
+#       fallback path — see _run_merge_test_gate below.
+#   _run_merge_test_gate <story_id> <worktree_path> <qa_report_path> <pr_url> <expected_head_sha>
+#     Gates the MERGE step (post-push, post-PR-create). Prefers the GitHub
+#     Actions test-gate.yml workflow-run conclusion for the exact pushed
+#     commit when the diff is in that workflow's path scope; falls back to
+#     _run_deterministic_test_gate (unchanged) when the CI result cannot be
+#     observed (out-of-scope diff, no PR, timeout, gh API error) — never
+#     treats an unobservable CI result as a pass.
+#     Returns: 0 = proceed to merge, 1 = caller must skip merge and return 1
+#       (same side-effect contract as _run_deterministic_test_gate).
 #
 # Differential semantics (must stay aligned with qa-review skill Step 4):
 # only a test that PASSES on origin/<TARGET_BRANCH> and FAILS on the story's
@@ -35,7 +45,20 @@
 # Internal helpers (not part of the public contract, but stable within this
 # file): _test_gate_resolve_units, _test_gate_run_units,
 # _test_gate_parse_junit_failures, _test_gate_resolve_pm,
-# _test_gate_pkg_script, _test_gate_append_report, _test_gate_restore.
+# _test_gate_pkg_script, _test_gate_append_report, _test_gate_restore,
+# _test_gate_ci_scope_touched, _test_gate_poll_ci_verdict.
+#
+# CI-delegated merge gate env vars (all optional, have defaults):
+#   GAAI_CI_TEST_GATE_TIMEOUT_SEC        — bounded poll wait (default: 1200,
+#                                           same order of magnitude as
+#                                           GAAI_AGENT_HANG_THRESHOLD_SEC)
+#   GAAI_CI_TEST_GATE_POLL_INTERVAL_SEC  — sleep between polls (default: 20;
+#                                           keeps wrapper.log fresh so the
+#                                           hang-detector never fires on a
+#                                           legitimate CI wait — see
+#                                           _test_gate_poll_ci_verdict)
+#   GAAI_CI_TEST_GATE_API_TIMEOUT_SEC    — wall-clock bound for each GitHub
+#                                           API call (default: 30)
 
 [[ -n "${_TEST_GATE_SH_SOURCED:-}" ]] && return 0
 _TEST_GATE_SH_SOURCED=1
@@ -448,4 +471,256 @@ _run_deterministic_test_gate() {
   _test_gate_append_report "$qa_report_path" "PASS" "$base_ref" "$base_sha" "" "$base_fail_list" ""
   echo "[TEST-GATE] ${story_id} : PASS — no new failures vs ${base_ref}"
   return 0
+}
+
+# ── CI-delegated merge gate ──────────────────────────────────────────────────
+
+# Scope pre-check — mirrors .github/workflows/test-gate.yml's own `paths:`
+# filter (workers/**, packages/**). Pure git, no network/gh call: this is
+# what lets an out-of-scope diff (e.g. .gaai/**-only) resolve to the local
+# fallback instantly, with zero gh API calls. If the workflow's paths filter
+# is ever widened without updating this glob list (or vice versa), the two
+# drift — see Risk Register in this feature's execution plan; drift fails safe
+# (an extra unavailable:timeout fallback cycle), never a silent pass.
+# Returns 0 = in scope, 1 = not in scope (including "no diff at all").
+_test_gate_ci_scope_touched() {
+  local worktree_path="$1"
+  local base_ref="origin/${TARGET_BRANCH:-staging}"
+  local changed_files
+  changed_files=$(git -C "$worktree_path" diff --name-only "${base_ref}...HEAD" 2>/dev/null)
+  [[ -z "$changed_files" ]] && return 1
+  local f
+  while IFS= read -r f; do
+    case "$f" in workers/*|packages/*) return 0 ;; esac
+  done <<< "$changed_files"
+  return 1
+}
+
+# Validates a positive, arithmetic-safe integer setting. Invalid values fall
+# back to the documented default instead of creating a zero-sleep busy loop,
+# an infinite negative-elapsed loop, or an arithmetic-expression injection.
+_test_gate_positive_int() {
+  local raw="$1" fallback="$2" label="$3"
+  if [[ "$raw" =~ ^[1-9][0-9]{0,8}$ ]]; then
+    printf '%s\n' "$raw"
+  else
+    echo "[WARN] test-gate: invalid ${label}='${raw}' — using ${fallback}" >&2
+    printf '%s\n' "$fallback"
+  fi
+}
+
+# Runs one command with a portable wall-clock timeout (GNU `timeout` is not
+# available by default on macOS). Stdout is replayed to the caller; stderr is
+# intentionally suppressed because GitHub CLI diagnostics may contain noisy
+# transport details and the caller emits the stable fallback reason. Returns
+# 124 when the watchdog fires, otherwise the command's actual exit code.
+_test_gate_run_with_timeout() {
+  local timeout_sec="$1"
+  shift
+
+  local output_file timeout_marker
+  output_file=$(mktemp "${TMPDIR:-/tmp}/gaai-test-gate-api.XXXXXX") || return 125
+  timeout_marker="${output_file}.timeout"
+
+  "$@" >"$output_file" 2>/dev/null &
+  local command_pid=$!
+  (
+    # Poll in short increments so cancelling a completed call's watchdog cannot
+    # strand a long-lived `sleep` child on shells that do not cascade signals.
+    local watchdog_deadline watchdog_now
+    watchdog_deadline=$(( $(date +%s) + timeout_sec ))
+    while kill -0 "$command_pid" 2>/dev/null; do
+      watchdog_now=$(date +%s)
+      (( watchdog_now >= watchdog_deadline )) && break
+      sleep 1
+    done
+    if kill -0 "$command_pid" 2>/dev/null; then
+      : > "$timeout_marker"
+      kill -TERM "$command_pid" 2>/dev/null || true
+      # This is a read-only CLI call, so do not add a post-deadline grace
+      # period that would weaken the caller's wall-clock bound.
+      kill -0 "$command_pid" 2>/dev/null && kill -KILL "$command_pid" 2>/dev/null || true
+    fi
+  ) >/dev/null 2>&1 &
+  local watchdog_pid=$!
+
+  local command_rc=0
+  wait "$command_pid" || command_rc=$?
+  kill "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+
+  local did_timeout=0
+  [[ -f "$timeout_marker" ]] && did_timeout=1
+  [[ -s "$output_file" ]] && command cat "$output_file"
+  rm -f "$output_file" "$timeout_marker"
+
+  [[ "$did_timeout" -eq 1 ]] && return 124
+  return "$command_rc"
+}
+
+# Polls the workflow-run endpoint for `.github/workflows/test-gate.yml`,
+# filtered to the exact pushed head SHA. A workflow run is the authoritative
+# aggregate: unlike a `gh pr checks` row snapshot, it cannot report success in
+# the window after the detect job completes but before its dynamic matrix jobs
+# materialise. Before returning a decisive verdict, the PR's current head is
+# re-read and must still equal the expected SHA. The eventual merge command
+# also sends that SHA to the REST merge endpoint as its atomic TOCTOU backstop.
+#
+# Bounded and sleep-based — never busy-waits. Prints exactly one line to
+# STDOUT: "pass", "fail", "blocked:head_moved", or
+# "unavailable:<reason>" (reason in timeout|api_error). Progress logging goes
+# to stderr because stdout is the signal captured by the caller. No scheduler
+# or notification side effects occur here.
+_test_gate_poll_ci_verdict() {
+  local story_id="$1" pr_url="$2" expected_head_sha="$3"
+  local timeout_sec poll_interval api_timeout_sec
+  timeout_sec=$(_test_gate_positive_int "${GAAI_CI_TEST_GATE_TIMEOUT_SEC:-1200}" 1200 GAAI_CI_TEST_GATE_TIMEOUT_SEC)
+  poll_interval=$(_test_gate_positive_int "${GAAI_CI_TEST_GATE_POLL_INTERVAL_SEC:-20}" 20 GAAI_CI_TEST_GATE_POLL_INTERVAL_SEC)
+  api_timeout_sec=$(_test_gate_positive_int "${GAAI_CI_TEST_GATE_API_TIMEOUT_SEC:-30}" 30 GAAI_CI_TEST_GATE_API_TIMEOUT_SEC)
+
+  local started_at deadline now remaining call_timeout sleep_for
+  started_at=$(date +%s)
+  deadline=$(( started_at + timeout_sec ))
+  local api_err_streak=0
+  local jq_expr='if (.workflow_runs | length) == 0 then "missing" else (.workflow_runs | sort_by(.created_at) | last | [(.status // "unknown"), (.conclusion // "pending"), (.head_sha // "missing")] | @tsv) end'
+
+  while :; do
+    now=$(date +%s)
+    (( now >= deadline )) && break
+    remaining=$(( deadline - now ))
+    call_timeout="$api_timeout_sec"
+    (( call_timeout > remaining )) && call_timeout="$remaining"
+
+    local run_line gh_rc=0
+    run_line=$(_test_gate_run_with_timeout "$call_timeout" gh api --method GET \
+      "repos/{owner}/{repo}/actions/workflows/test-gate.yml/runs" \
+      -f event=pull_request -f head_sha="$expected_head_sha" -F per_page=10 \
+      --jq "$jq_expr") || gh_rc=$?
+
+    if [[ "$gh_rc" -eq 0 && "$run_line" == "missing" ]]; then
+      api_err_streak=0
+    elif [[ "$gh_rc" -eq 0 && "$run_line" == *$'\t'* ]]; then
+      local run_status run_conclusion observed_head_sha
+      IFS=$'\t' read -r run_status run_conclusion observed_head_sha <<< "$run_line"
+      if [[ "$observed_head_sha" != "$expected_head_sha" ]]; then
+        api_err_streak=$(( api_err_streak + 1 ))
+      elif [[ "$run_status" == "completed" ]]; then
+        # A completed blocking conclusion for the exact pushed SHA is already
+        # decisive. Do not let an unrelated PR-head lookup outage downgrade a
+        # known CI failure into the local fallback path.
+        if [[ "$run_conclusion" != "success" && "$run_conclusion" != "cancelled" ]]; then
+          echo "fail"
+          return 0
+        fi
+
+        # The workflow lookup may have consumed most of this iteration's
+        # budget. Recompute the remaining wall clock before the second call.
+        # Both success and cancellation need this check: success may authorize
+        # only the current head, while cancellation caused by a superseding
+        # push must report the moved head rather than masquerading as failure.
+        now=$(date +%s)
+        (( now >= deadline )) && break
+        remaining=$(( deadline - now ))
+        local head_call_timeout="$api_timeout_sec"
+        (( head_call_timeout > remaining )) && head_call_timeout="$remaining"
+
+        local current_head_sha head_rc=0
+        current_head_sha=$(_test_gate_run_with_timeout "$head_call_timeout" gh pr view "$pr_url" \
+          --json headRefOid --jq .headRefOid) || head_rc=$?
+        if [[ "$head_rc" -ne 0 || ! "$current_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+          api_err_streak=$(( api_err_streak + 1 ))
+        elif [[ "$current_head_sha" != "$expected_head_sha" ]]; then
+          echo "blocked:head_moved"
+          return 0
+        elif [[ "$run_conclusion" == "success" ]]; then
+          echo "pass"
+          return 0
+        else
+          # A same-head cancelled run is non-decisive: a manual re-run may
+          # supersede it. Keep polling until a decisive run appears or the
+          # bounded wait falls back locally.
+          api_err_streak=0
+        fi
+      else
+        # queued/in_progress/waiting/requested/pending are valid observations.
+        api_err_streak=0
+      fi
+    else
+      api_err_streak=$(( api_err_streak + 1 ))
+    fi
+
+    if (( api_err_streak >= 3 )); then
+      echo "unavailable:api_error"
+      return 0
+    fi
+
+    now=$(date +%s)
+    (( now >= deadline )) && break
+    remaining=$(( deadline - now ))
+    sleep_for="$poll_interval"
+    (( sleep_for > remaining )) && sleep_for="$remaining"
+    echo "[TEST-GATE-CI] ${story_id} : waiting on ${pr_url}@${expected_head_sha} (elapsed=$(( now - started_at ))s/${timeout_sec}s)" >&2
+    sleep "$sleep_for"
+  done
+  echo "unavailable:timeout"
+}
+
+# ── Orchestrator (public) ───────────────────────────────────────────────────
+# Gates the merge step. Decision tree: out-of-scope diff or no PR → immediate
+# local fallback (zero gh calls) ; in-scope + PR → poll CI ; CI pass/fail is
+# decisive ; CI unavailable (timeout/api_error) → local fallback. Never
+# treats an unobservable CI result as a pass (fail-safe precedent).
+_run_merge_test_gate() {
+  local story_id="$1" worktree_path="$2" qa_report_path="$3" pr_url="$4" expected_head_sha="$5"
+
+  local _fallback_reason=""
+  if ! _test_gate_ci_scope_touched "$worktree_path"; then
+    _fallback_reason="path_scope_excluded"
+  elif [[ -z "$pr_url" ]]; then
+    _fallback_reason="no_pr"
+  elif [[ ! "$expected_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    _fallback_reason="head_unresolved"
+  fi
+
+  if [[ -n "$_fallback_reason" ]]; then
+    echo "[WARN] ${story_id} handle_commit_phase: CI test-gate result unavailable (${_fallback_reason}) — falling back to local gate [class=TEST_GATE_CI_UNAVAILABLE_FALLBACK]"
+    _run_deterministic_test_gate "$story_id" "$worktree_path" "$qa_report_path"
+    return $?
+  fi
+
+  local verdict reason
+  verdict=$(_test_gate_poll_ci_verdict "$story_id" "$pr_url" "$expected_head_sha")
+  case "$verdict" in
+    pass)
+      echo "[TEST-GATE] ${story_id} : PASS (CI, ${pr_url}@${expected_head_sha})"
+      _test_gate_append_report "$qa_report_path" "PASS" "CI:${pr_url}@${expected_head_sha}" "" "" "" ""
+      return 0
+      ;;
+    fail)
+      echo "[ERROR] ${story_id} handle_commit_phase: CI test gate reported failure [class=TEST_GATE_BLOCKED]"
+      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      if declare -F notify_escalation_inline >/dev/null 2>&1; then
+        notify_escalation_inline "$story_id" "test_gate_ci_failure" \
+          "CI test-gate run failed for ${pr_url}"
+      fi
+      _test_gate_append_report "$qa_report_path" "BLOCKED" "CI:${pr_url}@${expected_head_sha}" "" "" "" "CI test-gate workflow run reported failure"
+      return 1
+      ;;
+    blocked:head_moved)
+      echo "[ERROR] ${story_id} handle_commit_phase: PR head moved after push; refusing merge [class=TEST_GATE_BLOCKED]"
+      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      if declare -F notify_escalation_inline >/dev/null 2>&1; then
+        notify_escalation_inline "$story_id" "test_gate_head_moved" \
+          "PR head no longer matches pushed commit ${expected_head_sha} for ${pr_url}"
+      fi
+      _test_gate_append_report "$qa_report_path" "BLOCKED" "CI:${pr_url}@${expected_head_sha}" "" "" "" "PR head moved after the tested push"
+      return 1
+      ;;
+    *)
+      reason="${verdict#unavailable:}"
+      echo "[WARN] ${story_id} handle_commit_phase: CI test-gate result unavailable (${reason}) — falling back to local gate [class=TEST_GATE_CI_UNAVAILABLE_FALLBACK]"
+      _run_deterministic_test_gate "$story_id" "$worktree_path" "$qa_report_path"
+      return $?
+      ;;
+  esac
 }
