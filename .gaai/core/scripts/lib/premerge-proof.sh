@@ -67,7 +67,11 @@
 # merge_ref (git ref resolving to T), base_sha/head_sha/merge_sha/tree_sha
 # (claims, cross-checked against independent resolution), run
 # {workflow_path,run_id,run_attempt,event}, manifest_digest (claim),
-# jobs: [{name, conclusion, continue_on_error?, run_attempt?}].
+# jobs: [{name, conclusion, continue_on_error?, run_attempt?}]. This is a
+# closed field set (mirrors verdict's additionalProperties:false) — the one
+# tolerated extension point is x_extensions, same as on the emitted verdict.
+# Any other unrecognized top-level key -> schema_invalid (never silently
+# ignored — malformed/incomplete evidence must never reach success).
 #
 # Env vars:
 #   GAAI_PREMERGE_SCHEMA_PATH — override the schema path (default: resolved
@@ -220,6 +224,11 @@ _premerge_verify() {
     jq -e --arg f "$f" 'has($f)' <<<"$evidence" >/dev/null 2>&1 \
       || { _premerge_emit_verdict "$evidence" '{}' '' schema_invalid; return 1; }
   done
+  # Closed field set: any top-level key outside the documented evidence
+  # contract + the single x_extensions tolerance point is schema_invalid —
+  # an unrecognized field must never be silently accepted (AC4).
+  jq -e '(keys - ["repository","mode","identity","merge_ref","base_sha","head_sha","merge_sha","tree_sha","run","manifest_digest","jobs","x_extensions"]) == []' \
+    <<<"$evidence" >/dev/null 2>&1 || { _premerge_emit_verdict "$evidence" '{}' '' schema_invalid; return 1; }
   jq -e '(.jobs|type=="array") and (.run|type=="object" and has("workflow_path") and has("run_id") and has("run_attempt") and has("event")) and (.identity|type=="object")' \
     <<<"$evidence" >/dev/null 2>&1 || { _premerge_emit_verdict "$evidence" '{}' '' schema_invalid; return 1; }
 
