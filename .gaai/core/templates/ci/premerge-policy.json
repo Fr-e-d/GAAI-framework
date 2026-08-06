@@ -3,8 +3,8 @@
   "policy_version": "1",
   "digest_algorithm": "sha256",
   "workflow": {
-    "path": ".github/workflows/test-gate.yml",
-    "name": "Test Gate"
+    "path": ".github/workflows/gaai-premerge.yml",
+    "name": "GAAI Pre-Merge"
   },
   "covered_paths": [
     ".gaai/core/ci/premerge-policy.schema.json",

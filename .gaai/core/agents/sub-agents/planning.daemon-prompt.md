@@ -139,7 +139,12 @@ Write output to $GAAI_PLAN_PATH
 Write the execution plan to exactly: `$GAAI_PLAN_PATH`
 
 The plan MUST include:
-- YAML frontmatter with `artefact_type: execution-plan`, `id: $GAAI_STORY_ID`, `skills_invoked`
+- YAML frontmatter carrying every field artefacts.rules.md R3 makes mandatory:
+  `type: artefact`, `artefact_type: execution-plan`, `track: delivery`,
+  `id: $GAAI_STORY_ID`, `related_backlog_id: $GAAI_STORY_ID`, `created_at`,
+  plus `skills_invoked`. Omitting `type`, `track` or `related_backlog_id`
+  produces a non-conformant artefact — this instruction previously named only
+  three fields, and every plan written against it failed R3.
 - `## Implementation Sequence` — ordered steps with specific file paths,
   line numbers, and checkpoints
 - `## Edge Cases` — per AC
