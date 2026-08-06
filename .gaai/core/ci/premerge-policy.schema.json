@@ -1,0 +1,206 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gaai.dev/schemas/premerge-policy.schema.json",
+  "title": "GAAI portable pre-merge proof contract",
+  "description": "Two named schemas: $defs/trust_manifest (base-held policy, read from the base commit B, never from a PR copy) and $defs/verdict (the full merge-proof verdict a verifier emits after independently resolving Git state and cross-checking caller-supplied CI evidence). Consumers reference a fragment, e.g. premerge-policy.schema.json#/$defs/trust_manifest.",
+  "$defs": {
+    "reason_enum": {
+      "type": "string",
+      "description": "Stable, closed terminal-reason taxonomy. Priority-check order (first match wins) lives in the verifier, not the schema: schema_invalid, environment_error, commit_unresolvable, identity_mode_conflict, tuple_forged, parent_mismatch, tree_mismatch, manifest_digest_mismatch, trust_surface_changed, run_attempt_mismatch, job_missing, job_duplicate, job_not_success.",
+      "enum": [
+        "schema_invalid",
+        "environment_error",
+        "commit_unresolvable",
+        "identity_mode_conflict",
+        "tuple_forged",
+        "parent_mismatch",
+        "tree_mismatch",
+        "manifest_digest_mismatch",
+        "trust_surface_changed",
+        "run_attempt_mismatch",
+        "job_missing",
+        "job_duplicate",
+        "job_not_success"
+      ]
+    },
+    "trust_manifest": {
+      "type": "object",
+      "title": "trust_manifest",
+      "description": "Versioned JSON trust manifest, resolvable only from the base commit B. Defines schema/policy versions, digest algorithm, workflow identity, trust-covered paths, the complete required-job set, the validation profile, and an optional rollover approval reference.",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "policy_version",
+        "digest_algorithm",
+        "workflow",
+        "covered_paths",
+        "required_jobs",
+        "validation_profile"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "description": "Version of this schema the manifest instance conforms to (e.g. \"1.0.0\")."
+        },
+        "policy_version": {
+          "type": "string",
+          "description": "Version of the policy content itself, independent of schema_version."
+        },
+        "digest_algorithm": {
+          "type": "string",
+          "enum": ["sha256"],
+          "description": "Canonical digest algorithm. Closed to sha256 in this schema version."
+        },
+        "workflow": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "name"],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Repository-relative path of the trusted validation workflow (e.g. .github/workflows/test-gate.yml)."
+            },
+            "name": {
+              "type": "string",
+              "description": "Human-readable workflow name as declared in the workflow file."
+            }
+          }
+        },
+        "covered_paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Repository-relative paths that must be byte-identical between the base commit B and the synthetic merge commit T for the base to remain a trust root (AC3)."
+        },
+        "required_jobs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "The complete set of job names that must each appear exactly once with a successful conclusion (AC5)."
+        },
+        "validation_profile": {
+          "type": "string",
+          "description": "Identifier of the validation profile this manifest enforces (e.g. \"standard\")."
+        },
+        "rollover_approval_ref": {
+          "type": "string",
+          "description": "Optional reference (e.g. a human-approval artefact or commit) authorizing a change to this manifest's own trust-covered content."
+        }
+      }
+    },
+    "pull_request_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pr_number", "base_ref", "head_ref"],
+      "properties": {
+        "pr_number": { "type": "integer", "minimum": 1 },
+        "base_ref": { "type": "string" },
+        "head_ref": { "type": "string" }
+      }
+    },
+    "merge_group_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["merge_group_ref", "base_ref"],
+      "properties": {
+        "merge_group_ref": { "type": "string" },
+        "base_ref": { "type": "string" }
+      }
+    },
+    "job_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "conclusion"],
+      "properties": {
+        "name": { "type": "string" },
+        "conclusion": { "type": "string" },
+        "continue_on_error": { "type": "boolean" }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "title": "verdict",
+      "description": "Full merge-proof verdict binding repository, PR-or-merge-group identity, B/H/T/tree(T), workflow/run identity, run_attempt, event, manifest digest, validation profile, and every required job (AC4).",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "repository",
+        "mode",
+        "identity",
+        "base_sha",
+        "head_sha",
+        "merge_sha",
+        "tree_sha",
+        "run",
+        "manifest_digest",
+        "validation_profile",
+        "jobs",
+        "result"
+      ],
+      "properties": {
+        "schema_version": { "type": "string" },
+        "repository": {
+          "type": "string",
+          "description": "owner/repo the verdict applies to."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["pull_request", "merge_group"],
+          "description": "Provenance mode. A merge_group verdict cannot be confused with a pull_request verdict (AC2)."
+        },
+        "identity": {
+          "description": "Mode-shaped identity block. oneOf enforces schema-level rejection of a mismatched shape (e.g. mode=merge_group carrying pr_number).",
+          "oneOf": [
+            { "$ref": "#/$defs/pull_request_identity" },
+            { "$ref": "#/$defs/merge_group_identity" }
+          ]
+        },
+        "base_sha": { "type": "string", "description": "B — resolved base commit." },
+        "head_sha": { "type": "string", "description": "H — resolved head/candidate commit." },
+        "merge_sha": { "type": "string", "description": "T — resolved synthetic merge commit; parents(T) == (B, H) in order for pull_request mode." },
+        "tree_sha": { "type": "string", "description": "tree(T) — the tree object of the synthetic merge commit." },
+        "run": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["workflow_path", "run_id", "run_attempt", "event"],
+          "properties": {
+            "workflow_path": { "type": "string" },
+            "run_id": { "type": "string" },
+            "run_attempt": { "type": "integer", "minimum": 1 },
+            "event": { "type": "string" }
+          }
+        },
+        "manifest_digest": {
+          "type": "string",
+          "description": "Canonical sha256 digest of the trust_manifest read from B."
+        },
+        "validation_profile": { "type": "string" },
+        "jobs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/job_result" }
+        },
+        "result": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": { "type": "string", "enum": ["success", "rejected"] },
+            "reason": { "$ref": "#/$defs/reason_enum" }
+          },
+          "if": {
+            "properties": { "status": { "const": "rejected" } }
+          },
+          "then": {
+            "required": ["status", "reason"]
+          }
+        },
+        "x_extensions": {
+          "type": "object",
+          "description": "The single explicitly-allowed schema extension point on verdict (AC4). Free-form; not validated further.",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

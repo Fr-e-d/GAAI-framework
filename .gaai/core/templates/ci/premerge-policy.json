@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "policy_version": "1",
+  "digest_algorithm": "sha256",
+  "workflow": {
+    "path": ".github/workflows/test-gate.yml",
+    "name": "Test Gate"
+  },
+  "covered_paths": [
+    ".gaai/core/ci/premerge-policy.schema.json",
+    ".gaai/core/templates/ci/premerge-policy.json",
+    ".gaai/core/scripts/lib/premerge-proof.sh"
+  ],
+  "required_jobs": [
+    "premerge-validate"
+  ],
+  "validation_profile": "standard"
+}
