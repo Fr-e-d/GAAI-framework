@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+-: Define and verify the base-held pre-merge proof contract
 -: Daemon commit-phase delegates the test-gate decision to CI, with local fallback
 - fix: support safe YAML flow lists
 - fix: stop `grep -c ... || echo 0` from emitting two counts
