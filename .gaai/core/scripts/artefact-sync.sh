@@ -68,8 +68,13 @@ while IFS= read -r line; do
   if [[ "$line" =~ ^[[:space:]]*artefact:[[:space:]]+(.+)$ ]]; then
     artefact_path="${BASH_REMATCH[1]}"
     artefact_path="${artefact_path// /}"  # trim whitespace
-    # Skip null values
-    [[ "$artefact_path" == "null" ]] && continue
+    # Skip unset values. YAML spells "no artefact yet" three ways, and the
+    # quoted-empty form reaches us as the two literal quote characters — not as
+    # an empty string — so the -z test below never caught it and the row was
+    # reported as a missing file at the nonsense path "<gaai-dir>/''".
+    artefact_path="${artefact_path%\"}"; artefact_path="${artefact_path#\"}"
+    artefact_path="${artefact_path%\'}"; artefact_path="${artefact_path#\'}"
+    [[ "$artefact_path" == "null" || "$artefact_path" == "~" ]] && continue
     [[ -z "$artefact_path" ]] && continue
 
     full_path="$GAAI_DIR/$artefact_path"

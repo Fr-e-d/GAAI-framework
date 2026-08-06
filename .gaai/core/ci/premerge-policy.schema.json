@@ -1,27 +1,39 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gaai.dev/schemas/premerge-policy.schema.json",
   "title": "GAAI portable pre-merge proof contract",
-  "description": "Two named schemas: $defs/trust_manifest (base-held policy, read from the base commit B, never from a PR copy) and $defs/verdict (the full merge-proof verdict a verifier emits after independently resolving Git state and cross-checking caller-supplied CI evidence). Consumers reference a fragment, e.g. premerge-policy.schema.json#/$defs/trust_manifest.",
+  "description": "Three named schemas: $defs/trust_manifest (base-held policy, read from the base commit B, never from a PR copy), $defs/evidence (the untrusted, caller-supplied description of a CI run) and $defs/verdict (the full merge-proof verdict a verifier emits after independently resolving Git state and cross-checking the evidence). Consumers reference a fragment, e.g. premerge-policy.schema.json#/$defs/trust_manifest. A verifier resolves this document only from B, at .gaai/core/ci/premerge-policy.schema.json, so a candidate can never weaken the contract that judges it.",
   "$defs": {
     "reason_enum": {
       "type": "string",
-      "description": "Stable, closed terminal-reason taxonomy. Priority-check order (first match wins) lives in the verifier, not the schema: schema_invalid, environment_error, commit_unresolvable, identity_mode_conflict, tuple_forged, parent_mismatch, tree_mismatch, manifest_digest_mismatch, trust_surface_changed, run_attempt_mismatch, job_missing, job_duplicate, job_not_success.",
+      "description": "Stable, closed terminal-reason taxonomy. The verifier checks in one fixed order so a verdict never reports two simultaneous causes; the same ordered list is restated behind the same marker in the verifier library header, and the two must stay equal. PRIORITY_ORDER: environment_error, schema_invalid, identity_mode_conflict, commit_unresolvable, parent_mismatch, tuple_forged, tree_mismatch, manifest_digest_mismatch, provenance_mismatch, policy_missing, trust_surface_changed, run_attempt_mismatch, job_missing, job_duplicate, job_not_success",
       "enum": [
-        "schema_invalid",
         "environment_error",
-        "commit_unresolvable",
+        "schema_invalid",
         "identity_mode_conflict",
-        "tuple_forged",
+        "commit_unresolvable",
         "parent_mismatch",
+        "tuple_forged",
         "tree_mismatch",
         "manifest_digest_mismatch",
+        "provenance_mismatch",
+        "policy_missing",
         "trust_surface_changed",
         "run_attempt_mismatch",
         "job_missing",
         "job_duplicate",
         "job_not_success"
       ]
+    },
+    "workflow_identity": {
+      "type": "object",
+      "description": "Identity of the single validation workflow this policy trusts. A default policy may forward-declare the managed workflow the installation change will create, before that file exists; the identity is declared here and never listed in covered_paths, because a covered path matching nothing at B is policy_missing. The change that creates the workflow must create exactly this identity and add its own new trust surfaces, the workflow file included, to covered_paths.",
+      "additionalProperties": false,
+      "required": ["path", "name"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "Repository-relative path of the trusted validation workflow." },
+        "name": { "type": "string", "minLength": 1, "description": "Workflow name as declared in the workflow file." }
+      }
     },
     "trust_manifest": {
       "type": "object",
@@ -40,10 +52,12 @@
       "properties": {
         "schema_version": {
           "type": "string",
+          "minLength": 1,
           "description": "Version of this schema the manifest instance conforms to (e.g. \"1.0.0\")."
         },
         "policy_version": {
           "type": "string",
+          "minLength": 1,
           "description": "Version of the policy content itself, independent of schema_version."
         },
         "digest_algorithm": {
@@ -51,41 +65,30 @@
           "enum": ["sha256"],
           "description": "Canonical digest algorithm. Closed to sha256 in this schema version."
         },
-        "workflow": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["path", "name"],
-          "properties": {
-            "path": {
-              "type": "string",
-              "description": "Repository-relative path of the trusted validation workflow (e.g. .github/workflows/test-gate.yml)."
-            },
-            "name": {
-              "type": "string",
-              "description": "Human-readable workflow name as declared in the workflow file."
-            }
-          }
-        },
+        "workflow": { "$ref": "#/$defs/workflow_identity" },
         "covered_paths": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string" },
-          "description": "Repository-relative paths that must be byte-identical between the base commit B and the synthetic merge commit T for the base to remain a trust root (AC3)."
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "pattern": "^(?!/|:)(?!\\.{1,2}(?:/|$))(?!.*(?:/\\.{1,2})(?:/|$))(?!.*//)(?!.*[\\u0000\\n\\r*?\\[\\]])(?!.*/$).+$" },
+          "description": "Repository-relative paths that must be byte-identical between the base commit B and the synthetic merge commit T for the base to remain a trust root (AC3). Every entry must be one canonical literal path resolving to a real object at B: absolute paths, empty or dot components, parent-directory components, trailing separators, embedded newline or NUL bytes, Git pathspec magic (a leading colon) and glob metacharacters are rejected, since none of them denote one unambiguous auditable object."
         },
         "required_jobs": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "type": "string" },
-          "description": "The complete set of job names that must each appear exactly once with a successful conclusion (AC5)."
+          "items": { "type": "string", "minLength": 1 },
+          "description": "The complete set of job names that must each appear exactly once with a successful conclusion (AC5). A repeated name here violates this published uniqueItems constraint and is schema_invalid; a repeated job name in evidence is job_duplicate instead, because that is untrusted run data rather than policy."
         },
         "validation_profile": {
           "type": "string",
+          "minLength": 1,
           "description": "Identifier of the validation profile this manifest enforces (e.g. \"standard\")."
         },
         "rollover_approval_ref": {
           "type": "string",
-          "description": "Optional reference (e.g. a human-approval artefact or commit) authorizing a change to this manifest's own trust-covered content."
+          "minLength": 1,
+          "description": "Optional reference (e.g. a human-approval artefact or commit) authorizing a change to this manifest's own trust-covered content. Declared here and intentionally left unread by the verifier; binding it to a current human approval decision belongs to the merge-authorization layer."
         }
       }
     },
@@ -95,8 +98,8 @@
       "required": ["pr_number", "base_ref", "head_ref"],
       "properties": {
         "pr_number": { "type": "integer", "minimum": 1 },
-        "base_ref": { "type": "string" },
-        "head_ref": { "type": "string" }
+        "base_ref": { "type": "string", "minLength": 1, "description": "Untrusted ref selector resolved locally to B. The merge-authorization layer must bind it to the controller-resolved repository base before this proof can authorize a merge." },
+        "head_ref": { "type": "string", "minLength": 1, "description": "Untrusted ref selector resolved locally to H. The merge-authorization layer must bind it to the controller-resolved current candidate head." }
       }
     },
     "merge_group_identity": {
@@ -104,8 +107,21 @@
       "additionalProperties": false,
       "required": ["merge_group_ref", "base_ref"],
       "properties": {
-        "merge_group_ref": { "type": "string" },
-        "base_ref": { "type": "string" }
+        "merge_group_ref": { "type": "string", "minLength": 1, "description": "Untrusted ref selector for the merge-group candidate; controller binding remains an authorization-layer duty." },
+        "base_ref": { "type": "string", "minLength": 1, "description": "Untrusted ref selector resolved locally to B. The merge-authorization layer must bind it to the controller-resolved repository base before this proof can authorize a merge." }
+      }
+    },
+    "run_identity": {
+      "type": "object",
+      "description": "Identity of the CI run that produced the evidence. workflow_path and workflow_name are compared against the base-held manifest's workflow identity and event must equal the mode, so a run of another workflow — or of the trusted workflow under a different trigger — cannot be presented as this proof (provenance_mismatch).",
+      "additionalProperties": false,
+      "required": ["workflow_path", "workflow_name", "run_id", "run_attempt", "event"],
+      "properties": {
+        "workflow_path": { "type": "string", "minLength": 1 },
+        "workflow_name": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1 },
+        "run_attempt": { "type": "integer", "minimum": 1 },
+        "event": { "type": "string", "minLength": 1 }
       }
     },
     "job_result": {
@@ -113,15 +129,54 @@
       "additionalProperties": false,
       "required": ["name", "conclusion"],
       "properties": {
-        "name": { "type": "string" },
-        "conclusion": { "type": "string" },
-        "continue_on_error": { "type": "boolean" }
+        "name": { "type": "string", "minLength": 1 },
+        "conclusion": { "type": "string", "minLength": 1 },
+        "continue_on_error": { "type": "boolean" },
+        "run_attempt": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "title": "evidence",
+      "description": "Caller-supplied, untrusted description of a CI run. Every identity, commit and tree claim it carries is independently recomputed from Git and cross-checked; nothing here is taken at face value. Closed field set: x_extensions is the single tolerated top-level extension point and any other unrecognized key is schema_invalid, never silently ignored.",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "mode",
+        "identity",
+        "merge_ref",
+        "base_sha",
+        "head_sha",
+        "merge_sha",
+        "tree_sha",
+        "run",
+        "manifest_digest",
+        "validation_profile",
+        "jobs"
+      ],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1, "description": "owner/repo the run claims. Carried into the verdict and deliberately not verified at this layer: binding it to a controller-resolved repository identity belongs to the merge-authorization layer." },
+        "mode": { "type": "string", "enum": ["pull_request", "merge_group"] },
+        "identity": {
+          "description": "Mode-shaped identity block. Matching neither published shape is schema_invalid; matching the other mode's shape is identity_mode_conflict, evaluated only after structural validation.",
+          "oneOf": [{ "$ref": "#/$defs/pull_request_identity" }, { "$ref": "#/$defs/merge_group_identity" }]
+        },
+        "merge_ref": { "type": "string", "minLength": 1, "description": "Untrusted Git ref selector resolved locally to T; the merge-authorization layer binds the resulting tuple to the current controller-resolved candidate." },
+        "base_sha": { "type": "string", "minLength": 1 },
+        "head_sha": { "type": "string", "minLength": 1 },
+        "merge_sha": { "type": "string", "minLength": 1 },
+        "tree_sha": { "type": "string", "minLength": 1 },
+        "run": { "$ref": "#/$defs/run_identity" },
+        "manifest_digest": { "type": "string", "minLength": 1 },
+        "validation_profile": { "type": "string", "minLength": 1 },
+        "jobs": { "type": "array", "items": { "$ref": "#/$defs/job_result" }, "description": "Observed jobs. Deliberately not uniqueItems: a duplicated required job name is ambiguous run evidence (job_duplicate), not a malformed document." },
+        "x_extensions": { "type": "object", "description": "The single explicitly-allowed extension point on evidence. Free-form; not validated further." }
       }
     },
     "verdict": {
       "type": "object",
       "title": "verdict",
-      "description": "Full merge-proof verdict binding repository, PR-or-merge-group identity, B/H/T/tree(T), workflow/run identity, run_attempt, event, manifest digest, validation profile, and every required job (AC4).",
+      "description": "Full merge-proof verdict binding repository, PR-or-merge-group identity, B/H/T/tree(T), workflow/run identity, run_attempt, event, manifest digest, validation profile, and every required job (AC4). A rejection raised before the evidence has been structurally validated carries null in every data field instead of echoing unvalidated input, so every verdict the verifier can emit — on success and on every rejection path — validates against this schema.",
       "additionalProperties": false,
       "required": [
         "schema_version",
@@ -139,47 +194,29 @@
         "result"
       ],
       "properties": {
-        "schema_version": { "type": "string" },
-        "repository": {
-          "type": "string",
-          "description": "owner/repo the verdict applies to."
-        },
+        "schema_version": { "type": "string", "minLength": 1 },
+        "repository": { "type": ["string", "null"], "description": "owner/repo the verdict applies to; null before evidence validation." },
         "mode": {
-          "type": "string",
-          "enum": ["pull_request", "merge_group"],
+          "type": ["string", "null"],
+          "enum": ["pull_request", "merge_group", null],
           "description": "Provenance mode. A merge_group verdict cannot be confused with a pull_request verdict (AC2)."
         },
         "identity": {
-          "description": "Mode-shaped identity block. oneOf enforces schema-level rejection of a mismatched shape (e.g. mode=merge_group carrying pr_number).",
+          "description": "Mode-shaped identity block, or null before evidence validation.",
           "oneOf": [
             { "$ref": "#/$defs/pull_request_identity" },
-            { "$ref": "#/$defs/merge_group_identity" }
+            { "$ref": "#/$defs/merge_group_identity" },
+            { "type": "null" }
           ]
         },
-        "base_sha": { "type": "string", "description": "B — resolved base commit." },
-        "head_sha": { "type": "string", "description": "H — resolved head/candidate commit." },
-        "merge_sha": { "type": "string", "description": "T — resolved synthetic merge commit; parents(T) == (B, H) in order for pull_request mode." },
-        "tree_sha": { "type": "string", "description": "tree(T) — the tree object of the synthetic merge commit." },
-        "run": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["workflow_path", "run_id", "run_attempt", "event"],
-          "properties": {
-            "workflow_path": { "type": "string" },
-            "run_id": { "type": "string" },
-            "run_attempt": { "type": "integer", "minimum": 1 },
-            "event": { "type": "string" }
-          }
-        },
-        "manifest_digest": {
-          "type": "string",
-          "description": "Canonical sha256 digest of the trust_manifest read from B."
-        },
-        "validation_profile": { "type": "string" },
-        "jobs": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/job_result" }
-        },
+        "base_sha": { "type": ["string", "null"], "description": "B — resolved base commit." },
+        "head_sha": { "type": ["string", "null"], "description": "H — resolved head/candidate commit." },
+        "merge_sha": { "type": ["string", "null"], "description": "T — resolved synthetic merge commit; parents(T) == (B, H) in order for pull_request mode." },
+        "tree_sha": { "type": ["string", "null"], "description": "tree(T) — the tree object of the synthetic merge commit." },
+        "run": { "oneOf": [{ "$ref": "#/$defs/run_identity" }, { "type": "null" }] },
+        "manifest_digest": { "type": ["string", "null"], "description": "Canonical sha256 digest of the trust_manifest read from B." },
+        "validation_profile": { "type": ["string", "null"] },
+        "jobs": { "oneOf": [{ "type": "array", "items": { "$ref": "#/$defs/job_result" } }, { "type": "null" }] },
         "result": {
           "type": "object",
           "additionalProperties": false,
@@ -188,17 +225,13 @@
             "status": { "type": "string", "enum": ["success", "rejected"] },
             "reason": { "$ref": "#/$defs/reason_enum" }
           },
-          "if": {
-            "properties": { "status": { "const": "rejected" } }
-          },
-          "then": {
-            "required": ["status", "reason"]
-          }
+          "if": { "required": ["status"], "properties": { "status": { "const": "rejected" } } },
+          "then": { "required": ["reason"] },
+          "else": { "not": { "required": ["reason"] } }
         },
         "x_extensions": {
           "type": "object",
-          "description": "The single explicitly-allowed schema extension point on verdict (AC4). Free-form; not validated further.",
-          "additionalProperties": true
+          "description": "The single explicitly-allowed schema extension point on verdict (AC4). Free-form; not validated further."
         }
       }
     }

@@ -69,8 +69,15 @@ Only the **backlog** may be used for orchestration.
 ### R3 — Mandatory Frontmatter
 
 Every artefact MUST contain YAML frontmatter declaring at minimum:
-- `gaai.type: artefact`
-- `artefact_type` — must be one of: `epic | story | plan | report | prd | marketing | strategy | evaluation`
+- `type: artefact` — the corpus-wide kind discriminator, shared with `type: agent`
+  and `type: memory`. Not namespaced: no file in the corpus has ever carried a
+  `gaai.` prefix, and this rule previously asked for `gaai.type`, a spelling zero
+  producers emitted and zero validators checked.
+- `artefact_type` — the sub-kind within artefacts. Currently emitted:
+  `epic | story | execution-plan | qa-report | impl-report | memory-delta |
+  research | consistency-report | risk-report | micro-delivery-report |
+  plan-blocked`. (`plan` is the retired spelling of `execution-plan`; both name
+  the same kind and existing files keep their value.)
 - `track`
 - `id`
 - `related_backlog_id`
