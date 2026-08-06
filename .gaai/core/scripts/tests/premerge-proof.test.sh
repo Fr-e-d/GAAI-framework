@@ -28,6 +28,7 @@
 #   T23 AC1/4      jq unavailable -> environment_error
 #   T24 AC1        canonical digest: reorder-stable, value-sensitive
 #   T25 AC1        manifest missing a required field -> schema_invalid (unit-level)
+#   T26 AC4        evidence carries an unrecognized top-level field -> schema_invalid
 set -uo pipefail
 
 PASS_COUNT=0
@@ -428,6 +429,20 @@ if [[ $rc -ne 0 && "$_PREMERGE_REASON" == "schema_invalid" ]]; then
 else
   fail "T25: expected schema_invalid, got rc=$rc reason=${_PREMERGE_REASON:-}"
 fi
+
+# ── T26: evidence with an unrecognized top-level field -> schema_invalid ─────
+echo ""; echo "T26: evidence carries an unrecognized top-level field"
+R26="${FIXTURE_BASE}/t26"; build_pr_fixture "$R26"
+E26_BASE="${FIXTURE_BASE}/t26-base-evidence.json"
+E26="${FIXTURE_BASE}/t26-evidence.json"
+build_evidence_pr "$PR_B" "$PR_H" "$PR_T" "$PR_TREE_T" "$PR_MANIFEST_DIGEST" "$JOBS_OK" 1 "$E26_BASE"
+jq '. + {"malicious_extra": {"inject":"whatever"}}' "$E26_BASE" > "$E26"
+out="$(run_verify "$R26" "policy.json" "$E26")"
+check_reason "$out" "schema_invalid" "T26: unrecognized evidence field rejected"
+# Sanity: the identical evidence minus the extra field still succeeds, proving
+# the rejection above is caused by the injected key, not by fixture drift.
+out_baseline="$(run_verify "$R26" "policy.json" "$E26_BASE")"
+check_success "$out_baseline" "T26 baseline: same evidence without the extra field succeeds"
 
 echo ""
 echo "════════════════════════════════════════"
