@@ -1490,6 +1490,13 @@ handle_impl_phase() {
   local impl_tag
   impl_tag=$(get_impl_model_tag "$story_id")
 
+  # ── Resolve tier once — feeds both the tier-aware default-route coercion
+  #    below AND the GAAI_STORY_TIER export to daemon-prompt-construct.sh,
+  #    so the notes.md context-recovery discipline can key on tier
+  #    regardless of which route the coercion below ends up selecting.
+  local _tier
+  _tier=$(get_story_tier "$story_id")
+
   # ── DEC-94 — Tier-aware default impl_model coercion ───────────────────────
   # When impl_model is absent (no story-level opt-in/out), default routing
   # is secondary (per DEC-93 reversal commit 38e6b3f5) for cost optimization.
@@ -1503,8 +1510,6 @@ handle_impl_phase() {
   # hit the hard-gate (commit 443d5ad1) — that's intentional, forces them
   # to either decompose to Tier 1 or switch to primary.
   if [[ "$impl_tag" == "absent" ]]; then
-    local _tier
-    _tier=$(get_story_tier "$story_id")
     if [[ "$_tier" =~ ^[0-9]+$ ]] && (( _tier >= 2 )); then
       impl_tag="primary"
       echo "[INFO] ${story_id} handle_impl_phase: tier ${_tier} + absent tag → coerced to primary (DEC-94)"
@@ -1563,6 +1568,7 @@ handle_impl_phase() {
     GAAI_EPIC_PATH="${epic_path:-}" \
     GAAI_WORKSPACE_PATH="$worktree_path" \
     SECONDARY_ROUTE="$_secondary_route_flag" \
+    GAAI_STORY_TIER="$_tier" \
     PROJECT_DIR="$PROJECT_DIR" \
     bash "$prompt_construct_script" 2>/dev/null
   ); then

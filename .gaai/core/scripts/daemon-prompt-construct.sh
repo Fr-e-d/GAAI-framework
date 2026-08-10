@@ -11,6 +11,7 @@
 #   GAAI_EPIC_PATH       — absolute path to {epic_id}.epic.md (may be empty)
 #   GAAI_WORKSPACE_PATH  — absolute worktree root (for NOTES_PATH substitution)
 #   SECONDARY_ROUTE      — "true" or "false" (default: "false")
+#   GAAI_STORY_TIER      — story tier, e.g. "1" or "2" (default: "", treated as < 2)
 #   PROJECT_DIR          — repo root (for resolving DEC file paths)
 
 set -euo pipefail
@@ -23,17 +24,50 @@ set -euo pipefail
 : "${PROJECT_DIR:?daemon-prompt-construct.sh: PROJECT_DIR is required}"
 
 SECONDARY_ROUTE="${SECONDARY_ROUTE:-false}"
+GAAI_STORY_TIER="${GAAI_STORY_TIER:-}"
 NOTES_PATH="${GAAI_WORKSPACE_PATH}/.gaai/project/contexts/artefacts/notes/${GAAI_STORY_ID}.notes.md"
 
-# ── Section 1: R1-R6 context discipline preamble (secondary route only) ───
-if [[ "$SECONDARY_ROUTE" == "true" ]]; then
+# ── notes.md context-recovery discipline applies whenever the route is
+#    secondary OR the story is Tier 2+, independent of route. The
+#    tier-aware default-route coercion routes Tier 2+ absent-tag stories to
+#    primary, so gating on SECONDARY_ROUTE alone left the population most
+#    likely to need this discipline (long/complex Impl sessions) with none
+#    of it. Only Section 1 (this gate) is affected — the input-artefact and
+#    prior-QA-findings inline-vs-chunked gates below stay SECONDARY_ROUTE-
+#    only: that is a separate, context-budget concern, not this one.
+NOTES_DISCIPLINE_TIER_GATED="false"
+if [[ "$GAAI_STORY_TIER" =~ ^[0-9]+$ ]] && (( GAAI_STORY_TIER >= 2 )); then
+  NOTES_DISCIPLINE_TIER_GATED="true"
+fi
+NOTES_DISCIPLINE_ENABLED="false"
+if [[ "$SECONDARY_ROUTE" == "true" || "$NOTES_DISCIPLINE_TIER_GATED" == "true" ]]; then
+  NOTES_DISCIPLINE_ENABLED="true"
+fi
+
+# ── Section 1: R1-R6 context discipline preamble ───────────────────────────
+# Single heredoc with a pre-computed ${ROUTE_RATIONALE} substitution — NOT
+# split across two heredocs joined at runtime. A prior version of this gate
+# concatenated a route-specific heredoc with the shared trailing heredoc and
+# silently dropped the blank line at the join, producing byte-different
+# output from the pre-existing behaviour on the very route (secondary) that
+# must stay unchanged. Keeping this as one heredoc makes that class of bug
+# structurally impossible: there is no join boundary left to drop a line at.
+if [[ "$NOTES_DISCIPLINE_ENABLED" == "true" ]]; then
+  if [[ "$SECONDARY_ROUTE" == "true" ]]; then
+    ROUTE_RATIONALE="You operate in a long-running agentic session with a 200K context window
+and aggressive autocompaction. Failure to follow these rules causes session
+termination via rapid_refill_breaker (Claude Code internal safety) — observed
+empirically at 43% fail rate on this routing path."
+  else
+    ROUTE_RATIONALE="This is a Tier ${GAAI_STORY_TIER} story: complex Impl sessions on this tier
+have been observed to exhaust the MAX_TURNS budget or hit an autocompaction
+boundary before producing an impl-report. Failure to follow these rules risks
+losing all recoverable state if that happens."
+  fi
   cat <<PREAMBLE
 === CONTEXT DISCIPLINE (MANDATORY for this delivery) ===
 
-You operate in a long-running agentic session with a 200K context window
-and aggressive autocompaction. Failure to follow these rules causes session
-termination via rapid_refill_breaker (Claude Code internal safety) — observed
-empirically at 43% fail rate on this routing path.
+${ROUTE_RATIONALE}
 
 These rules are derived from Anthropic's "Effective Context Engineering for
 AI Agents" guidance. They apply throughout this session.
