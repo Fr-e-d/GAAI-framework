@@ -777,8 +777,8 @@ _emit_routing_record() {
 
 _emit_routing_record_fallback() {
   [[ -n "${ROUTING_LOG_PATH:-}" ]] || return 0
-  local trace_id="$1" story_id="$2" phase="$3" provider="$4" model="$5" duration_ms="$6" fallback_reason="$7" impl_tag="$8" pipeline="${9:-}" pr_url="${10:-}" auto_merge_applied="${11:-}"
-  TRACE_ID="$trace_id" STORY_ID="$story_id" PHASE="$phase" PROVIDER="$provider" MODEL="$model" DURATION_MS="$duration_ms" FALLBACK_REASON="$fallback_reason" IMPL_TAG="$impl_tag" PIPELINE="$pipeline" PR_URL="$pr_url" AUTO_MERGE_APPLIED="$auto_merge_applied" ROUTING_LOG_PATH="$ROUTING_LOG_PATH" \
+  local trace_id="$1" story_id="$2" phase="$3" provider="$4" model="$5" duration_ms="$6" fallback_reason="$7" impl_tag="$8" pipeline="${9:-}" pr_url="${10:-}" auto_merge_applied="${11:-}" qa_summary="${12:-}"
+  TRACE_ID="$trace_id" STORY_ID="$story_id" PHASE="$phase" PROVIDER="$provider" MODEL="$model" DURATION_MS="$duration_ms" FALLBACK_REASON="$fallback_reason" IMPL_TAG="$impl_tag" PIPELINE="$pipeline" PR_URL="$pr_url" AUTO_MERGE_APPLIED="$auto_merge_applied" QA_SUMMARY="$qa_summary" ROUTING_LOG_PATH="$ROUTING_LOG_PATH" \
     python3 - <<'PYEOF' 2>/dev/null || true
 import json, os, time
 record = {
@@ -798,6 +798,11 @@ if os.environ.get("PR_URL"):
   record["pr_url"] = os.environ["PR_URL"]
 if os.environ.get("AUTO_MERGE_APPLIED"):
   record["auto_merge_applied"] = os.environ["AUTO_MERGE_APPLIED"] == "true"
+if os.environ.get("QA_SUMMARY"):
+  try:
+    record["qa_summary"] = json.loads(os.environ["QA_SUMMARY"])
+  except (ValueError, TypeError):
+    pass
 with open(os.environ["ROUTING_LOG_PATH"], "a", encoding="utf-8") as fh:
   fh.write(json.dumps(record, separators=(",", ":")) + "\n")
 PYEOF
@@ -835,9 +840,13 @@ _emit_plan_routing_record() {
 }
 
 # ── QA-phase routing record (adds --pipeline, real model, real duration, verdict) ──
-# Arguments: story_id trace_id provider fallback_reason duration_ms
+# Arguments: story_id trace_id provider fallback_reason duration_ms [qa_summary_json]
+# qa_summary_json (AC5): the qa-verdict.mjs validator's own sanitized stdout summary
+# (story_id, schema_version, both axes, aggregate, remediation route, evaluated_as_of,
+# surface/evidence counts, safe locators) — omitted when the validator did not run
+# or did not succeed (e.g. QA_HANDOFF_INVALID / QA_SCHEDULER_FAILURE branches).
 _emit_qa_routing_record() {
-  local story_id="$1" trace_id="$2" provider="$3" fallback_reason="$4" duration_ms="$5"
+  local story_id="$1" trace_id="$2" provider="$3" fallback_reason="$4" duration_ms="$5" qa_summary="${6:-}"
   local impl_tag model_val
   impl_tag=$(get_impl_model_tag "$story_id")
   model_val="${CLAUDE_MODEL_PRIMARY:-claude-sonnet-5}"
@@ -861,8 +870,9 @@ _emit_qa_routing_record() {
     --fallback-reason "$fallback_reason" \
     --impl-model-tag  "$impl_tag" \
     --pipeline        "3phase" \
+    --qa-summary      "$qa_summary" \
     ${log_path_args[@]+"${log_path_args[@]}"} \
-    2>/dev/null || _emit_routing_record_fallback "$trace_id" "$story_id" "qa" "$provider" "$model_val" "$duration_ms" "$fallback_reason" "$impl_tag" "3phase" "" ""
+    2>/dev/null || _emit_routing_record_fallback "$trace_id" "$story_id" "qa" "$provider" "$model_val" "$duration_ms" "$fallback_reason" "$impl_tag" "3phase" "" "" "$qa_summary"
 }
 
 # ── Commit-phase routing record (adds --pipeline, --pr-url, --auto-merge-applied) ──
@@ -1740,6 +1750,72 @@ if d is not None:
   fi
 }
 
+# ── Expected-surface derivation (DEC-200 AC2 evidence-authority) ──────────
+# Materializes the exact surface set QA's changed_surface_inventory must equal
+# one-to-one: the union of the Story's "## File Inventory" backtick-quoted
+# paths, the execution-plan's "## Implementation Sequence" Files-column
+# backtick-quoted paths, and the actual `git diff --name-only` against
+# base_ref. Writes a JSON array to $5.
+_derive_qa_expected_surfaces() {
+  local story_path="$1" plan_path="$2" worktree_path="$3" base_ref="$4" out_path="$5"
+  local tmp
+  tmp=$(mktemp)
+
+  # Story "## File Inventory": only the leading backtick token of each `- `
+  # bullet (the path) is a surface — description prose after the em-dash is
+  # never scanned, so a stray backticked example there can't be mistaken for
+  # a changed file.
+  awk '/^## File Inventory/{f=1;next} /^## /{f=0} f' "$story_path" 2>/dev/null \
+    | grep -E '^- `' 2>/dev/null \
+    | sed -E 's/^- `([^`]*)`.*/\1/' \
+    | grep -E '/' >> "$tmp" || true
+
+  # PLAN "## Implementation Sequence": only the table's "Files" column is a
+  # surface source. Escaped pipes (`\|`, used inside cell prose to render a
+  # literal "|") are protected before column-splitting so they don't shift
+  # column indices, then restored. The Action/Checkpoint columns routinely
+  # contain inline shell/CLI examples with backticked, slash-bearing paths
+  # that are NOT changed surfaces — scanning the whole row/section (the prior
+  # behavior) pulled those in as false surfaces.
+  awk '
+    /^## Implementation Sequence/ { f=1; next }
+    /^## / { f=0 }
+    f && /^\|/ {
+      line = $0
+      gsub(/\\\|/, "@@PIPE@@", line)
+      n = split(line, cell, "|")
+      if (!header_seen) {
+        header_seen = 1
+        for (i = 1; i <= n; i++) {
+          h = cell[i]; gsub(/^[ \t]+|[ \t]+$/, "", h)
+          if (h == "Files") files_col = i
+        }
+        next
+      }
+      is_sep = 1
+      for (i = 1; i <= n; i++) {
+        c = cell[i]; gsub(/^[ \t]+|[ \t]+$/, "", c)
+        if (c != "" && c !~ /^[-:]+$/) is_sep = 0
+      }
+      if (is_sep) next
+      if (files_col && files_col <= n) {
+        c = cell[files_col]
+        gsub(/@@PIPE@@/, "\\|", c)
+        print c
+      }
+    }
+  ' "$plan_path" 2>/dev/null \
+    | grep -oE '`[^`]+`' 2>/dev/null | tr -d '`' | grep -E '/' >> "$tmp" || true
+
+  git -C "$worktree_path" diff --name-only "${base_ref}...HEAD" 2>/dev/null >> "$tmp" || true
+
+  sort -u "$tmp" | grep -v '^[[:space:]]*$' | node -e '
+    const lines = require("fs").readFileSync(0, "utf8").split("\n").filter(Boolean);
+    process.stdout.write(JSON.stringify(lines));
+  ' > "$out_path" 2>/dev/null || printf '[]' > "$out_path"
+  rm -f "$tmp"
+}
+
 handle_qa_phase() {
   local story_id="$1" trace_id="$2"
   local ts t_start_ms t_end_ms duration_ms
@@ -1777,12 +1853,19 @@ handle_qa_phase() {
 
   # ── Resolve artefact paths (AC2) ──────────────────────────────────────────
   local story_path plan_path impl_report_path qa_report_path memory_delta_path log_path
+  local qa_schema_path qa_verdict_path qa_verdict_locator
   story_path="${worktree_path}/.gaai/project/contexts/artefacts/stories/${story_id}.story.md"
   plan_path="${worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
   impl_report_path="${worktree_path}/.gaai/project/contexts/artefacts/impl-reports/${story_id}.impl-report.md"
   qa_report_path="${worktree_path}/.gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-report.md"
   memory_delta_path="${worktree_path}/.gaai/project/contexts/artefacts/memory-deltas/${story_id}.memory-delta.md"
   log_path="${worktree_path}/.delivery-logs/${story_id}.qa.log"
+  qa_schema_path="${PROJECT_DIR}/.gaai/core/schemas/qa-verdict.v1.schema.json"
+  qa_verdict_path="${worktree_path}/.gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-verdict.json"
+  # AC5: repo-relative locator for the sidecar's own path (distinct from the
+  # Markdown report_path already inside the sidecar) — safe to log/observe,
+  # unlike qa_verdict_path itself which carries the local worktree prefix.
+  qa_verdict_locator="${qa_verdict_path#"${worktree_path}/"}"
 
   # Rotate prior session's log on retry (preserves forensic trail).
   _rotate_phase_log "$log_path"
@@ -1838,6 +1921,11 @@ handle_qa_phase() {
   mkdir -p "$(dirname "$memory_delta_path")"
   mkdir -p "$(dirname "$log_path")"
 
+  # ── Derive expected-surface set (DEC-200 AC2) ─────────────────────────────
+  local expected_surfaces_path
+  expected_surfaces_path=$(mktemp "/tmp/gaai-qa-expected-surfaces-${story_id}-XXXXXX")
+  _derive_qa_expected_surfaces "$story_path" "$plan_path" "$worktree_path" "$base_ref" "$expected_surfaces_path"
+
   # ── Build prompt from qa.daemon-prompt.md (AC1) ───────────────────────────
   local agent_prompt_src
   agent_prompt_src="${PROJECT_DIR}/.gaai/core/agents/sub-agents/qa.daemon-prompt.md"
@@ -1856,6 +1944,9 @@ handle_qa_phase() {
     "GAAI_PLAN_PATH=${plan_path}" \
     "GAAI_IMPL_REPORT_PATH=${impl_report_path}" \
     "GAAI_QA_REPORT_PATH=${qa_report_path}" \
+    "GAAI_QA_SCHEMA_PATH=${qa_schema_path}" \
+    "GAAI_QA_VERDICT_PATH=${qa_verdict_path}" \
+    "GAAI_QA_EXPECTED_SURFACES_PATH=${expected_surfaces_path}" \
     "GAAI_EPIC_PATH=${epic_path}" \
     "GAAI_BASE_REF=${base_ref}" \
     "GAAI_WORKTREE_PATH=${worktree_path}" \
@@ -1869,6 +1960,9 @@ handle_qa_phase() {
       "GAAI_PLAN_PATH=${plan_path}" \
       "GAAI_IMPL_REPORT_PATH=${impl_report_path}" \
       "GAAI_QA_REPORT_PATH=${qa_report_path}" \
+      "GAAI_QA_SCHEMA_PATH=${qa_schema_path}" \
+      "GAAI_QA_VERDICT_PATH=${qa_verdict_path}" \
+      "GAAI_QA_EXPECTED_SURFACES_PATH=${expected_surfaces_path}" \
       "GAAI_EPIC_PATH=${epic_path}" \
       "GAAI_BASE_REF=${base_ref}" \
       "GAAI_WORKTREE_PATH=${worktree_path}" \
@@ -1881,13 +1975,13 @@ handle_qa_phase() {
     # .qa-spawn-deaths counter instead of the unbounded resume-relaunch branch.
     touch "${LOCK_DIR}/.qa-spawn-death-pending-${story_id}" 2>/dev/null || true
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_PROMPT_EMPTY" "0"
-    rm -f "$prompt_file" 2>/dev/null || true
+    rm -f "$prompt_file" "$expected_surfaces_path" 2>/dev/null || true
     return 1
   fi
 
   # ── Prompt-context tripwire (AC2, AC4) ────────────────────────────────────
   if ! _assert_prompt_context_resolved "$prompt_file" "qa" "$story_id" "$trace_id"; then
-    rm -f "$prompt_file" 2>/dev/null || true
+    rm -f "$prompt_file" "$expected_surfaces_path" 2>/dev/null || true
     return 1
   fi
 
@@ -1906,6 +2000,9 @@ handle_qa_phase() {
   GAAI_PLAN_PATH="$plan_path" \
   GAAI_IMPL_REPORT_PATH="$impl_report_path" \
   GAAI_QA_REPORT_PATH="$qa_report_path" \
+  GAAI_QA_SCHEMA_PATH="$qa_schema_path" \
+  GAAI_QA_VERDICT_PATH="$qa_verdict_path" \
+  GAAI_QA_EXPECTED_SURFACES_PATH="$expected_surfaces_path" \
   GAAI_EPIC_PATH="$epic_path" \
   GAAI_BASE_REF="$base_ref" \
   GAAI_DELIVERY_LOG_FILE="$log_path" \
@@ -1948,9 +2045,47 @@ handle_qa_phase() {
   # ── AC5(b): artefact missing despite exit 0 ───────────────────────────────
   if [[ ! -s "$qa_report_path" ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: qa-report missing or empty at $qa_report_path [class=QA_NO_ARTEFACT]"
+    rm -f "$expected_surfaces_path" 2>/dev/null || true
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_NO_ARTEFACT" "$duration_ms"
     return 1
   fi
+
+  # ── DEC-200 JSON handoff (validation-only — fail-closed; does NOT yet drive
+  # routing, per Story Out-of-Scope. E1096S02 owns switching consumption. This
+  # gate runs BEFORE the Markdown verdict parse so an invalid/missing JSON
+  # sidecar is caught even when the Markdown report looks like a clean PASS. ──
+  if [[ ! -s "$qa_verdict_path" ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: qa-verdict.json missing or empty at $qa_verdict_path [class=QA_HANDOFF_INVALID] (the JSON handoff did not drive routing this cycle)"
+    rm -f "$expected_surfaces_path" 2>/dev/null || true
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_HANDOFF_INVALID" "$duration_ms"
+    if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
+      echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_HANDOFF_INVALID"
+    fi
+    return 1
+  fi
+
+  local qa_validator_out qa_validator_rc qa_validator_out_file
+  qa_validator_out_file=$(mktemp "/tmp/gaai-qa-verdict-summary-${story_id}-XXXXXX")
+  node "${PROJECT_DIR}/.gaai/core/scripts/lib/qa-verdict.mjs" validate \
+    --sidecar "$qa_verdict_path" \
+    --schema "$qa_schema_path" \
+    --story-id "$story_id" \
+    --expected-surfaces "$expected_surfaces_path" \
+    --sidecar-locator "$qa_verdict_locator" \
+    >"$qa_validator_out_file" 2>&1
+  qa_validator_rc=$?
+  qa_validator_out=$(cat "$qa_validator_out_file" 2>/dev/null || echo "")
+  rm -f "$qa_validator_out_file" "$expected_surfaces_path" 2>/dev/null || true
+
+  if [[ "$qa_validator_rc" -ne 0 ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: qa-verdict.json failed validation [class=QA_HANDOFF_INVALID]: ${qa_validator_out} (the JSON handoff did not drive routing this cycle — Markdown remains the routing signal)"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_HANDOFF_INVALID" "$duration_ms"
+    if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
+      echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_HANDOFF_INVALID"
+    fi
+    return 1
+  fi
+  echo "[$(date '+%H:%M:%S')] ${story_id} handle_qa_phase: qa-verdict.json valid (validation-only, not yet routing-authoritative) — ${qa_validator_out}"
 
   # ── AC4: parse 3-way verdict ──────────────────────────────────────────────
   local verdict
@@ -1967,6 +2102,19 @@ handle_qa_phase() {
     return 1
   fi
 
+  # ── DEC-200 Markdown/JSON agreement — a disagreement is QA_HANDOFF_INVALID,
+  # never repaired or promoted (AC3). ────────────────────────────────────────
+  local qa_json_verdict
+  qa_json_verdict=$(printf '%s' "$qa_validator_out" | grep -oE '"verdict":"[A-Z]+"' | head -1 | cut -d'"' -f4)
+  if [[ -n "$qa_json_verdict" && "$qa_json_verdict" != "$verdict" ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: Markdown verdict '${verdict}' disagrees with JSON verdict '${qa_json_verdict}' [class=QA_HANDOFF_INVALID]"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_HANDOFF_INVALID" "$duration_ms"
+    if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
+      echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_HANDOFF_INVALID (markdown/json disagreement)"
+    fi
+    return 1
+  fi
+
   # ── AC4: verdict-driven phase advancement ─────────────────────────────────
   case "$verdict" in
     PASS)
@@ -1976,21 +2124,27 @@ handle_qa_phase() {
         _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SCHEDULER_FAILURE" "$duration_ms"
         return 1
       fi
-      _emit_qa_routing_record "$story_id" "$trace_id" "primary" "null" "$duration_ms"
+      _emit_qa_routing_record "$story_id" "$trace_id" "primary" "null" "$duration_ms" "$qa_validator_out"
       # Worktree-scope audit (advisory)
       _run_worktree_audit "$story_id" "qa" "$log_path" "$worktree_path"
       ts=$(date '+%H:%M:%S')
-      echo "[${ts}] ${story_id} phase=qa PASS (${duration_ms}ms)"
+      # AC5: correlate the DEC-200 summary with the terminal PASS decision itself
+      # (not only the earlier generic validation-succeeded line) — story ID,
+      # schema version, both axes, aggregate, remediation route, evaluated
+      # timestamp, surface/evidence counts, safe locators; no report bodies,
+      # credentials or authority URL query values (qa_validator_out is the
+      # validator's own sanitized summary, never the raw sidecar/report).
+      echo "[${ts}] ${story_id} phase=qa PASS (${duration_ms}ms) — ${qa_validator_out}"
       return 0
       ;;
     FAIL)
-      echo "[ERROR] ${story_id} handle_qa_phase: QA verdict=FAIL [class=QA_VERDICT:FAIL]"
+      echo "[ERROR] ${story_id} handle_qa_phase: QA verdict=FAIL [class=QA_VERDICT:FAIL] — ${qa_validator_out}"
       if ! "$SCHEDULER" --set-phase-status "$story_id" qa_failed "$BACKLOG_FILE" 2>/dev/null; then
         echo "[ERROR] ${story_id} handle_qa_phase: --set-phase-status qa_failed failed [class=QA_SCHEDULER_FAILURE]"
         _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SCHEDULER_FAILURE" "$duration_ms"
         return 1
       fi
-      _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_VERDICT:FAIL" "$duration_ms"
+      _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_VERDICT:FAIL" "$duration_ms" "$qa_validator_out"
       # Retry-loop convention : phase_status:qa_failed is the failure signal,
       # NOT this function's exit code. Return 0 so the wrapper outer loop
       # iterates and dispatch_3phase_story's qa_failed case (the retry-loop
@@ -2006,7 +2160,7 @@ handle_qa_phase() {
         _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SCHEDULER_FAILURE" "$duration_ms"
         return 1
       fi
-      _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_VERDICT:ESCALATE" "$duration_ms"
+      _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_VERDICT:ESCALATE" "$duration_ms" "$qa_validator_out"
       # Surface the QA-agent ESCALATE verdict to the operator via the existing
       # notification machinery (terminal bell + macOS osascript + webhook+HMAC).
       # Symmetry with the retry-cap-exhausted path in dispatch_3phase_story's

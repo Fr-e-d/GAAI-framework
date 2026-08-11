@@ -95,7 +95,50 @@ TS|Error|warning" /tmp/tsc-output.txt | tail -100`.
 - Dead code or unreachable branches present → FAIL
 - Tests were disabled or skipped to make the suite pass → FAIL
 
-### 7. Memory Alignment (PASS only)
+### 7. Currentness & Evidence Review (DEC-200)
+
+Independent of Steps 1-6, evaluate and record `state_of_the_art_conformance` — do this
+BEFORE finalizing `plan_conformance`, to avoid anchoring on "tests passed" (DEC-200 D1).
+
+- **Materiality floor.** A functionally correct implementation that passes every business
+  test is still `FAIL` on this axis when any changed surface is `blocking`: a named primary
+  authority identifies it as `deprecated | unsupported | materially_obsolete | unsafe |
+  officially_discouraged | demonstrably_fragile`. A newer-but-still-supported alternative,
+  stylistic preference, unofficial blog opinion or reviewer taste is `non_blocking` and does
+  NOT breach the floor. `materially_obsolete` applies only when primary authority identifies
+  the current replacement/migration and continued use materially impairs security,
+  reliability, interoperability or supported maintenance — even if not formally deprecated
+  yet. Business tests never override this floor.
+- **Evidence discipline.** Primary authority only: an official standard/regulator
+  publication, official vendor/runtime/framework documentation or advisory, official
+  maintainer release/security notes, or a governed authority record pointing to such
+  material. Live retrieval is preferred; a governed record is the fallback. Live locators
+  must be absolute HTTPS with no user-info and no secret-shaped query parameter; governed
+  locators must be safe repo-relative (no leading `/`, no `..`). A governed record's
+  `authority_domain` (`security | fast_moving | stable | unknown`) is pre-authored by the
+  record — never chosen at review time to make the evidence pass. `security`/`fast_moving`
+  records are fresh for 30 days, `stable` for 90 days, measured to the review timestamp; a
+  `security` or `unsafe`-materiality claim requires an `authority_domain: security` record.
+  A missing or literal `unknown` domain defaults to `fast_moving` and the validator emits
+  `authority_domain_defaulted` for that surface — an observable, valid fallback, not a defect.
+- **Fail-closed on missing capability.** No live retrieval AND no fresh governed record for
+  a surface → that axis is `ESCALATE` for this review, never an inferred `PASS`. This holds
+  identically for every supported executor (DEC-190 D6) — divergence between executors is
+  acceptable only when one lacks retrieval capability the other has.
+- **Not-applicable is narrow.** `not_applicable` is valid only for a surface mechanically
+  identified as a test fixture, generated metadata or preserved historical record with a
+  concrete, stated reason that it has no runtime, dependency, operational, interoperability,
+  reliability or security effect. If you cannot make that case concretely, classify and
+  evidence the surface normally — do not use N/A as an escape hatch.
+- **Root cause.** Every blocking finding carries `root_cause: plan | implementation`. An
+  inability to reach a conclusion is `ESCALATE`, not a guess.
+
+This step's structured output (inventory, findings, evidence, both axis verdicts, the
+machine-derivable aggregate/route) is written to the JSON sidecar per
+`qa.daemon-prompt.md` — this skill step defines the review discipline; the daemon prompt
+defines the file/env-var contract.
+
+### 8. Memory Alignment (PASS only)
 
 On PASS verdict, the skill MUST invoke `memory-alignment-check` (SKILL-MEMORY-ALIGNMENT-CHECK-001) before returning. QA MUST NOT improvise the delta — `memory-alignment-check` owns it.
 
@@ -159,6 +202,6 @@ This skill must NEVER:
 - Reinterpret Stories
 - Negotiate acceptance criteria
 - Approve partial conformance
-- MUST NOT write or modify `contexts/artefacts/memory-deltas/{id}.memory-delta.md` directly. The delta is written exclusively by `memory-alignment-check` (invoked at Step 6). Free-form delta variants are a governance violation.
+- MUST NOT write or modify `contexts/artefacts/memory-deltas/{id}.memory-delta.md` directly. The delta is written exclusively by `memory-alignment-check` (invoked at Step 8). Free-form delta variants are a governance violation.
 
 **If it's not explicitly validated → it's broken. If it's broken → it doesn't ship.**

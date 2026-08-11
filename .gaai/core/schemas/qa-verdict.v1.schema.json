@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gaai.dev/schemas/qa-verdict.v1.schema.json",
+  "title": "GAAI OSS QA two-axis handoff (schema_version 1)",
+  "description": "DEC-200 two-axis QA verdict contract: independent plan_conformance and state_of_the_art_conformance axes, a mechanically complete changed-surface inventory, structured findings/evidence, a machine-derived aggregate verdict and remediation route. Enforced independently by .gaai/core/scripts/lib/qa-verdict.mjs (hand-rolled Node-stdlib validator, no JSON-Schema engine dependency) — this document is the closed-shape reference, not the runtime enforcement path.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "story_id",
+    "evaluated_as_of",
+    "state_of_the_art_conformance",
+    "plan_conformance",
+    "changed_surface_inventory",
+    "findings",
+    "evidence",
+    "verdict",
+    "remediation_route",
+    "replan_required",
+    "report_path"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "story_id": { "type": "string", "minLength": 1 },
+    "evaluated_as_of": { "type": "string", "minLength": 1, "description": "ISO 8601 timestamp. Freshness windows (DEC-200 D3) are computed relative to this value, not wall-clock validator run time." },
+    "state_of_the_art_conformance": {
+      "$ref": "#/$defs/axis_verdict",
+      "description": "Evaluated and recorded BEFORE plan_conformance (DEC-200 D1, anti green-test-anchoring). Object key order in the sidecar file is the structural signal the validator checks."
+    },
+    "plan_conformance": {
+      "$ref": "#/$defs/axis_verdict",
+      "description": "Conformity to every Story AC, then the governed PLAN. Story wins on Story/PLAN conflict (DEC-200 D1)."
+    },
+    "changed_surface_inventory": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/inventory_entry" },
+      "description": "Complete, exactly-once inventory of every surface the dispatcher derived from Story + PLAN + actual diff (DEC-200 D2)."
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding_entry" }
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidence_entry" }
+    },
+    "verdict": {
+      "$ref": "#/$defs/axis_verdict",
+      "description": "Machine-derived aggregate from the DEC-200 D4 nine-row truth table over the two axes. Never a model-supplied value the validator trusts on its own."
+    },
+    "remediation_route": {
+      "enum": ["human", "plan", "impl", null],
+      "description": "Machine-derived per DEC-200 D5 precedence human > plan > implementation."
+    },
+    "replan_required": {
+      "type": ["boolean", "null"]
+    },
+    "report_path": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$",
+      "description": "Safe repo-relative path to the durable Markdown report. No leading '/', no '..' segment."
+    }
+  },
+  "$defs": {
+    "axis_verdict": {
+      "type": "string",
+      "enum": ["PASS", "FAIL", "ESCALATE"]
+    },
+    "classification": {
+      "type": "string",
+      "enum": ["blocking", "non_blocking", "not_applicable"]
+    },
+    "review_domain": {
+      "type": "string",
+      "enum": ["security", "dependency", "runtime_api", "data", "operations", "interoperability", "reliability", "other"]
+    },
+    "materiality": {
+      "type": "string",
+      "enum": ["deprecated", "unsupported", "materially_obsolete", "unsafe", "officially_discouraged", "demonstrably_fragile"]
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["supports", "contradicts"],
+      "description": "Descriptive only — excluded from aggregation and routing (DEC-200 D4)."
+    },
+    "source_kind": {
+      "type": "string",
+      "enum": ["live", "governed_record"]
+    },
+    "authority_domain": {
+      "type": "string",
+      "enum": ["security", "fast_moving", "stable", "unknown"]
+    },
+    "root_cause": {
+      "type": "string",
+      "enum": ["plan", "implementation"]
+    },
+    "inventory_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surface", "classification", "review_domain"],
+      "properties": {
+        "surface": { "type": "string", "minLength": 1 },
+        "classification": { "$ref": "#/$defs/classification" },
+        "review_domain": { "$ref": "#/$defs/review_domain" },
+        "materiality": { "$ref": "#/$defs/materiality" },
+        "eligibility_reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concrete reason the surface is a test fixture, generated metadata or preserved historical record with no runtime/dependency/operational/interoperability/reliability/security effect (DEC-200 D2). Required, and only valid, when classification=not_applicable."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "classification": { "const": "blocking" } } },
+          "then": {
+            "required": ["materiality"],
+            "not": { "required": ["eligibility_reason"] }
+          }
+        },
+        {
+          "if": { "properties": { "classification": { "const": "non_blocking" } } },
+          "then": {
+            "not": { "required": ["materiality"] },
+            "allOf": [{ "not": { "required": ["eligibility_reason"] } }]
+          }
+        },
+        {
+          "if": { "properties": { "classification": { "const": "not_applicable" } } },
+          "then": {
+            "required": ["eligibility_reason"],
+            "not": { "required": ["materiality"] }
+          }
+        }
+      ]
+    },
+    "finding_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_id", "surface", "classification", "description"],
+      "properties": {
+        "finding_id": { "type": "string", "minLength": 1 },
+        "surface": { "type": "string", "minLength": 1 },
+        "classification": { "$ref": "#/$defs/classification" },
+        "description": { "type": "string", "minLength": 1 },
+        "root_cause": { "$ref": "#/$defs/root_cause" }
+      },
+      "if": { "properties": { "classification": { "const": "blocking" } } },
+      "then": { "required": ["root_cause"] }
+    },
+    "governed_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority_record_version", "official_authority_url", "verified_at", "claim_scope"],
+      "properties": {
+        "authority_record_version": { "const": 1 },
+        "official_authority_url": { "type": "string", "minLength": 1 },
+        "verified_at": { "type": "string", "minLength": 1 },
+        "authority_domain": { "$ref": "#/$defs/authority_domain" },
+        "claim_scope": { "type": "string", "minLength": 1 }
+      },
+      "description": "authority_domain may be absent only for a record authored before this contract (DEC-200 D3); absence or literal 'unknown' defaults to fast_moving (30-day) freshness."
+    },
+    "evidence_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surface", "finding_id", "outcome", "source_kind", "authority_uri", "authority_title", "accessed_at", "claim"],
+      "properties": {
+        "surface": { "type": "string", "minLength": 1 },
+        "finding_id": { "type": "string", "minLength": 1 },
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "source_kind": { "$ref": "#/$defs/source_kind" },
+        "authority_uri": { "type": "string", "minLength": 1, "description": "Absolute HTTPS, no user-info, no secret-shaped query key when source_kind=live; safe repo-relative path when source_kind=governed_record." },
+        "authority_title": { "type": "string", "minLength": 1 },
+        "published_at": { "type": "string", "minLength": 1 },
+        "accessed_at": { "type": "string", "minLength": 1 },
+        "claim": { "type": "string", "minLength": 1 },
+        "content_digest": { "type": "string", "minLength": 1 },
+        "excerpt": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "materiality": { "$ref": "#/$defs/materiality", "description": "Required only when the referenced surface is classification=blocking; forbidden otherwise (cross-object rule, validator-enforced)." },
+        "governed_record": { "$ref": "#/$defs/governed_record" }
+      },
+      "oneOf": [
+        { "required": ["content_digest"] },
+        { "required": ["excerpt"] }
+      ],
+      "allOf": [
+        {
+          "if": { "properties": { "source_kind": { "const": "governed_record" } } },
+          "then": { "required": ["governed_record"] },
+          "else": { "not": { "required": ["governed_record"] } }
+        }
+      ]
+    }
+  }
+}

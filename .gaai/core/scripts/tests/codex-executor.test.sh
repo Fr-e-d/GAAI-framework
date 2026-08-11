@@ -135,10 +135,16 @@ fi
 echo "T4: QA prompt is self-contained after template expansion (AC2, AC3)"
 QA_TEMPLATE="$REPO_ROOT/.gaai/core/agents/sub-agents/qa.daemon-prompt.md"
 QA_PROMPT="$TMPDIR_TEST/qa-prompt.md"
+FIX_QA_SCHEMA_PATH="$REPO_ROOT/.gaai/core/schemas/qa-verdict.v1.schema.json"
+FIX_QA_VERDICT_PATH="/tmp/gaai-fixture-worktree/.gaai/project/contexts/artefacts/qa-reports/T-CTXFIX.qa-verdict.json"
+FIX_QA_EXPECTED_SURFACES_PATH="/tmp/gaai-fixture-worktree/expected-surfaces.json"
 _expand_daemon_prompt_template "$QA_TEMPLATE" "$QA_PROMPT" \
   "GAAI_STORY_PATH=$FIX_STORY_PATH" "GAAI_PLAN_PATH=$FIX_PLAN_PATH" \
   "GAAI_IMPL_REPORT_PATH=/tmp/gaai-fixture-worktree/.gaai/project/contexts/artefacts/impl-reports/T-CTXFIX.impl-report.md" \
   "GAAI_QA_REPORT_PATH=/tmp/gaai-fixture-worktree/.gaai/project/contexts/artefacts/qa-reports/T-CTXFIX.qa-report.md" \
+  "GAAI_QA_SCHEMA_PATH=$FIX_QA_SCHEMA_PATH" \
+  "GAAI_QA_VERDICT_PATH=$FIX_QA_VERDICT_PATH" \
+  "GAAI_QA_EXPECTED_SURFACES_PATH=$FIX_QA_EXPECTED_SURFACES_PATH" \
   "GAAI_EPIC_PATH=$FIX_EPIC_PATH" \
   "GAAI_BASE_REF=origin/staging" \
   "GAAI_WORKTREE_PATH=$FIX_WORKTREE" \
@@ -153,6 +159,25 @@ if grep -qF "origin/staging" "$QA_PROMPT"; then
   pass "T4b: QA prompt carries resolved GAAI_BASE_REF value"
 else
   fail "T4b: QA prompt missing resolved GAAI_BASE_REF value"
+fi
+if grep -qF "$FIX_QA_SCHEMA_PATH" "$QA_PROMPT" && grep -qF "$FIX_QA_VERDICT_PATH" "$QA_PROMPT" && grep -qF "$FIX_QA_EXPECTED_SURFACES_PATH" "$QA_PROMPT"; then
+  pass "T4c: QA prompt carries resolved GAAI_QA_SCHEMA_PATH/GAAI_QA_VERDICT_PATH/GAAI_QA_EXPECTED_SURFACES_PATH values (DEC-200)"
+else
+  fail "T4c: QA prompt missing one or more resolved DEC-200 two-axis handoff path values"
+fi
+
+# executor-invariance: same QA prompt file, both executors, byte-identical stdin (DEC-200 D6 / DEC-190 D3)
+CLAUDE_CAPTURE_QA="$TMPDIR_TEST/claude-stdin-qa.txt"
+CODEX_CAPTURE_QA="$TMPDIR_TEST/codex-stdin-qa.txt"
+PATH="$FAKEBIN:$PATH" GAAI_DAEMON_EXECUTOR=claude GAAI_CLAUDE_STDIN_FILE="$CLAUDE_CAPTURE_QA" \
+  _run_claude_with_loop_breaker "T-CTXFIX" "qa" "$LOG_FILE" "$QA_PROMPT" "$WORKTREE" >/dev/null 2>&1
+PATH="$FAKEBIN:$PATH" GAAI_DAEMON_EXECUTOR=codex GAAI_CODEX_ARGS_FILE="$ARGS_FILE" GAAI_CODEX_STDIN_FILE="$CODEX_CAPTURE_QA" \
+  _run_claude_with_loop_breaker "T-CTXFIX" "qa" "$LOG_FILE" "$QA_PROMPT" "$WORKTREE" >/dev/null 2>&1
+echo "T5: QA prompt contract reaches both executors identically (DEC-200 D6, AC4)"
+if cmp -s "$CLAUDE_CAPTURE_QA" "$CODEX_CAPTURE_QA"; then
+  pass "T5a: QA prompt bytes are executor-invariant (claude stdin == codex stdin)"
+else
+  fail "T5a: executor-invariance broken — claude and codex received different QA prompt bytes"
 fi
 
 echo
