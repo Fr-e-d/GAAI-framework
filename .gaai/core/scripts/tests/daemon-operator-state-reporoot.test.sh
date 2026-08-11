@@ -56,6 +56,16 @@ if grep -qE 'tmux_env_args\+=\(-e "GAAI_REPO_ROOT=' "$START"; then
 else
   fail "TC3-2: daemon-start.sh does not forward GAAI_REPO_ROOT via tmux env"
 fi
+if grep -qE 'tmux_env_args\+=\(-e "GAAI_CI_TEST_GATE_TIMEOUT_SEC=' "$START"; then
+  pass "TC3-3: daemon-start.sh forwards GAAI_CI_TEST_GATE_TIMEOUT_SEC via tmux env"
+else
+  fail "TC3-3: daemon-start.sh does not forward GAAI_CI_TEST_GATE_TIMEOUT_SEC via tmux env"
+fi
+if grep -qE 'tmux_env_args\+=\(-e "GAAI_CI_TEST_GATE_MATERIALIZE_SEC=' "$START"; then
+  pass "TC3-4: daemon-start.sh forwards GAAI_CI_TEST_GATE_MATERIALIZE_SEC via tmux env"
+else
+  fail "TC3-4: daemon-start.sh does not forward GAAI_CI_TEST_GATE_MATERIALIZE_SEC via tmux env"
+fi
 
 echo "=== TC4: delivery-daemon.sh operator-state paths use _STATE_PROJECT_DIR (not raw GAAI_PROJECT_DIR) ==="
 for var in LOG_FILE LOG_DIR LOCK_DIR; do

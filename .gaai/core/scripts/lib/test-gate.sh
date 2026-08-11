@@ -49,9 +49,27 @@
 # _test_gate_ci_scope_touched, _test_gate_poll_ci_verdict.
 #
 # CI-delegated merge gate env vars (all optional, have defaults):
-#   GAAI_CI_TEST_GATE_TIMEOUT_SEC        — bounded poll wait (default: 1200,
-#                                           same order of magnitude as
-#                                           GAAI_AGENT_HANG_THRESHOLD_SEC)
+#   GAAI_CI_TEST_GATE_TIMEOUT_SEC        — bounded poll wait (default: 2700 =
+#                                           45 min, derived from the CI
+#                                           workflow's own declared job
+#                                           timeouts along its critical path:
+#                                           detect -> max(head, baseline) ->
+#                                           test-gate. Covers the workflow's
+#                                           full declared execution budget;
+#                                           queue latency is absorbed on top
+#                                           of it by this same bounded wait)
+#   GAAI_CI_TEST_GATE_MATERIALIZE_SEC    — bounded sub-wait for a workflow run
+#                                           to first appear for the expected
+#                                           SHA (default: 300 = 5 min). If no
+#                                           run has been observed within this
+#                                           sub-budget, the poll returns
+#                                           "unavailable:no_run" immediately
+#                                           instead of waiting out the full
+#                                           budget — distinguishes "CI will
+#                                           never run" from "CI is still
+#                                           running". Once a run has been
+#                                           observed in any state, the full
+#                                           budget governs.
 #   GAAI_CI_TEST_GATE_POLL_INTERVAL_SEC  — sleep between polls (default: 20;
 #                                           keeps wrapper.log fresh so the
 #                                           hang-detector never fires on a
@@ -567,26 +585,40 @@ _test_gate_run_with_timeout() {
 # also sends that SHA to the REST merge endpoint as its atomic TOCTOU backstop.
 #
 # Bounded and sleep-based — never busy-waits. Prints exactly one line to
-# STDOUT: "pass", "fail", "blocked:head_moved", or
-# "unavailable:<reason>" (reason in timeout|api_error). Progress logging goes
-# to stderr because stdout is the signal captured by the caller. No scheduler
-# or notification side effects occur here.
+# STDOUT: "pass", "fail", "blocked:head_moved", or "unavailable:<reason>"
+# (reason in timeout|api_error|no_run — no_run means the materialize
+# sub-budget expired before any workflow run was ever observed for the
+# expected SHA; timeout means a run WAS observed but no decisive verdict
+# arrived before the full budget expired). Progress logging goes to stderr
+# because stdout is the signal captured by the caller. No scheduler or
+# notification side effects occur here.
 _test_gate_poll_ci_verdict() {
   local story_id="$1" pr_url="$2" expected_head_sha="$3"
-  local timeout_sec poll_interval api_timeout_sec
-  timeout_sec=$(_test_gate_positive_int "${GAAI_CI_TEST_GATE_TIMEOUT_SEC:-1200}" 1200 GAAI_CI_TEST_GATE_TIMEOUT_SEC)
+  local timeout_sec materialize_sec poll_interval api_timeout_sec
+  # Default derived from the CI workflow's own declared job timeouts along
+  # its critical path (detect -> max(head, baseline) -> test-gate) — see the
+  # file header for the full derivation. Not a wall-clock sample: it stays
+  # correct independent of runner performance drift.
+  timeout_sec=$(_test_gate_positive_int "${GAAI_CI_TEST_GATE_TIMEOUT_SEC:-2700}" 2700 GAAI_CI_TEST_GATE_TIMEOUT_SEC)
+  materialize_sec=$(_test_gate_positive_int "${GAAI_CI_TEST_GATE_MATERIALIZE_SEC:-300}" 300 GAAI_CI_TEST_GATE_MATERIALIZE_SEC)
   poll_interval=$(_test_gate_positive_int "${GAAI_CI_TEST_GATE_POLL_INTERVAL_SEC:-20}" 20 GAAI_CI_TEST_GATE_POLL_INTERVAL_SEC)
   api_timeout_sec=$(_test_gate_positive_int "${GAAI_CI_TEST_GATE_API_TIMEOUT_SEC:-30}" 30 GAAI_CI_TEST_GATE_API_TIMEOUT_SEC)
 
-  local started_at deadline now remaining call_timeout sleep_for
+  local started_at deadline materialize_deadline now remaining call_timeout sleep_for
   started_at=$(date +%s)
   deadline=$(( started_at + timeout_sec ))
+  materialize_deadline=$(( started_at + materialize_sec ))
+  local run_observed=0
   local api_err_streak=0
   local jq_expr='if (.workflow_runs | length) == 0 then "missing" else (.workflow_runs | sort_by(.created_at) | last | [(.status // "unknown"), (.conclusion // "pending"), (.head_sha // "missing")] | @tsv) end'
 
   while :; do
     now=$(date +%s)
     (( now >= deadline )) && break
+    if [[ "$run_observed" -eq 0 && "$now" -ge "$materialize_deadline" ]]; then
+      echo "unavailable:no_run"
+      return 0
+    fi
     remaining=$(( deadline - now ))
     call_timeout="$api_timeout_sec"
     (( call_timeout > remaining )) && call_timeout="$remaining"
@@ -604,46 +636,52 @@ _test_gate_poll_ci_verdict() {
       IFS=$'\t' read -r run_status run_conclusion observed_head_sha <<< "$run_line"
       if [[ "$observed_head_sha" != "$expected_head_sha" ]]; then
         api_err_streak=$(( api_err_streak + 1 ))
-      elif [[ "$run_status" == "completed" ]]; then
-        # A completed blocking conclusion for the exact pushed SHA is already
-        # decisive. Do not let an unrelated PR-head lookup outage downgrade a
-        # known CI failure into the local fallback path.
-        if [[ "$run_conclusion" != "success" && "$run_conclusion" != "cancelled" ]]; then
-          echo "fail"
-          return 0
-        fi
+      else
+        # A run for the expected SHA has now been seen in SOME state — this
+        # is "materialized" regardless of whether it is queued, in progress,
+        # or already completed. From here on the full budget governs.
+        run_observed=1
+        if [[ "$run_status" == "completed" ]]; then
+          # A completed blocking conclusion for the exact pushed SHA is already
+          # decisive. Do not let an unrelated PR-head lookup outage downgrade a
+          # known CI failure into the local fallback path.
+          if [[ "$run_conclusion" != "success" && "$run_conclusion" != "cancelled" ]]; then
+            echo "fail"
+            return 0
+          fi
 
-        # The workflow lookup may have consumed most of this iteration's
-        # budget. Recompute the remaining wall clock before the second call.
-        # Both success and cancellation need this check: success may authorize
-        # only the current head, while cancellation caused by a superseding
-        # push must report the moved head rather than masquerading as failure.
-        now=$(date +%s)
-        (( now >= deadline )) && break
-        remaining=$(( deadline - now ))
-        local head_call_timeout="$api_timeout_sec"
-        (( head_call_timeout > remaining )) && head_call_timeout="$remaining"
+          # The workflow lookup may have consumed most of this iteration's
+          # budget. Recompute the remaining wall clock before the second call.
+          # Both success and cancellation need this check: success may authorize
+          # only the current head, while cancellation caused by a superseding
+          # push must report the moved head rather than masquerading as failure.
+          now=$(date +%s)
+          (( now >= deadline )) && break
+          remaining=$(( deadline - now ))
+          local head_call_timeout="$api_timeout_sec"
+          (( head_call_timeout > remaining )) && head_call_timeout="$remaining"
 
-        local current_head_sha head_rc=0
-        current_head_sha=$(_test_gate_run_with_timeout "$head_call_timeout" gh pr view "$pr_url" \
-          --json headRefOid --jq .headRefOid) || head_rc=$?
-        if [[ "$head_rc" -ne 0 || ! "$current_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
-          api_err_streak=$(( api_err_streak + 1 ))
-        elif [[ "$current_head_sha" != "$expected_head_sha" ]]; then
-          echo "blocked:head_moved"
-          return 0
-        elif [[ "$run_conclusion" == "success" ]]; then
-          echo "pass"
-          return 0
+          local current_head_sha head_rc=0
+          current_head_sha=$(_test_gate_run_with_timeout "$head_call_timeout" gh pr view "$pr_url" \
+            --json headRefOid --jq .headRefOid) || head_rc=$?
+          if [[ "$head_rc" -ne 0 || ! "$current_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            api_err_streak=$(( api_err_streak + 1 ))
+          elif [[ "$current_head_sha" != "$expected_head_sha" ]]; then
+            echo "blocked:head_moved"
+            return 0
+          elif [[ "$run_conclusion" == "success" ]]; then
+            echo "pass"
+            return 0
+          else
+            # A same-head cancelled run is non-decisive: a manual re-run may
+            # supersede it. Keep polling until a decisive run appears or the
+            # bounded wait falls back locally.
+            api_err_streak=0
+          fi
         else
-          # A same-head cancelled run is non-decisive: a manual re-run may
-          # supersede it. Keep polling until a decisive run appears or the
-          # bounded wait falls back locally.
+          # queued/in_progress/waiting/requested/pending are valid observations.
           api_err_streak=0
         fi
-      else
-        # queued/in_progress/waiting/requested/pending are valid observations.
-        api_err_streak=0
       fi
     else
       api_err_streak=$(( api_err_streak + 1 ))
@@ -656,9 +694,17 @@ _test_gate_poll_ci_verdict() {
 
     now=$(date +%s)
     (( now >= deadline )) && break
+    if [[ "$run_observed" -eq 0 && "$now" -ge "$materialize_deadline" ]]; then
+      echo "unavailable:no_run"
+      return 0
+    fi
     remaining=$(( deadline - now ))
     sleep_for="$poll_interval"
     (( sleep_for > remaining )) && sleep_for="$remaining"
+    if [[ "$run_observed" -eq 0 ]]; then
+      local materialize_remaining=$(( materialize_deadline - now ))
+      (( sleep_for > materialize_remaining )) && sleep_for="$materialize_remaining"
+    fi
     echo "[TEST-GATE-CI] ${story_id} : waiting on ${pr_url}@${expected_head_sha} (elapsed=$(( now - started_at ))s/${timeout_sec}s)" >&2
     sleep "$sleep_for"
   done
@@ -718,7 +764,12 @@ _run_merge_test_gate() {
       ;;
     *)
       reason="${verdict#unavailable:}"
-      echo "[WARN] ${story_id} handle_commit_phase: CI test-gate result unavailable (${reason}) — falling back to local gate [class=TEST_GATE_CI_UNAVAILABLE_FALLBACK]"
+      local reason_detail=""
+      case "$reason" in
+        timeout) reason_detail=" — CI run observed but still in progress at cutoff" ;;
+        no_run)  reason_detail=" — no CI run observed for this SHA" ;;
+      esac
+      echo "[WARN] ${story_id} handle_commit_phase: CI test-gate result unavailable (${reason})${reason_detail} — falling back to local gate [class=TEST_GATE_CI_UNAVAILABLE_FALLBACK]"
       _run_deterministic_test_gate "$story_id" "$worktree_path" "$qa_report_path"
       return $?
       ;;

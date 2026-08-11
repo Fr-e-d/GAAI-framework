@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+-: 'The CI test-gate wait outlasts a normal CI run, so local
 -: Produce and validate the two-axis QA handoff
 
 ## [2.49.0] - 2026-08-11
