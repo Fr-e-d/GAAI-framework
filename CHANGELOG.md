@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+-: Consume the two-axis handoff and route remediation
 -: 'The CI test-gate wait outlasts a normal CI run, so local
 -: Produce and validate the two-axis QA handoff
 

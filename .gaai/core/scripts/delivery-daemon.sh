@@ -2704,21 +2704,36 @@ _resolve_cross_cycle_qa_report() {
 
   [[ ! -f "$qa_report" || ! -s "$qa_report" ]] && return 0
 
-  local verdict
-  verdict=$(grep -m 1 -iE '^[[:space:]]*Verdict:[[:space:]]*(PASS|FAIL|ESCALATE)\b' "$qa_report" 2>/dev/null \
-    | sed -E 's/^[[:space:]]*Verdict:[[:space:]]*//' | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]' || true)
+  # DEC-200 / E1096S02 AC1: derive from the shared JSON resolver, not Markdown
+  # grep — daemon-dispatch.sh (sourced above this call site) supplies
+  # _qa_verdict_resolve(). rc=2 (no sidecar — legacy/currentness-rerun case)
+  # and rc=1 (invalid-present) both fall through to "no injection": the
+  # dispatch-side currentness gate (daemon-dispatch.sh dispatch_3phase_story),
+  # not this function, is the one place phase_status is authoritatively reset
+  # for a missing/invalid sidecar. This function only ever decides PLAN-prompt
+  # injection content for an ALREADY-valid FAIL/ESCALATE route.
+  local base_ref="${GAAI_BASE_REF:-origin/${TARGET_BRANCH:-staging}}"
+  local out rc
+  out=$(_qa_verdict_resolve "$sid" "$wt_path" "$base_ref")
+  rc=$?
+  [[ "$rc" -ne 0 ]] && return 0
 
-  [[ -z "$verdict" ]] && return 0
+  local verdict route replan
+  verdict=$(printf '%s' "$out" | sed -n '1p')
+  route=$(printf '%s' "$out" | sed -n '2p')
+  replan=$(printf '%s' "$out" | sed -n '3p')
   [[ "$verdict" == "PASS" ]] && return 0
 
+  # DEC-200 D5: ESCALATE routes to remediation_route:"human", not "plan" — but
+  # the pre-existing (Markdown-only) behavior mapped ESCALATE to phase="plan"
+  # for injection purposes (best-available context for a human/architectural
+  # review is the PLAN-style delta framing). Preserve that observable behavior
+  # explicitly rather than silently changing it via the route-based mapping.
   local phase="impl"
   if [[ "$verdict" == "ESCALATE" ]]; then
     phase="plan"
-  elif [[ "$verdict" == "FAIL" ]]; then
-    local replan
-    replan=$(grep -m 1 -iE '^[[:space:]]*replan_required:[[:space:]]*(true|false)\b' "$qa_report" 2>/dev/null \
-      | sed -E 's/^[[:space:]]*replan_required:[[:space:]]*//' | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]' || true)
-    [[ "$replan" == "true" ]] && phase="plan"
+  elif [[ "$route" == "plan" ]]; then
+    phase="plan"
   fi
 
   local _replan_val="${replan:-absent}"
