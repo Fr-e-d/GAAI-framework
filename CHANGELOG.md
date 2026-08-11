@@ -7,35 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.49.0] - 2026-08-11
 
 ### Changed
+- feat: block pushing a hermetic test without its executable bit
 - fix: gate notes.md context discipline on tier, not just route
 - fix: harden the portable pre-merge proof contract
 - fix: make premerge-proof.test.sh executable
 - fix: make R3 describe the contract producers actually implement
--: Define and verify the base-held pre-merge proof contract
--: Daemon commit-phase delegates the test-gate decision to CI, with local fallback
 - fix: support safe YAML flow lists
 - fix: stop `grep -c ... || echo 0` from emitting two counts
 - fix: resolve the worktree deps marker without a project path
 - fix: stop daemon-state-machine reaching into the host repo
 - fix: make the OSS test corpus pass on Linux and macOS
 - chore: raise phase timeouts for Sonnet 5 + bound test-gate unit runs
--: State ELv2 licensing publicly without open-source ambiguity
--: allocator ledger/lock key off common git dir, shared across worktrees
--: Make capability documentation follow shipped runtime and filesystem truth
-- fix: renice test-gate subshell via $BASHPID, not $$
 - fix: renice test-gate subshell via $BASHPID, not $$
 - fix: lower CPU priority of test-gate unit runs
 - fix: stream test-gate unit output live instead of buffering
 - fix: hang-detector was blind to commit-phase activity
 - fix: name the entry tier Starter
 - fix: correct the amended rule and the core hook after review FAIL
--: resolve Plan/QA daemon-prompt $GAAI_* tokens at construction time
 - test: repair 37 pre-existing daemon-state-machine failures (origin/staging fixtures)
 - fix: reconcile plan-prompt EXECUTE-NOW block with sanctioned plan-blocked exits
 - fix: harden plan/qa phase prompts against conversational bail
+
 
 ## [2.50.0] - 2026-07-23
 
