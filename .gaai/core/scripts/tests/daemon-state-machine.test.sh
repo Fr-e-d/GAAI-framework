@@ -1879,6 +1879,14 @@ unset TARGET_BRANCH
 echo "T44: dispatch_3phase_story — qa_passed → done via handle_commit_phase"
 > "$ROUTING_LOG"
 make_commit_worktree "TST-COMMIT-01"
+# E1096S02 AC2/DEC-200 D7: dispatch_3phase_story's currentness gate reruns QA for
+# any qa_passed/qa_failed story lacking a two-axis sidecar (make_commit_worktree only
+# writes the legacy Markdown qa-report.md). This test exercises dispatch's qa_passed ->
+# handle_commit_phase wiring specifically, so it needs a valid, agreeing sidecar to
+# represent a REALISTIC current qa_passed state and avoid tripping the (correct, new)
+# currentness rerun — QARERUN-1/2 below cover the missing-sidecar rerun path itself.
+printf '{"schema_version":1,"story_id":"TST-COMMIT-01","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"PASS","plan_conformance":"PASS","changed_surface_inventory":[],"findings":[],"evidence":[],"verdict":"PASS","remediation_route":null,"replan_required":null,"report_path":"qa-reports/TST-COMMIT-01.qa-report.md"}' \
+  > "$COMMIT_FIXTURE_DIR/TST-COMMIT-01-workspace/.gaai/project/contexts/artefacts/qa-reports/TST-COMMIT-01.qa-verdict.json"
 "$SCHEDULER" --set-phase-status "TST-COMMIT-01" qa_passed "$FIXTURE" 2>/dev/null || true
 GAAI_SHIM_PUSH_FAIL=0
 TRACE="test-trace-$(date +%s)-044"
@@ -2463,6 +2471,456 @@ export PROJECT_DIR="$QAD_OLD_PROJECT_DIR"
 unset GAAI_WORKTREES_BASE CLAUDE_MODEL_PRIMARY GAAI_WORKSPACE_ID GAAI_ORG_ID
 rm -rf "$QAD_FIXTURE_DIR"
 
+# ── QAROUTE/QARERUN/QAJSON-E/QAPARITY: E1096S02 AC3/AC4/AC6 live routing ───
+# Route persistence, independent PLAN/IMPL counters, both exhaustion paths,
+# the currentness gate (qa_passed/qa_failed/implemented) and Claude/Codex
+# executor parity. Reuses the QAJSON-D self-contained fixture idiom exactly
+# (fresh dir, GAAI_WORKTREES_BASE, make_qa_worktree, own shim dir/PATH).
+echo "QAROUTE/QARERUN: E1096S02 live routing + currentness gate"
+QAR_FIXTURE_DIR="/tmp/gaai-qaroute-tests-$$"
+rm -rf "$QAR_FIXTURE_DIR"; mkdir -p "$QAR_FIXTURE_DIR"
+export GAAI_WORKTREES_BASE="$QAR_FIXTURE_DIR"
+export CLAUDE_MODEL_PRIMARY="claude-sonnet-4-6"
+export GAAI_WORKSPACE_ID="test-workspace"
+export GAAI_ORG_ID="test-org"
+QA_FIXTURE_DIR="$QAR_FIXTURE_DIR"
+QAR_SHIM_DIR="$QAR_FIXTURE_DIR/shims"
+mkdir -p "$QAR_SHIM_DIR"
+QAR_OLD_PATH="$PATH"
+QAR_OLD_PROJECT_DIR="$PROJECT_DIR"
+export PATH="$QAR_SHIM_DIR:$PATH"
+export PROJECT_DIR="$SCRIPT_DIR/../../../.."
+
+# Helper: claude shim writing a matching Markdown+JSON handoff. mixed=1 adds
+# an extra impl-rooted blocking finding alongside the plan-rooted one (proves
+# PLAN precedence wins when both root causes exist, per deriveRemediation()).
+make_qaroute_claude_shim() {
+  local verdict="$1" route="${2:-impl}" mixed="${3:-}"
+  local sota_c="PASS" plan_c="PASS" route_json="null" replan_json="null" findings_json="[]"
+  case "$verdict" in
+    FAIL)
+      plan_c="FAIL"
+      if [[ "$route" == "plan" ]]; then
+        route_json='"plan"'; replan_json="true"
+        if [[ "$mixed" == "mixed" ]]; then
+          findings_json='[{"finding_id":"f1","surface":"a.ts","classification":"blocking","description":"impl issue","root_cause":"implementation"},{"finding_id":"f2","surface":"b.ts","classification":"blocking","description":"plan issue","root_cause":"plan"}]'
+        else
+          findings_json='[{"finding_id":"f1","surface":"b.ts","classification":"blocking","description":"plan issue","root_cause":"plan"}]'
+        fi
+      else
+        route_json='"impl"'; replan_json="false"
+        findings_json='[{"finding_id":"f1","surface":"a.ts","classification":"blocking","description":"impl issue","root_cause":"implementation"}]'
+      fi
+      ;;
+    ESCALATE) sota_c="ESCALATE"; route_json='"human"'; replan_json="null" ;;
+  esac
+  cat > "$QAR_SHIM_DIR/claude" << QARSHIM_EOF
+#!/usr/bin/env bash
+if [[ -n "\${GAAI_QA_VERDICT_PATH:-}" ]]; then
+  printf '{"schema_version":1,"story_id":"%s","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"$sota_c","plan_conformance":"$plan_c","changed_surface_inventory":[],"findings":$findings_json,"evidence":[],"verdict":"$verdict","remediation_route":$route_json,"replan_required":$replan_json,"report_path":"qa-reports/%s.qa-report.md"}' "\${GAAI_STORY_ID:-}" "\${GAAI_STORY_ID:-}" > "\$GAAI_QA_VERDICT_PATH"
+fi
+if [[ -n "\${GAAI_QA_REPORT_PATH:-}" ]]; then
+  printf '## AC1\ncheck\n\n## Verdict: %s\n' "$verdict" > "\$GAAI_QA_REPORT_PATH"
+fi
+exit 0
+QARSHIM_EOF
+  chmod +x "$QAR_SHIM_DIR/claude"
+}
+
+# ── QAROUTE-1: mixed root causes -> PLAN precedence wins ────────────────
+echo "QAROUTE-1: handle_qa_phase persists 'plan' route on FAIL with mixed root-cause findings"
+cat >> "$FIXTURE" << 'YAML_QAR1'
+- id: TST-QAROUTE-1
+  status: in_progress
+  phase_status: implemented
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_QAR1
+make_qa_worktree "TST-QAROUTE-1"
+make_qaroute_claude_shim "FAIL" "plan" "mixed"
+"$SCHEDULER" --set-phase-status "TST-QAROUTE-1" implemented "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-qar1"
+if handle_qa_phase "TST-QAROUTE-1" "$TRACE" 2>/dev/null; then
+  qar_ps=$(get_phase_status "TST-QAROUTE-1")
+  if [[ "$qar_ps" == "qa_failed" ]]; then
+    pass "QAROUTE-1a: FAIL verdict -> phase_status qa_failed"
+  else
+    fail "QAROUTE-1a: expected qa_failed, got '$qar_ps'"
+  fi
+  if [[ -f "${LOCK_DIR}/.qa-route-TST-QAROUTE-1" ]] && [[ "$(cat "${LOCK_DIR}/.qa-route-TST-QAROUTE-1")" == "plan" ]]; then
+    pass "QAROUTE-1b: .qa-route marker persisted as 'plan' (PLAN-rooted finding wins over mixed IMPL-rooted finding)"
+  else
+    fail "QAROUTE-1b: .qa-route marker missing or not 'plan' — $(cat "${LOCK_DIR}/.qa-route-TST-QAROUTE-1" 2>/dev/null)"
+  fi
+else
+  fail "QAROUTE-1a: handle_qa_phase returned non-zero for FAIL verdict"
+  fail "QAROUTE-1b: (skipped)"
+fi
+
+# ── QAROUTE-2: single impl-rooted finding -> impl route ──────────────────
+echo "QAROUTE-2: handle_qa_phase persists 'impl' route on FAIL with impl-rooted finding"
+cat >> "$FIXTURE" << 'YAML_QAR2'
+- id: TST-QAROUTE-2
+  status: in_progress
+  phase_status: implemented
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_QAR2
+make_qa_worktree "TST-QAROUTE-2"
+make_qaroute_claude_shim "FAIL" "impl"
+"$SCHEDULER" --set-phase-status "TST-QAROUTE-2" implemented "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-qar2"
+if handle_qa_phase "TST-QAROUTE-2" "$TRACE" 2>/dev/null; then
+  qar_ps=$(get_phase_status "TST-QAROUTE-2")
+  if [[ "$qar_ps" == "qa_failed" ]]; then
+    pass "QAROUTE-2a: FAIL(impl) verdict -> phase_status qa_failed"
+  else
+    fail "QAROUTE-2a: expected qa_failed, got '$qar_ps'"
+  fi
+  if [[ -f "${LOCK_DIR}/.qa-route-TST-QAROUTE-2" ]] && [[ "$(cat "${LOCK_DIR}/.qa-route-TST-QAROUTE-2")" == "impl" ]]; then
+    pass "QAROUTE-2b: .qa-route marker persisted as 'impl'"
+  else
+    fail "QAROUTE-2b: .qa-route marker missing or not 'impl' — $(cat "${LOCK_DIR}/.qa-route-TST-QAROUTE-2" 2>/dev/null)"
+  fi
+else
+  fail "QAROUTE-2a: handle_qa_phase returned non-zero for FAIL(impl)"
+  fail "QAROUTE-2b: (skipped)"
+fi
+
+# ── QAROUTE-3: dispatch consumes 'plan' route — rewinds not_started ──────
+echo "QAROUTE-3: dispatch_3phase_story consumes plan route (rewind not_started, replans-only counter)"
+cat >> "$FIXTURE" << 'YAML_QAR3'
+- id: TST-QAROUTE-3
+  status: in_progress
+  phase_status: qa_failed
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_QAR3
+make_qa_worktree "TST-QAROUTE-3"
+printf '{"schema_version":1,"story_id":"TST-QAROUTE-3","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"PASS","plan_conformance":"FAIL","changed_surface_inventory":[],"findings":[],"evidence":[],"verdict":"FAIL","remediation_route":"plan","replan_required":true,"report_path":"qa-reports/TST-QAROUTE-3.qa-report.md"}' \
+  > "$QAR_FIXTURE_DIR/TST-QAROUTE-3-workspace/.gaai/project/contexts/artefacts/qa-reports/TST-QAROUTE-3.qa-verdict.json"
+rm -f "${LOCK_DIR}/.qa-retries-TST-QAROUTE-3" "${LOCK_DIR}/.qa-replans-TST-QAROUTE-3"
+printf 'plan\n' > "${LOCK_DIR}/.qa-route-TST-QAROUTE-3"
+"$SCHEDULER" --set-phase-status "TST-QAROUTE-3" qa_failed "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-qar3"
+if dispatch_3phase_story "TST-QAROUTE-3" "$TRACE" 2>/dev/null; then
+  qar_ps=$(get_phase_status "TST-QAROUTE-3")
+  if [[ "$qar_ps" == "not_started" ]]; then
+    pass "QAROUTE-3a: plan route rewinds phase_status to not_started (not 'planned')"
+  else
+    fail "QAROUTE-3a: expected not_started, got '$qar_ps'"
+  fi
+  if [[ "$(cat "${LOCK_DIR}/.qa-replans-TST-QAROUTE-3" 2>/dev/null)" == "1" ]]; then
+    pass "QAROUTE-3b: .qa-replans counter incremented to 1"
+  else
+    fail "QAROUTE-3b: .qa-replans counter not 1 — $(cat "${LOCK_DIR}/.qa-replans-TST-QAROUTE-3" 2>/dev/null)"
+  fi
+  if [[ ! -f "${LOCK_DIR}/.qa-retries-TST-QAROUTE-3" ]]; then
+    pass "QAROUTE-3c: .qa-retries (IMPL counter) untouched by PLAN route"
+  else
+    fail "QAROUTE-3c: .qa-retries unexpectedly created by PLAN route"
+  fi
+  if grep -q '"fallback_reason":"QA_REPLAN_1"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "QAROUTE-3d: routing.jsonl has QA_REPLAN_1 retry record"
+  else
+    fail "QAROUTE-3d: routing.jsonl missing QA_REPLAN_1 — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+  if [[ "${GAAI_QA_INJECT_PHASE:-}" == "plan" ]]; then
+    pass "QAROUTE-3e: GAAI_QA_INJECT_PHASE=plan exported for PLAN-route re-spawn"
+  else
+    fail "QAROUTE-3e: GAAI_QA_INJECT_PHASE not 'plan' — '${GAAI_QA_INJECT_PHASE:-}'"
+  fi
+else
+  fail "QAROUTE-3a: dispatch_3phase_story returned non-zero"
+  fail "QAROUTE-3b: (skipped)"; fail "QAROUTE-3c: (skipped)"
+  fail "QAROUTE-3d: (skipped)"; fail "QAROUTE-3e: (skipped)"
+fi
+unset GAAI_QA_INJECT_PHASE GAAI_QA_REPORT_PATH 2>/dev/null || true
+
+# ── QAROUTE-4: independence across alternating plan/impl cycles ──────────
+echo "QAROUTE-4: independent counters across alternating PLAN/IMPL cycles"
+cat >> "$FIXTURE" << 'YAML_QAR4'
+- id: TST-QAROUTE-4
+  status: in_progress
+  phase_status: qa_failed
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_QAR4
+make_qa_worktree "TST-QAROUTE-4"
+printf '{"schema_version":1,"story_id":"TST-QAROUTE-4","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"PASS","plan_conformance":"FAIL","changed_surface_inventory":[],"findings":[],"evidence":[],"verdict":"FAIL","remediation_route":"plan","replan_required":true,"report_path":"qa-reports/TST-QAROUTE-4.qa-report.md"}' \
+  > "$QAR_FIXTURE_DIR/TST-QAROUTE-4-workspace/.gaai/project/contexts/artefacts/qa-reports/TST-QAROUTE-4.qa-verdict.json"
+rm -f "${LOCK_DIR}/.qa-retries-TST-QAROUTE-4" "${LOCK_DIR}/.qa-replans-TST-QAROUTE-4"
+"$SCHEDULER" --set-phase-status "TST-QAROUTE-4" qa_failed "$FIXTURE" 2>/dev/null || true
+printf 'plan\n' > "${LOCK_DIR}/.qa-route-TST-QAROUTE-4"
+dispatch_3phase_story "TST-QAROUTE-4" "test-trace-qar4-1" 2>/dev/null || true
+"$SCHEDULER" --set-phase-status "TST-QAROUTE-4" qa_failed "$FIXTURE" 2>/dev/null || true
+printf 'impl\n' > "${LOCK_DIR}/.qa-route-TST-QAROUTE-4"
+dispatch_3phase_story "TST-QAROUTE-4" "test-trace-qar4-2" 2>/dev/null || true
+"$SCHEDULER" --set-phase-status "TST-QAROUTE-4" qa_failed "$FIXTURE" 2>/dev/null || true
+printf 'plan\n' > "${LOCK_DIR}/.qa-route-TST-QAROUTE-4"
+dispatch_3phase_story "TST-QAROUTE-4" "test-trace-qar4-3" 2>/dev/null || true
+if [[ "$(cat "${LOCK_DIR}/.qa-replans-TST-QAROUTE-4" 2>/dev/null)" == "2" ]]; then
+  pass "QAROUTE-4a: .qa-replans reflects 2 PLAN cycles (plan/impl/plan sequence)"
+else
+  fail "QAROUTE-4a: expected .qa-replans=2, got '$(cat "${LOCK_DIR}/.qa-replans-TST-QAROUTE-4" 2>/dev/null)'"
+fi
+if [[ "$(cat "${LOCK_DIR}/.qa-retries-TST-QAROUTE-4" 2>/dev/null)" == "1" ]]; then
+  pass "QAROUTE-4b: .qa-retries reflects 1 IMPL cycle, independent of the PLAN counter"
+else
+  fail "QAROUTE-4b: expected .qa-retries=1, got '$(cat "${LOCK_DIR}/.qa-retries-TST-QAROUTE-4" 2>/dev/null)'"
+fi
+unset GAAI_QA_INJECT_PHASE GAAI_QA_REPORT_PATH 2>/dev/null || true
+
+# ── QAROUTE-5: PLAN route exhaustion escalates ────────────────────────────
+echo "QAROUTE-5: PLAN route exhaustion escalates to qa_escalated + cleans markers"
+cat >> "$FIXTURE" << 'YAML_QAR5'
+- id: TST-QAROUTE-5
+  status: in_progress
+  phase_status: qa_failed
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_QAR5
+make_qa_worktree "TST-QAROUTE-5"
+printf '{"schema_version":1,"story_id":"TST-QAROUTE-5","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"PASS","plan_conformance":"FAIL","changed_surface_inventory":[],"findings":[],"evidence":[],"verdict":"FAIL","remediation_route":"plan","replan_required":true,"report_path":"qa-reports/TST-QAROUTE-5.qa-report.md"}' \
+  > "$QAR_FIXTURE_DIR/TST-QAROUTE-5-workspace/.gaai/project/contexts/artefacts/qa-reports/TST-QAROUTE-5.qa-verdict.json"
+rm -f "${LOCK_DIR}/.qa-retries-TST-QAROUTE-5" "${LOCK_DIR}/.qa-replans-TST-QAROUTE-5"
+printf '2\n' > "${LOCK_DIR}/.qa-replans-TST-QAROUTE-5"
+printf 'plan\n' > "${LOCK_DIR}/.qa-route-TST-QAROUTE-5"
+"$SCHEDULER" --set-phase-status "TST-QAROUTE-5" qa_failed "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-qar5"
+if dispatch_3phase_story "TST-QAROUTE-5" "$TRACE" 2>/dev/null; then
+  qar_ps=$(get_phase_status "TST-QAROUTE-5")
+  if [[ "$qar_ps" == "qa_escalated" ]]; then
+    pass "QAROUTE-5a: PLAN cap reached (2/2) -> qa_escalated"
+  else
+    fail "QAROUTE-5a: expected qa_escalated, got '$qar_ps'"
+  fi
+  if grep -q '"fallback_reason":"QA_REPLAN_EXHAUSTED"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "QAROUTE-5b: routing.jsonl has QA_REPLAN_EXHAUSTED"
+  else
+    fail "QAROUTE-5b: routing.jsonl missing QA_REPLAN_EXHAUSTED — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+  if [[ ! -f "${LOCK_DIR}/.qa-replans-TST-QAROUTE-5" && ! -f "${LOCK_DIR}/.qa-route-TST-QAROUTE-5" ]]; then
+    pass "QAROUTE-5c: .qa-replans and .qa-route markers cleaned up on escalation"
+  else
+    fail "QAROUTE-5c: escalation markers not cleaned up"
+  fi
+else
+  fail "QAROUTE-5a: dispatch_3phase_story returned non-zero"
+  fail "QAROUTE-5b: (skipped)"; fail "QAROUTE-5c: (skipped)"
+fi
+
+# ── QAROUTE-6: IMPL route exhaustion escalates (regression) ──────────────
+echo "QAROUTE-6: IMPL route exhaustion escalates to qa_escalated (regression — unchanged QA_RETRY_EXHAUSTED)"
+cat >> "$FIXTURE" << 'YAML_QAR6'
+- id: TST-QAROUTE-6
+  status: in_progress
+  phase_status: qa_failed
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_QAR6
+make_qa_worktree "TST-QAROUTE-6"
+printf '{"schema_version":1,"story_id":"TST-QAROUTE-6","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"PASS","plan_conformance":"FAIL","changed_surface_inventory":[],"findings":[],"evidence":[],"verdict":"FAIL","remediation_route":"impl","replan_required":false,"report_path":"qa-reports/TST-QAROUTE-6.qa-report.md"}' \
+  > "$QAR_FIXTURE_DIR/TST-QAROUTE-6-workspace/.gaai/project/contexts/artefacts/qa-reports/TST-QAROUTE-6.qa-verdict.json"
+rm -f "${LOCK_DIR}/.qa-retries-TST-QAROUTE-6" "${LOCK_DIR}/.qa-replans-TST-QAROUTE-6"
+printf '3\n' > "${LOCK_DIR}/.qa-retries-TST-QAROUTE-6"
+printf 'impl\n' > "${LOCK_DIR}/.qa-route-TST-QAROUTE-6"
+"$SCHEDULER" --set-phase-status "TST-QAROUTE-6" qa_failed "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-qar6"
+if dispatch_3phase_story "TST-QAROUTE-6" "$TRACE" 2>/dev/null; then
+  qar_ps=$(get_phase_status "TST-QAROUTE-6")
+  if [[ "$qar_ps" == "qa_escalated" ]]; then
+    pass "QAROUTE-6a: IMPL cap reached (3/3) -> qa_escalated"
+  else
+    fail "QAROUTE-6a: expected qa_escalated, got '$qar_ps'"
+  fi
+  if grep -q '"fallback_reason":"QA_RETRY_EXHAUSTED"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "QAROUTE-6b: routing.jsonl has QA_RETRY_EXHAUSTED (regression guard)"
+  else
+    fail "QAROUTE-6b: routing.jsonl missing QA_RETRY_EXHAUSTED"
+  fi
+  if [[ ! -f "${LOCK_DIR}/.qa-retries-TST-QAROUTE-6" && ! -f "${LOCK_DIR}/.qa-route-TST-QAROUTE-6" ]]; then
+    pass "QAROUTE-6c: .qa-retries and .qa-route markers cleaned up on escalation"
+  else
+    fail "QAROUTE-6c: escalation markers not cleaned up"
+  fi
+else
+  fail "QAROUTE-6a: dispatch_3phase_story returned non-zero"
+  fail "QAROUTE-6b: (skipped)"; fail "QAROUTE-6c: (skipped)"
+fi
+
+# ── QARERUN-1: qa_passed lacking sidecar -> same-cycle currentness rerun ──
+echo "QARERUN-1: qa_passed lacking two-axis sidecar triggers currentness rerun, same cycle"
+cat >> "$FIXTURE" << 'YAML_QRR1'
+- id: TST-QARERUN-1
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_QRR1
+make_qa_worktree "TST-QARERUN-1"
+printf '## AC1\npass\n\n## Verdict: PASS\n' \
+  > "$QAR_FIXTURE_DIR/TST-QARERUN-1-workspace/.gaai/project/contexts/artefacts/qa-reports/TST-QARERUN-1.qa-report.md"
+make_qaroute_claude_shim "PASS"
+"$SCHEDULER" --set-phase-status "TST-QARERUN-1" qa_passed "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-qrr1"
+if dispatch_3phase_story "TST-QARERUN-1" "$TRACE" 2>/dev/null; then
+  if grep -q '"fallback_reason":"QA_CURRENTNESS_RERUN"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "QARERUN-1a: QA_CURRENTNESS_RERUN emitted for sidecar-less qa_passed story"
+  else
+    fail "QARERUN-1a: routing.jsonl missing QA_CURRENTNESS_RERUN — content: $(head -5 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+  qar_ps=$(get_phase_status "TST-QARERUN-1")
+  if [[ "$qar_ps" == "qa_passed" ]]; then
+    pass "QARERUN-1b: fresh same-cycle QA re-executed and reached qa_passed under the current contract"
+  else
+    fail "QARERUN-1b: expected qa_passed after same-cycle rerun, got '$qar_ps'"
+  fi
+else
+  fail "QARERUN-1a: dispatch_3phase_story returned non-zero"
+  fail "QARERUN-1b: (skipped)"
+fi
+
+# ── QARERUN-2: qa_failed lacking sidecar -> same-cycle currentness rerun ──
+echo "QARERUN-2: qa_failed lacking two-axis sidecar triggers currentness rerun, same cycle"
+cat >> "$FIXTURE" << 'YAML_QRR2'
+- id: TST-QARERUN-2
+  status: in_progress
+  phase_status: qa_failed
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_QRR2
+make_qa_worktree "TST-QARERUN-2"
+printf '## AC1\nfail\n\n## Verdict: FAIL\n' \
+  > "$QAR_FIXTURE_DIR/TST-QARERUN-2-workspace/.gaai/project/contexts/artefacts/qa-reports/TST-QARERUN-2.qa-report.md"
+make_qaroute_claude_shim "FAIL" "impl"
+"$SCHEDULER" --set-phase-status "TST-QARERUN-2" qa_failed "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-qrr2"
+if dispatch_3phase_story "TST-QARERUN-2" "$TRACE" 2>/dev/null; then
+  if grep -q '"fallback_reason":"QA_CURRENTNESS_RERUN"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "QARERUN-2a: QA_CURRENTNESS_RERUN emitted for sidecar-less qa_failed story"
+  else
+    fail "QARERUN-2a: routing.jsonl missing QA_CURRENTNESS_RERUN — content: $(head -5 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+  qar_ps=$(get_phase_status "TST-QARERUN-2")
+  if [[ "$qar_ps" == "qa_failed" ]]; then
+    pass "QARERUN-2b: fresh same-cycle QA re-executed and reached qa_failed under the current contract"
+  else
+    fail "QARERUN-2b: expected qa_failed after same-cycle rerun, got '$qar_ps'"
+  fi
+else
+  fail "QARERUN-2a: dispatch_3phase_story returned non-zero"
+  fail "QARERUN-2b: (skipped)"
+fi
+unset GAAI_QA_INJECT_PHASE GAAI_QA_REPORT_PATH 2>/dev/null || true
+
+# ── QARERUN-3: implemented is out of gate scope (negative control) ───────
+echo "QARERUN-3: implemented phase_status is out of gate scope — no currentness rerun"
+cat >> "$FIXTURE" << 'YAML_QRR3'
+- id: TST-QARERUN-3
+  status: in_progress
+  phase_status: implemented
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_QRR3
+make_qa_worktree "TST-QARERUN-3"
+make_qaroute_claude_shim "PASS"
+"$SCHEDULER" --set-phase-status "TST-QARERUN-3" implemented "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-qrr3"
+if dispatch_3phase_story "TST-QARERUN-3" "$TRACE" 2>/dev/null; then
+  if grep -q "QA_CURRENTNESS_RERUN" "$ROUTING_LOG" 2>/dev/null; then
+    fail "QARERUN-3a: QA_CURRENTNESS_RERUN unexpectedly emitted for implemented phase_status"
+  else
+    pass "QARERUN-3a: no QA_CURRENTNESS_RERUN emitted for implemented phase_status (negative control)"
+  fi
+  qar_ps=$(get_phase_status "TST-QARERUN-3")
+  if [[ "$qar_ps" == "qa_passed" ]]; then
+    pass "QARERUN-3b: dispatch proceeded straight into handle_qa_phase as normal"
+  else
+    fail "QARERUN-3b: expected qa_passed, got '$qar_ps'"
+  fi
+else
+  fail "QARERUN-3a: dispatch_3phase_story returned non-zero"
+  fail "QARERUN-3b: (skipped)"
+fi
+
+# ── QAJSON-E: PASS/agree regression (AC2->AC3 cutover safety) ────────────
+echo "QAJSON-E: PASS/agree regression — qa_aggregate cutover doesn't break the agreeing PASS path"
+cat >> "$FIXTURE" << 'YAML_QJE'
+- id: TST-QAJSON-E
+  status: in_progress
+  phase_status: implemented
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_QJE
+make_qa_worktree "TST-QAJSON-E"
+make_qaroute_claude_shim "PASS"
+"$SCHEDULER" --set-phase-status "TST-QAJSON-E" implemented "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-qje"
+if handle_qa_phase "TST-QAJSON-E" "$TRACE" 2>/dev/null; then
+  qar_ps=$(get_phase_status "TST-QAJSON-E")
+  if [[ "$qar_ps" == "qa_passed" ]]; then
+    pass "QAJSON-E: Markdown=PASS agrees with JSON=PASS -> qa_passed"
+  else
+    fail "QAJSON-E: expected qa_passed, got '$qar_ps'"
+  fi
+else
+  fail "QAJSON-E: handle_qa_phase returned non-zero for agreeing PASS"
+fi
+
+# ── QAPARITY-1: identical routing outcome under claude vs codex ──────────
+echo "QAPARITY-1: routing/counter outcome identical under claude vs codex executor"
+for _qp_executor in claude codex; do
+  _qp_sid="TST-QAPARITY-${_qp_executor}"
+  printf -- '- id: %s\n  status: in_progress\n  phase_status: qa_failed\n  delivery_pipeline: 3phase\n  impl_model: primary\n' "$_qp_sid" >> "$FIXTURE"
+  make_qa_worktree "$_qp_sid"
+  printf '{"schema_version":1,"story_id":"%s","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"PASS","plan_conformance":"FAIL","changed_surface_inventory":[],"findings":[],"evidence":[],"verdict":"FAIL","remediation_route":"plan","replan_required":true,"report_path":"qa-reports/%s.qa-report.md"}' "$_qp_sid" "$_qp_sid" \
+    > "$QAR_FIXTURE_DIR/${_qp_sid}-workspace/.gaai/project/contexts/artefacts/qa-reports/${_qp_sid}.qa-verdict.json"
+  rm -f "${LOCK_DIR}/.qa-retries-${_qp_sid}" "${LOCK_DIR}/.qa-replans-${_qp_sid}"
+  printf 'plan\n' > "${LOCK_DIR}/.qa-route-${_qp_sid}"
+  "$SCHEDULER" --set-phase-status "$_qp_sid" qa_failed "$FIXTURE" 2>/dev/null || true
+  if [[ "$_qp_executor" == "codex" ]]; then
+    export GAAI_DAEMON_EXECUTOR=codex
+  else
+    unset GAAI_DAEMON_EXECUTOR
+  fi
+  dispatch_3phase_story "$_qp_sid" "test-trace-qp-${_qp_executor}" 2>/dev/null || true
+  _qp_ps=$(get_phase_status "$_qp_sid")
+  _qp_replans=$(cat "${LOCK_DIR}/.qa-replans-${_qp_sid}" 2>/dev/null || echo "")
+  if [[ "$_qp_executor" == "claude" ]]; then
+    _qp_claude_ps="$_qp_ps"; _qp_claude_replans="$_qp_replans"
+  else
+    _qp_codex_ps="$_qp_ps"; _qp_codex_replans="$_qp_replans"
+  fi
+done
+unset GAAI_DAEMON_EXECUTOR GAAI_QA_INJECT_PHASE GAAI_QA_REPORT_PATH 2>/dev/null || true
+if [[ "$_qp_claude_ps" == "$_qp_codex_ps" && "$_qp_claude_ps" == "not_started" ]]; then
+  pass "QAPARITY-1a: identical phase_status rewind (not_started) for claude vs codex executor"
+else
+  fail "QAPARITY-1a: claude='$_qp_claude_ps' vs codex='$_qp_codex_ps' — routing diverged by executor"
+fi
+if [[ "$_qp_claude_replans" == "$_qp_codex_replans" && "$_qp_claude_replans" == "1" ]]; then
+  pass "QAPARITY-1b: identical .qa-replans counter (1) for claude vs codex executor"
+else
+  fail "QAPARITY-1b: claude replans='$_qp_claude_replans' vs codex replans='$_qp_codex_replans'"
+fi
+unset _qp_executor _qp_sid _qp_ps _qp_replans _qp_claude_ps _qp_claude_replans _qp_codex_ps _qp_codex_replans
+
+export PATH="$QAR_OLD_PATH"
+export PROJECT_DIR="$QAR_OLD_PROJECT_DIR"
+unset GAAI_WORKTREES_BASE CLAUDE_MODEL_PRIMARY GAAI_WORKSPACE_ID GAAI_ORG_ID
+unset QAR_OLD_PATH QAR_OLD_PROJECT_DIR QAR_SHIM_DIR QAR_FIXTURE_DIR QA_FIXTURE_DIR
+rm -rf "/tmp/gaai-qaroute-tests-$$"
+
 # ── QAJSON-DERIVE: _derive_qa_expected_surfaces against a realistic ────────
 # Story "## File Inventory" + PLAN "## Implementation Sequence" table whose
 # Action/Checkpoint columns carry inline shell/CLI examples with slash-
@@ -2530,6 +2988,59 @@ else
   fail "QAJSON-DERIVE: $QDER_CHECK"
 fi
 rm -rf "$QDER_DIR"
+
+# ── RUNBOOK-1: delivery-loop.workflow.md D8 runbook contract check ─────
+# AC6's second sentence requires a hermetic check that the workflow doc names
+# both DEC-200 D8 stop thresholds, the durable human-reversal record fields,
+# and the hard-gate-preserving defer/human route — not just that the code
+# behaves correctly. This test reads the doc directly (no daemon call) and
+# fails if any required D8 clause has drifted or been removed from the doc.
+echo "RUNBOOK-1: delivery-loop.workflow.md documents the DEC-200 D8 operator runbook"
+RUNBOOK_DOC="$PROJECT_DIR/.gaai/core/workflows/delivery-loop.workflow.md"
+
+if [[ ! -s "$RUNBOOK_DOC" ]]; then
+  fail "RUNBOOK-1: delivery-loop.workflow.md missing or empty at $RUNBOOK_DOC"
+else
+  RUNBOOK_MISSING=()
+
+  # Observation window
+  grep -qF "30 calendar days" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("observation-window-30-days")
+  grep -qF "20 completed dual-axis QA reviews" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("observation-window-20-reviews")
+
+  # Stop trigger 1 — unsupported false PASS / security miss
+  grep -qF "unsupported false PASS" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("stop-trigger-false-pass")
+  grep -qF "security miss" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("stop-trigger-security-miss")
+
+  # Stop trigger 2 — second human-overturned evidence-invalid state-of-the-art block
+  grep -qF "second" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("stop-trigger-second-occurrence")
+  grep -qF "human overturning an evidence-invalid" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("stop-trigger-human-overturn")
+  grep -qF "state-of-the-art block" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("stop-trigger-sota-block")
+
+  # Hard-gate-preserving defer/human route
+  grep -qF "defers every affected Story through the existing" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("defer-route-scheduler")
+  grep -qF "claim/scheduler protocol" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("defer-route-protocol-ref")
+  grep -qF "continuation to a human" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("defer-route-human")
+  grep -qF "weakened to advisory-only or silently accepted" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("defer-route-no-advisory-downgrade")
+
+  # Durable human-reversal record — required field list
+  grep -qF "Durable human-reversal record" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-heading")
+  grep -qF "QA review ID" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-qa-review-id")
+  grep -qF "Story ID" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-story-id")
+  grep -qF "reviewed and decided timestamps" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-timestamps")
+  grep -qF "classification and materiality" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-classification")
+  grep -qF "reversal reason" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-reason")
+  grep -qF "operator identity" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-operator")
+  grep -qF "safe evidence/report" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-safe-locators")
+  grep -qF "Report or evidence bodies and secrets are never included" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-no-bodies-secrets")
+
+  if [[ ${#RUNBOOK_MISSING[@]} -eq 0 ]]; then
+    pass "RUNBOOK-1: D8 runbook doc names both stop thresholds, the human-reversal record and the defer/human route"
+  else
+    fail "RUNBOOK-1: delivery-loop.workflow.md missing D8 clauses: ${RUNBOOK_MISSING[*]}"
+  fi
+  unset RUNBOOK_MISSING
+fi
+unset RUNBOOK_DOC
 
 # ── Summary ───────────────────────────────────────────────────
 echo ""

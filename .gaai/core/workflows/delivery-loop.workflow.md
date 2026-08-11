@@ -174,23 +174,34 @@ QA agent writes `phase_status:` as the first YAML frontmatter field in `$GAAI_QA
 - `qa_failed` → retry impl (up to `MAX_RETRIES=3` total cycles); if exhausted → `failed`
 - `qa_escalated` → mark `escalated`, surface to human
 
-### Two-axis JSON handoff (validation-only)
+### Two-axis JSON handoff (authoritative for routing)
 
-Per **DEC-200**, the QA agent also writes a JSON sidecar to `$GAAI_QA_VERDICT_PATH`
+Per **DEC-200**, the QA agent writes a JSON sidecar to `$GAAI_QA_VERDICT_PATH`
 (`{id}.qa-verdict.json`) conforming to `$GAAI_QA_SCHEMA_PATH`, carrying two independent axes
 (`plan_conformance`, `state_of_the_art_conformance`), a changed-surface inventory, structured
 findings/evidence, a machine-derived aggregate `verdict`, and `remediation_route` /
-`replan_required`. The daemon runs `.gaai/core/scripts/lib/qa-verdict.mjs validate` against it
-immediately after the existing "qa-report missing" check and before the Markdown `## Verdict:`
-parse: **fail-closed** — a missing, malformed, or internally-inconsistent JSON handoff (or one
-whose `verdict` disagrees with the parsed Markdown `## Verdict:` line) sends the story straight
-to `failed` (no retry), even when the Markdown report looks like a clean PASS.
+`replan_required`. `daemon-dispatch.sh:_qa_verdict_resolve()` is the **one shared resolver** —
+both `handle_qa_phase()` (live, post-spawn) and `delivery-daemon.sh:_resolve_cross_cycle_qa_report()`
+(cross-cycle, pre-spawn relaunch) call it; it shells out to
+`.gaai/core/scripts/lib/qa-verdict.mjs validate`, which independently re-derives the aggregate and
+route from the axes/findings and rejects the handoff if the sidecar's own `verdict` /
+`remediation_route` / `replan_required` disagree with that derivation — a model-supplied aggregate
+or route is never consumed as-is.
 
-**This Story (E1096S01) is validation-only.** Phase routing (`phase_status` transitions on
-PASS/FAIL/ESCALATE) remains driven exclusively by the Markdown `## Verdict:` line, unchanged.
-The JSON sidecar is produced and independently validated, but does not yet drive
-`phase_status` transitions on its own axes — only its *invalidity* is a new fail-closed gate.
-**E1096S02** owns switching live/recovery consumption to the two-axis contract.
+**The JSON aggregate — not the Markdown `## Verdict:` line — drives `phase_status` routing.**
+Markdown is still parsed for the "qa-report missing" presence check and for a disagreement guard
+(a JSON `verdict` that disagrees with the parsed Markdown line is fail-closed exactly as before);
+it can therefore still *invalidate* a cycle, but it no longer *selects* the routing branch. This
+closes the gap left open in E1096S01, which was validation-only.
+
+**Currentness gate (DEC-200 D7 / AC2).** Every dispatch of a story at `phase_status: qa_passed` or
+`qa_failed` (live and every cross-cycle relaunch — this is the one choke point neither executor
+choice nor restart timing can bypass) checks whether the current worktree's `.qa-verdict.json`
+sidecar exists. If it does not — a legacy/in-flight story from before the two-axis contract shipped,
+or any other non-terminal state missing the sidecar — the daemon resets `phase_status` to
+`implemented` and emits `QA_CURRENTNESS_RERUN`, so QA reruns under the current contract *this same
+cycle*. Historical, completed (terminal) one-verdict reports are never reinterpreted or retro-fitted
+with a synthesized PASS — the gate only ever touches non-terminal stories still in flight.
 
 ### Output contract
 
@@ -256,7 +267,23 @@ Deterministic bash only — no `claude -p` invocation. Implemented in `handle_co
 
 `MAX_RETRIES=3` applies per phase cycle independently (defined as a constant in `daemon-dispatch.sh`; cross-reference there for current value).
 
-QA cycles count toward impl retries: if QA returns `qa_failed`, impl is re-spawned and the counter increments. After 3 `qa_failed` / impl-retry cycles, story transitions to `failed`.
+**QA remediation routes (DEC-200 D5) are independent and bounded.** On a `FAIL` aggregate, the
+resolver's `remediation_route` (`plan` or `impl`, precedence `human > plan > impl` when both root
+causes exist) is persisted per-story to `${LOCK_DIR}/.qa-route-{id}` by `handle_qa_phase()`'s FAIL
+branch, and consumed by `dispatch_3phase_story()`'s `qa_failed)` case, which drives one of two
+disjoint, independently-countered reruns:
+
+| Route | Counter file | Max (env var, default) | Rewind target | Exhaustion reason |
+|---|---|---|---|---|
+| PLAN (`remediation_route:"plan"`) | `${LOCK_DIR}/.qa-replans-{id}` | `GAAI_QA_REPLAN_MAX` (2) | `phase_status: not_started` (full fresh PLAN; `GAAI_QA_INJECT_PHASE=plan` exported so the PLAN prompt gets prior-cycle delta context) | `QA_REPLAN_EXHAUSTED` |
+| IMPL (`remediation_route:"impl"`) | `${LOCK_DIR}/.qa-retries-{id}` | `GAAI_QA_RETRY_MAX` (3) | `phase_status: planned` (re-spawn impl only) | `QA_RETRY_EXHAUSTED` |
+
+A replan never consumes or resets the IMPL retry counter, and an IMPL retry never touches the PLAN
+counter — the two counters live in separate files and separate code branches. Either counter's
+exhaustion escalates the story (`qa_escalated`) rather than silently falling through to the other
+route. Any axis result of `ESCALATE` routes to the existing human escalation path directly (never
+consumes either counter). Both counter files, plus `.qa-route-{id}`, are removed on terminal
+completion (`done|failed|escalated`) alongside the pre-existing `.qa-retries-{id}` cleanup.
 
 ### Failure mode taxonomy
 
@@ -264,7 +291,7 @@ Canonical failure mode enums are defined in `daemon-dispatch.sh`. Refer to:
 
 - **Plan phase:** `PLAN_PHASE_FAILED`, `NO_ARTEFACT`, `PARSE_ERROR`, `SCHEDULER_FAILURE`
 - **Impl phase:** `PARSE_ERROR` (JSON parse on spawn output), `False|<error_reason>` from `nested-claude-spawn.js`
-- **QA phase:** `QA_SPAWN_FAILED`, `QA_NO_ARTEFACT`, `QA_VERDICT_PARSE_ERROR`, `QA_HANDOFF_INVALID` (DEC-200 JSON sidecar missing/malformed/internally-inconsistent, or disagrees with the Markdown verdict — immediate `failed`, no retry), `QA_VERDICT:FAIL`, `QA_VERDICT:ESCALATE`, `QA_SCHEDULER_FAILURE`
+- **QA phase:** `QA_SPAWN_FAILED`, `QA_NO_ARTEFACT`, `QA_VERDICT_PARSE_ERROR`, `QA_HANDOFF_INVALID` (DEC-200 JSON sidecar missing/malformed/internally-inconsistent, or disagrees with the Markdown verdict — immediate `failed`, no retry), `QA_VERDICT:FAIL`, `QA_VERDICT:ESCALATE`, `QA_SCHEDULER_FAILURE`, `QA_CURRENTNESS_RERUN` (non-terminal `qa_passed`/`qa_failed` story missing the two-axis sidecar — rewinds to `implemented`, not a failure), `QA_REPLAN_EXHAUSTED` (PLAN route's `GAAI_QA_REPLAN_MAX` reruns exhausted — escalates), `QA_RETRY_EXHAUSTED` (IMPL route's `GAAI_QA_RETRY_MAX` reruns exhausted — escalates)
 - **Commit phase:** `COMMIT_FAILED`, `PUSH_FAILED`, `PR_CREATE_FAILED`, `AUTO_MERGE_FAILED`, `GH_AUTH_MISSING`, `SCHEDULER_FAILURE`
 
 All constants are defined in `daemon-dispatch.sh`.
@@ -281,3 +308,30 @@ When a story enters `failed` state:
 2. Identify the failure mode from the `fallback_reason` field
 3. Fix the root cause (AC gap, dependency missing, etc.)
 4. Re-trigger via `backlog-scheduler.sh --set-status {id} refined`
+
+### DEC-200 D8 dual-axis QA observation runbook
+
+Autonomous dual-axis QA (the two-axis handoff, currentness gate and PLAN/IMPL routing described
+above) is under an explicit operator observation window, not unconditional trust from day one.
+
+**Observation window:** at least 30 calendar days AND the first 20 completed dual-axis QA reviews,
+whichever is longer.
+
+**Stop triggers (either one halts automation immediately):**
+
+1. Any unsupported false PASS or a security miss discovered downstream of a dual-axis PASS.
+2. The **second** occurrence, within the window, of a human overturning an evidence-invalid
+   state-of-the-art block (i.e. a case where dual-axis QA blocked on `state_of_the_art_conformance`
+   evidence grounds and a human reviewer determined the block was wrong).
+
+**On trigger:** the operator stops the daemon, defers every affected Story through the existing
+claim/scheduler protocol (`orchestration.rules.md`) rather than force-progressing it, and routes
+continuation to a human. Reports and evidence already produced are preserved as-is — never
+weakened to advisory-only or silently accepted on a single-verdict basis. This is a manual operator
+action; no daemon code auto-halts on these triggers.
+
+**Durable human-reversal record:** every human overturn of a dual-axis QA outcome during the window
+is recorded (per existing GAAI memory conventions — an operator/founder process artefact, not a new
+code path or schema) with: QA review ID, Story ID, reviewed and decided timestamps, the original
+classification and materiality, the reversal reason, the operator identity, and safe evidence/report
+locators. Report or evidence bodies and secrets are never included in the record.

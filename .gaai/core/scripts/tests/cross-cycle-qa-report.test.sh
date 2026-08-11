@@ -26,6 +26,11 @@ DAEMON_LIB="$SCRIPT_DIR/../delivery-daemon.sh"
 DISPATCH_LIB="$SCRIPT_DIR/../daemon-dispatch.sh"
 PROMPT_LIB="$SCRIPT_DIR/../daemon-prompt-construct.sh"
 
+# E1096S02 AC1: _resolve_cross_cycle_qa_report now delegates to the shared
+# _qa_verdict_resolve resolver (daemon-dispatch.sh), which shells out to
+# qa-verdict.mjs — needs a real PROJECT_DIR to find the script + schema.
+export PROJECT_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+
 FIXTURE_DIR="/tmp/gaai-cross-cycle-qa-report-test-$$"
 mkdir -p "$FIXTURE_DIR"
 
@@ -34,13 +39,65 @@ trap cleanup EXIT
 
 SID="TST001"
 
-# ── Helper: extract _resolve_cross_cycle_qa_report from delivery-daemon.sh ─────
-# Extract the function into a sourceable script.
+# ── Helper: extract _resolve_cross_cycle_qa_report + its E1096S02 dependencies ──
+# _resolve_cross_cycle_qa_report (delivery-daemon.sh) now calls the shared
+# _qa_verdict_resolve resolver, which itself calls _derive_qa_expected_surfaces
+# (both daemon-dispatch.sh) — extract all three into one sourceable script.
 extract_helper() {
   local helper_script="$FIXTURE_DIR/helper.sh"
   sed -n '/^_resolve_cross_cycle_qa_report()/,/^}/p' "$DAEMON_LIB" > "$helper_script"
-  # Source it so the function is available in our shell
+  sed -n '/^_derive_qa_expected_surfaces()/,/^}/p' "$DISPATCH_LIB" >> "$helper_script"
+  sed -n '/^_qa_verdict_resolve()/,/^}/p' "$DISPATCH_LIB" >> "$helper_script"
+  # Source it so the functions are available in our shell
   source "$helper_script"
+}
+
+# ── Helper: create a story.md with a File Inventory entry ──────────────────────
+# _derive_qa_expected_surfaces reads this to build the expected-surfaces set —
+# lets a fixture control that set without needing a real git-tracked diff.
+make_story_with_inventory() {
+  local dir="$1" surface="$2"
+  local story_dir="${dir}/.gaai/project/contexts/artefacts/stories"
+  mkdir -p "$story_dir"
+  {
+    echo "---"
+    echo "id: ${SID}"
+    echo "---"
+    echo "## File Inventory"
+    echo "- \`${surface}\` — test fixture surface"
+  } > "${story_dir}/${SID}.story.md"
+}
+
+# ── Helper: create a valid two-axis qa-verdict.json sidecar (DEC-200) ──────────
+# verdict: PASS | FAIL | ESCALATE. route (FAIL only): impl | plan — plan requires
+# a blocking, plan-rooted finding, which requires a matching expected surface
+# (pair with make_story_with_inventory using the same $surface first).
+make_qa_verdict_sidecar() {
+  local dir="$1" verdict="$2" route="${3:-impl}" surface="${4:-}"
+  local qa_dir="${dir}/.gaai/project/contexts/artefacts/qa-reports"
+  mkdir -p "$qa_dir"
+  local plan_c="PASS" sota_c="PASS" route_json="null" replan_json="null"
+  local inventory="[]" findings="[]" evidence="[]"
+  case "$verdict" in
+    PASS) : ;;
+    FAIL)
+      plan_c="FAIL"
+      if [[ "$route" == "plan" ]]; then
+        route_json='"plan"'; replan_json="true"
+        inventory="[{\"surface\":\"${surface}\",\"classification\":\"blocking\",\"review_domain\":\"other\",\"materiality\":\"deprecated\"}]"
+        findings="[{\"finding_id\":\"f1\",\"surface\":\"${surface}\",\"classification\":\"blocking\",\"description\":\"x\",\"root_cause\":\"plan\"}]"
+        evidence="[{\"surface\":\"${surface}\",\"finding_id\":\"f1\",\"outcome\":\"contradicts\",\"source_kind\":\"live\",\"authority_uri\":\"https://x.com/docs\",\"authority_title\":\"x\",\"accessed_at\":\"2026-08-07T00:00:00Z\",\"claim\":\"y\",\"excerpt\":\"z\",\"materiality\":\"deprecated\"}]"
+      else
+        route_json='"impl"'; replan_json="false"
+      fi
+      ;;
+    ESCALATE)
+      plan_c="ESCALATE"; route_json='"human"'; replan_json="null"
+      ;;
+  esac
+  printf '{"schema_version":1,"story_id":"%s","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"%s","plan_conformance":"%s","changed_surface_inventory":%s,"findings":%s,"evidence":%s,"verdict":"%s","remediation_route":%s,"replan_required":%s,"report_path":"qa-reports/%s.qa-report.md"}' \
+    "$SID" "$sota_c" "$plan_c" "$inventory" "$findings" "$evidence" "$verdict" "$route_json" "$replan_json" "$SID" \
+    > "${qa_dir}/${SID}.qa-verdict.json"
 }
 
 # ── Helper: create a qa-report fixture ─────────────────────────────────────────
@@ -226,14 +283,16 @@ echo ""
 
 extract_helper
 
-# ── T1: FAIL+replan_required=true → phase=plan, PLAN block appended ────────────
+# ── T1: FAIL+route=plan (DEC-200 D5) → phase=plan, PLAN block appended ─────────
 run_t1() {
-  echo "T1: FAIL+replan_required=true → phase=plan, PLAN block with all artefacts"
+  echo "T1: FAIL+route=plan → phase=plan, PLAN block with all artefacts"
   local wt="$FIXTURE_DIR/t1-wt"
   mkdir -p "$wt"
   make_qa_report "$wt" "FAIL" "true"
   make_plan "$wt"
   make_impl_report "$wt"
+  make_story_with_inventory "$wt" "src/thing.ts"
+  make_qa_verdict_sidecar "$wt" "FAIL" "plan" "src/thing.ts"
 
   local out
   out=$(_resolve_cross_cycle_qa_report "$SID" "$wt" 2>/dev/null)
@@ -258,12 +317,13 @@ run_t1() {
   grep -q "✓ KEEP" "$prompt" && pass "T1: KEEP marker present" || fail "T1: KEEP marker missing"
 }
 
-# ── T2: FAIL+replan_required=false → phase=impl, Section 4b triggers ──────────
+# ── T2: FAIL+route=impl (DEC-200 D5) → phase=impl, Section 4b triggers ────────
 run_t2() {
-  echo "T2: FAIL+replan_required=false → phase=impl, Section 4b triggers"
+  echo "T2: FAIL+route=impl → phase=impl, Section 4b triggers"
   local wt="$FIXTURE_DIR/t2-wt"
   mkdir -p "$wt"
   make_qa_report "$wt" "FAIL" "false"
+  make_qa_verdict_sidecar "$wt" "FAIL" "impl"
 
   local out
   out=$(_resolve_cross_cycle_qa_report "$SID" "$wt" 2>/dev/null)
@@ -281,23 +341,22 @@ run_t2() {
   test_section_4b_gate "$qa_path" "impl" && pass "T2: Section 4b gate triggers" || fail "T2: Section 4b gate did not trigger"
 }
 
-# ── T3: FAIL without replan_required field (backward compat) → phase=impl ─────
+# ── T3: legacy Markdown-only report, no sidecar → no injection (DEC-200 D7) ────
+# Repurposed (E1096S02): once JSON is the sole source of truth for a VALID
+# cycle, "FAIL without replan_required field" no longer applies — a Markdown-
+# only report (no qa-verdict.json) is exactly the currentness-rerun case.
+# _resolve_cross_cycle_qa_report defers to the dispatch-side currentness gate
+# (see daemon-state-machine.test.sh QARERUN-*) rather than injecting here.
 run_t3() {
-  echo "T3: FAIL without replan_required field → phase=impl (backward compat)"
+  echo "T3: legacy Markdown-only report (no sidecar) → no injection"
   local wt="$FIXTURE_DIR/t3-wt"
   mkdir -p "$wt"
   make_qa_report "$wt" "FAIL" ""
 
   local out
   out=$(_resolve_cross_cycle_qa_report "$SID" "$wt" 2>/dev/null)
-  local phase verdict replan
-  phase=$(printf '%s' "$out" | sed -n '2p')
-  verdict=$(printf '%s' "$out" | sed -n '3p')
-  replan=$(printf '%s' "$out" | sed -n '4p')
 
-  [[ "$phase" == "impl" ]] && pass "T3: phase=impl (backward compat)" || fail "T3: expected phase=impl got='$phase'"
-  [[ "$verdict" == "FAIL" ]] && pass "T3: verdict=FAIL" || fail "T3: expected verdict=FAIL got='$verdict'"
-  [[ "$replan" == "absent" ]] && pass "T3: replan=absent" || fail "T3: expected replan=absent got='$replan'"
+  [[ -z "$out" ]] && pass "T3: no output (no sidecar -> currentness gate owns this, not injection)" || fail "T3: expected no output got='$out'"
 }
 
 # ── T4: ESCALATE → phase=plan ──────────────────────────────────────────────────
@@ -306,6 +365,7 @@ run_t4() {
   local wt="$FIXTURE_DIR/t4-wt"
   mkdir -p "$wt"
   make_qa_report "$wt" "ESCALATE"
+  make_qa_verdict_sidecar "$wt" "ESCALATE"
 
   local out
   out=$(_resolve_cross_cycle_qa_report "$SID" "$wt" 2>/dev/null)
@@ -316,7 +376,9 @@ run_t4() {
 
   [[ "$phase" == "plan" ]] && pass "T4: phase=plan" || fail "T4: expected phase=plan got='$phase'"
   [[ "$verdict" == "ESCALATE" ]] && pass "T4: verdict=ESCALATE" || fail "T4: expected verdict=ESCALATE got='$verdict'"
-  [[ "$replan" == "absent" ]] && pass "T4: replan=absent" || fail "T4: expected replan=absent got='$replan'"
+  # E1096S02: JSON-sourced replan_required is always a literal token (null/true/false),
+  # never truly absent the way an unparsed Markdown field could be.
+  [[ "$replan" == "null" ]] && pass "T4: replan=null" || fail "T4: expected replan=null got='$replan'"
 
   local qa_path
   qa_path=$(printf '%s' "$out" | head -1)
@@ -360,6 +422,10 @@ run_t7() {
   make_large_qa_report "$wt"
   make_plan "$wt"
   make_impl_report "$wt"
+  # ESCALATE (not route=plan) keeps this fixture simple — T7's assertions are
+  # about prompt truncation/size, not route selection (route=plan is covered
+  # by T1; ESCALATE forces phase=plan the same way, per DEC-200 D5).
+  make_qa_verdict_sidecar "$wt" "ESCALATE"
 
   local out
   out=$(_resolve_cross_cycle_qa_report "$SID" "$wt" 2>/dev/null)
@@ -386,6 +452,9 @@ run_t8() {
   setup_git_repo_with_plan "$wt"
   make_qa_report "$wt" "FAIL" "true"
   make_impl_report "$wt"
+  # ESCALATE keeps this fixture simple — T8 tests the git-show plan-content
+  # fallback (inject_plan_block), not route selection (see T1 for route=plan).
+  make_qa_verdict_sidecar "$wt" "ESCALATE"
 
   local out
   out=$(_resolve_cross_cycle_qa_report "$SID" "$wt" 2>/dev/null)
@@ -419,6 +488,49 @@ run_t9() {
   ! grep -q "^## Prior cycle QA findings" "$prompt" && pass "T9: semantic property holds (same as T6)" || fail "T9: unexpected Prior cycle QA findings header"
 }
 
+# ── T10: restart-before/after-QA parity (AC6) ──────────────────────────────────
+# Same fixture files on disk, two independent invocations (simulating a daemon
+# restart between them) — the resolver is a pure function of on-disk state, so
+# both calls must return byte-identical output.
+run_t10() {
+  echo "T10: restart-before/after-QA parity — two independent resolves agree"
+  local wt="$FIXTURE_DIR/t10-wt"
+  mkdir -p "$wt"
+  make_qa_report "$wt" "FAIL" "false"
+  make_qa_verdict_sidecar "$wt" "FAIL" "impl"
+
+  local out1 out2
+  out1=$(_resolve_cross_cycle_qa_report "$SID" "$wt" 2>/dev/null)
+  out2=$(_resolve_cross_cycle_qa_report "$SID" "$wt" 2>/dev/null)
+
+  [[ "$out1" == "$out2" ]] && pass "T10: restart parity — identical output across two independent resolves" \
+    || fail "T10: outputs diverged — out1='$out1' out2='$out2'"
+}
+
+# ── T11: sidecar present but internally invalid → no injection, no throw ──────
+# Fail-open on injection only: the dispatch-side currentness/QA_HANDOFF_INVALID
+# gates (daemon-dispatch.sh), not this function, own rejecting an invalid
+# handoff — this function only ever decides PLAN-prompt content.
+run_t11() {
+  echo "T11: sidecar present but invalid (verdict disagrees with axes) → no injection"
+  local wt="$FIXTURE_DIR/t11-wt"
+  mkdir -p "$wt"
+  make_qa_report "$wt" "FAIL" "false"
+  local qa_dir="${wt}/.gaai/project/contexts/artefacts/qa-reports"
+  mkdir -p "$qa_dir"
+  # plan_conformance=PASS + sota=PASS derives aggregate PASS, but verdict
+  # claims FAIL — an internally inconsistent (invalid) handoff.
+  printf '{"schema_version":1,"story_id":"%s","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"PASS","plan_conformance":"PASS","changed_surface_inventory":[],"findings":[],"evidence":[],"verdict":"FAIL","remediation_route":"impl","replan_required":false,"report_path":"qa-reports/%s.qa-report.md"}' \
+    "$SID" "$SID" > "${qa_dir}/${SID}.qa-verdict.json"
+
+  local out rc
+  out=$(_resolve_cross_cycle_qa_report "$SID" "$wt" 2>/dev/null)
+  rc=$?
+
+  [[ "$rc" -eq 0 ]] && pass "T11: no throw (rc=0)" || fail "T11: unexpected non-zero rc=$rc"
+  [[ -z "$out" ]] && pass "T11: no output (invalid handoff -> no injection)" || fail "T11: expected no output got='$out'"
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 
 run_t1
@@ -430,6 +542,8 @@ run_t6
 run_t7
 run_t8
 run_t9
+run_t10
+run_t11
 
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""

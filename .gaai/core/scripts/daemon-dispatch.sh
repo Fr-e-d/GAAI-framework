@@ -1816,6 +1816,46 @@ _derive_qa_expected_surfaces() {
   rm -f "$tmp"
 }
 
+# ── Shared JSON-handoff resolver (DEC-200 / E1096S02 AC1) ─────────────────
+# The ONE place both the live QA handler (handle_qa_phase) and cross-cycle
+# recovery (delivery-daemon.sh:_resolve_cross_cycle_qa_report) derive the
+# axes/aggregate/route/replan from the validated sidecar. Never invoke
+# qa-verdict.mjs directly from a second call site.
+# Args: story_id worktree_path base_ref
+# Stdout on rc=0 (OK): 4 lines — verdict, remediation_route, replan_required,
+#   summary_json (the validator's own sanitized single-line JSON summary).
+# Stdout on rc=2 (QA_SIDECAR_ABSENT, DEC-200 D7 currentness case) or rc=1
+#   (QA_HANDOFF_INVALID): nothing on stdout; caller distinguishes via $?.
+_qa_verdict_resolve() {
+  local story_id="$1" worktree_path="$2" base_ref="$3"
+  local story_path plan_path qa_verdict_path qa_schema_path qa_verdict_locator expected_surfaces_path
+  story_path="${worktree_path}/.gaai/project/contexts/artefacts/stories/${story_id}.story.md"
+  plan_path="${worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
+  qa_verdict_path="${worktree_path}/.gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-verdict.json"
+  qa_schema_path="${PROJECT_DIR}/.gaai/core/schemas/qa-verdict.v1.schema.json"
+  qa_verdict_locator="${qa_verdict_path#"${worktree_path}/"}"
+
+  [[ ! -s "$qa_verdict_path" ]] && return 2
+
+  expected_surfaces_path=$(mktemp "/tmp/gaai-qa-resolve-surfaces-${story_id}-XXXXXX")
+  _derive_qa_expected_surfaces "$story_path" "$plan_path" "$worktree_path" "$base_ref" "$expected_surfaces_path"
+
+  local out rc
+  out=$(node "${PROJECT_DIR}/.gaai/core/scripts/lib/qa-verdict.mjs" validate \
+    --sidecar "$qa_verdict_path" --schema "$qa_schema_path" --story-id "$story_id" \
+    --expected-surfaces "$expected_surfaces_path" --sidecar-locator "$qa_verdict_locator" 2>&1)
+  rc=$?
+  rm -f "$expected_surfaces_path" 2>/dev/null || true
+  [[ "$rc" -ne 0 ]] && return "$rc"
+
+  local v r p
+  v=$(printf '%s' "$out" | grep -oE '"verdict":"[A-Z]+"' | head -1 | cut -d'"' -f4)
+  r=$(printf '%s' "$out" | grep -oE '"remediation_route":(null|"[a-z]+")' | head -1 | cut -d: -f2 | tr -d '"')
+  p=$(printf '%s' "$out" | grep -oE '"replan_required":(null|true|false)' | head -1 | cut -d: -f2)
+  printf '%s\n%s\n%s\n%s\n' "$v" "$r" "$p" "$out"
+  return 0
+}
+
 handle_qa_phase() {
   local story_id="$1" trace_id="$2"
   local ts t_start_ms t_end_ms duration_ms
@@ -1853,7 +1893,7 @@ handle_qa_phase() {
 
   # ── Resolve artefact paths (AC2) ──────────────────────────────────────────
   local story_path plan_path impl_report_path qa_report_path memory_delta_path log_path
-  local qa_schema_path qa_verdict_path qa_verdict_locator
+  local qa_schema_path qa_verdict_path
   story_path="${worktree_path}/.gaai/project/contexts/artefacts/stories/${story_id}.story.md"
   plan_path="${worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
   impl_report_path="${worktree_path}/.gaai/project/contexts/artefacts/impl-reports/${story_id}.impl-report.md"
@@ -1862,10 +1902,6 @@ handle_qa_phase() {
   log_path="${worktree_path}/.delivery-logs/${story_id}.qa.log"
   qa_schema_path="${PROJECT_DIR}/.gaai/core/schemas/qa-verdict.v1.schema.json"
   qa_verdict_path="${worktree_path}/.gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-verdict.json"
-  # AC5: repo-relative locator for the sidecar's own path (distinct from the
-  # Markdown report_path already inside the sidecar) — safe to log/observe,
-  # unlike qa_verdict_path itself which carries the local worktree prefix.
-  qa_verdict_locator="${qa_verdict_path#"${worktree_path}/"}"
 
   # Rotate prior session's log on retry (preserves forensic trail).
   _rotate_phase_log "$log_path"
@@ -1922,6 +1958,11 @@ handle_qa_phase() {
   mkdir -p "$(dirname "$log_path")"
 
   # ── Derive expected-surface set (DEC-200 AC2) ─────────────────────────────
+  # Needed here (pre-spawn) so the QA agent itself can read
+  # GAAI_QA_EXPECTED_SURFACES_PATH below — a separate concern from
+  # _qa_verdict_resolve's own internal recomputation of the same set for the
+  # post-spawn validation call further down (small, intentional redundancy;
+  # not a new cost class per the Risk Register).
   local expected_surfaces_path
   expected_surfaces_path=$(mktemp "/tmp/gaai-qa-expected-surfaces-${story_id}-XXXXXX")
   _derive_qa_expected_surfaces "$story_path" "$plan_path" "$worktree_path" "$base_ref" "$expected_surfaces_path"
@@ -2049,43 +2090,43 @@ handle_qa_phase() {
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_NO_ARTEFACT" "$duration_ms"
     return 1
   fi
+  # expected_surfaces_path's job (spawn-time agent context) is done — the
+  # resolver below derives its own independent copy for validation.
+  rm -f "$expected_surfaces_path" 2>/dev/null || true
 
-  # ── DEC-200 JSON handoff (validation-only — fail-closed; does NOT yet drive
-  # routing, per Story Out-of-Scope. E1096S02 owns switching consumption. This
-  # gate runs BEFORE the Markdown verdict parse so an invalid/missing JSON
-  # sidecar is caught even when the Markdown report looks like a clean PASS. ──
-  if [[ ! -s "$qa_verdict_path" ]]; then
+  # ── DEC-200 JSON handoff — the shared resolver (_qa_verdict_resolve) is the
+  # sole machine authority for the aggregate/route/replan driving routing below
+  # (AC1/AC3). This gate runs BEFORE the Markdown verdict parse so an invalid/
+  # missing JSON sidecar is caught even when the Markdown report looks like a
+  # clean PASS. Markdown remains parsed further down only for the presence and
+  # disagreement guard (AC2/AC3) — it never selects the routing branch itself. ──
+  local _resolve_out _resolve_rc
+  _resolve_out=$(_qa_verdict_resolve "$story_id" "$worktree_path" "$base_ref")
+  _resolve_rc=$?
+  if [[ "$_resolve_rc" -eq 2 ]]; then
+    # Should not normally happen post-spawn (qa-report existence already passed
+    # above) unless the agent wrote the Markdown report but not the JSON sidecar
+    # — same fail-closed contract as before this Story.
     echo "[ERROR] ${story_id} handle_qa_phase: qa-verdict.json missing or empty at $qa_verdict_path [class=QA_HANDOFF_INVALID] (the JSON handoff did not drive routing this cycle)"
-    rm -f "$expected_surfaces_path" 2>/dev/null || true
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_HANDOFF_INVALID" "$duration_ms"
+    if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
+      echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_HANDOFF_INVALID"
+    fi
+    return 1
+  elif [[ "$_resolve_rc" -ne 0 ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: qa-verdict.json failed validation [class=QA_HANDOFF_INVALID]: ${_resolve_out}"
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_HANDOFF_INVALID" "$duration_ms"
     if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
       echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_HANDOFF_INVALID"
     fi
     return 1
   fi
-
-  local qa_validator_out qa_validator_rc qa_validator_out_file
-  qa_validator_out_file=$(mktemp "/tmp/gaai-qa-verdict-summary-${story_id}-XXXXXX")
-  node "${PROJECT_DIR}/.gaai/core/scripts/lib/qa-verdict.mjs" validate \
-    --sidecar "$qa_verdict_path" \
-    --schema "$qa_schema_path" \
-    --story-id "$story_id" \
-    --expected-surfaces "$expected_surfaces_path" \
-    --sidecar-locator "$qa_verdict_locator" \
-    >"$qa_validator_out_file" 2>&1
-  qa_validator_rc=$?
-  qa_validator_out=$(cat "$qa_validator_out_file" 2>/dev/null || echo "")
-  rm -f "$qa_validator_out_file" "$expected_surfaces_path" 2>/dev/null || true
-
-  if [[ "$qa_validator_rc" -ne 0 ]]; then
-    echo "[ERROR] ${story_id} handle_qa_phase: qa-verdict.json failed validation [class=QA_HANDOFF_INVALID]: ${qa_validator_out} (the JSON handoff did not drive routing this cycle — Markdown remains the routing signal)"
-    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_HANDOFF_INVALID" "$duration_ms"
-    if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
-      echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_HANDOFF_INVALID"
-    fi
-    return 1
-  fi
-  echo "[$(date '+%H:%M:%S')] ${story_id} handle_qa_phase: qa-verdict.json valid (validation-only, not yet routing-authoritative) — ${qa_validator_out}"
+  local qa_aggregate qa_route qa_replan qa_validator_out
+  qa_aggregate=$(printf '%s' "$_resolve_out" | sed -n '1p')
+  qa_route=$(printf '%s' "$_resolve_out" | sed -n '2p')
+  qa_replan=$(printf '%s' "$_resolve_out" | sed -n '3p')
+  qa_validator_out=$(printf '%s' "$_resolve_out" | sed -n '4p')
+  echo "[$(date '+%H:%M:%S')] ${story_id} handle_qa_phase: qa-verdict.json valid — ${qa_validator_out}"
 
   # ── AC4: parse 3-way verdict ──────────────────────────────────────────────
   local verdict
@@ -2103,11 +2144,10 @@ handle_qa_phase() {
   fi
 
   # ── DEC-200 Markdown/JSON agreement — a disagreement is QA_HANDOFF_INVALID,
-  # never repaired or promoted (AC3). ────────────────────────────────────────
-  local qa_json_verdict
-  qa_json_verdict=$(printf '%s' "$qa_validator_out" | grep -oE '"verdict":"[A-Z]+"' | head -1 | cut -d'"' -f4)
-  if [[ -n "$qa_json_verdict" && "$qa_json_verdict" != "$verdict" ]]; then
-    echo "[ERROR] ${story_id} handle_qa_phase: Markdown verdict '${verdict}' disagrees with JSON verdict '${qa_json_verdict}' [class=QA_HANDOFF_INVALID]"
+  # never repaired or promoted (AC3). qa_aggregate is the resolver's own
+  # cross-checked derived value (never re-parsed from raw JSON here). ───────
+  if [[ -n "$qa_aggregate" && "$qa_aggregate" != "$verdict" ]]; then
+    echo "[ERROR] ${story_id} handle_qa_phase: Markdown verdict '${verdict}' disagrees with JSON verdict '${qa_aggregate}' [class=QA_HANDOFF_INVALID]"
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_HANDOFF_INVALID" "$duration_ms"
     if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
       echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_HANDOFF_INVALID (markdown/json disagreement)"
@@ -2115,8 +2155,10 @@ handle_qa_phase() {
     return 1
   fi
 
-  # ── AC4: verdict-driven phase advancement ─────────────────────────────────
-  case "$verdict" in
+  # ── AC1/AC3: verdict-driven phase advancement — the JSON-derived aggregate,
+  # not the Markdown line, is the sole machine authority selecting the branch.
+  # Markdown remains parsed above only for the presence and disagreement guard. ──
+  case "$qa_aggregate" in
     PASS)
       # AC5(d): scheduler failure → return 1 without phase advance, daemon retries
       if ! "$SCHEDULER" --set-phase-status "$story_id" qa_passed "$BACKLOG_FILE" 2>/dev/null; then
@@ -2138,12 +2180,20 @@ handle_qa_phase() {
       return 0
       ;;
     FAIL)
-      echo "[ERROR] ${story_id} handle_qa_phase: QA verdict=FAIL [class=QA_VERDICT:FAIL] — ${qa_validator_out}"
+      echo "[ERROR] ${story_id} handle_qa_phase: QA verdict=FAIL route=${qa_route} [class=QA_VERDICT:FAIL] — ${qa_validator_out}"
       if ! "$SCHEDULER" --set-phase-status "$story_id" qa_failed "$BACKLOG_FILE" 2>/dev/null; then
         echo "[ERROR] ${story_id} handle_qa_phase: --set-phase-status qa_failed failed [class=QA_SCHEDULER_FAILURE]"
         _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SCHEDULER_FAILURE" "$duration_ms"
         return 1
       fi
+      # DEC-200 D5 / AC3-AC4: persist the resolver's derived root-cause route for
+      # dispatch_3phase_story's qa_failed case to consume. remediation_route is
+      # closed to plan|impl on a FAIL aggregate; any other/empty value defensively
+      # normalizes to impl at the read site (dispatch_3phase_story), matching the
+      # pre-cutover IMPL-only behavior as the safe fallback.
+      printf '%s\n' "${qa_route:-impl}" > "${LOCK_DIR}/.qa-route-${story_id}.tmp.$$" \
+        && mv "${LOCK_DIR}/.qa-route-${story_id}.tmp.$$" "${LOCK_DIR}/.qa-route-${story_id}" \
+        || rm -f "${LOCK_DIR}/.qa-route-${story_id}.tmp.$$" 2>/dev/null
       _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_VERDICT:FAIL" "$duration_ms" "$qa_validator_out"
       # Retry-loop convention : phase_status:qa_failed is the failure signal,
       # NOT this function's exit code. Return 0 so the wrapper outer loop
@@ -3247,6 +3297,33 @@ dispatch_3phase_story() {
     return 1
   fi
 
+  # ── DEC-200 D7 / E1096S02 AC2 currentness gate ────────────────────────────
+  # The one choke point both the live wrapper loop and every cross-cycle
+  # relaunch (crash_recovery_scan -> launch_3phase_in_tmux -> wrapper's own
+  # while loop) funnel through on every dispatch step. A non-terminal Story
+  # sitting at qa_passed/qa_failed without a two-axis sidecar (legacy report,
+  # or an in-flight cutover artifact) can never coast through on old Markdown
+  # prose — QA reruns THIS SAME cycle by rewinding to implemented, not next poll.
+  if [[ "$ps" == "qa_passed" || "$ps" == "qa_failed" ]]; then
+    local _cur_wt _cur_sidecar
+    if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+      _cur_wt="${GAAI_WORKTREES_BASE}/${story_id}-workspace"
+    else
+      _cur_wt="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." 2>/dev/null && pwd)/.gaai-worktrees/$(basename "${REPO_ROOT:-$PROJECT_DIR}")/${story_id}-workspace"
+    fi
+    _cur_sidecar="${_cur_wt}/.gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-verdict.json"
+    if [[ ! -s "$_cur_sidecar" ]]; then
+      echo "[$(date '+%H:%M:%S')] ${story_id} dispatch: phase_status=${ps} lacks two-axis sidecar — currentness rerun (DEC-200 D7)"
+      if "$SCHEDULER" --set-phase-status "$story_id" implemented "$BACKLOG_FILE" 2>/dev/null; then
+        _emit_routing_record "$story_id" "$trace_id" "qa" "rerun" "QA_CURRENTNESS_RERUN" 2>/dev/null || true
+        ps="implemented"
+      else
+        echo "[ERROR] ${story_id} dispatch: scheduler --set-phase-status implemented failed during currentness rerun"
+        return 1
+      fi
+    fi
+  fi
+
   case "$ps" in
     not_started)
       _write_active_marker "$story_id" "plan"
@@ -3277,38 +3354,59 @@ dispatch_3phase_story() {
       [[ $_commit_rc -ne 0 ]] && return 1
       ;;
     qa_failed)
-      # ── Retry-loop : QA FAIL → re-IMPL with qa-report context ────────────
-      # When QA verdict is FAIL, the canonical flow is to re-spawn IMPL with
-      # the qa-report findings as additional context, up to GAAI_QA_RETRY_MAX
-      # total IMPL+QA cycles. If the retry cap is exhausted, escalate to
-      # qa_escalated for human triage. Without this block, the wrapper exits
-      # at qa_failed and the story ghosts in_progress until daemon restart
-      # (the main poll loop ignores in_progress ; recovery at restart just
-      # re-spawns the wrapper which would re-hit the same terminal state).
+      # ── Retry-loop : QA FAIL → re-PLAN or re-IMPL with qa-report context ──
+      # DEC-200 D5 root-cause routing: the resolver-derived route persisted by
+      # handle_qa_phase's FAIL branch (${LOCK_DIR}/.qa-route-${story_id})
+      # selects PLAN or IMPL remediation, each with its OWN independent
+      # bounded counter (AC4) — a replan neither consumes nor resets the IMPL
+      # retry counter, and vice versa. If a route's cap is exhausted, escalate
+      # to qa_escalated for human triage. Without this block, the wrapper
+      # exits at qa_failed and the story ghosts in_progress until daemon
+      # restart (the main poll loop ignores in_progress ; recovery at restart
+      # just re-spawns the wrapper which would re-hit the same terminal state).
       #
-      # The QA retry counter is stored per-story at
-      # ${LOCK_DIR}/.qa-retries-${story_id} as a single integer line. It is
-      # intentionally distinct from the daemon main-loop's wrapper-launch
-      # retry counter — this counter tracks IMPL+QA cycles within a single
-      # story's lifetime, persists across wrapper relaunches, and is cleaned
-      # up on terminal transitions (qa_escalated branch here ; done/failed
-      # branches in _reconcile_yaml_status_on_exit).
+      # Counters live per-story at ${LOCK_DIR}/.qa-retries-${story_id} (IMPL)
+      # and ${LOCK_DIR}/.qa-replans-${story_id} (PLAN) as single integer
+      # lines — both intentionally distinct from the daemon main-loop's
+      # wrapper-launch retry counter. They persist across wrapper relaunches
+      # and are cleaned up on terminal transitions (qa_escalated branch here ;
+      # done/failed branches in _reconcile_yaml_status_on_exit).
       #
-      # The qa-report path is exported as GAAI_QA_REPORT_PATH so the impl
-      # prompt construction helper injects the prior QA findings into the
-      # next IMPL claude-p invocation as fix-this-please context.
-      local _qa_retry_file _qa_retry_count _qa_retry_max
-      _qa_retry_file="${LOCK_DIR}/.qa-retries-${story_id}"
-      _qa_retry_count=0
-      if [[ -f "$_qa_retry_file" ]]; then
-        _qa_retry_count=$(cat "$_qa_retry_file" 2>/dev/null || echo 0)
-        [[ "$_qa_retry_count" =~ ^[0-9]+$ ]] || _qa_retry_count=0
+      # The qa-report path is exported as GAAI_QA_REPORT_PATH so the re-spawned
+      # phase's prompt construction helper injects the prior QA findings as
+      # fix-this-please context. GAAI_QA_INJECT_PHASE=plan additionally routes
+      # it into the next PLAN invocation on the plan route only (impl route
+      # leaves it unset, explicitly, in case a stale plan-route env leaked
+      # from a prior cycle in the same wrapper process).
+      local _qa_route_file="${LOCK_DIR}/.qa-route-${story_id}"
+      local _qa_route="impl"
+      if [[ -f "$_qa_route_file" ]]; then
+        _qa_route=$(cat "$_qa_route_file" 2>/dev/null || echo impl)
+        [[ "$_qa_route" == "plan" ]] || _qa_route="impl"
       fi
-      _qa_retry_max="${GAAI_QA_RETRY_MAX:-3}"
-      if (( _qa_retry_count >= _qa_retry_max )); then
-        echo "[$(date '+%H:%M:%S')] ${story_id} dispatch: QA retry cap reached (${_qa_retry_count}/${_qa_retry_max}) — escalating qa_failed -> qa_escalated"
+      local _qa_counter_file _qa_counter_max _qa_rewind_phase _qa_exhaust_reason _qa_reason_prefix
+      if [[ "$_qa_route" == "plan" ]]; then
+        _qa_counter_file="${LOCK_DIR}/.qa-replans-${story_id}"
+        _qa_counter_max="${GAAI_QA_REPLAN_MAX:-2}"
+        _qa_rewind_phase="not_started"
+        _qa_exhaust_reason="QA_REPLAN_EXHAUSTED"
+        _qa_reason_prefix="QA_REPLAN"
+      else
+        _qa_counter_file="${LOCK_DIR}/.qa-retries-${story_id}"
+        _qa_counter_max="${GAAI_QA_RETRY_MAX:-3}"
+        _qa_rewind_phase="planned"
+        _qa_exhaust_reason="QA_RETRY_EXHAUSTED"
+        _qa_reason_prefix="QA_RETRY"
+      fi
+      local _qa_counter_count=0
+      if [[ -f "$_qa_counter_file" ]]; then
+        _qa_counter_count=$(cat "$_qa_counter_file" 2>/dev/null || echo 0)
+        [[ "$_qa_counter_count" =~ ^[0-9]+$ ]] || _qa_counter_count=0
+      fi
+      if (( _qa_counter_count >= _qa_counter_max )); then
+        echo "[$(date '+%H:%M:%S')] ${story_id} dispatch: QA ${_qa_route} cap reached (${_qa_counter_count}/${_qa_counter_max}) — escalating qa_failed -> qa_escalated"
         if "$SCHEDULER" --set-phase-status "$story_id" qa_escalated "$BACKLOG_FILE" 2>/dev/null; then
-          _emit_routing_record "$story_id" "$trace_id" "qa" "error" "QA_RETRY_EXHAUSTED" 2>/dev/null || true
+          _emit_routing_record "$story_id" "$trace_id" "qa" "error" "$_qa_exhaust_reason" 2>/dev/null || true
         else
           echo "[ERROR] ${story_id} dispatch: scheduler --set-phase-status qa_escalated failed"
         fi
@@ -3316,24 +3414,24 @@ dispatch_3phase_story() {
         # macOS osascript + webhook+HMAC). Helper is best-effort, never blocks.
         if declare -F notify_escalation_inline >/dev/null 2>&1; then
           notify_escalation_inline "$story_id" \
-            "QA retry cap reached (${_qa_retry_count}/${_qa_retry_max})" \
+            "QA ${_qa_route} cap reached (${_qa_counter_count}/${_qa_counter_max})" \
             "Review .gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-report.md and either fix manually or re-refine the story"
         fi
-        rm -f "$_qa_retry_file" 2>/dev/null || true
+        rm -f "$_qa_counter_file" "$_qa_route_file" 2>/dev/null || true
         # Cross-cycle outcome metric — emit when escalated after cross-cycle route
         if [[ -n "${GAAI_QA_INJECT_PHASE_SNAPSHOT:-}" ]]; then
-          local _cc_cycle_n=${_qa_retry_count:-0}
+          local _cc_cycle_n=${_qa_counter_count:-0}
           local _cc_outcome_json="{\"sid\":\"${story_id}\",\"cycle_n\":${_cc_cycle_n},\"routed_phase\":\"${GAAI_QA_INJECT_PHASE_SNAPSHOT}\",\"outcome\":\"qa_escalated\",\"marker_honor_rate\":$(_compute_marker_honor_rate "$story_id" "${GAAI_WORKTREE_PATH:-${worktree_path}}" "${GAAI_QA_INJECT_PHASE_SNAPSHOT}")}"
           printf '%s\n' "$_cc_outcome_json" >> "${LOG_DIR}/cross-cycle-outcomes.jsonl" 2>/dev/null || true
         fi
         return 0
       fi
       # Increment counter via atomic temp-rename (no sed dependency, no shared helper).
-      _qa_retry_count=$((_qa_retry_count + 1))
-      local _qa_retry_tmp="${_qa_retry_file}.tmp.$$"
-      printf '%s\n' "$_qa_retry_count" > "$_qa_retry_tmp" 2>/dev/null \
-        && mv "$_qa_retry_tmp" "$_qa_retry_file" 2>/dev/null \
-        || rm -f "$_qa_retry_tmp" 2>/dev/null
+      _qa_counter_count=$((_qa_counter_count + 1))
+      local _qa_counter_tmp="${_qa_counter_file}.tmp.$$"
+      printf '%s\n' "$_qa_counter_count" > "$_qa_counter_tmp" 2>/dev/null \
+        && mv "$_qa_counter_tmp" "$_qa_counter_file" 2>/dev/null \
+        || rm -f "$_qa_counter_tmp" 2>/dev/null
       # Resolve worktree path (mirrors handle_impl_phase formula).
       local _wt_path _wt_parent _wt_repo
       if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
@@ -3348,18 +3446,24 @@ dispatch_3phase_story() {
         fi
       fi
       export GAAI_QA_REPORT_PATH="${_wt_path}/.gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-report.md"
+      if [[ "$_qa_route" == "plan" ]]; then
+        export GAAI_QA_INJECT_PHASE=plan
+      else
+        unset GAAI_QA_INJECT_PHASE 2>/dev/null || true
+      fi
       # Emit retry routing record BEFORE rewinding phase_status so the qa_failed
       # state itself is preserved in the routing trace for forensic post-mortem.
-      _emit_routing_record "$story_id" "$trace_id" "qa" "retry" "QA_RETRY_${_qa_retry_count}" 2>/dev/null || true
-      # Rewind phase_status to planned so the next outer-loop iteration calls
-      # handle_impl_phase. The IMPL prompt will pick up the qa-report via
+      _emit_routing_record "$story_id" "$trace_id" "qa" "retry" "${_qa_reason_prefix}_${_qa_counter_count}" 2>/dev/null || true
+      # Rewind phase_status so the next outer-loop iteration re-enters PLAN
+      # (not_started, full fresh replan) or IMPL (planned, unchanged from
+      # before this Story). The re-spawned phase picks up the qa-report via
       # GAAI_QA_REPORT_PATH (read by daemon-prompt-construct.sh).
-      if ! "$SCHEDULER" --set-phase-status "$story_id" planned "$BACKLOG_FILE" 2>/dev/null; then
-        echo "[ERROR] ${story_id} dispatch: scheduler --set-phase-status planned failed during retry"
-        unset GAAI_QA_REPORT_PATH
+      if ! "$SCHEDULER" --set-phase-status "$story_id" "$_qa_rewind_phase" "$BACKLOG_FILE" 2>/dev/null; then
+        echo "[ERROR] ${story_id} dispatch: scheduler --set-phase-status ${_qa_rewind_phase} failed during retry"
+        unset GAAI_QA_REPORT_PATH GAAI_QA_INJECT_PHASE
         return 1
       fi
-      echo "[$(date '+%H:%M:%S')] ${story_id} dispatch: QA FAIL — retry ${_qa_retry_count}/${_qa_retry_max} (IMPL will re-spawn with qa-report context: ${GAAI_QA_REPORT_PATH})"
+      echo "[$(date '+%H:%M:%S')] ${story_id} dispatch: QA FAIL route=${_qa_route} — cycle ${_qa_counter_count}/${_qa_counter_max} (re-spawn will pick up qa-report context: ${GAAI_QA_REPORT_PATH})"
       return 0
       ;;
     commit_failed)
@@ -3612,6 +3716,9 @@ _reconcile_yaml_status_on_exit() {
         _cc_cycle_n=$(cat "${LOCK_DIR}/.qa-retries-${story_id}" 2>/dev/null || echo 0)
       fi
       rm -f "${LOCK_DIR}/.qa-retries-${story_id}" 2>/dev/null || true
+      # E1096S02 AC4: same lifecycle as .qa-retries — clean the independent
+      # PLAN-route counter and the route marker on terminal transitions too.
+      rm -f "${LOCK_DIR}/.qa-replans-${story_id}" "${LOCK_DIR}/.qa-route-${story_id}" 2>/dev/null || true
       # Cross-cycle outcome metric — emit on terminal transition after cross-cycle route
       if [[ -n "${GAAI_QA_INJECT_PHASE_SNAPSHOT:-}" ]]; then
         local _cc_outcome_json="{\"sid\":\"${story_id}\",\"cycle_n\":${_cc_cycle_n},\"routed_phase\":\"${GAAI_QA_INJECT_PHASE_SNAPSHOT}\",\"outcome\":\"${target_status}\",\"marker_honor_rate\":$(_compute_marker_honor_rate "$story_id" "${GAAI_WORKTREE_PATH:-${worktree_path}}" "${GAAI_QA_INJECT_PHASE_SNAPSHOT}")}"

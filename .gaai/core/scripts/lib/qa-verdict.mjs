@@ -4,9 +4,13 @@
 // materiality/evidence rules, exact surface coverage, authority freshness
 // and the machine-derived aggregate/remediation invariants independently of
 // whatever the QA agent narrated. Exports a pure function for hermetic
-// tests and a thin CLI wrapper for daemon-dispatch.sh.
+// tests and a thin CLI wrapper for daemon-dispatch.sh. On success, summary
+// carries source:'qa_verdict_v1' (E1096S02 AC1). The CLI's `validate`
+// subcommand exits 2 with QA_SIDECAR_ABSENT: <path> on stderr when the
+// sidecar file itself does not exist (E1096S02 AC2 currentness signal),
+// distinct from exit 1 QA_HANDOFF_INVALID for every other failure mode.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
 
 const AXIS = new Set(['PASS', 'FAIL', 'ESCALATE']);
 const CLASSIFICATION = new Set(['blocking', 'non_blocking', 'not_applicable']);
@@ -197,7 +201,7 @@ function checkEvidenceEntry(entry, idx, errors, surfaceMap, nowISO, domainDefaul
  * @returns {{valid:boolean, errors:string[], derivedAggregate:?string,
  *   derivedRemediationRoute:?string, derivedReplanRequired:?boolean,
  *   authorityDomainDefaulted:boolean, authorityDomainDefaultedSurfaces:string[],
- *   summary:?object}}
+ *   summary:?{source:string}}}
  */
 export function validateQaVerdict({ sidecar, storyId, expectedSurfaces, sidecarPath }) {
   const errors = [];
@@ -350,6 +354,7 @@ export function validateQaVerdict({ sidecar, storyId, expectedSurfaces, sidecarP
       state_of_the_art_conformance: sidecar.state_of_the_art_conformance,
       verdict: sidecar.verdict,
       remediation_route: sidecar.remediation_route,
+      replan_required: sidecar.replan_required,
       evaluated_as_of: sidecar.evaluated_as_of,
       surface_count: inventory.length,
       evidence_count: evidence.length,
@@ -359,6 +364,8 @@ export function validateQaVerdict({ sidecar, storyId, expectedSurfaces, sidecarP
       sidecar_path: sidecarPath ?? null,
       // DEC-200 D3: observable signal — never silently absorbed (AC2/AC6).
       authority_domain_defaulted: authorityDomainDefaulted,
+      // E1096S02 AC1: forward-compatible observability tag, not a decision axis.
+      source: 'qa_verdict_v1',
     } : null,
   };
 }
@@ -394,6 +401,13 @@ async function main() {
     process.exit(1);
   }
   const args = parseArgs(rest);
+  // E1096S02 AC2 currentness gate: a sidecar that was never produced this cycle
+  // (ENOENT) is a distinct outcome from one that exists but fails validation —
+  // checked before the generic try/catch so it never falls into QA_HANDOFF_INVALID.
+  if (!existsSync(args.sidecar)) {
+    process.stderr.write(`QA_SIDECAR_ABSENT: ${args.sidecar}\n`);
+    process.exit(2);
+  }
   let sidecar;
   let expectedSurfaces;
   try {
@@ -424,7 +438,19 @@ async function main() {
   process.exit(0);
 }
 
-const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+// realpathSync(argv[1]) — not the raw argv path — because import.meta.url reflects
+// the module's resolved real path. A caller invoking this file through a symlinked
+// directory (e.g. macOS /tmp -> /private/tmp, common under daemon worktree fixtures)
+// would otherwise make this comparison silently false: main() never runs, node exits
+// 0 with no output, and a caller capturing stdout sees an empty success with no error.
+let isMain = false;
+if (process.argv[1]) {
+  try {
+    isMain = import.meta.url === `file://${realpathSync(process.argv[1])}`;
+  } catch {
+    isMain = false;
+  }
+}
 if (isMain) {
   main();
 }
