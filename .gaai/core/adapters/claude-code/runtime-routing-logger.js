@@ -106,6 +106,10 @@ export function logPhase(params) {
     'cutover_from', 'cutover_to', 'forced', 'operator_id', 'pre_flip_in_progress_count',
     // E156S07: auto-resolve audit fields (additive optional, DEC-65 append-only)
     'resolution_strategy', 'conflicting_files_count', 'auto_resolve_attempts',
+    // E1096S01: DEC-200 QA-verdict validator summary (AC5 observability) — the
+    // already-sanitized object from qa-verdict.mjs (no report bodies, no
+    // credentials, no authority URL query values).
+    'qa_summary',
   ];
   for (const f of TELEMETRY_FIELDS) {
     if (f in params) entry[f] = params[f];
@@ -152,6 +156,7 @@ if (import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).hr
   const resolutionStrategyArg    = argValue('--resolution-strategy');
   const conflictingFilesCountArg = argValue('--conflicting-files-count');
   const autoResolveAttemptsArg   = argValue('--auto-resolve-attempts');
+  const qaSummaryArg             = argValue('--qa-summary');
 
   // --log-path overrides default log path (useful for testing without internal _setLogPath)
   if (logPathArg) _setLogPath(logPathArg);
@@ -186,6 +191,9 @@ if (import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).hr
     }
     if (autoResolveAttemptsArg !== undefined) {
       phaseParams.auto_resolve_attempts = Number(autoResolveAttemptsArg);
+    }
+    if (qaSummaryArg !== undefined && qaSummaryArg !== '') {
+      try { phaseParams.qa_summary = JSON.parse(qaSummaryArg); } catch { /* ignore malformed */ }
     }
     logPhase(phaseParams);
     process.stdout.write(formatPhaseStdout(phase, provider, model, fallbackReason));

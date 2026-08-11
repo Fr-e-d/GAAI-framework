@@ -152,6 +152,9 @@ Env vars set by `handle_qa_phase()` in `daemon-dispatch.sh`:
 | `$GAAI_PLAN_PATH` | Path to `{id}.execution-plan.md` |
 | `$GAAI_IMPL_REPORT_PATH` | Path to `{id}.impl-report.md` |
 | `$GAAI_QA_REPORT_PATH` | Output path for `qa-report.md` |
+| `$GAAI_QA_SCHEMA_PATH` | Path to `.gaai/core/schemas/qa-verdict.v1.schema.json` (DEC-200) |
+| `$GAAI_QA_VERDICT_PATH` | Output path for the JSON sidecar `{id}.qa-verdict.json` (DEC-200) |
+| `$GAAI_QA_EXPECTED_SURFACES_PATH` | Path to a daemon-materialized JSON array — the exact surface set the JSON sidecar's `changed_surface_inventory` must equal one-to-one (DEC-200) |
 | `$GAAI_EPIC_PATH` | Path to `{epic}.epic.md` |
 | `$GAAI_BASE_REF` | Git ref for diff comparison |
 | `$GAAI_DELIVERY_LOG_FILE` | Per-story log path |
@@ -161,7 +164,7 @@ Env vars set by `handle_qa_phase()` in `daemon-dispatch.sh`:
 
 ### Prompt source
 
-Daemon reads `.gaai/core/agents/sub-agents/qa.daemon-prompt.md` and passes it as the `claude -p` system prompt. Story, execution-plan, and impl-report are included in the prompt body.
+Daemon reads `.gaai/core/agents/sub-agents/qa.daemon-prompt.md` and passes it as the `claude -p` system prompt. Story, execution-plan, and impl-report are included in the prompt body. The prompt requires the QA agent to evaluate and record `state_of_the_art_conformance` before `plan_conformance` (DEC-200 D1).
 
 ### Verdict format
 
@@ -171,9 +174,28 @@ QA agent writes `phase_status:` as the first YAML frontmatter field in `$GAAI_QA
 - `qa_failed` → retry impl (up to `MAX_RETRIES=3` total cycles); if exhausted → `failed`
 - `qa_escalated` → mark `escalated`, surface to human
 
+### Two-axis JSON handoff (validation-only)
+
+Per **DEC-200**, the QA agent also writes a JSON sidecar to `$GAAI_QA_VERDICT_PATH`
+(`{id}.qa-verdict.json`) conforming to `$GAAI_QA_SCHEMA_PATH`, carrying two independent axes
+(`plan_conformance`, `state_of_the_art_conformance`), a changed-surface inventory, structured
+findings/evidence, a machine-derived aggregate `verdict`, and `remediation_route` /
+`replan_required`. The daemon runs `.gaai/core/scripts/lib/qa-verdict.mjs validate` against it
+immediately after the existing "qa-report missing" check and before the Markdown `## Verdict:`
+parse: **fail-closed** — a missing, malformed, or internally-inconsistent JSON handoff (or one
+whose `verdict` disagrees with the parsed Markdown `## Verdict:` line) sends the story straight
+to `failed` (no retry), even when the Markdown report looks like a clean PASS.
+
+**This Story (E1096S01) is validation-only.** Phase routing (`phase_status` transitions on
+PASS/FAIL/ESCALATE) remains driven exclusively by the Markdown `## Verdict:` line, unchanged.
+The JSON sidecar is produced and independently validated, but does not yet drive
+`phase_status` transitions on its own axes — only its *invalidity* is a new fail-closed gate.
+**E1096S02** owns switching live/recovery consumption to the two-axis contract.
+
 ### Output contract
 
 - Writes: `$GAAI_QA_REPORT_PATH` (`.gaai/project/contexts/artefacts/qa-reports/{id}.qa-report.md`)
+- Writes: `$GAAI_QA_VERDICT_PATH` (`.gaai/project/contexts/artefacts/qa-reports/{id}.qa-verdict.json`)
 - Optional: `$GAAI_MEMORY_DELTA_PATH` if QA agent identifies memory-worthy decisions
 - Phase transition: `phase_status: implemented → qa_passed | qa_failed | qa_escalated`
 
@@ -185,6 +207,15 @@ QA agent writes `phase_status:` as the first YAML frontmatter field in `$GAAI_QA
 trace_id, story_id, phase=qa, provider=primary,
 model=$CLAUDE_MODEL_PRIMARY, duration_ms, fallback_reason, impl_model_tag, pipeline=3phase
 ```
+
+On successful JSON handoff validation, the daemon additionally logs a one-line summary
+(story ID, schema version, both axes, aggregate, remediation route, `evaluated_as_of`,
+surface/evidence counts, safe sidecar/report locators — no report bodies, credentials or
+authority-URL query values) to the phase log/stdout for observability (AC5). This same summary
+is also passed to `_emit_qa_routing_record` as `--qa-summary` on every PASS/FAIL/ESCALATE call
+site and is part of the `runtime-routing.jsonl` schema as the `qa_summary` field (allowlisted in
+`runtime-routing-logger.js`'s `TELEMETRY_FIELDS`) — so the routing record itself, not only the
+phase log, carries the two-axis summary for every terminal QA outcome.
 
 ---
 
@@ -233,7 +264,7 @@ Canonical failure mode enums are defined in `daemon-dispatch.sh`. Refer to:
 
 - **Plan phase:** `PLAN_PHASE_FAILED`, `NO_ARTEFACT`, `PARSE_ERROR`, `SCHEDULER_FAILURE`
 - **Impl phase:** `PARSE_ERROR` (JSON parse on spawn output), `False|<error_reason>` from `nested-claude-spawn.js`
-- **QA phase:** `QA_SPAWN_FAILED`, `QA_NO_ARTEFACT`, `QA_VERDICT_PARSE_ERROR`, `QA_VERDICT:FAIL`, `QA_VERDICT:ESCALATE`, `QA_SCHEDULER_FAILURE`
+- **QA phase:** `QA_SPAWN_FAILED`, `QA_NO_ARTEFACT`, `QA_VERDICT_PARSE_ERROR`, `QA_HANDOFF_INVALID` (DEC-200 JSON sidecar missing/malformed/internally-inconsistent, or disagrees with the Markdown verdict — immediate `failed`, no retry), `QA_VERDICT:FAIL`, `QA_VERDICT:ESCALATE`, `QA_SCHEDULER_FAILURE`
 - **Commit phase:** `COMMIT_FAILED`, `PUSH_FAILED`, `PR_CREATE_FAILED`, `AUTO_MERGE_FAILED`, `GH_AUTH_MISSING`, `SCHEDULER_FAILURE`
 
 All constants are defined in `daemon-dispatch.sh`.

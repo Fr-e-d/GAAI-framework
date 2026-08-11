@@ -169,6 +169,9 @@ mkdir -p "$DISPATCH_SHIM_DIR"
 cat > "$DISPATCH_SHIM_DIR/claude" << 'DISPATCH_SHIM_EOF'
 #!/usr/bin/env bash
 if [[ -n "${GAAI_QA_REPORT_PATH:-}" ]]; then
+  if [[ -n "${GAAI_QA_VERDICT_PATH:-}" ]]; then
+    printf '{"schema_version":1,"story_id":"%s","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"PASS","plan_conformance":"PASS","changed_surface_inventory":[],"findings":[],"evidence":[],"verdict":"PASS","remediation_route":null,"replan_required":null,"report_path":"qa-reports/%s.qa-report.md"}' "${GAAI_STORY_ID:-}" "${GAAI_STORY_ID:-}" > "${GAAI_QA_VERDICT_PATH}"
+  fi
   printf '## AC1\npass\n\n## Verdict: PASS\n' > "${GAAI_QA_REPORT_PATH}"
 elif [[ -n "${GAAI_PLAN_PATH:-}" ]]; then
   printf '## Implementation Sequence\nStep 1.\n' > "${GAAI_PLAN_PATH}"
@@ -1057,11 +1060,26 @@ QASTORY_EOF
 QA_SHIM_DIR="$QA_FIXTURE_DIR/shims"
 mkdir -p "$QA_SHIM_DIR"
 
-# Helper: write claude shim that emits a specific verdict
+# Helper: write claude shim that emits a specific verdict — writes BOTH the
+# Markdown report AND a matching, internally-valid DEC-200 JSON sidecar
+# (handle_qa_phase now fails closed when the JSON handoff is missing/invalid,
+# per E1096S01). These QA fixture worktrees have no git repo and no Story
+# "## File Inventory" / PLAN "Files" column, so the daemon's derived expected-
+# surface set is empty — an empty changed_surface_inventory is the exact
+# match, keeping this shim simple.
 make_qa_claude_shim() {
   local verdict="$1"
+  local route replan
+  case "$verdict" in
+    PASS) route="null"; replan="null" ;;
+    FAIL) route="\"impl\""; replan="false" ;;
+    ESCALATE) route="\"human\""; replan="null" ;;
+  esac
   cat > "$QA_SHIM_DIR/claude" << QASHIM_EOF
 #!/usr/bin/env bash
+if [[ -n "\${GAAI_QA_VERDICT_PATH:-}" ]]; then
+  printf '{"schema_version":1,"story_id":"%s","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"$verdict","plan_conformance":"$verdict","changed_surface_inventory":[],"findings":[],"evidence":[],"verdict":"$verdict","remediation_route":$route,"replan_required":$replan,"report_path":"qa-reports/%s.qa-report.md"}' "\${GAAI_STORY_ID:-}" "\${GAAI_STORY_ID:-}" > "\$GAAI_QA_VERDICT_PATH"
+fi
 if [[ -n "\${GAAI_QA_REPORT_PATH:-}" ]]; then
   printf '## AC1\npass\n\n## Verdict: %s\n' "$verdict" > "\$GAAI_QA_REPORT_PATH"
 fi
@@ -1088,12 +1106,18 @@ QANO_EOF
   chmod +x "$QA_SHIM_DIR/claude"
 }
 
-# claude shim that exits 0 but writes a report without a verdict marker
+# claude shim that exits 0 but writes a report without a verdict marker.
+# Writes a valid JSON sidecar too, so this fixture still isolates the
+# Markdown-verdict-marker-absent path (AC5c) rather than tripping the prior
+# QA_HANDOFF_INVALID gate.
 make_qa_claude_badverdict_shim() {
-  cat > "$QA_SHIM_DIR/claude" << 'QABADVERDICT_EOF'
+  cat > "$QA_SHIM_DIR/claude" << QABADVERDICT_EOF
 #!/usr/bin/env bash
-if [[ -n "${GAAI_QA_REPORT_PATH:-}" ]]; then
-  printf '## AC1\npass\n\nNo verdict marker here.\n' > "${GAAI_QA_REPORT_PATH}"
+if [[ -n "\${GAAI_QA_VERDICT_PATH:-}" ]]; then
+  printf '{"schema_version":1,"story_id":"%s","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"PASS","plan_conformance":"PASS","changed_surface_inventory":[],"findings":[],"evidence":[],"verdict":"PASS","remediation_route":null,"replan_required":null,"report_path":"qa-reports/%s.qa-report.md"}' "\${GAAI_STORY_ID:-}" "\${GAAI_STORY_ID:-}" > "\$GAAI_QA_VERDICT_PATH"
+fi
+if [[ -n "\${GAAI_QA_REPORT_PATH:-}" ]]; then
+  printf '## AC1\npass\n\nNo verdict marker here.\n' > "\${GAAI_QA_REPORT_PATH}"
 fi
 exit 0
 QABADVERDICT_EOF
@@ -1132,9 +1156,18 @@ if handle_qa_phase "TST-QA-PASS" "$TRACE" 2>/dev/null; then
   else
     fail "T22b: routing.jsonl missing expected fields — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
   fi
+  # AC5 fix: the DEC-200 validator summary reaches the structured audit record
+  # (runtime-routing.jsonl), not only an ad hoc stdout echo.
+  if grep -q '"qa_summary":{' "$ROUTING_LOG" 2>/dev/null && \
+     grep -q '"verdict":"PASS"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T22c: routing.jsonl has qa_summary with verdict=PASS"
+  else
+    fail "T22c: routing.jsonl missing qa_summary — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
 else
   fail "T22a: handle_qa_phase returned non-zero for PASS verdict"
   fail "T22b: (skipped — T22a failed)"
+  fail "T22c: (skipped — T22a failed)"
 fi
 
 # ── T23: QA FAIL verdict → qa_failed ─────────────────────────
@@ -1156,9 +1189,16 @@ if handle_qa_phase "TST-QA-FAIL" "$TRACE" 2>/dev/null; then
   else
     fail "T23b: routing.jsonl missing QA_VERDICT:FAIL — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
   fi
+  if grep -q '"qa_summary":{' "$ROUTING_LOG" 2>/dev/null && \
+     grep -q '"verdict":"FAIL"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T23c: routing.jsonl has qa_summary with verdict=FAIL (AC5: FAIL branch carries structured summary too)"
+  else
+    fail "T23c: routing.jsonl missing qa_summary — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
 else
   fail "T23a: handle_qa_phase returned non-zero for FAIL verdict; retry-loop convention expects qa_failed + rc=0"
   fail "T23b: (skipped)"
+  fail "T23c: (skipped)"
 fi
 
 # ── T24: QA ESCALATE verdict → qa_escalated ──────────────────
@@ -1182,6 +1222,12 @@ else
     pass "T24b: routing.jsonl has QA_VERDICT:ESCALATE fallback_reason"
   else
     fail "T24b: routing.jsonl missing QA_VERDICT:ESCALATE — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+  if grep -q '"qa_summary":{' "$ROUTING_LOG" 2>/dev/null && \
+     grep -q '"verdict":"ESCALATE"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "T24c: routing.jsonl has qa_summary with verdict=ESCALATE (AC5: ESCALATE branch carries structured summary too)"
+  else
+    fail "T24c: routing.jsonl missing qa_summary — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
   fi
 fi
 
@@ -1935,6 +1981,555 @@ unset GAAI_SHIM_PUSH_FAIL GAAI_SHIM_GH_AUTH_FAIL GAAI_SHIM_GH_PR_EXISTS GAAI_SHI
 unset GAAI_SHIM_AUTOMERGE_NULL GAAI_SHIM_AUTOMERGE_FAIL GAAI_COMMIT_CALL_LOG
 unset COMMIT_OLD_PATH COMMIT_FIXTURE_DIR COMMIT_SHIM_DIR COMMIT_REAL_GIT COMMIT_CALL_LOG
 rm -rf "/tmp/gaai-commit-phase-tests-$$"
+
+# ── QAJSON: DEC-200 two-axis qa-verdict.mjs hermetic fixture matrix (AC6) ──
+# Pure-function fixtures against validateQaVerdict — no daemon spawn, no LLM,
+# no network. Labels use a QAJSON prefix (not T-numbered) to avoid colliding
+# with the T1-T46 sequence used elsewhere in this file.
+echo "QAJSON: qa-verdict.mjs hermetic fixture matrix (AC6)"
+QAJSON_SCRIPT="/tmp/gaai-qa-verdict-fixtures-$$.mjs"
+QAJSON_MODULE="$PROJECT_DIR/.gaai/core/scripts/lib/qa-verdict.mjs"
+cat > "$QAJSON_SCRIPT" << 'NODEFIX_EOF'
+const { validateQaVerdict } = await import(process.env.GAAI_QA_VERDICT_MODULE);
+
+function base(overrides = {}) {
+  return {
+    schema_version: 1,
+    story_id: 'FIX-1',
+    evaluated_as_of: '2026-08-07T00:00:00Z',
+    state_of_the_art_conformance: 'PASS',
+    plan_conformance: 'PASS',
+    changed_surface_inventory: [],
+    findings: [],
+    evidence: [],
+    verdict: 'PASS',
+    remediation_route: null,
+    replan_required: null,
+    report_path: 'qa-reports/FIX-1.qa-report.md',
+    ...overrides,
+  };
+}
+
+function blockingCase(materiality, reviewDomain = 'other', domain = 'stable', verifiedAt = '2026-08-01T00:00:00Z') {
+  return base({
+    state_of_the_art_conformance: 'FAIL',
+    verdict: 'FAIL',
+    remediation_route: 'impl',
+    replan_required: false,
+    changed_surface_inventory: [{ surface: 'a.ts', classification: 'blocking', review_domain: reviewDomain, materiality }],
+    findings: [{ finding_id: 'f1', surface: 'a.ts', classification: 'blocking', description: 'x', root_cause: 'implementation' }],
+    evidence: [{
+      surface: 'a.ts', finding_id: 'f1', outcome: 'contradicts', source_kind: 'governed_record',
+      authority_uri: 'contexts/authority/a.md', authority_title: 'x', accessed_at: '2026-08-07T00:00:00Z',
+      claim: 'y', excerpt: 'z', materiality,
+      governed_record: { authority_record_version: 1, official_authority_url: 'https://x.com', verified_at: verifiedAt, authority_domain: domain, claim_scope: 'x' },
+    }],
+  });
+}
+
+const CASES = [];
+// expectDefaulted (optional 5th arg): when set, asserts result.authorityDomainDefaulted
+// matches — the DEC-200 D3 "emits authority_domain_defaulted" observability signal.
+const add = (name, sidecar, expectedSurfaces, valid, expectDefaulted) => CASES.push({ name, sidecar, expectedSurfaces, valid, expectDefaulted });
+
+// ── 9 axis-combination rows ────────────────────────────────────────────────
+const AXES = ['PASS', 'FAIL', 'ESCALATE'];
+for (const plan of AXES) {
+  for (const sota of AXES) {
+    let verdict = 'PASS';
+    if (plan === 'ESCALATE' || sota === 'ESCALATE') verdict = 'ESCALATE';
+    else if (plan === 'FAIL' || sota === 'FAIL') verdict = 'FAIL';
+    let route = null; let replan = null;
+    if (verdict === 'ESCALATE') { route = 'human'; replan = null; }
+    else if (verdict === 'FAIL') { route = 'impl'; replan = false; }
+    add(`axis-row plan=${plan} sota=${sota} -> ${verdict}`, base({
+      plan_conformance: plan, state_of_the_art_conformance: sota, verdict, remediation_route: route, replan_required: replan,
+    }), [], true);
+  }
+}
+
+// ── Story-wins-PLAN-conflict marker: validator's role is limited to
+// confirming a Story-scoped blocking finding is present with root_cause; it
+// cannot mechanically arbitrate Story-vs-PLAN content (documented boundary).
+add('story-wins marker: implementation-rooted blocking finding routes impl', blockingCase('deprecated'), ['a.ts'], true);
+
+// ── 4 D5 remediation-route/replan_required invariants ──────────────────────
+add('D5: ESCALATE -> human/null', base({ plan_conformance: 'ESCALATE', state_of_the_art_conformance: 'PASS', verdict: 'ESCALATE', remediation_route: 'human', replan_required: null }), [], true);
+add('D5: FAIL plan-rooted -> plan/true', base({
+  plan_conformance: 'FAIL', state_of_the_art_conformance: 'PASS', verdict: 'FAIL', remediation_route: 'plan', replan_required: true,
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'blocking', review_domain: 'other', materiality: 'deprecated' }],
+  findings: [{ finding_id: 'f1', surface: 'a.ts', classification: 'blocking', description: 'x', root_cause: 'plan' }],
+  evidence: [{ surface: 'a.ts', finding_id: 'f1', outcome: 'contradicts', source_kind: 'live', authority_uri: 'https://x.com/docs', authority_title: 'x', accessed_at: '2026-08-07T00:00:00Z', claim: 'y', excerpt: 'z', materiality: 'deprecated' }],
+}), ['a.ts'], true);
+add('D5: FAIL impl-rooted -> impl/false', blockingCase('unsupported'), ['a.ts'], true);
+add('D5: PASS -> null/null', base(), [], true);
+
+// ── 3 conditional classification/evidence shapes ────────────────────────────
+add('classification: blocking without materiality -> invalid', base({
+  state_of_the_art_conformance: 'FAIL', verdict: 'FAIL', remediation_route: 'impl', replan_required: false,
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'blocking', review_domain: 'other' }],
+}), ['a.ts'], false);
+add('classification: non_blocking with materiality -> invalid', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking', review_domain: 'other', materiality: 'deprecated' }],
+}), ['a.ts'], false);
+add('classification: not_applicable without eligibility_reason -> invalid', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'not_applicable', review_domain: 'other' }],
+}), ['a.ts'], false);
+add('classification: not_applicable valid with eligibility_reason', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'not_applicable', review_domain: 'other', eligibility_reason: 'generated test fixture, no runtime effect' }],
+}), ['a.ts'], true);
+
+// ── missing / null / forbidden materiality ──────────────────────────────────
+add('materiality: missing on blocking -> invalid', base({
+  state_of_the_art_conformance: 'FAIL', verdict: 'FAIL', remediation_route: 'impl', replan_required: false,
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'blocking', review_domain: 'other' }],
+  findings: [{ finding_id: 'f1', surface: 'a.ts', classification: 'blocking', description: 'x', root_cause: 'implementation' }],
+}), ['a.ts'], false);
+add('materiality: null on non_blocking -> invalid (must be absent, not null)', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking', review_domain: 'other', materiality: null }],
+}), ['a.ts'], false);
+add('materiality: forbidden on not_applicable -> invalid', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'not_applicable', review_domain: 'other', eligibility_reason: 'x', materiality: 'deprecated' }],
+}), ['a.ts'], false);
+
+// ── closed outcome excluded from aggregate math ─────────────────────────────
+add('outcome=supports does not change validity/aggregate', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking', review_domain: 'other' }],
+  findings: [{ finding_id: 'f1', surface: 'a.ts', classification: 'non_blocking', description: 'x' }],
+  evidence: [{ surface: 'a.ts', finding_id: 'f1', outcome: 'supports', source_kind: 'live', authority_uri: 'https://x.com/a', authority_title: 'x', accessed_at: '2026-08-07T00:00:00Z', claim: 'y', excerpt: 'z' }],
+}), ['a.ts'], true);
+add('outcome=contradicts does not change validity/aggregate (still PASS-eligible non_blocking)', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking', review_domain: 'other' }],
+  findings: [{ finding_id: 'f1', surface: 'a.ts', classification: 'non_blocking', description: 'x' }],
+  evidence: [{ surface: 'a.ts', finding_id: 'f1', outcome: 'contradicts', source_kind: 'live', authority_uri: 'https://x.com/a', authority_title: 'x', accessed_at: '2026-08-07T00:00:00Z', claim: 'y', excerpt: 'z' }],
+}), ['a.ts'], true);
+
+// ── newer-but-supported non-blocking evidence confirms non_blocking, not FAIL ──
+add('newer-but-supported alt -> non_blocking, PASS-eligible', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking', review_domain: 'other' }],
+  findings: [{ finding_id: 'f1', surface: 'a.ts', classification: 'non_blocking', description: 'newer supported alt exists' }],
+  evidence: [{ surface: 'a.ts', finding_id: 'f1', outcome: 'supports', source_kind: 'live', authority_uri: 'https://x.com/a', authority_title: 'x', accessed_at: '2026-08-07T00:00:00Z', claim: 'still supported', excerpt: 'z' }],
+}), ['a.ts'], true);
+
+// ── every material FAIL class ────────────────────────────────────────────────
+for (const m of ['deprecated', 'unsupported', 'materially_obsolete', 'unsafe', 'officially_discouraged', 'demonstrably_fragile']) {
+  const domain = m === 'unsafe' ? 'security' : 'stable';
+  add(`materiality class: ${m}`, blockingCase(m, m === 'unsafe' ? 'security' : 'other', domain), ['a.ts'], true);
+}
+
+// ── exact inventory equality: missing / duplicate / unexpected surface ──────
+add('inventory: missing expected surface -> invalid', base(), ['a.ts', 'b.ts'], false);
+add('inventory: duplicate surface -> invalid', base({
+  changed_surface_inventory: [
+    { surface: 'a.ts', classification: 'non_blocking', review_domain: 'other' },
+    { surface: 'a.ts', classification: 'non_blocking', review_domain: 'other' },
+  ],
+}), ['a.ts'], false);
+add('inventory: unexpected surface -> invalid', base({
+  changed_surface_inventory: [{ surface: 'z.ts', classification: 'non_blocking', review_domain: 'other' }],
+}), ['a.ts'], false);
+
+// ── N-A eligible vs ineligible-but-claimed (shape-level; semantic eligibility
+// is a documented validator boundary — see Story AC2 edge cases) ───────────
+add('N-A eligible (shape valid)', base({
+  changed_surface_inventory: [{ surface: 'fixture.json', classification: 'not_applicable', review_domain: 'other', eligibility_reason: 'test fixture data, no runtime effect' }],
+}), ['fixture.json'], true);
+
+// ── missing / invalid review_domain ──────────────────────────────────────────
+add('review_domain: missing -> invalid', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking' }],
+}), ['a.ts'], false);
+add('review_domain: invalid value -> invalid', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking', review_domain: 'bogus' }],
+}), ['a.ts'], false);
+
+// ── official live evidence with durable digest/excerpt ───────────────────────
+add('live evidence with content_digest', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking', review_domain: 'other' }],
+  findings: [{ finding_id: 'f1', surface: 'a.ts', classification: 'non_blocking', description: 'x' }],
+  evidence: [{ surface: 'a.ts', finding_id: 'f1', outcome: 'supports', source_kind: 'live', authority_uri: 'https://x.com/a', authority_title: 'x', accessed_at: '2026-08-07T00:00:00Z', claim: 'y', content_digest: 'sha256:abc123' }],
+}), ['a.ts'], true);
+
+// ── governed record freshness ────────────────────────────────────────────────
+function grCase(domain, verifiedAt, evalAsOf = '2026-08-07T00:00:00Z') {
+  return base({
+    evaluated_as_of: evalAsOf,
+    changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking', review_domain: 'other' }],
+    findings: [{ finding_id: 'f1', surface: 'a.ts', classification: 'non_blocking', description: 'x' }],
+    evidence: [{
+      surface: 'a.ts', finding_id: 'f1', outcome: 'supports', source_kind: 'governed_record',
+      authority_uri: 'contexts/authority/a.md', authority_title: 'x', accessed_at: evalAsOf, claim: 'y', excerpt: 'z',
+      governed_record: { authority_record_version: 1, official_authority_url: 'https://x.com', verified_at: verifiedAt, authority_domain: domain, claim_scope: 'x' },
+    }],
+  });
+}
+add('governed record: fresh fast_moving (<30d)', grCase('fast_moving', '2026-07-20T00:00:00Z'), ['a.ts'], true, false);
+add('governed record: stale fast_moving (>30d) claimed PASS -> invalid', grCase('fast_moving', '2026-06-01T00:00:00Z'), ['a.ts'], false);
+add('governed record: fresh stable (<90d)', grCase('stable', '2026-06-01T00:00:00Z'), ['a.ts'], true);
+add('governed record: stale stable (>90d) claimed PASS -> invalid', grCase('stable', '2026-01-01T00:00:00Z'), ['a.ts'], false);
+{
+  const staleEscalate = grCase('stable', '2026-01-01T00:00:00Z');
+  staleEscalate.state_of_the_art_conformance = 'ESCALATE';
+  staleEscalate.verdict = 'ESCALATE';
+  staleEscalate.remediation_route = 'human';
+  add('governed record: stale but correctly-ESCALATE -> valid', staleEscalate, ['a.ts'], true);
+}
+
+// ── missing / wrong record version ───────────────────────────────────────────
+{
+  const wrongVersion = grCase('stable', '2026-08-01T00:00:00Z');
+  wrongVersion.evidence[0].governed_record.authority_record_version = 2;
+  add('governed record: wrong authority_record_version -> invalid', wrongVersion, ['a.ts'], false);
+}
+{
+  const missingVersion = grCase('stable', '2026-08-01T00:00:00Z');
+  delete missingVersion.evidence[0].governed_record.authority_record_version;
+  add('governed record: missing authority_record_version -> invalid', missingVersion, ['a.ts'], false);
+}
+
+// ── missing official_authority_url / verified_at / claim_scope ─────────────
+{
+  const missingUrl = grCase('stable', '2026-08-01T00:00:00Z');
+  delete missingUrl.evidence[0].governed_record.official_authority_url;
+  add('governed record: missing official_authority_url -> invalid', missingUrl, ['a.ts'], false);
+}
+{
+  const missingScope = grCase('stable', '2026-08-01T00:00:00Z');
+  delete missingScope.evidence[0].governed_record.claim_scope;
+  add('governed record: missing claim_scope -> invalid', missingScope, ['a.ts'], false);
+}
+
+// ── fresh/stale missing or literal-unknown authority_domain (observable default) ──
+// Each case asserts authorityDomainDefaulted === true — DEC-200 D3 requires the
+// fallback to "emit authority_domain_defaulted", not merely apply the 30-day window.
+{
+  const freshMissingDomain = grCase('stable', '2026-08-01T00:00:00Z');
+  delete freshMissingDomain.evidence[0].governed_record.authority_domain;
+  add('governed record: missing authority_domain, fresh (<30d default) -> valid', freshMissingDomain, ['a.ts'], true, true);
+}
+{
+  const staleMissingDomain = grCase('stable', '2026-06-01T00:00:00Z');
+  delete staleMissingDomain.evidence[0].governed_record.authority_domain;
+  add('governed record: missing authority_domain, stale (>30d default) claimed PASS -> invalid', staleMissingDomain, ['a.ts'], false, true);
+}
+{
+  const freshUnknownDomain = grCase('unknown', '2026-08-01T00:00:00Z');
+  add('governed record: literal unknown authority_domain, fresh -> valid', freshUnknownDomain, ['a.ts'], true, true);
+}
+{
+  const staleUnknownDomain = grCase('unknown', '2026-06-01T00:00:00Z');
+  add('governed record: literal unknown authority_domain, stale claimed PASS -> invalid', staleUnknownDomain, ['a.ts'], false, true);
+}
+
+// ── unrecognized / mismatched authority_domain — immediate escalation ───────
+{
+  const bogusDomain = grCase('sometimes', '2026-08-01T00:00:00Z');
+  bogusDomain.state_of_the_art_conformance = 'ESCALATE';
+  bogusDomain.verdict = 'ESCALATE';
+  bogusDomain.remediation_route = 'human';
+  add('governed record: unrecognized authority_domain -> invalid even under ESCALATE', bogusDomain, ['a.ts'], false);
+}
+
+// ── security and unsafe domain enforcement ──────────────────────────────────
+add('security materiality with security domain, fresh -> valid', blockingCase('unsafe', 'security', 'security', '2026-08-01T00:00:00Z'), ['a.ts'], true);
+{
+  const mismatchEscalate = blockingCase('unsafe', 'security', 'stable', '2026-08-06T00:00:00Z');
+  mismatchEscalate.state_of_the_art_conformance = 'ESCALATE';
+  mismatchEscalate.verdict = 'ESCALATE';
+  mismatchEscalate.remediation_route = 'human';
+  mismatchEscalate.replan_required = null;
+  add('security/unsafe with non-security domain + ESCALATE -> valid', mismatchEscalate, ['a.ts'], true);
+}
+{
+  const mismatchPass = blockingCase('unsafe', 'security', 'stable', '2026-08-06T00:00:00Z');
+  mismatchPass.state_of_the_art_conformance = 'FAIL';
+  mismatchPass.verdict = 'FAIL';
+  add('security/unsafe with non-security domain + claimed FAIL (not ESCALATE) -> invalid', mismatchPass, ['a.ts'], false);
+}
+
+// ── empty PASS: no surface coverage ─────────────────────────────────────────
+add('empty inventory with non-empty expected surfaces -> invalid', base(), ['a.ts'], false);
+
+// ── unsafe locators ──────────────────────────────────────────────────────────
+add('governed locator: absolute path -> invalid', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking', review_domain: 'other' }],
+  findings: [{ finding_id: 'f1', surface: 'a.ts', classification: 'non_blocking', description: 'x' }],
+  evidence: [{ surface: 'a.ts', finding_id: 'f1', outcome: 'supports', source_kind: 'governed_record', authority_uri: '/etc/passwd', authority_title: 'x', accessed_at: '2026-08-07T00:00:00Z', claim: 'y', excerpt: 'z', governed_record: { authority_record_version: 1, official_authority_url: 'https://x.com', verified_at: '2026-08-01T00:00:00Z', authority_domain: 'stable', claim_scope: 'x' } }],
+}), ['a.ts'], false);
+add('governed locator: .. segment -> invalid', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking', review_domain: 'other' }],
+  findings: [{ finding_id: 'f1', surface: 'a.ts', classification: 'non_blocking', description: 'x' }],
+  evidence: [{ surface: 'a.ts', finding_id: 'f1', outcome: 'supports', source_kind: 'governed_record', authority_uri: '../../../secrets.md', authority_title: 'x', accessed_at: '2026-08-07T00:00:00Z', claim: 'y', excerpt: 'z', governed_record: { authority_record_version: 1, official_authority_url: 'https://x.com', verified_at: '2026-08-01T00:00:00Z', authority_domain: 'stable', claim_scope: 'x' } }],
+}), ['a.ts'], false);
+
+// ── secret-shaped query value on a live URL ──────────────────────────────────
+add('live locator: secret-shaped query key -> invalid', base({
+  changed_surface_inventory: [{ surface: 'a.ts', classification: 'non_blocking', review_domain: 'other' }],
+  findings: [{ finding_id: 'f1', surface: 'a.ts', classification: 'non_blocking', description: 'x' }],
+  evidence: [{ surface: 'a.ts', finding_id: 'f1', outcome: 'supports', source_kind: 'live', authority_uri: 'https://x.com/a?token=abc123', authority_title: 'x', accessed_at: '2026-08-07T00:00:00Z', claim: 'y', excerpt: 'z' }],
+}), ['a.ts'], false);
+
+// ── wrong story_id ────────────────────────────────────────────────────────────
+CASES.push({ name: 'wrong story_id -> invalid', sidecar: base(), expectedSurfaces: [], valid: false, storyId: 'DIFFERENT-STORY' });
+
+// ── state_of_the_art_conformance recorded before plan_conformance (D1 ordering) ──
+{
+  const outOfOrder = JSON.parse(JSON.stringify(base()));
+  const reordered = {};
+  reordered.schema_version = outOfOrder.schema_version;
+  reordered.story_id = outOfOrder.story_id;
+  reordered.evaluated_as_of = outOfOrder.evaluated_as_of;
+  reordered.plan_conformance = outOfOrder.plan_conformance;
+  reordered.state_of_the_art_conformance = outOfOrder.state_of_the_art_conformance;
+  reordered.changed_surface_inventory = outOfOrder.changed_surface_inventory;
+  reordered.findings = outOfOrder.findings;
+  reordered.evidence = outOfOrder.evidence;
+  reordered.verdict = outOfOrder.verdict;
+  reordered.remediation_route = outOfOrder.remediation_route;
+  reordered.replan_required = outOfOrder.replan_required;
+  reordered.report_path = outOfOrder.report_path;
+  add('D1 ordering: plan_conformance key before state_of_the_art_conformance -> invalid', reordered, [], false);
+}
+
+// ── report_path safety ────────────────────────────────────────────────────────
+add('report_path: absolute path -> invalid', base({ report_path: '/etc/passwd' }), [], false);
+
+let pass = 0; let fail = 0;
+for (const c of CASES) {
+  const result = validateQaVerdict({ sidecar: c.sidecar, storyId: c.storyId || 'FIX-1', expectedSurfaces: c.expectedSurfaces });
+  let ok = result.valid === c.valid;
+  if (ok && c.expectDefaulted !== undefined) ok = result.authorityDomainDefaulted === c.expectDefaulted;
+  if (ok) { pass += 1; } else { fail += 1; }
+  const detail = ok ? '' : JSON.stringify({ errors: result.errors, authorityDomainDefaulted: result.authorityDomainDefaulted });
+  console.log(`SCENARIO_RESULT|${c.name}|${ok ? 'PASS' : 'FAIL'}|${detail}`);
+}
+console.log(`SCENARIO_SUMMARY|${pass}|${fail}`);
+process.exit(fail === 0 ? 0 : 1);
+NODEFIX_EOF
+
+QAJSON_RC=0
+GAAI_QA_VERDICT_MODULE="$QAJSON_MODULE" node "$QAJSON_SCRIPT" > /tmp/gaai-qa-verdict-fixtures-out-$$.txt 2>&1 || QAJSON_RC=$?
+while IFS='|' read -r _tag _name _res _detail; do
+  [[ "$_tag" != "SCENARIO_RESULT" ]] && continue
+  if [[ "$_res" == "PASS" ]]; then
+    pass "QAJSON: $_name"
+  else
+    fail "QAJSON: $_name -> $_detail"
+  fi
+done < <(grep '^SCENARIO_RESULT|' /tmp/gaai-qa-verdict-fixtures-out-$$.txt)
+if [[ "$QAJSON_RC" -ne 0 ]] && ! grep -q '^SCENARIO_RESULT|' /tmp/gaai-qa-verdict-fixtures-out-$$.txt; then
+  fail "QAJSON: fixture script crashed — $(cat /tmp/gaai-qa-verdict-fixtures-out-$$.txt)"
+fi
+rm -f "$QAJSON_SCRIPT" "/tmp/gaai-qa-verdict-fixtures-out-$$.txt"
+
+# ── QAJSON-CLI: malformed JSON via the CLI wrapper (JSON.parse failure path) ──
+echo "QAJSON-CLI: malformed sidecar JSON via CLI"
+MALFORMED_SIDECAR="/tmp/gaai-qa-malformed-$$.json"
+printf '{ this is not valid json' > "$MALFORMED_SIDECAR"
+printf '[]' > "/tmp/gaai-qa-malformed-expected-$$.json"
+if node "$QAJSON_MODULE" validate --sidecar "$MALFORMED_SIDECAR" --schema "$QAJSON_MODULE" \
+    --story-id FIX-1 --expected-surfaces "/tmp/gaai-qa-malformed-expected-$$.json" >/dev/null 2>&1; then
+  fail "QAJSON-CLI: malformed JSON should exit non-zero"
+else
+  pass "QAJSON-CLI: malformed JSON exits non-zero (QA_HANDOFF_INVALID)"
+fi
+rm -f "$MALFORMED_SIDECAR" "/tmp/gaai-qa-malformed-expected-$$.json"
+
+# ── QAJSON-CLI2: successful validation echoes sidecar_path (AC5) ───────────
+echo "QAJSON-CLI2: --sidecar-locator reaches the success summary as sidecar_path"
+VALID_SIDECAR="/tmp/gaai-qa-valid-$$.json"
+cat > "$VALID_SIDECAR" << 'VALIDFIX_EOF'
+{
+  "schema_version": 1,
+  "story_id": "FIX-CLI",
+  "evaluated_as_of": "2026-08-11T00:00:00Z",
+  "state_of_the_art_conformance": "PASS",
+  "plan_conformance": "PASS",
+  "changed_surface_inventory": [],
+  "findings": [],
+  "evidence": [],
+  "verdict": "PASS",
+  "remediation_route": null,
+  "replan_required": null,
+  "report_path": "qa-reports/FIX-CLI.qa-report.md"
+}
+VALIDFIX_EOF
+printf '[]' > "/tmp/gaai-qa-valid-expected-$$.json"
+QAJSON_SCHEMA="$PROJECT_DIR/.gaai/core/schemas/qa-verdict.v1.schema.json"
+QAJSON_CLI2_RC=0
+QAJSON_CLI2_OUT=$(node "$QAJSON_MODULE" validate --sidecar "$VALID_SIDECAR" --schema "$QAJSON_SCHEMA" \
+  --story-id FIX-CLI --expected-surfaces "/tmp/gaai-qa-valid-expected-$$.json" \
+  --sidecar-locator "qa-reports/FIX-CLI.qa-verdict.json" 2>&1) || QAJSON_CLI2_RC=$?
+if [[ "$QAJSON_CLI2_RC" -ne 0 ]]; then
+  fail "QAJSON-CLI2: expected exit 0 on valid fixture, got $QAJSON_CLI2_RC — $QAJSON_CLI2_OUT"
+elif [[ "$QAJSON_CLI2_OUT" == *'"sidecar_path":"qa-reports/FIX-CLI.qa-verdict.json"'* ]]; then
+  pass "QAJSON-CLI2: success summary carries sidecar_path alongside report_path"
+else
+  fail "QAJSON-CLI2: summary missing sidecar_path — $QAJSON_CLI2_OUT"
+fi
+rm -f "$VALID_SIDECAR" "/tmp/gaai-qa-valid-expected-$$.json"
+
+# ── QAJSON-D: daemon-level fail-closed fixtures (handle_qa_phase) ──────────
+# Proves the new JSON gate overrides a well-formed Markdown PASS, and that a
+# Markdown/JSON verdict disagreement is caught, even though phase routing
+# still reads the Markdown line for AGREEING handoffs (T22-T24 above already
+# cover the agree-and-pass-through path with the updated shim).
+echo "QAJSON-D: handle_qa_phase fails closed on invalid/disagreeing JSON handoff"
+QAD_FIXTURE_DIR="/tmp/gaai-qa-handoff-tests-$$"
+rm -rf "$QAD_FIXTURE_DIR"; mkdir -p "$QAD_FIXTURE_DIR"
+export GAAI_WORKTREES_BASE="$QAD_FIXTURE_DIR"
+export CLAUDE_MODEL_PRIMARY="claude-sonnet-4-6"
+export GAAI_WORKSPACE_ID="test-workspace"
+export GAAI_ORG_ID="test-org"
+cat >> "$FIXTURE" << 'YAML_QAD'
+- id: TST-QA-HANDOFF
+  status: in_progress
+  phase_status: implemented
+  delivery_pipeline: 3phase
+  impl_model: primary
+YAML_QAD
+QA_FIXTURE_DIR="$QAD_FIXTURE_DIR"
+make_qa_worktree "TST-QA-HANDOFF"
+QAD_SHIM_DIR="$QAD_FIXTURE_DIR/shims"
+mkdir -p "$QAD_SHIM_DIR"
+QAD_OLD_PATH="$PATH"
+QAD_OLD_PROJECT_DIR="$PROJECT_DIR"
+export PATH="$QAD_SHIM_DIR:$PATH"
+export PROJECT_DIR="$SCRIPT_DIR/../../../.."
+
+# Markdown PASS, JSON sidecar absent entirely.
+cat > "$QAD_SHIM_DIR/claude" << 'QAD_MISSING_JSON_EOF'
+#!/usr/bin/env bash
+if [[ -n "${GAAI_QA_REPORT_PATH:-}" ]]; then
+  printf '## AC1\npass\n\n## Verdict: PASS\n' > "${GAAI_QA_REPORT_PATH}"
+fi
+exit 0
+QAD_MISSING_JSON_EOF
+chmod +x "$QAD_SHIM_DIR/claude"
+"$SCHEDULER" --set-phase-status "TST-QA-HANDOFF" implemented "$FIXTURE" 2>/dev/null || true
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-qad1"
+if handle_qa_phase "TST-QA-HANDOFF" "$TRACE" 2>/dev/null; then
+  fail "QAJSON-D1a: expected non-zero when JSON sidecar absent despite Markdown PASS"
+else
+  qad_ps=$(get_phase_status "TST-QA-HANDOFF")
+  if [[ "$qad_ps" == "failed" ]]; then
+    pass "QAJSON-D1a: JSON-absent-despite-Markdown-PASS -> story 'failed' (gate overrides Markdown)"
+  else
+    fail "QAJSON-D1a: expected 'failed', got '$qad_ps'"
+  fi
+  if grep -q '"fallback_reason":"QA_HANDOFF_INVALID"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "QAJSON-D1b: routing.jsonl has QA_HANDOFF_INVALID fallback_reason"
+  else
+    fail "QAJSON-D1b: routing.jsonl missing QA_HANDOFF_INVALID — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+fi
+
+# Markdown PASS, JSON sidecar valid but claims FAIL (disagreement).
+cat > "$QAD_SHIM_DIR/claude" << 'QAD_DISAGREE_EOF'
+#!/usr/bin/env bash
+if [[ -n "${GAAI_QA_VERDICT_PATH:-}" ]]; then
+  printf '{"schema_version":1,"story_id":"%s","evaluated_as_of":"2026-08-07T00:00:00Z","state_of_the_art_conformance":"FAIL","plan_conformance":"FAIL","changed_surface_inventory":[],"findings":[],"evidence":[],"verdict":"FAIL","remediation_route":"impl","replan_required":false,"report_path":"qa-reports/%s.qa-report.md"}' "${GAAI_STORY_ID:-}" "${GAAI_STORY_ID:-}" > "${GAAI_QA_VERDICT_PATH}"
+fi
+if [[ -n "${GAAI_QA_REPORT_PATH:-}" ]]; then
+  printf '## AC1\npass\n\n## Verdict: PASS\n' > "${GAAI_QA_REPORT_PATH}"
+fi
+exit 0
+QAD_DISAGREE_EOF
+chmod +x "$QAD_SHIM_DIR/claude"
+"$SCHEDULER" --set-phase-status "TST-QA-HANDOFF" implemented "$FIXTURE" 2>/dev/null || true
+rm -f "$QAD_FIXTURE_DIR/TST-QA-HANDOFF-workspace/.gaai/project/contexts/artefacts/qa-reports/TST-QA-HANDOFF.qa-report.md"
+rm -f "$QAD_FIXTURE_DIR/TST-QA-HANDOFF-workspace/.gaai/project/contexts/artefacts/qa-reports/TST-QA-HANDOFF.qa-verdict.json"
+> "$ROUTING_LOG"
+TRACE="test-trace-$(date +%s)-qad2"
+if handle_qa_phase "TST-QA-HANDOFF" "$TRACE" 2>/dev/null; then
+  fail "QAJSON-D2a: expected non-zero on Markdown/JSON verdict disagreement"
+else
+  qad_ps=$(get_phase_status "TST-QA-HANDOFF")
+  if [[ "$qad_ps" == "failed" ]]; then
+    pass "QAJSON-D2a: Markdown=PASS vs JSON=FAIL disagreement -> story 'failed'"
+  else
+    fail "QAJSON-D2a: expected 'failed', got '$qad_ps'"
+  fi
+  if grep -q '"fallback_reason":"QA_HANDOFF_INVALID"' "$ROUTING_LOG" 2>/dev/null; then
+    pass "QAJSON-D2b: routing.jsonl has QA_HANDOFF_INVALID fallback_reason"
+  else
+    fail "QAJSON-D2b: routing.jsonl missing QA_HANDOFF_INVALID — content: $(head -3 "$ROUTING_LOG" 2>/dev/null)"
+  fi
+fi
+
+export PATH="$QAD_OLD_PATH"
+export PROJECT_DIR="$QAD_OLD_PROJECT_DIR"
+unset GAAI_WORKTREES_BASE CLAUDE_MODEL_PRIMARY GAAI_WORKSPACE_ID GAAI_ORG_ID
+rm -rf "$QAD_FIXTURE_DIR"
+
+# ── QAJSON-DERIVE: _derive_qa_expected_surfaces against a realistic ────────
+# Story "## File Inventory" + PLAN "## Implementation Sequence" table whose
+# Action/Checkpoint columns carry inline shell/CLI examples with slash-
+# bearing backticked spans (the normal shape of a prepare-execution-plan
+# table — see this very Story's own plan). Proves the derivation extracts
+# only the leading-backtick Story path and the PLAN table's "Files" column,
+# never prose fragments from other columns/sections, and that an escaped
+# pipe ("\|") inside a cell does not shift the "Files" column index.
+echo "QAJSON-DERIVE: expected-surface derivation ignores non-Files prose"
+QDER_DIR="/tmp/gaai-qa-derive-tests-$$"
+rm -rf "$QDER_DIR"; mkdir -p "$QDER_DIR"
+
+QDER_STORY="$QDER_DIR/story.md"
+cat > "$QDER_STORY" << 'QDER_STORY_EOF'
+## File Inventory
+
+- `.gaai/core/real/story-surface.ts` — implements X; see also `bash path/to/example.sh` for a
+  reference invocation and `docs/notes/other.md` for background. `(impl)`
+
+## Out of Scope
+QDER_STORY_EOF
+
+QDER_PLAN="$QDER_DIR/plan.md"
+cat > "$QDER_PLAN" << 'QDER_PLAN_EOF'
+## Implementation Sequence
+
+| Step | Action | Files | Checkpoint |
+|------|--------|-------|------------|
+| 1 | Run `node scripts/tool.mjs run --flag` then inspect `logs/tool.log` for errors | `.gaai/core/real/plan-surface.ts` | Verify via `bash tests/check.sh` and confirm `reports/out.json` exists |
+| 2 | Update the enum `A\|B\|C` in prose (escaped pipe must not shift columns) | `.gaai/core/real/plan-surface2.ts` | `node --check .gaai/core/real/plan-surface2.ts` passes |
+
+## Edge Cases
+QDER_PLAN_EOF
+
+QDER_OUT="$QDER_DIR/expected-surfaces.json"
+_derive_qa_expected_surfaces "$QDER_STORY" "$QDER_PLAN" "$QDER_DIR" "HEAD" "$QDER_OUT"
+
+QDER_RESULT=$(cat "$QDER_OUT" 2>/dev/null || echo '[]')
+QDER_CHECK=$(node -e '
+  const fs = require("fs");
+  const got = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const expected = [
+    ".gaai/core/real/story-surface.ts",
+    ".gaai/core/real/plan-surface.ts",
+    ".gaai/core/real/plan-surface2.ts"
+  ];
+  const forbidden = [
+    "path/to/example.sh", "docs/notes/other.md",
+    "scripts/tool.mjs", "logs/tool.log",
+    "tests/check.sh", "reports/out.json"
+  ];
+  const missing = expected.filter(e => !got.includes(e));
+  const leaked = forbidden.filter(f => got.includes(f));
+  const extra = got.filter(g => !expected.includes(g));
+  if (missing.length === 0 && leaked.length === 0 && extra.length === 0) {
+    console.log("OK");
+  } else {
+    console.log("MISSING=" + JSON.stringify(missing) + " LEAKED=" + JSON.stringify(leaked) + " EXTRA=" + JSON.stringify(extra) + " GOT=" + JSON.stringify(got));
+  }
+' "$QDER_OUT")
+
+if [[ "$QDER_CHECK" == "OK" ]]; then
+  pass "QAJSON-DERIVE: only real Files/leading-bullet surfaces derived, no Action/Checkpoint prose leaked"
+else
+  fail "QAJSON-DERIVE: $QDER_CHECK"
+fi
+rm -rf "$QDER_DIR"
 
 # ── Summary ───────────────────────────────────────────────────
 echo ""
