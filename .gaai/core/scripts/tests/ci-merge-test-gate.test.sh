@@ -40,6 +40,14 @@
 #     lookup is unavailable; it can never be downgraded to local fallback.
 # T11/T12 (cancellation): same-head cancellation is non-decisive and falls back
 #     on timeout, while cancellation caused by a superseding head blocks as moved.
+# T13 (materialize sub-budget + default, AC1+AC5+AC6): GAAI_CI_TEST_GATE_TIMEOUT_SEC
+#     left unset (exercises the 2700s default) with a permanently-"missing" run —
+#     the much shorter materialize sub-budget fires first, returning
+#     "unavailable:no_run" well inside it rather than waiting out the full budget.
+# T14 (timeout classification, AC3): a run observed in_progress on every poll —
+#     materialize sub-budget is satisfied immediately, the full (short, pinned)
+#     budget then expires and reports "unavailable:timeout" with the
+#     still-in-progress detail, distinct from T13's no_run detail.
 #
 # Run: bash .gaai/core/scripts/tests/ci-merge-test-gate.test.sh
 # Exit 0 = all pass.
@@ -206,9 +214,11 @@ OUT_T2="$SANDBOX/T2.out.log"
 : > "$GH_CALL_LOG"
 set_gh_run_lines "completed"$'\t'"success"$'\t'"$HEAD_T2"
 export GH_PR_HEAD_SHA="$HEAD_T2"
+export GAAI_CI_TEST_GATE_TIMEOUT_SEC=5
 unset GH_API_EXIT GH_API_HANG_SEC
 _run_merge_test_gate "T2" "$REPO_T2" "$QA_T2" "$PR_URL" "$HEAD_T2" > "$OUT_T2" 2>&1
 RC_T2=$?
+unset GAAI_CI_TEST_GATE_TIMEOUT_SEC
 
 [[ "$RC_T2" -eq 0 ]] && pass "T2: returns 0 (CI pass)" || fail "T2: expected rc=0, got ${RC_T2}"
 grep -q "gh api.*head_sha=${HEAD_T2}" "$GH_CALL_LOG" \
@@ -235,9 +245,11 @@ OUT_T3="$SANDBOX/T3.out.log"
 : > "$NOTIFY_CALLS_LOG"
 set_gh_run_lines "completed"$'\t'"failure"$'\t'"$HEAD_T3"
 export GH_PR_HEAD_SHA="$HEAD_T3"
+export GAAI_CI_TEST_GATE_TIMEOUT_SEC=5
 unset GH_API_EXIT GH_API_HANG_SEC
 _run_merge_test_gate "T3" "$REPO_T3" "$QA_T3" "$PR_URL" "$HEAD_T3" > "$OUT_T3" 2>&1
 RC_T3=$?
+unset GAAI_CI_TEST_GATE_TIMEOUT_SEC
 
 [[ "$RC_T3" -eq 1 ]] && pass "T3: returns 1 (CI fail blocks)" || fail "T3: expected rc=1, got ${RC_T3}"
 grep -q -- "--set-phase-status T3 failed" "$SCHEDULER_CALLS_LOG" \
@@ -357,10 +369,12 @@ OUT_T7="$SANDBOX/T7.out.log"
 : > "$NOTIFY_CALLS_LOG"
 set_gh_run_lines "completed"$'\t'"success"$'\t'"$HEAD_T7"
 export GH_PR_HEAD_SHA="$(printf '%040d' 1)"
+export GAAI_CI_TEST_GATE_TIMEOUT_SEC=5
 unset GH_API_EXIT GH_API_HANG_SEC
 
 _run_merge_test_gate "T7" "$REPO_T7" "$QA_T7" "$PR_URL" "$HEAD_T7" > "$OUT_T7" 2>&1
 RC_T7=$?
+unset GAAI_CI_TEST_GATE_TIMEOUT_SEC
 
 [[ "$RC_T7" -eq 1 ]] && pass "T7: moved PR head blocks" || fail "T7: expected rc=1, got ${RC_T7}"
 grep -q "test_gate_head_moved" "$NOTIFY_CALLS_LOG" \
@@ -504,9 +518,11 @@ OUT_T12="$SANDBOX/T12.out.log"
 : > "$NOTIFY_CALLS_LOG"
 set_gh_run_lines "completed"$'\t'"cancelled"$'\t'"$HEAD_T12"
 export GH_PR_HEAD_SHA="$(printf '%040d' 2)"
+export GAAI_CI_TEST_GATE_TIMEOUT_SEC=5
 
 _run_merge_test_gate "T12" "$REPO_T12" "$QA_T12" "$PR_URL" "$HEAD_T12" > "$OUT_T12" 2>&1
 RC_T12=$?
+unset GAAI_CI_TEST_GATE_TIMEOUT_SEC
 
 [[ "$RC_T12" -eq 1 ]] \
   && pass "T12: superseding push blocks the cancelled old head" \
@@ -516,6 +532,70 @@ grep -q "test_gate_head_moved" "$NOTIFY_CALLS_LOG" \
   || fail "T12: moved-head escalation reason missing"
 
 unset GH_PR_HEAD_SHA
+
+# ── T13: materialize sub-budget fast-fail + unset-default resolution (AC1+AC5+AC6) ─
+echo "--- T13: no run ever materialises, default budget unset ---"
+REPO_T13="$(setup_repo T13 "workers/fake-pkg/file.txt")"
+HEAD_T13=$(git -C "$REPO_T13" rev-parse HEAD)
+QA_T13="$SANDBOX/T13.qa-report.md"
+OUT_T13="$SANDBOX/T13.out.log"
+: > "$GH_CALL_LOG"
+set_gh_run_lines "missing"
+unset GAAI_CI_TEST_GATE_TIMEOUT_SEC
+export GAAI_CI_TEST_GATE_MATERIALIZE_SEC=1
+export GAAI_CI_TEST_GATE_POLL_INTERVAL_SEC=1
+export GAAI_CI_TEST_GATE_API_TIMEOUT_SEC=1
+unset GH_API_EXIT GH_API_HANG_SEC
+
+_t13_start=$(date +%s)
+_run_merge_test_gate "T13" "$REPO_T13" "$QA_T13" "$PR_URL" "$HEAD_T13" > "$OUT_T13" 2>&1
+RC_T13=$?
+_t13_end=$(date +%s)
+_t13_elapsed=$(( _t13_end - _t13_start ))
+
+[[ "$RC_T13" -eq 0 ]] && pass "T13: returns 0 (local fallback PASS)" || fail "T13: expected rc=0, got ${RC_T13}"
+[[ "$_t13_elapsed" -lt 10 ]] \
+  && pass "T13: no_run resolved well inside the materialize sub-budget (${_t13_elapsed}s < 10s)" \
+  || fail "T13: took ${_t13_elapsed}s — materialize sub-budget did not fast-fail"
+grep -q "unavailable (no_run)" "$OUT_T13" \
+  && pass "T13: fallback reason=no_run (distinct token, AC6)" \
+  || fail "T13: expected reason=no_run in output"
+grep -q "no CI run observed for this SHA" "$OUT_T13" \
+  && pass "T13: no_run detail present (AC3)" \
+  || fail "T13: no_run detail missing from output"
+grep -q '/2700s)' "$OUT_T13" \
+  && pass "T13: progress line reflects the unset-default full budget of 2700s (AC1+AC5)" \
+  || fail "T13: progress line does not show the 2700s default"
+
+unset GAAI_CI_TEST_GATE_MATERIALIZE_SEC GAAI_CI_TEST_GATE_POLL_INTERVAL_SEC GAAI_CI_TEST_GATE_API_TIMEOUT_SEC
+
+# ── T14: run observed but never decisive → timeout classification (AC3) ─────
+echo "--- T14: run observed in_progress throughout, budget exhausts ---"
+REPO_T14="$(setup_repo T14 "workers/fake-pkg/file.txt")"
+HEAD_T14=$(git -C "$REPO_T14" rev-parse HEAD)
+QA_T14="$SANDBOX/T14.qa-report.md"
+OUT_T14="$SANDBOX/T14.out.log"
+: > "$GH_CALL_LOG"
+set_gh_run_lines "in_progress"$'\t'"pending"$'\t'"$HEAD_T14"
+export GAAI_CI_TEST_GATE_TIMEOUT_SEC=2
+export GAAI_CI_TEST_GATE_MATERIALIZE_SEC=1
+export GAAI_CI_TEST_GATE_POLL_INTERVAL_SEC=1
+export GAAI_CI_TEST_GATE_API_TIMEOUT_SEC=1
+unset GH_API_EXIT GH_API_HANG_SEC
+
+_run_merge_test_gate "T14" "$REPO_T14" "$QA_T14" "$PR_URL" "$HEAD_T14" > "$OUT_T14" 2>&1
+RC_T14=$?
+
+[[ "$RC_T14" -eq 0 ]] && pass "T14: returns 0 (local fallback PASS)" || fail "T14: expected rc=0, got ${RC_T14}"
+grep -q "unavailable (timeout)" "$OUT_T14" \
+  && pass "T14: fallback reason=timeout (verdict shape unchanged)" \
+  || fail "T14: expected reason=timeout in output"
+grep -q "CI run observed but still in progress at cutoff" "$OUT_T14" \
+  && pass "T14: timeout detail present (AC3's second class)" \
+  || fail "T14: timeout detail missing from output"
+
+unset GAAI_CI_TEST_GATE_TIMEOUT_SEC GAAI_CI_TEST_GATE_MATERIALIZE_SEC \
+  GAAI_CI_TEST_GATE_POLL_INTERVAL_SEC GAAI_CI_TEST_GATE_API_TIMEOUT_SEC
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""

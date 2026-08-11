@@ -465,6 +465,8 @@ do_start() {
     [[ -n "${GAAI_CODEX_IGNORE_USER_CONFIG:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_IGNORE_USER_CONFIG=${GAAI_CODEX_IGNORE_USER_CONFIG}")
     [[ -n "${GAAI_DAEMON_HOME:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_HOME=${GAAI_DAEMON_HOME}")
     [[ -n "${GAAI_REPO_ROOT:-}" ]] && tmux_env_args+=(-e "GAAI_REPO_ROOT=${GAAI_REPO_ROOT}")
+    [[ -n "${GAAI_CI_TEST_GATE_TIMEOUT_SEC:-}" ]] && tmux_env_args+=(-e "GAAI_CI_TEST_GATE_TIMEOUT_SEC=${GAAI_CI_TEST_GATE_TIMEOUT_SEC}")
+    [[ -n "${GAAI_CI_TEST_GATE_MATERIALIZE_SEC:-}" ]] && tmux_env_args+=(-e "GAAI_CI_TEST_GATE_MATERIALIZE_SEC=${GAAI_CI_TEST_GATE_MATERIALIZE_SEC}")
     tmux new-session -d -s gaai-daemon ${tmux_env_args[@]+"${tmux_env_args[@]}"} "$daemon_cmd"
 
     # Give it a moment to start, then grab the PID
