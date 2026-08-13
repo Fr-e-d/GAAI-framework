@@ -205,13 +205,22 @@ _DISPATCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   source "${_DISPATCH_SCRIPT_DIR}/lib/worktree-integrity.sh" 2>/dev/null && \
   _WORKTREE_INTEGRITY_SH_SOURCED=1
 
-# ── Deterministic test gate helper ──────────────────────────────
-# Sourced here so dispatch's handle_commit_phase can gate the merge step
-# (post-push, post-PR-create) on the CI or local differential test gate.
-# Same optional-source contract as worktree-integrity.
-[[ -z "${_TEST_GATE_SH_SOURCED:-}" ]] && \
-  source "${_DISPATCH_SCRIPT_DIR}/lib/test-gate.sh" 2>/dev/null && \
+# ── Deterministic test gate + hosted authority controller ──────
+# The merge controller is a required trust dependency. A missing or invalid
+# source must stop dispatcher initialization; commit handling also checks the
+# function at the point of use to fail closed if runtime state is altered.
+if [[ -z "${_TEST_GATE_SH_SOURCED:-}" ]]; then
+  if ! source "${_DISPATCH_SCRIPT_DIR}/lib/test-gate.sh"; then
+    echo "[ERROR] dispatcher initialization: hosted merge authority controller could not be loaded" >&2
+    return 1 2>/dev/null || exit 1
+  fi
   _TEST_GATE_SH_SOURCED=1
+fi
+if ! declare -F _run_merge_test_gate >/dev/null 2>&1 \
+    || ! declare -F _test_gate_recheck_pr_tuple >/dev/null 2>&1; then
+  echo "[ERROR] dispatcher initialization: hosted merge authority controller is incomplete" >&2
+  return 1 2>/dev/null || exit 1
+fi
 
 # ── Active-spawn marker directory (AC1) ──────────────────────────────────
 # LOCK_DIR is set by delivery-daemon.sh before sourcing this library.
@@ -2420,34 +2429,105 @@ _auto_resolve_push() {
 # the atomic server-side precondition; the follow-up read verifies the durable
 # outcome before the daemon records success.
 #
+# Read durable PR state before any live-tuple recheck. This is intentionally
+# separate from the REST authority read: GitHub can expose a successful merge
+# through one API before the other, and an already-merged exact head is a
+# successful terminal state rather than a reason to reissue the mutation.
+_merge_exact_pr_head_observe_durable() {
+  local story_id="$1" pr_number="$2" expected_head_sha="$3"
+  local observed observed_state observed_head
+  observed=$(gh pr view "$pr_number" --repo "$TEST_GATE_AUTH_REPOSITORY_NAME" \
+    --json state,headRefOid \
+    --jq '[.state,.headRefOid] | @tsv' 2>/dev/null || echo "")
+  observed_state=""; observed_head=""
+  IFS=$'\t' read -r observed_state observed_head <<<"$observed"
+  if [[ "$observed_head" =~ ^[0-9a-fA-F]{40}$ && "$observed_head" != "$expected_head_sha" ]]; then
+    TEST_GATE_FINAL_OUTCOME="blocked:head_changed"
+    echo "[ERROR] ${story_id} exact-head merge: PR head moved (${observed_head}, expected ${expected_head_sha})"
+    return 2
+  fi
+  if [[ "$observed_state" == "MERGED" && "$observed_head" == "$expected_head_sha" ]]; then
+    TEST_GATE_FINAL_OUTCOME="merged"
+    return 0
+  fi
+  return 1
+}
+
 # Returns: 0 = exact head is MERGED, 1 = unavailable/rejected after retries,
-#          2 = PR head moved away from expected_head_sha.
-_merge_exact_pr_head() {
+#          2 = PR head moved, 3 = base moved, 4 = another fail-closed recheck.
+_merge_exact_pr_head_unlocked() {
   local story_id="$1" pr_url="$2" pr_number="$3" expected_head_sha="$4"
+  TEST_GATE_FINAL_OUTCOME="blocked:github_unavailable"
   if [[ ! "$pr_number" =~ ^[0-9]+$ || ! "$expected_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
     echo "[ERROR] ${story_id} exact-head merge: invalid PR number or head SHA"
     return 1
   fi
+  if [[ "$pr_number" != "${TEST_GATE_AUTH_PR_NUMBER:-}" \
+        || "$expected_head_sha" != "${TEST_GATE_AUTH_HEAD_SHA:-}" ]]; then
+    TEST_GATE_FINAL_OUTCOME="blocked:pr_tuple_mismatch"
+    echo "[ERROR] ${story_id} exact-head merge: authorized PR/head binding does not match mutation request"
+    return 4
+  fi
 
-  local merge_attempt=0 merge_max=12 merge_out merge_rc
-  local observed observed_state observed_head
+  local merge_attempt=0 merge_max merge_retry_sleep merge_out merge_rc durable_rc
+  local final_outcome final_reason final_readiness final_rc
+  merge_max=$(_test_gate_positive_int \
+    "${GAAI_MERGE_AUTHORITY_MERGE_RETRIES:-12}" 12 GAAI_MERGE_AUTHORITY_MERGE_RETRIES)
+  merge_retry_sleep="${GAAI_MERGE_AUTHORITY_RETRY_SLEEP_SEC:-5}"
+  if [[ ! "$merge_retry_sleep" =~ ^[0-9]+$ ]]; then
+    echo "[WARN] invalid GAAI_MERGE_AUTHORITY_RETRY_SLEEP_SEC=${merge_retry_sleep}; using 5" >&2
+    merge_retry_sleep=5
+  fi
   while [[ "$merge_attempt" -lt "$merge_max" ]]; do
     merge_attempt=$(( merge_attempt + 1 ))
-    merge_out=$(gh api --method PUT "repos/{owner}/{repo}/pulls/${pr_number}/merge" \
+
+    # A previous PUT may already have succeeded even while REST still reports
+    # the PR closed rather than mergeable. Confirm durable success first so a
+    # propagation lag cannot convert a completed merge into a failed Story.
+    if _merge_exact_pr_head_observe_durable "$story_id" "$pr_number" "$expected_head_sha"; then
+      return 0
+    else
+      durable_rc=$?
+      [[ "$durable_rc" -eq 2 ]] && return 2
+    fi
+
+    final_outcome=$(_test_gate_recheck_pr_tuple \
+      "$TEST_GATE_AUTH_PR_NUMBER" "$TEST_GATE_AUTH_REPOSITORY_ID" \
+      "$TEST_GATE_AUTH_REPOSITORY_NAME" "$TEST_GATE_AUTH_BASE_REF" \
+      "$TEST_GATE_AUTH_BASE_SHA" "$TEST_GATE_AUTH_HEAD_REF" "$expected_head_sha" \
+      "$TEST_GATE_AUTH_WORKFLOW_ID" "$TEST_GATE_AUTH_RUN_ID" \
+      "$TEST_GATE_AUTH_RUN_NUMBER" "$TEST_GATE_AUTH_RUN_ATTEMPT" \
+      "$TEST_GATE_AUTH_JOB_ID")
+    final_rc=$?
+    if [[ "$final_rc" -ne 0 ]]; then
+      final_reason="${final_outcome%%$'\t'*}"
+      final_readiness=""
+      IFS=$'\t' read -r _ final_readiness <<<"$final_outcome"
+      TEST_GATE_FINAL_OUTCOME="$final_reason"
+      if [[ "$final_reason" == "blocked:pr_not_merge_ready" \
+            && "$final_readiness" == "pending" \
+            && "$merge_attempt" -lt "$merge_max" ]]; then
+        echo "[WARN] ${story_id} merge authority final recheck: mergeability pending (${merge_attempt}/${merge_max})"
+        sleep "$merge_retry_sleep"
+        continue
+      fi
+      echo "[ERROR] ${story_id} merge authority final recheck: ${final_reason}"
+      case "$final_reason" in
+        blocked:head_changed) return 2 ;;
+        blocked:stale_base) return 3 ;;
+        *) return 4 ;;
+      esac
+    fi
+    merge_out=$(gh api --method PUT \
+      "repos/${TEST_GATE_AUTH_REPOSITORY_NAME}/pulls/${pr_number}/merge" \
       -f merge_method=squash -f sha="$expected_head_sha" --jq '.merged' 2>&1)
     merge_rc=$?
 
-    observed=$(gh pr view "$pr_url" --json state,headRefOid \
-      --jq '[.state,.headRefOid] | @tsv' 2>/dev/null || echo "")
-    observed_state=""; observed_head=""
-    IFS=$'\t' read -r observed_state observed_head <<< "$observed"
-
-    if [[ "$observed_head" =~ ^[0-9a-fA-F]{40}$ && "$observed_head" != "$expected_head_sha" ]]; then
-      echo "[ERROR] ${story_id} exact-head merge: PR head moved (${observed_head}, expected ${expected_head_sha})"
-      return 2
-    fi
-    if [[ "$observed_state" == "MERGED" && "$observed_head" == "$expected_head_sha" ]]; then
+    if _merge_exact_pr_head_observe_durable "$story_id" "$pr_number" "$expected_head_sha"; then
       return 0
+    else
+      durable_rc=$?
+      [[ "$durable_rc" -eq 2 ]] && return 2
     fi
 
     # A success response without a verified MERGED state is not accepted. In
@@ -2458,7 +2538,7 @@ _merge_exact_pr_head() {
     else
       echo "[WARN] ${story_id} exact-head merge attempt ${merge_attempt}/${merge_max} rejected: ${merge_out: -200}"
     fi
-    [[ "$merge_attempt" -lt "$merge_max" ]] && sleep 5
+    [[ "$merge_attempt" -lt "$merge_max" ]] && sleep "$merge_retry_sleep"
   done
 
   # Opt-in trust-arc escape hatch for protected branches. `--admin` bypasses a
@@ -2466,23 +2546,222 @@ _merge_exact_pr_head() {
   # applies before success is returned.
   if [[ "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-false}" == "true" ]]; then
     echo "[INFO] ${story_id} exact-head merge: attempting admin fallback"
-    merge_out=$(gh pr merge --admin --squash --match-head-commit \
-      "$expected_head_sha" "$pr_url" 2>&1)
-    merge_rc=$?
-    observed=$(gh pr view "$pr_url" --json state,headRefOid \
-      --jq '[.state,.headRefOid] | @tsv' 2>/dev/null || echo "")
-    observed_state=""; observed_head=""
-    IFS=$'\t' read -r observed_state observed_head <<< "$observed"
-    if [[ "$observed_head" =~ ^[0-9a-fA-F]{40}$ && "$observed_head" != "$expected_head_sha" ]]; then
-      return 2
-    fi
-    if [[ "$observed_state" == "MERGED" && "$observed_head" == "$expected_head_sha" ]]; then
+    if _merge_exact_pr_head_observe_durable "$story_id" "$pr_number" "$expected_head_sha"; then
       return 0
+    else
+      durable_rc=$?
+      [[ "$durable_rc" -eq 2 ]] && return 2
     fi
-    echo "[WARN] ${story_id} exact-head merge: admin fallback failed (rc=${merge_rc}): ${merge_out: -200}"
+    final_outcome=$(_test_gate_recheck_pr_tuple \
+      "$TEST_GATE_AUTH_PR_NUMBER" "$TEST_GATE_AUTH_REPOSITORY_ID" \
+      "$TEST_GATE_AUTH_REPOSITORY_NAME" "$TEST_GATE_AUTH_BASE_REF" \
+      "$TEST_GATE_AUTH_BASE_SHA" "$TEST_GATE_AUTH_HEAD_REF" "$expected_head_sha" \
+      "$TEST_GATE_AUTH_WORKFLOW_ID" "$TEST_GATE_AUTH_RUN_ID" \
+      "$TEST_GATE_AUTH_RUN_NUMBER" "$TEST_GATE_AUTH_RUN_ATTEMPT" \
+      "$TEST_GATE_AUTH_JOB_ID")
+    final_rc=$?
+    if [[ "$final_rc" -ne 0 ]]; then
+      final_reason="${final_outcome%%$'\t'*}"
+      TEST_GATE_FINAL_OUTCOME="$final_reason"
+      echo "[ERROR] ${story_id} merge authority admin final recheck: ${final_reason}"
+      case "$final_reason" in
+        blocked:head_changed) return 2 ;;
+        blocked:stale_base) return 3 ;;
+        *) return 4 ;;
+      esac
+    fi
+    merge_out=$(gh pr merge --admin --squash --match-head-commit \
+      "$expected_head_sha" "$pr_number" --repo "$TEST_GATE_AUTH_REPOSITORY_NAME" 2>&1)
+    merge_rc=$?
+    if [[ "$merge_rc" -ne 0 ]]; then
+      echo "[WARN] ${story_id} exact-head merge: admin fallback rejected (rc=${merge_rc}): ${merge_out: -200}"
+    fi
+    merge_attempt=0
+    while [[ "$merge_attempt" -lt "$merge_max" ]]; do
+      merge_attempt=$(( merge_attempt + 1 ))
+      if _merge_exact_pr_head_observe_durable "$story_id" "$pr_number" "$expected_head_sha"; then
+        return 0
+      else
+        durable_rc=$?
+        [[ "$durable_rc" -eq 2 ]] && return 2
+      fi
+      [[ "$merge_attempt" -lt "$merge_max" ]] && sleep "$merge_retry_sleep"
+    done
+    echo "[WARN] ${story_id} exact-head merge: admin fallback did not produce a durable exact-head merge"
   fi
 
+  TEST_GATE_FINAL_OUTCOME="AUTO_MERGE_FAILED"
   return 1
+}
+
+# Serialize the final live tuple recheck and exact-head mutation. The base SHA
+# cannot be an atomic merge-endpoint precondition on GitHub Free, so a human
+# base update in the remaining recheck-to-mutation interval stays an explicit
+# residual; daemon-originated merges cannot race one another.
+_merge_exact_pr_head() (
+  local story_id="$1" pr_url="$2" pr_number="$3" expected_head_sha="$4"
+  local lock_path="${LOCK_DIR}/.merge-authority.lock" owner_path lock_timeout lock_poll_interval
+  local started_at now owner owner_token merge_rc lock_kind="" lock_process_pid=""
+  local pid_probe="" pid_probe_child="" lock_cleanup_armed=false
+  owner_path="${lock_path}.owner"
+  TEST_GATE_FINAL_OUTCOME="blocked:github_unavailable"
+  lock_timeout=$(_test_gate_positive_int \
+    "${GAAI_MERGE_AUTHORITY_LOCK_TIMEOUT_SEC:-300}" 300 GAAI_MERGE_AUTHORITY_LOCK_TIMEOUT_SEC)
+  lock_process_pid="${BASHPID:-}"
+  if [[ ! "$lock_process_pid" =~ ^[0-9]+$ ]]; then
+    # Bash 3.2 does not expose BASHPID and keeps $$ equal to the parent shell
+    # inside `( )`. A command substitution would add another transient fork,
+    # so a directly-backgrounded child writes its PPID to a private file.
+    # That PPID is the actual lock-holder process shlock must track/reclaim.
+    pid_probe=$(mktemp "${TMPDIR:-/tmp}/gaai-merge-lock-pid.XXXXXX") || {
+      echo "[ERROR] ${story_id} merge authority: lock-holder PID probe is unavailable"
+      printf 'MERGE_AUTHORITY_OUTCOME=%s\n' "$TEST_GATE_FINAL_OUTCOME"
+      return 4
+    }
+    sh -c 'printf "%s\n" "$PPID" >"$1"' _ "$pid_probe" &
+    pid_probe_child=$!
+    wait "$pid_probe_child" 2>/dev/null || true
+    IFS= read -r lock_process_pid <"$pid_probe" || lock_process_pid=""
+    rm -f "$pid_probe"
+  fi
+  if [[ ! "$lock_process_pid" =~ ^[0-9]+$ ]]; then
+    echo "[ERROR] ${story_id} merge authority: lock-holder PID is unavailable"
+    printf 'MERGE_AUTHORITY_OUTCOME=%s\n' "$TEST_GATE_FINAL_OUTCOME"
+    return 4
+  fi
+  if ! kill -0 "$lock_process_pid" 2>/dev/null \
+      || [[ -n "$pid_probe_child" && "$lock_process_pid" == "$pid_probe_child" ]]; then
+    echo "[ERROR] ${story_id} merge authority: lock-holder PID is not the live holder"
+    printf 'MERGE_AUTHORITY_OUTCOME=%s\n' "$TEST_GATE_FINAL_OUTCOME"
+    return 4
+  fi
+  owner_token="${lock_process_pid}:${RANDOM}:${SECONDS}"
+  _merge_authority_lock_cleanup() {
+    [[ "$lock_cleanup_armed" == "true" ]] || return 0
+    # Disarm before releasing either lock representation. If a signal arrives
+    # after release and a successor acquires the same path, EXIT cleanup must
+    # never run a second time and delete the successor's lock.
+    lock_cleanup_armed=false
+    trap - EXIT
+    if [[ "$(cat "$owner_path" 2>/dev/null || true)" == "$owner_token" ]]; then
+      rm -f "$owner_path" 2>/dev/null || true
+    fi
+    if [[ "$lock_kind" == "flock" ]]; then
+      flock -u 9 2>/dev/null || true
+      exec 9>&-
+    elif [[ "$lock_kind" == "shlock" ]]; then
+      # shlock has no unlock operation. This process acquired the path and no
+      # peer can replace it while its live PID remains valid, so remove it on
+      # every non-SIGKILL exit without depending on platform lockfile format.
+      rm -f "$lock_path" 2>/dev/null || true
+    fi
+  }
+  trap '_merge_authority_lock_cleanup' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  # Prefer a kernel-owned advisory lock: it is acquired atomically and the OS
+  # releases it on normal exit, signal termination, or SIGKILL. `shlock` is the
+  # portable process-lock fallback and reclaims dead-PID locks atomically after
+  # its platform-defined lock-file freshness guard.
+  if command -v flock >/dev/null 2>&1; then
+    # Fixed fd 9 keeps this path compatible with Bash 3.2; the function runs
+    # in an isolated subshell, so it cannot clobber a caller-owned descriptor.
+    if ! exec 9>>"$lock_path"; then
+      echo "[ERROR] ${story_id} merge authority: merge lock file is unavailable"
+      printf 'MERGE_AUTHORITY_OUTCOME=%s\n' "$TEST_GATE_FINAL_OUTCOME"
+      return 4
+    fi
+    if ! flock -x -w "$lock_timeout" 9; then
+      owner=$(cat "$owner_path" 2>/dev/null || echo "unknown")
+      echo "[ERROR] ${story_id} merge authority: blocked:github_unavailable (merge lock timeout; owner=${owner})"
+      printf 'MERGE_AUTHORITY_OUTCOME=%s\n' "$TEST_GATE_FINAL_OUTCOME"
+      return 4
+    fi
+    lock_kind="flock"
+  elif command -v shlock >/dev/null 2>&1; then
+    lock_poll_interval=$(_test_gate_positive_int \
+      "${GAAI_MERGE_AUTHORITY_LOCK_POLL_SEC:-1}" 1 GAAI_MERGE_AUTHORITY_LOCK_POLL_SEC)
+    started_at=$(date +%s)
+    while ! shlock -p "$lock_process_pid" -f "$lock_path" 2>/dev/null; do
+      now=$(date +%s)
+      if (( now - started_at >= lock_timeout )); then
+        owner=$(head -1 "$lock_path" 2>/dev/null || echo "unknown")
+        echo "[ERROR] ${story_id} merge authority: blocked:github_unavailable (merge lock timeout; owner=${owner})"
+        printf 'MERGE_AUTHORITY_OUTCOME=%s\n' "$TEST_GATE_FINAL_OUTCOME"
+        return 4
+      fi
+      sleep "$lock_poll_interval"
+    done
+    lock_kind="shlock"
+  else
+    echo "[ERROR] ${story_id} merge authority: no supported atomic lock provider (flock or shlock)"
+    printf 'MERGE_AUTHORITY_OUTCOME=%s\n' "$TEST_GATE_FINAL_OUTCOME"
+    return 4
+  fi
+
+  lock_cleanup_armed=true
+
+  if ! printf '%s\n' "$owner_token" >"$owner_path"; then
+    echo "[ERROR] ${story_id} merge authority: could not publish merge lock owner"
+    printf 'MERGE_AUTHORITY_OUTCOME=%s\n' "$TEST_GATE_FINAL_OUTCOME"
+    return 4
+  fi
+  _merge_exact_pr_head_unlocked "$story_id" "$pr_url" "$pr_number" "$expected_head_sha"
+  merge_rc=$?
+  # Bash implementations differ on when an EXIT trap from a subshell-bodied
+  # function runs when that function is itself inside command substitution.
+  # Release synchronously on the normal path; retain the trap for signals and
+  # every early return above.
+  _merge_authority_lock_cleanup
+  printf 'MERGE_AUTHORITY_OUTCOME=%s\n' "$TEST_GATE_FINAL_OUTCOME"
+  return "$merge_rc"
+)
+
+# Preserve ordinary logs while returning the exact fail-closed reason from the
+# isolated lock holder to the commit-phase caller.
+_merge_exact_pr_head_capture() {
+  local merge_output merge_rc line found=false
+  MERGE_EXACT_OUTCOME="blocked:github_unavailable"
+  merge_output=$(_merge_exact_pr_head "$@")
+  merge_rc=$?
+  while IFS= read -r line; do
+    if [[ "$line" == MERGE_AUTHORITY_OUTCOME=* ]]; then
+      MERGE_EXACT_OUTCOME="${line#MERGE_AUTHORITY_OUTCOME=}"
+      found=true
+    elif [[ -n "$line" ]]; then
+      printf '%s\n' "$line"
+    fi
+  done <<<"$merge_output"
+  [[ "$found" == "true" ]] || MERGE_EXACT_OUTCOME="blocked:github_unavailable"
+  return "$merge_rc"
+}
+
+# Resolve the post-controller merge policy without side effects. Keeping this
+# separate makes the human-only Story override executable and testable before
+# any merge API can be reached.
+_resolve_auto_merge_policy() {
+  local story_auto_merge="$1" trailer_killswitch="$2" authority_human_required="${3:-false}"
+  if [[ "$authority_human_required" == "true" ]]; then
+    echo "false|trust_surface_changed"
+  elif [[ "$trailer_killswitch" == "true" ]]; then
+    echo "false|trailer_override"
+  elif [[ "$story_auto_merge" == "true" ]]; then
+    echo "true|null"
+  elif [[ "$story_auto_merge" == "false" ]]; then
+    echo "false|story_override"
+  else
+    local workspace_policy="${GAAI_AUTO_MERGE_POLICY:-staging_only}"
+    if [[ "$workspace_policy" == "on" ]]; then
+      echo "true|null"
+    elif [[ "$workspace_policy" == "staging_only" && "${TARGET_BRANCH:-staging}" == "staging" ]]; then
+      echo "true|null"
+    elif [[ "$workspace_policy" == "staging_only" ]]; then
+      echo "false|branch_excluded"
+    else
+      echo "false|policy_off"
+    fi
+  fi
 }
 
 # ── Autonomous post-delivery triage hook (AC2, AC3, AC4, AC5) ────────────────
@@ -3091,14 +3370,34 @@ ${qa_snippet}"
     fi
   fi
 
-  # ── CI-delegated merge test gate, local fallback ──────────────────────────
-  if declare -f _run_merge_test_gate >/dev/null 2>&1; then
-    if ! _run_merge_test_gate "$story_id" "$worktree_path" "$qa_report_path" "$pr_url" "$pushed_head_sha"; then
-      echo "[ERROR] ${story_id} handle_commit_phase: merge test gate blocked commit [class=TEST_GATE_BLOCKED]"
-      _emit_commit_routing_record "$story_id" "$trace_id" "error" "TEST_GATE_BLOCKED" "0" "$pr_url" "false"
-      return 1
-    fi
+  # ── Base-held current hosted authority (controller-first, fail closed) ────
+  local authority_human_required=false commit_outcome="null"
+  if ! declare -F _run_merge_test_gate >/dev/null 2>&1; then
+    TEST_GATE_OUTCOME="blocked:github_unavailable"
+    echo "[ERROR] ${story_id} handle_commit_phase: hosted merge authority controller is unavailable [class=TEST_GATE_BLOCKED]"
+    declare -F notify_escalation_inline >/dev/null 2>&1 && \
+      notify_escalation_inline "$story_id" "$TEST_GATE_OUTCOME" "Hosted merge authority controller unavailable for ${pr_url}"
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "$TEST_GATE_OUTCOME" "0" "$pr_url" "false"
+    return 1
   fi
+  local gate_rc=0
+  _run_merge_test_gate "$story_id" "$worktree_path" "$qa_report_path" "$pr_url" "$pushed_head_sha" || gate_rc=$?
+  if [[ "$gate_rc" -eq 2 ]]; then
+    authority_human_required=true
+    commit_outcome="$TEST_GATE_OUTCOME"
+    declare -F notify_escalation_inline >/dev/null 2>&1 && \
+      notify_escalation_inline "$story_id" "$TEST_GATE_OUTCOME" "Human review required for ${pr_url}"
+  elif [[ "$gate_rc" -ne 0 ]]; then
+    # Preserve the pre-cutover commit-phase lifecycle: a hosted observation
+    # block stops this wrapper with the exact reason, but does not convert a
+    # technical timeout or GitHub outage into a failed-quality verdict. The
+    # durable qa_passed phase remains available to the existing recovery path.
+    declare -F notify_escalation_inline >/dev/null 2>&1 && \
+      notify_escalation_inline "$story_id" "$TEST_GATE_OUTCOME" "Hosted merge authority blocked ${pr_url}"
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "$TEST_GATE_OUTCOME" "0" "$pr_url" "false"
+    return 1
+  fi
+  [[ -n "$TEST_GATE_AUTH_PR_NUMBER" ]] && pr_number="$TEST_GATE_AUTH_PR_NUMBER"
 
   # ── Trailer killswitch verification (AC3-i) ───────────────────────────────
   local trailer_killswitch=false
@@ -3107,42 +3406,14 @@ ${qa_snippet}"
   fi
 
   # ── Auto-merge policy resolution (AC3) ───────────────────────────────────
-  local auto_merge_applied=false auto_merge_skipped_reason="policy_off"
-
-  if [[ "$trailer_killswitch" == "true" ]]; then
-    auto_merge_skipped_reason="trailer_override"
-  elif [[ "$story_auto_merge" == "true" ]]; then
-    auto_merge_applied=true; auto_merge_skipped_reason="null"
-  elif [[ "$story_auto_merge" == "false" ]]; then
-    auto_merge_skipped_reason="story_override"
-  else
-    # inherit → workspace toggle (D1 stub: env var fallback per V1 design)
-    local workspace_policy="${GAAI_AUTO_MERGE_POLICY:-staging_only}"
-    if [[ "$workspace_policy" == "on" ]]; then
-      auto_merge_applied=true; auto_merge_skipped_reason="null"
-    elif [[ "$workspace_policy" == "staging_only" ]]; then
-      # NOTE : the policy check evaluates the PR TARGET branch (where the merge
-      # lands), not the story HEAD branch. Story branches are always
-      # `story/{STORY_ID}` ; comparing them to "staging" never matched, so
-      # `staging_only` policy silently devolved to `branch_excluded` for every
-      # delivery — defeating the policy and accumulating un-merged PRs.
-      # The PR base is the daemon's TARGET_BRANCH (`--base $TARGET_BRANCH` at
-      # gh-pr-create), which defaults to "staging".
-      local _target="${TARGET_BRANCH:-staging}"
-      if [[ "$_target" == "staging" ]]; then
-        auto_merge_applied=true; auto_merge_skipped_reason="null"
-      else
-        auto_merge_skipped_reason="branch_excluded"
-      fi
-    else
-      auto_merge_skipped_reason="policy_off"
-    fi
-  fi
+  local auto_merge_applied auto_merge_skipped_reason
+  IFS='|' read -r auto_merge_applied auto_merge_skipped_reason \
+    <<<"$(_resolve_auto_merge_policy "$story_auto_merge" "$trailer_killswitch" "$authority_human_required")"
 
   # ── Apply daemon-authorized merge if resolved (AC3) ──────────────────────
   if [[ "$auto_merge_applied" == "true" ]] && [[ -n "$pr_url" ]]; then
     local merge_exit=1
-    _merge_exact_pr_head "$story_id" "$pr_url" "$pr_number" "$pushed_head_sha"
+    _merge_exact_pr_head_capture "$story_id" "$pr_url" "$pr_number" "$pushed_head_sha"
     merge_exit=$?
     if [[ "$merge_exit" -eq 2 ]]; then
       echo "[ERROR] ${story_id} handle_commit_phase: PR head moved during merge; refusing authorization [class=TEST_GATE_BLOCKED]"
@@ -3152,6 +3423,16 @@ ${qa_snippet}"
           "PR head no longer matches tested commit ${pushed_head_sha} for ${pr_url}"
       fi
       _emit_commit_routing_record "$story_id" "$trace_id" "error" "TEST_GATE_BLOCKED" "0" "$pr_url" "false"
+      return 1
+    elif [[ "$merge_exit" -eq 3 ]]; then
+      echo "[ERROR] ${story_id} handle_commit_phase: blocked:stale_base during final merge recheck [class=TEST_GATE_BLOCKED]"
+      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      _emit_commit_routing_record "$story_id" "$trace_id" "error" "blocked:stale_base" "0" "$pr_url" "false"
+      return 1
+    elif [[ "$merge_exit" -eq 4 ]]; then
+      echo "[ERROR] ${story_id} handle_commit_phase: ${MERGE_EXACT_OUTCOME} during final merge recheck [class=TEST_GATE_BLOCKED]"
+      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      _emit_commit_routing_record "$story_id" "$trace_id" "error" "$MERGE_EXACT_OUTCOME" "0" "$pr_url" "false"
       return 1
     fi
     if [[ "$merge_exit" -ne 0 ]]; then
@@ -3169,20 +3450,40 @@ ${qa_snippet}"
             _emit_commit_routing_record "$story_id" "$trace_id" "error" "PUSH_FAILED" "0" "$pr_url" "false"
             return 1
           fi
-          if declare -f _run_merge_test_gate >/dev/null 2>&1; then
-            if ! _run_merge_test_gate "$story_id" "$worktree_path" "$qa_report_path" "$pr_url" "$resolved_head_sha"; then
-              echo "[ERROR] ${story_id} handle_commit_phase: resolved head failed merge test gate [class=TEST_GATE_BLOCKED]"
-              _emit_commit_routing_record "$story_id" "$trace_id" "error" "TEST_GATE_BLOCKED" "0" "$pr_url" "false"
-              return 1
-            fi
+          if ! declare -F _run_merge_test_gate >/dev/null 2>&1; then
+            TEST_GATE_OUTCOME="blocked:github_unavailable"
+            echo "[ERROR] ${story_id} handle_commit_phase: hosted merge authority controller disappeared before resolved-head recheck [class=TEST_GATE_BLOCKED]"
+            _emit_commit_routing_record "$story_id" "$trace_id" "error" "$TEST_GATE_OUTCOME" "0" "$pr_url" "false"
+            return 1
+          fi
+          local resolved_gate_rc=0
+          _run_merge_test_gate "$story_id" "$worktree_path" "$qa_report_path" \
+            "$pr_url" "$resolved_head_sha" || resolved_gate_rc=$?
+          if [[ "$resolved_gate_rc" -eq 2 ]]; then
+            authority_human_required=true
+            auto_merge_applied=false
+            auto_merge_skipped_reason=trust_surface_changed
+            commit_outcome="$TEST_GATE_OUTCOME"
+            merge_exit=0
+            declare -F notify_escalation_inline >/dev/null 2>&1 && \
+              notify_escalation_inline "$story_id" "$TEST_GATE_OUTCOME" \
+                "Human review required for conflict-resolved ${pr_url}"
+          elif [[ "$resolved_gate_rc" -ne 0 ]]; then
+            echo "[ERROR] ${story_id} handle_commit_phase: resolved head failed merge test gate: ${TEST_GATE_OUTCOME} [class=TEST_GATE_BLOCKED]"
+            _emit_commit_routing_record "$story_id" "$trace_id" "error" "$TEST_GATE_OUTCOME" "0" "$pr_url" "false"
+            return 1
+          else
+            pr_number="$TEST_GATE_AUTH_PR_NUMBER"
           fi
           pushed_head_sha="$resolved_head_sha"
 
           # Resolved and re-gated: use the same retry, durable verification,
           # moved-head handling, and optional admin fallback as the initial SHA.
-          local resolve_merge_exit
-          _merge_exact_pr_head "$story_id" "$pr_url" "$pr_number" "$pushed_head_sha"
-          resolve_merge_exit=$?
+          local resolve_merge_exit=0
+          if [[ "$authority_human_required" != "true" ]]; then
+            _merge_exact_pr_head_capture "$story_id" "$pr_url" "$pr_number" "$pushed_head_sha"
+            resolve_merge_exit=$?
+          fi
           if [[ "$resolve_merge_exit" -eq 0 ]]; then
             merge_exit=0  # fall through to post-merge path below
           elif [[ "$resolve_merge_exit" -eq 2 ]]; then
@@ -3193,6 +3494,11 @@ ${qa_snippet}"
                 "PR head no longer matches re-tested commit ${pushed_head_sha} for ${pr_url}"
             fi
             _emit_commit_routing_record "$story_id" "$trace_id" "error" "TEST_GATE_BLOCKED" "0" "$pr_url" "false"
+            return 1
+          elif [[ "$resolve_merge_exit" -eq 3 || "$resolve_merge_exit" -eq 4 ]]; then
+            echo "[ERROR] ${story_id} handle_commit_phase: resolved head failed final live tuple recheck: ${MERGE_EXACT_OUTCOME} [class=TEST_GATE_BLOCKED]"
+            "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+            _emit_commit_routing_record "$story_id" "$trace_id" "error" "$MERGE_EXACT_OUTCOME" "0" "$pr_url" "false"
             return 1
           else
             echo "[ERROR] ${story_id} handle_commit_phase: exact-head merge failed after resolve [class=AUTO_MERGE_FAILED]"
@@ -3265,7 +3571,7 @@ ${qa_snippet}"
   duration_ms=$(( t_end_ms - t_start_ms ))
 
   # ── Emit success routing record ────────────────────────────────────────────
-  _emit_commit_routing_record "$story_id" "$trace_id" "daemon-bash" "null" "$duration_ms" "$pr_url" "$auto_merge_applied"
+  _emit_commit_routing_record "$story_id" "$trace_id" "daemon-bash" "$commit_outcome" "$duration_ms" "$pr_url" "$auto_merge_applied"
 
   ts=$(date '+%H:%M:%S')
   echo "[${ts}] ${story_id} phase=commit DONE (${duration_ms}ms) pr=${pr_url:-none} auto_merge=${auto_merge_applied}"
