@@ -105,6 +105,34 @@ mkdir -p "$LOCK_DIR"
 # shellcheck disable=SC1090
 source "$DISPATCH_LIB"
 
+# State-machine tests below exercise commit/PR behavior downstream of merge
+# authority. Bind those paths to an explicit hosted-pass tuple so the fixtures
+# never rely on the forbidden missing-CI/local-fallback authorization removed
+# by the hosted-only authority contract. The dedicated controller suite owns
+# REST failure coverage.
+_run_merge_test_gate() {
+  TEST_GATE_OUTCOME=hosted_pass
+  TEST_GATE_AUTH_PR_NUMBER=999
+  TEST_GATE_AUTH_REPOSITORY_ID=42
+  TEST_GATE_AUTH_REPOSITORY_NAME=test/repo
+  TEST_GATE_AUTH_BASE_REF="${TARGET_BRANCH:-staging}"
+  TEST_GATE_AUTH_BASE_SHA="$(git -C "$2" rev-parse "origin/${TARGET_BRANCH:-staging}" 2>/dev/null || printf '%040d' 1)"
+  TEST_GATE_AUTH_HEAD_REF="story/$1"
+  TEST_GATE_AUTH_HEAD_SHA="$5"
+  TEST_GATE_AUTH_WORKFLOW_ID=7001
+  TEST_GATE_AUTH_RUN_ID=9001
+  TEST_GATE_AUTH_RUN_NUMBER=12
+  TEST_GATE_AUTH_RUN_ATTEMPT=1
+  TEST_GATE_AUTH_JOB_ID=9101
+  TEST_GATE_AUTH_WORKTREE_PATH="$2"
+  export TEST_GATE_OUTCOME TEST_GATE_AUTH_PR_NUMBER TEST_GATE_AUTH_REPOSITORY_ID \
+    TEST_GATE_AUTH_REPOSITORY_NAME TEST_GATE_AUTH_BASE_REF TEST_GATE_AUTH_BASE_SHA TEST_GATE_AUTH_HEAD_REF \
+    TEST_GATE_AUTH_HEAD_SHA TEST_GATE_AUTH_WORKFLOW_ID TEST_GATE_AUTH_RUN_ID TEST_GATE_AUTH_RUN_NUMBER \
+    TEST_GATE_AUTH_RUN_ATTEMPT TEST_GATE_AUTH_JOB_ID TEST_GATE_AUTH_WORKTREE_PATH
+  return 0
+}
+_test_gate_recheck_pr_tuple() { echo hosted_pass; return 0; }
+
 echo "E134S02 — daemon-state-machine dispatch tests"
 echo ""
 
@@ -209,7 +237,12 @@ case "${1:-} ${2:-}" in
   "pr create") echo "https://github.com/test/repo/pull/999"; exit 0 ;;
   "pr view")
     if [[ "$*" == *"--json state,headRefOid"* ]]; then
-      printf 'MERGED\t%s\n' "$(cat "$GAAI_DISPATCH_MERGE_SHA_FILE" 2>/dev/null)"
+      merged_sha=$(cat "$GAAI_DISPATCH_MERGE_SHA_FILE" 2>/dev/null || true)
+      if [[ -n "${TEST_GATE_AUTH_HEAD_SHA:-}" && "$merged_sha" == "$TEST_GATE_AUTH_HEAD_SHA" ]]; then
+        printf 'MERGED\t%s\n' "$merged_sha"
+      else
+        printf 'OPEN\t%s\n' "${TEST_GATE_AUTH_HEAD_SHA:-}"
+      fi
       exit 0
     fi
     [[ "$*" == *"--json url"* ]] && { echo "https://github.com/test/repo/pull/999"; exit 0; }
@@ -1551,7 +1584,12 @@ case "$_cmd" in
     exit 0 ;;
   "pr view")
     if [[ "$*" == *"--json state,headRefOid"* ]]; then
-      printf 'MERGED\t%s\n' "$(cat "$GAAI_COMMIT_MERGE_SHA_FILE" 2>/dev/null)"
+      merged_sha=$(cat "$GAAI_COMMIT_MERGE_SHA_FILE" 2>/dev/null || true)
+      if [[ -n "${TEST_GATE_AUTH_HEAD_SHA:-}" && "$merged_sha" == "$TEST_GATE_AUTH_HEAD_SHA" ]]; then
+        printf 'MERGED\t%s\n' "$merged_sha"
+      else
+        printf 'OPEN\t%s\n' "${TEST_GATE_AUTH_HEAD_SHA:-}"
+      fi
       exit 0
     fi
     if [[ "$*" == *"--json url"* ]]; then

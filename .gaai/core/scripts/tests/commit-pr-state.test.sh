@@ -36,11 +36,15 @@ WT_BASE="$SANDBOX/worktrees"
 LOCK_DIR="$SANDBOX/locks"
 STUB_BIN="$SANDBOX/bin"
 GH_CALL_LOG="$SANDBOX/gh-calls.log"
+ROUTING_CAPTURE="$SANDBOX/routing-capture.log"
+NOTIFY_CAPTURE="$SANDBOX/notify-capture.log"
 BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
 BACKLOG_FILE="$PROJ/$BACKLOG_REL"
 
 mkdir -p "$WT_BASE" "$LOCK_DIR" "$STUB_BIN"
 : > "$GH_CALL_LOG"
+: > "$ROUTING_CAPTURE"
+: > "$NOTIFY_CAPTURE"
 
 git init --quiet --bare "$REMOTE"
 git init --quiet "$PROJ"
@@ -135,7 +139,12 @@ case "$subcmd" in
           else
             echo "${GH_PR_HEAD_SHA:-missing}"
           fi
-        elif [[ "$_args" == *"--json mergeable"* ]];        then echo '{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
+        elif [[ "$_args" == *"--json mergeable"* ]];        then
+          if [[ -n "${GH_PR_MERGEABLE_JSON:-}" ]]; then
+            echo "$GH_PR_MERGEABLE_JSON"
+          else
+            echo '{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
+          fi
         elif [[ "$_args" == *"--json url"* ]];              then echo "${GH_PR_STALE_URL:-}"
         else echo '{}'
         fi
@@ -168,7 +177,7 @@ NODEEOF
 chmod +x "$STUB_BIN/node"
 
 export PATH="$STUB_BIN:$PATH"
-export GH_CALL_LOG
+export GH_CALL_LOG ROUTING_CAPTURE NOTIFY_CAPTURE
 
 # ── Source daemon-dispatch.sh with minimal required env ──────────────────────
 export PROJECT_DIR="$PROJ"
@@ -188,9 +197,67 @@ _check_worktree_integrity()    { return 0; }
 _recover_worktree_safe_base()  { return 1; }
 chore_commit_field()           { return 0; }
 chore_commit_multi_field()     { return 0; }
-notify_escalation_inline()     { return 0; }
+notify_escalation_inline()     { printf '%s|%s|%s\n' "$1" "$2" "$3" >>"$NOTIFY_CAPTURE"; }
 _run_triage_for_story()        { return 0; }
-_emit_commit_routing_record()  { return 0; }
+_emit_commit_routing_record()  { printf '%s|%s|%s|%s|%s|%s|%s\n' "$@" >>"$ROUTING_CAPTURE"; }
+_auto_resolve_pr_conflicts()   { [[ "${GAAI_TEST_AUTO_RESOLVE_SUCCESS:-false}" == "true" ]]; }
+
+# These legacy PR-state tests exercise behavior downstream of merge authority.
+# Supply an explicit hosted-pass tuple; no local or absent evidence is allowed
+# to authorize their merge assertions. The dedicated controller suite covers
+# the full REST state machine and fail-closed outcomes.
+_run_merge_test_gate() {
+  TEST_GATE_AUTH_PR_NUMBER=""; TEST_GATE_AUTH_REPOSITORY_ID=""; TEST_GATE_AUTH_REPOSITORY_NAME=""
+  TEST_GATE_AUTH_BASE_REF=""; TEST_GATE_AUTH_BASE_SHA=""; TEST_GATE_AUTH_HEAD_REF=""; TEST_GATE_AUTH_HEAD_SHA=""
+  TEST_GATE_AUTH_WORKFLOW_ID=""; TEST_GATE_AUTH_RUN_ID=""; TEST_GATE_AUTH_RUN_NUMBER=""
+  TEST_GATE_AUTH_RUN_ATTEMPT=""; TEST_GATE_AUTH_JOB_ID=""; TEST_GATE_AUTH_WORKTREE_PATH="$2"
+  local configured_outcome="${GAAI_TEST_AUTHORITY_OUTCOME:-hosted_pass}"
+  if [[ "$configured_outcome" == "hosted_then_human" ]]; then
+    GAAI_TEST_AUTHORITY_CALL_COUNT=$(( ${GAAI_TEST_AUTHORITY_CALL_COUNT:-0} + 1 ))
+    [[ "$GAAI_TEST_AUTHORITY_CALL_COUNT" -gt 1 ]] \
+      && configured_outcome=human_required:trust_surface_changed \
+      || configured_outcome=hosted_pass
+  fi
+  case "$configured_outcome" in
+    human_required:trust_surface_changed)
+      TEST_GATE_OUTCOME=human_required:trust_surface_changed
+      export TEST_GATE_OUTCOME TEST_GATE_AUTH_PR_NUMBER TEST_GATE_AUTH_REPOSITORY_ID \
+        TEST_GATE_AUTH_REPOSITORY_NAME TEST_GATE_AUTH_BASE_REF TEST_GATE_AUTH_BASE_SHA \
+        TEST_GATE_AUTH_HEAD_REF TEST_GATE_AUTH_HEAD_SHA TEST_GATE_AUTH_WORKFLOW_ID \
+        TEST_GATE_AUTH_RUN_ID TEST_GATE_AUTH_RUN_NUMBER TEST_GATE_AUTH_RUN_ATTEMPT \
+        TEST_GATE_AUTH_JOB_ID TEST_GATE_AUTH_WORKTREE_PATH
+      return 2
+      ;;
+    blocked:*)
+      TEST_GATE_OUTCOME="$configured_outcome"
+      export TEST_GATE_OUTCOME TEST_GATE_AUTH_PR_NUMBER TEST_GATE_AUTH_REPOSITORY_ID \
+        TEST_GATE_AUTH_REPOSITORY_NAME TEST_GATE_AUTH_BASE_REF TEST_GATE_AUTH_BASE_SHA \
+        TEST_GATE_AUTH_HEAD_REF TEST_GATE_AUTH_HEAD_SHA TEST_GATE_AUTH_WORKFLOW_ID \
+        TEST_GATE_AUTH_RUN_ID TEST_GATE_AUTH_RUN_NUMBER TEST_GATE_AUTH_RUN_ATTEMPT \
+        TEST_GATE_AUTH_JOB_ID TEST_GATE_AUTH_WORKTREE_PATH
+      return 1
+      ;;
+  esac
+  TEST_GATE_OUTCOME=hosted_pass
+  TEST_GATE_AUTH_PR_NUMBER="${GH_URL_PR_NUMBER:-${GH_PR_NUMBER:-99}}"
+  TEST_GATE_AUTH_REPOSITORY_ID=42
+  TEST_GATE_AUTH_REPOSITORY_NAME=test/repo
+  TEST_GATE_AUTH_BASE_REF=staging
+  TEST_GATE_AUTH_BASE_SHA="$(git -C "$2" rev-parse origin/staging)"
+  TEST_GATE_AUTH_HEAD_REF="story/$1"
+  TEST_GATE_AUTH_HEAD_SHA="$5"
+  TEST_GATE_AUTH_WORKFLOW_ID=7001
+  TEST_GATE_AUTH_RUN_ID=9001
+  TEST_GATE_AUTH_RUN_NUMBER=12
+  TEST_GATE_AUTH_RUN_ATTEMPT=1
+  TEST_GATE_AUTH_JOB_ID=9101
+  export TEST_GATE_OUTCOME TEST_GATE_AUTH_PR_NUMBER TEST_GATE_AUTH_REPOSITORY_ID \
+    TEST_GATE_AUTH_REPOSITORY_NAME TEST_GATE_AUTH_BASE_REF TEST_GATE_AUTH_BASE_SHA TEST_GATE_AUTH_HEAD_REF \
+    TEST_GATE_AUTH_HEAD_SHA TEST_GATE_AUTH_WORKFLOW_ID TEST_GATE_AUTH_RUN_ID TEST_GATE_AUTH_RUN_NUMBER \
+    TEST_GATE_AUTH_RUN_ATTEMPT TEST_GATE_AUTH_JOB_ID TEST_GATE_AUTH_WORKTREE_PATH
+  return 0
+}
+_test_gate_recheck_pr_tuple() { echo hosted_pass; return 0; }
 
 echo ""
 echo "=== commit-pr-state: AC5 — PR-state guard in handle_commit_phase ==="
@@ -289,7 +356,7 @@ handle_commit_phase "$SID3" "trace-t3"
 set -e
 
 echo "T3a: direct REST merge called for the selected PR"
-if grep -q "gh api --method PUT repos/{owner}/{repo}/pulls/99/merge" "$GH_CALL_LOG"; then
+if grep -q "gh api --method PUT repos/test/repo/pulls/99/merge" "$GH_CALL_LOG"; then
   pass "T3a: exact PR merge API called"
 else
   fail "T3a: exact PR merge API was not called"
@@ -411,6 +478,123 @@ fi
 
 unset GH_MERGE_EXIT GH_MERGE_STDERR GH_PR_STATE_AFTER_MERGE \
   GH_PR_HEAD_SHA_AFTER_MERGE
+
+# ────────────────────────────────────────────────────────────────────────────
+# T6: dispatcher-level transient authority block — exact reason, resumable, no mutation
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T6: hosted authority blocks before merge policy/mutation ---"
+SID6="TST-PCS06"
+setup_story "$SID6"
+write_backlog "$SID6"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID6")"
+export GH_PR_STALE_URL="https://github.com/test/repo/pull/106"
+export GH_PR_STATE="OPEN" GH_PR_NUMBER="106" GAAI_AUTO_MERGE_POLICY="on"
+export GAAI_TEST_AUTHORITY_OUTCOME="blocked:run_pending"
+: >"$GH_CALL_LOG"; : >"$ROUTING_CAPTURE"; : >"$NOTIFY_CAPTURE"
+
+set +e
+handle_commit_phase "$SID6" "trace-t6"
+T6_RC=$?
+set -e
+T6_PHASE=$(grep -A 10 "id: ${SID6}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T6_RC" -ne 0 && "$T6_PHASE" == qa_passed \
+      && $(grep -cE 'gh api --method PUT .*pulls/[0-9]+/merge|gh pr merge' "$GH_CALL_LOG" || true) -eq 0 \
+      && $(grep -c 'blocked:run_pending' "$ROUTING_CAPTURE" || true) -ge 1 ]]; then
+  pass "T6: blocked hosted authority preserves resumable phase with the exact reason before mutation"
+else
+  fail "T6: dispatcher blocked route mismatch (rc=$T6_RC phase=$T6_PHASE)"
+fi
+
+# ────────────────────────────────────────────────────────────────────────────
+# T7: dispatcher-level human-required — pending review/done, notify, no merge
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T7: trust-surface change routes mandatory human review ---"
+SID7="TST-PCS07"
+setup_story "$SID7"
+write_backlog "$SID7"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID7")"
+export GH_PR_STALE_URL="https://github.com/test/repo/pull/107"
+export GH_PR_STATE="OPEN" GH_PR_NUMBER="107" GAAI_AUTO_MERGE_POLICY="on"
+export GAAI_TEST_AUTHORITY_OUTCOME="human_required:trust_surface_changed"
+: >"$GH_CALL_LOG"; : >"$ROUTING_CAPTURE"; : >"$NOTIFY_CAPTURE"
+
+set +e
+handle_commit_phase "$SID7" "trace-t7"
+T7_RC=$?
+set -e
+T7_PHASE=$(grep -A 10 "id: ${SID7}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T7_RC" -eq 0 && "$T7_PHASE" == done \
+      && $(grep -cE 'gh api --method PUT .*pulls/[0-9]+/merge|gh pr merge' "$GH_CALL_LOG" || true) -eq 0 \
+      && $(grep -c 'human_required:trust_surface_changed' "$ROUTING_CAPTURE" || true) -ge 1 \
+      && $(grep -c 'human_required:trust_surface_changed' "$NOTIFY_CAPTURE" || true) -ge 1 ]]; then
+  pass "T7: human-required leaves the PR pending for review and notifies without mutation"
+else
+  fail "T7: dispatcher human-required route mismatch (rc=$T7_RC phase=$T7_PHASE)"
+fi
+unset GAAI_TEST_AUTHORITY_OUTCOME
+
+# ────────────────────────────────────────────────────────────────────────────
+# T8: conflict-resolution re-gate becomes human-required, never a second PUT
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T8: conflict-resolved head can route human-required coherently ---"
+SID8="TST-PCS08"
+setup_story "$SID8"
+write_backlog "$SID8"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID8")"
+export GH_PR_STALE_URL="https://github.com/test/repo/pull/108"
+export GH_PR_STATE="OPEN" GH_PR_NUMBER="108" GAAI_AUTO_MERGE_POLICY="on"
+export GH_MERGE_EXIT=1 GH_MERGE_STDERR="conflicting"
+export GH_PR_MERGEABLE_JSON='{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}'
+export GAAI_TEST_AUTHORITY_OUTCOME=hosted_then_human GAAI_TEST_AUTHORITY_CALL_COUNT=0
+export GAAI_TEST_AUTO_RESOLVE_SUCCESS=true GAAI_MERGE_AUTHORITY_MERGE_RETRIES=1 \
+  GAAI_MERGE_AUTHORITY_RETRY_SLEEP_SEC=0
+: >"$GH_CALL_LOG"; : >"$ROUTING_CAPTURE"; : >"$NOTIFY_CAPTURE"
+
+set +e
+handle_commit_phase "$SID8" "trace-t8"
+T8_RC=$?
+set -e
+T8_PHASE=$(grep -A 10 "id: ${SID8}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+T8_PUTS=$(grep -cE 'gh api --method PUT .*pulls/[0-9]+/merge' "$GH_CALL_LOG" || true)
+if [[ "$T8_RC" -eq 0 && "$T8_PHASE" == done && "$T8_PUTS" -eq 1 \
+      && $(grep -c 'human_required:trust_surface_changed' "$ROUTING_CAPTURE" || true) -ge 1 \
+      && $(grep -c 'human_required:trust_surface_changed' "$NOTIFY_CAPTURE" || true) -ge 1 ]]; then
+  pass "T8: resolved-head human-required route leaves review pending without a second PUT"
+else
+  fail "T8: resolved-head human route mismatch (rc=$T8_RC phase=$T8_PHASE puts=$T8_PUTS)"
+fi
+unset GH_MERGE_EXIT GH_MERGE_STDERR GH_PR_MERGEABLE_JSON \
+  GAAI_TEST_AUTHORITY_OUTCOME GAAI_TEST_AUTHORITY_CALL_COUNT GAAI_TEST_AUTO_RESOLVE_SUCCESS \
+  GAAI_MERGE_AUTHORITY_MERGE_RETRIES GAAI_MERGE_AUTHORITY_RETRY_SLEEP_SEC
+
+# ────────────────────────────────────────────────────────────────────────────
+# T9: even after successful dispatcher initialization, losing the controller
+#     at runtime must block before policy resolution or any merge mutation.
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T9: missing hosted controller fails closed at dispatch ---"
+SID9="TST-PCS09"
+setup_story "$SID9"
+write_backlog "$SID9"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID9")"
+export GH_PR_STALE_URL="https://github.com/test/repo/pull/109"
+export GH_PR_STATE="OPEN" GH_PR_NUMBER="109" GAAI_AUTO_MERGE_POLICY="on"
+: >"$GH_CALL_LOG"; : >"$ROUTING_CAPTURE"; : >"$NOTIFY_CAPTURE"
+ORIGINAL_MERGE_GATE=$(declare -f _run_merge_test_gate)
+unset -f _run_merge_test_gate
+
+set +e
+handle_commit_phase "$SID9" "trace-t9"
+T9_RC=$?
+set -e
+eval "$ORIGINAL_MERGE_GATE"
+T9_PHASE=$(grep -A 10 "id: ${SID9}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T9_RC" -ne 0 && "$T9_PHASE" == qa_passed \
+      && $(grep -cE 'gh api --method PUT .*pulls/[0-9]+/merge|gh pr merge' "$GH_CALL_LOG" || true) -eq 0 \
+      && $(grep -c 'blocked:github_unavailable' "$ROUTING_CAPTURE" || true) -ge 1 ]]; then
+  pass "T9: missing hosted controller preserves resumable state and cannot reach merge"
+else
+  fail "T9: missing-controller route mismatch (rc=$T9_RC phase=$T9_PHASE)"
+fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
