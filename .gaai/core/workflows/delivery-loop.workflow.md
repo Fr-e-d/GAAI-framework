@@ -240,9 +240,9 @@ Deterministic bash only — no `claude -p` invocation. Implemented in `handle_co
 2. Push story branch with retry-rebase pattern (3 attempts, backoff 2s / 4s / 6s)
 3. `gh pr create --base staging --head story/{id}`
 4. CI watch (advisory mode if no branch protection)
-5. `gh pr merge --squash --delete-branch`
+5. `gh pr merge <pr> --repo <owner/repo> --squash --match-head-commit <sha>` — by number, never `--delete-branch` (see the API-only merge invariant in the rules file)
 6. Backlog status → `done` (flock-serialized push to staging)
-7. Worktree removal (the *remote* branch is deleted by `--delete-branch` at step 5; the local worktree is removed here, and the reaper drops any surviving local branch ref)
+7. Worktree removal via `git -C <primary working tree> worktree remove`, never from inside the worktree being removed; the local branch ref is dropped by the landed-or-preserved guard. The *remote* branch is left in place — no step here deletes it.
 
 **Normative authority:** the worktree + PR + cleanup invariants are defined in `orchestration.rules.md §Branch Rules → Worktree lifecycle & cleanup`. This sequence is the procedure; the rules file is the authority. The procedure restates only hard safety boundaries (see **Safety boundary** below); it does not define invariants.
 
