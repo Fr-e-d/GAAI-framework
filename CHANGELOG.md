@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: record run identity on the handle instead of inferring it
 - fix: keep and poll the handle until a terminal receipt
 - fix: make generated execution plans carry artefact frontmatter
 -: Make hosted CI the sole daemon merge authority

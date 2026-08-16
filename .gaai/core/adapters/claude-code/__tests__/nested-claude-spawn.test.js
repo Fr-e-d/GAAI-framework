@@ -1189,3 +1189,76 @@ describe('nested-claude-spawn — hard ceiling', () => {
 function _isAliveSelfCheck() {
   try { process.kill(process.pid, 0); return true; } catch { return false; }
 }
+
+// ---------------------------------------------------------------------------
+// Handle identity
+//
+// A handle that cannot name its own story forces consumers to infer identity
+// from the worktree path. These pin the recorded fields, and pin the one thing
+// that must never appear in them.
+// ---------------------------------------------------------------------------
+
+describe('nested-claude-spawn — handle identity', () => {
+
+  afterEach(() => {
+    _resetSpawnFn();
+    _resetLogPath();
+    clearEnv();
+    delete process.env.GAAI_STORY_ID;
+    delete process.env.GAAI_WORKSPACE_ID;
+  });
+
+  test('the in-flight handle names its story, workspace, phase and command', async () => {
+    setValidEnv();
+    const handleDir = useTmpHandleDir();
+    process.env.GAAI_STORY_ID     = 'EXAMPLE-STORY';
+    process.env.GAAI_WORKSPACE_ID = 'ws-example';
+
+    _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: '## Implementation\n', delay: 400 }));
+
+    // Deliberately not awaited: the record is written synchronously at spawn, and
+    // it is removed once the run concludes — mid-flight is the only time to read it.
+    const pending = _spawnWithTimerOverride(
+      'a-prompt-that-must-not-be-recorded', '', [],
+      { globalTimeoutMs: 60_000, heartbeatTimeoutMs: 60_000 }
+    );
+
+    const files = readdirSync(handleDir).filter(f => f.endsWith('.json'));
+    assert.equal(files.length, 1, 'exactly one in-flight handle');
+    const raw = readFileSync(join(handleDir, files[0]), 'utf8');
+    const rec = JSON.parse(raw);
+
+    assert.equal(rec.story_id, 'EXAMPLE-STORY');
+    assert.equal(rec.workspace_id, 'ws-example');
+    assert.equal(rec.phase, 'impl');
+    assert.equal(typeof rec.command?.bin, 'string');
+    assert.ok(rec.started_at, 'started_at recorded');
+    assert.ok(rec.last_activity_at, 'last_activity_at recorded');
+
+    // The argv carries the prompt. A handle file is not a place for prompt content.
+    assert.equal(raw.includes('a-prompt-that-must-not-be-recorded'), false,
+      'the prompt must never be persisted into the handle');
+
+    await pending;
+    assert.deepEqual(readdirSync(handleDir).filter(f => f.endsWith('.json')), [],
+      'the handle is cleared once the run concludes');
+  });
+
+  test('reconcile reports the story so callers need not parse a path', () => {
+    const handleDir = useTmpHandleDir();
+    writeFileSync(join(handleDir, 'h.json'), JSON.stringify({
+      trace_id: 'h',
+      pid: process.pid,
+      story_id: 'EXAMPLE-STORY',
+      cwd: '/tmp/some-unrelated-path',
+      started_at: new Date().toISOString(),
+      state: 'running',
+    }), 'utf8');
+
+    const report = reconcileHandles();
+    assert.equal(report.live.length, 1);
+    assert.equal(report.live[0].story_id, 'EXAMPLE-STORY',
+      'story identity survives reconciliation without path inference');
+  });
+
+});

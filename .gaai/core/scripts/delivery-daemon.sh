@@ -2103,6 +2103,11 @@ _recovery_relaunch() {
   # running; a live handle rooted in this story's worktree means there is nothing
   # to relaunch yet. Best-effort: any failure here falls through to the relaunch,
   # preserving prior behaviour rather than stalling recovery.
+  #
+  # Matching is on the handle's own story_id. The worktree-path substring below is
+  # only a fallback for handles written before that field existed — inferring a
+  # story from a path shape is a guess, and it is wrong for any layout that does
+  # not embed the id.
   local _handles_json _live_here=""
   _handles_json=$(node "$PROJECT_DIR/.gaai/core/adapters/claude-code/nested-claude-spawn.js" \
     --reconcile-handles 2>/dev/null || true)
@@ -2113,8 +2118,13 @@ try:
     live = json.load(sys.stdin).get("live", [])
 except Exception:
     sys.exit(0)
-needle = sys.argv[1] + "-workspace"
-print("1" if any(needle in (h.get("cwd") or "") for h in live) else "")
+sid = sys.argv[1]
+legacy = sid + "-workspace"
+def matches(h):
+    if h.get("story_id"):
+        return h["story_id"] == sid
+    return legacy in (h.get("cwd") or "")
+print("1" if any(matches(h) for h in live) else "")
 ' "$sid" 2>/dev/null || true)
   fi
   if [[ "$_live_here" == "1" ]]; then
