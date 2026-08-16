@@ -12,7 +12,7 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { writeFileSync, mkdirSync, existsSync, readFileSync, mkdtempSync, statSync, chmodSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, mkdtempSync, statSync, chmodSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -23,6 +23,7 @@ import {
   _resetSpawnFn,
   resolveMode,
   runImpl,
+  reconcileHandles,
 } from '../nested-claude-spawn.js';
 
 import { _setLogPath, _resetLogPath } from '../runtime-routing-logger.js';
@@ -104,6 +105,24 @@ function clearEnv() {
   delete process.env.GAAI_IMPL_MODEL;
   delete process.env.GAAI_IMPL_MODEL_FALLBACK;
   delete process.env.GAAI_CLAUDE_PROXY_BASE_URL;
+  delete process.env.GAAI_RUNNER_POLL_BUDGET_MS;
+  delete process.env.GAAI_RUNNER_HANDLE_DIR;
+}
+
+/**
+ * Pins the post-expiry poll budget so timeout tests stay fast. Without this the
+ * budget defaults to one further heartbeat window, which is minutes in production
+ * and would make these tests wait for it.
+ */
+function setPollBudget(ms) {
+  process.env.GAAI_RUNNER_POLL_BUDGET_MS = String(ms);
+}
+
+/** Isolates handle records in a throwaway directory. Returns the directory path. */
+function useTmpHandleDir() {
+  const dir = mkdtempSync(join(tmpdir(), 'gaai-test-handles-'));
+  process.env.GAAI_RUNNER_HANDLE_DIR = dir;
+  return dir;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +205,8 @@ describe('nested-claude-spawn', () => {
   // -------------------------------------------------------------------------
   test('T2: TIMEOUT - global timer kills hanging child', async () => {
     setValidEnv();
+    // Expiry now demotes to poll mode first; the kill lands when that budget runs out.
+    setPollBudget(50);
 
     const killSignals = [];
     _setSpawnFn(() => createHangingChild((sig) => killSignals.push(sig)));
@@ -206,6 +227,7 @@ describe('nested-claude-spawn', () => {
   // -------------------------------------------------------------------------
   test('T3: HEARTBEAT_TIMEOUT - heartbeat timer fires on silent child', async () => {
     setValidEnv();
+    setPollBudget(50);
 
     _setSpawnFn(() => createHangingChild());
 
@@ -216,6 +238,8 @@ describe('nested-claude-spawn', () => {
 
     assert.equal(r.success, false);
     assert.equal(r.error_reason, 'HEARTBEAT_TIMEOUT');
+    assert.equal(r.observation_window_expired, true,
+      'a silent child must be polled against its handle before being killed');
   });
 
   // -------------------------------------------------------------------------
@@ -853,3 +877,315 @@ describe('resolveMode (DEC-72 five-row matrix)', () => {
   });
 
 });
+
+// ---------------------------------------------------------------------------
+// Terminal receipts for long-running runs
+//
+// An expiring observation window used to end the run: the wrapper killed the
+// child, discarded the session_id it had already seen, and reported a failure
+// built from partial output — while the child went on to finish correctly.
+// These cover the retained handle, the poll-to-receipt path, and the outcome
+// being decided on the receipt rather than on the exit code our own kill produced.
+// ---------------------------------------------------------------------------
+
+/**
+ * Mock child driven by a script of timed stdout chunks, then a close.
+ * @param {Array<{ at: number, data: string }>} chunks - emission schedule (ms from spawn)
+ * @param {{ closeAt: number, exitCode: number|null, onKill?: Function }} end
+ */
+function createScriptedChild(chunks, { closeAt, exitCode = null, onKill }) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.exitCode = null;
+  child.kill = (signal) => { if (onKill) onKill(signal); };
+
+  for (const { at, data } of chunks) {
+    setTimeout(() => child.stdout.emit('data', Buffer.from(data)), at);
+  }
+  setTimeout(() => {
+    child.exitCode = exitCode;
+    child.emit('close', exitCode);
+  }, closeAt);
+
+  return child;
+}
+
+const INIT_LINE   = (sid) => JSON.stringify({ type: 'system', subtype: 'init', session_id: sid }) + '\n';
+const RESULT_LINE = (sid) => JSON.stringify({ type: 'result', subtype: 'success', is_error: false, session_id: sid }) + '\n';
+
+describe('nested-claude-spawn — terminal receipts', () => {
+
+  afterEach(() => {
+    _resetSpawnFn();
+    _resetLogPath();
+    clearEnv();
+  });
+
+  test('a run that finishes after its window expired is a success, not a timeout', async () => {
+    setValidEnv();
+    useTmpHandleDir();
+    setPollBudget(5_000);
+
+    const reportPath = join(mkdtempSync(join(tmpdir(), 'gaai-test-receipt-')), 'impl-report.md');
+
+    const killSignals = [];
+    _setSpawnFn(() => createScriptedChild(
+      [
+        { at: 10,  data: INIT_LINE('sess-late-finish') },
+        // Silence past the heartbeat window → wrapper demotes to poll mode.
+        { at: 400, data: (writeFileSync(reportPath, '## Implementation\ndone\n'), RESULT_LINE('sess-late-finish')) },
+      ],
+      // Exit code is null: the child ended without a clean code, exactly as it
+      // would after a signal. The receipt plus the artefact is what decides.
+      { closeAt: 450, exitCode: null, onKill: (s) => killSignals.push(s) }
+    ));
+
+    const r = await _spawnWithTimerOverride(
+      'test-prompt', reportPath, [],
+      { globalTimeoutMs: 60_000, heartbeatTimeoutMs: 150 }
+    );
+
+    assert.equal(r.observation_window_expired, true, 'the heartbeat window must have expired');
+    assert.equal(r.terminal_receipt, true, 'the terminal result event must have been observed');
+    assert.equal(r.session_id, 'sess-late-finish', 'the session_id must be retained, not discarded');
+    assert.equal(r.success, true, 'a completed run must not be graded as a failure');
+    assert.equal(r.error_reason, null);
+    assert.deepEqual(killSignals, [], 'a still-running child must not be killed at window expiry');
+  });
+
+  test('output resuming after a window expiry returns the run to normal watching', async () => {
+    setValidEnv();
+    useTmpHandleDir();
+    setPollBudget(5_000);
+
+    const reportPath = join(mkdtempSync(join(tmpdir(), 'gaai-test-resume-')), 'impl-report.md');
+
+    _setSpawnFn(() => createScriptedChild(
+      [
+        { at: 10,  data: INIT_LINE('sess-resume') },
+        { at: 300, data: JSON.stringify({ type: 'assistant', message: { content: 'still working' } }) + '\n' },
+        { at: 400, data: (writeFileSync(reportPath, '## Implementation\ndone\n'), RESULT_LINE('sess-resume')) },
+      ],
+      { closeAt: 450, exitCode: 0 }
+    ));
+
+    const r = await _spawnWithTimerOverride(
+      'test-prompt', reportPath, [],
+      { globalTimeoutMs: 60_000, heartbeatTimeoutMs: 150 }
+    );
+
+    assert.equal(r.observation_window_expired, true);
+    assert.equal(r.success, true);
+    assert.equal(r.session_id, 'sess-resume');
+  });
+
+  test('session_id split across two stdout chunks is still captured', async () => {
+    setValidEnv();
+    useTmpHandleDir();
+
+    const line  = INIT_LINE('sess-split');
+    const cut   = Math.floor(line.length / 2);
+
+    _setSpawnFn(() => createScriptedChild(
+      [
+        { at: 5,  data: line.slice(0, cut) },
+        { at: 20, data: line.slice(cut) },
+      ],
+      { closeAt: 60, exitCode: 0 }
+    ));
+
+    const r = await _spawnWithTimerOverride(
+      'test-prompt', '', [],
+      { globalTimeoutMs: 60_000, heartbeatTimeoutMs: 60_000 }
+    );
+
+    assert.equal(r.session_id, 'sess-split',
+      'a chunk boundary inside the init line must not lose the identifier');
+  });
+
+  test('the handle record is removed once the run reaches a terminal state', async () => {
+    setValidEnv();
+    const handleDir = useTmpHandleDir();
+
+    _setSpawnFn(() => createScriptedChild(
+      [{ at: 5, data: INIT_LINE('sess-handle') }],
+      { closeAt: 40, exitCode: 0 }
+    ));
+
+    await _spawnWithTimerOverride(
+      'test-prompt', '', [],
+      { globalTimeoutMs: 60_000, heartbeatTimeoutMs: 60_000 }
+    );
+
+    const leftover = readdirSync(handleDir).filter(f => f.endsWith('.json'));
+    assert.deepEqual(leftover, [], 'a concluded run must leave no handle behind');
+  });
+
+  test('reconcileHandles prunes dead handles and preserves live ones', () => {
+    const handleDir = useTmpHandleDir();
+
+    // A handle whose process is gone: pid 2^22 is above every configured pid_max.
+    writeFileSync(join(handleDir, 'dead.json'),
+      JSON.stringify({ trace_id: 'dead', pid: 4_194_304, state: 'polling' }), 'utf8');
+    // A handle that is demonstrably alive: this very test process.
+    writeFileSync(join(handleDir, 'live.json'),
+      JSON.stringify({ trace_id: 'live', pid: process.pid, state: 'running' }), 'utf8');
+
+    const report = reconcileHandles();
+
+    assert.deepEqual(report.stale.map(r => r.trace_id), ['dead']);
+    assert.deepEqual(report.live.map(r => r.trace_id), ['live']);
+    assert.equal(existsSync(join(handleDir, 'dead.json')), false, 'a dead handle must be pruned');
+    assert.equal(existsSync(join(handleDir, 'live.json')), true,
+      'a live handle must survive — pruning it is what lets recovery spawn a duplicate');
+  });
+
+});
+
+// ---------------------------------------------------------------------------
+// Hard ceiling + handle ageing
+//
+// Regressions caught in review of the poll-mode change. Poll mode made the
+// global window a one-shot entry point instead of a bound, and handle liveness
+// trusted a bare pid forever. Both let a run escape its limits.
+// ---------------------------------------------------------------------------
+
+/** Mock child that emits a byte every `everyMs` and never finishes. */
+function createChattyChild(everyMs, onKill) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.exitCode = null;
+  let killCount = 0;
+  const beat = setInterval(() => child.stdout.emit('data', Buffer.from('{"type":"assistant"}\n')), everyMs);
+  child.kill = (signal) => {
+    killCount++;
+    if (onKill) onKill(signal);
+    if (killCount >= 2) { clearInterval(beat); setImmediate(() => child.emit('close', null)); }
+  };
+  return child;
+}
+
+describe('nested-claude-spawn — hard ceiling', () => {
+
+  afterEach(() => {
+    _resetSpawnFn();
+    _resetLogPath();
+    clearEnv();
+  });
+
+  test('a child chatty enough to keep resetting the heartbeat is still stopped at the ceiling', async () => {
+    setValidEnv();
+    useTmpHandleDir();
+    setPollBudget(100);
+
+    const killSignals = [];
+    // Beats every 60ms: comfortably under the 400ms heartbeat, so the heartbeat
+    // alone would never fire and the run would never end.
+    _setSpawnFn(() => createChattyChild(60, (sig) => killSignals.push(sig)));
+
+    const started = Date.now();
+    const r = await _spawnWithTimerOverride(
+      'test-prompt', '/tmp/test-ceiling.md', [],
+      { globalTimeoutMs: 300, heartbeatTimeoutMs: 400 }
+    );
+
+    assert.equal(r.success, false);
+    assert.equal(r.error_reason, 'TIMEOUT', 'the ceiling must be the reason, not the heartbeat');
+    assert.ok(killSignals.includes('SIGTERM'), 'the ceiling must actually kill');
+    assert.ok(Date.now() - started < 10_000,
+      'the run must end shortly after the ceiling, not stream on indefinitely');
+  });
+
+  test('output resuming past the ceiling does not buy the run more time', async () => {
+    setValidEnv();
+    useTmpHandleDir();
+    setPollBudget(500);
+
+    const killSignals = [];
+    // Silent through the heartbeat (150ms) so poll mode opens, then chatty from
+    // 500ms — past the 400ms ceiling. Before the fix that late output left poll
+    // mode and re-armed only the heartbeat, so the chatter ran on unbounded.
+    _setSpawnFn(() => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.exitCode = null;
+      let killCount = 0;
+      let beat = null;
+      const start = setTimeout(() => {
+        beat = setInterval(() => child.stdout.emit('data', Buffer.from('{"type":"assistant"}\n')), 60);
+      }, 500);
+      child.kill = (signal) => {
+        killCount++;
+        killSignals.push(signal);
+        if (killCount >= 2) {
+          clearTimeout(start); if (beat) clearInterval(beat);
+          setImmediate(() => child.emit('close', null));
+        }
+      };
+      return child;
+    });
+
+    const started = Date.now();
+    const r = await _spawnWithTimerOverride(
+      'test-prompt', '/tmp/test-ceiling-resume.md', [],
+      { globalTimeoutMs: 400, heartbeatTimeoutMs: 150 }
+    );
+
+    assert.equal(r.success, false);
+    assert.ok(killSignals.includes('SIGTERM'), 'the run must be killed despite resumed output');
+    assert.ok(Date.now() - started < 10_000,
+      'resumed output past the ceiling must not restart the heartbeat cycle');
+  });
+
+  test('an over-age handle is not believed, and its process is left alone', () => {
+    const handleDir = useTmpHandleDir();
+    process.env.GAAI_RUNNER_HANDLE_MAX_AGE_MS = '1000';
+
+    // Alive pid (this process), but recorded long enough ago that the pid can no
+    // longer be trusted to belong to the recorded run.
+    writeFileSync(join(handleDir, 'aged.json'), JSON.stringify({
+      trace_id: 'aged',
+      pid: process.pid,
+      cwd: '/tmp/example-aged-workspace',
+      started_at: new Date(Date.now() - 60_000).toISOString(),
+      state: 'polling',
+    }), 'utf8');
+
+    const report = reconcileHandles();
+
+    assert.deepEqual(report.live, [], 'an over-age handle must not count as live');
+    assert.deepEqual(report.expired.map(r => r.trace_id), ['aged']);
+    assert.equal(existsSync(join(handleDir, 'aged.json')), false,
+      'the record must be pruned, or recovery stays blocked forever');
+    // The decisive part: we are still running. Signalling a recycled pid would be
+    // the actual damage this branch exists to avoid.
+    assert.equal(_isAliveSelfCheck(), true, 'reconcile must never signal an over-age pid');
+  });
+
+  test('a fresh handle with a live pid is still believed', () => {
+    const handleDir = useTmpHandleDir();
+
+    writeFileSync(join(handleDir, 'fresh.json'), JSON.stringify({
+      trace_id: 'fresh',
+      pid: process.pid,
+      cwd: '/tmp/example-fresh-workspace',
+      started_at: new Date().toISOString(),
+      state: 'running',
+    }), 'utf8');
+
+    const report = reconcileHandles();
+
+    assert.deepEqual(report.live.map(r => r.trace_id), ['fresh']);
+    assert.deepEqual(report.expired, []);
+    assert.equal(existsSync(join(handleDir, 'fresh.json')), true);
+  });
+
+});
+
+/** Proves this process survived the call above. */
+function _isAliveSelfCheck() {
+  try { process.kill(process.pid, 0); return true; } catch { return false; }
+}

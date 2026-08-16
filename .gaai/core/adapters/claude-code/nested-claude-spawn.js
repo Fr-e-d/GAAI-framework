@@ -36,7 +36,10 @@
  */
 
 import { spawn as _childSpawn } from 'node:child_process';
-import { existsSync, appendFileSync, mkdirSync } from 'node:fs';
+import {
+  existsSync, appendFileSync, mkdirSync,
+  writeFileSync, readFileSync, readdirSync, unlinkSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -44,6 +47,7 @@ import { logPhase, formatPhaseStdout } from './runtime-routing-logger.js';
 
 const _NESTED_REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 const _FAIL_DEBUG_PATH  = join(_NESTED_REPO_ROOT, '.gaai', 'project', 'contexts', 'logs', 'nested-fail-debug.jsonl');
+const _HANDLE_DIR_DEFAULT = join(_NESTED_REPO_ROOT, '.gaai', 'project', 'contexts', 'logs', 'runner-handles');
 
 // ---------------------------------------------------------------------------
 // Spawn injection seam (for tests only)
@@ -65,6 +69,36 @@ const GLOBAL_TIMEOUT_MS    = 14_400_000; // 4 hours
 const HEARTBEAT_TIMEOUT_MS =  1_800_000; // 30 minutes
 const SIGKILL_GRACE_MS     =      5_000; // 5 seconds
 const MAX_TURNS            =        150;
+
+// An expiring observation window is NOT proof the run ended. The child emits its
+// terminal receipt as a stream-json `{"type":"result"}` event; until that receipt
+// (or the child's own exit) is observed, the run is still in flight. Expiry
+// therefore demotes the wrapper to poll mode against the retained handle instead
+// of killing outright — see spawnCore()'s enterPollMode(). Killing on expiry alone
+// reported successful long runs as failures, discarded the session_id that would
+// have allowed correlation, and truncated the output to whatever had arrived.
+const POLL_INTERVAL_MS     =     30_000; // handle probe cadence while in poll mode
+
+/**
+ * Poll budget once an observation window expires. Defaults to one extra heartbeat
+ * window, which bounds the cost of the grace period at the same order as the window
+ * that just expired. Setting the override to 0 restores kill-on-expiry.
+ * @param {number} heartbeatTimeoutMs
+ * @returns {number}
+ */
+function _pollBudgetMs(heartbeatTimeoutMs) {
+  const raw = process.env.GAAI_RUNNER_POLL_BUDGET_MS;
+  if (raw !== undefined && raw !== '') {
+    const override = Number(raw);
+    if (Number.isFinite(override) && override >= 0) return override;
+  }
+  return heartbeatTimeoutMs;
+}
+
+/** Directory holding one JSON handle record per in-flight runner process. */
+function _handleDir() {
+  return process.env.GAAI_RUNNER_HANDLE_DIR || _HANDLE_DIR_DEFAULT;
+}
 
 // ---------------------------------------------------------------------------
 // JSDoc typedef for SpawnResult
@@ -88,6 +122,10 @@ const MAX_TURNS            =        150;
  *   null for primary-path invocations or when collectTelemetry was not requested.
  *   context_size_at_spawn: absent if no assistant event with input_tokens was found.
  *   compact_events_count/retry_429_count/nested_session_completed: always present (may be 0/false).
+ * @property {string|null}  session_id        - session_id announced by the child, or null if never observed
+ * @property {boolean}      terminal_receipt  - true iff the child emitted its terminal stream-json `result` event
+ * @property {boolean}      observation_window_expired - true iff an observation window expired and the run was
+ *   polled against its retained handle rather than concluded on the spot
  */
 
 // ---------------------------------------------------------------------------
@@ -485,6 +523,183 @@ function _makeLogFlusher(logFile) {
 }
 
 // ---------------------------------------------------------------------------
+// Private helpers: runner handle persistence + process-tree control
+// ---------------------------------------------------------------------------
+
+/**
+ * Absolute path of the handle record for one spawn.
+ * @param {string} traceId
+ * @returns {string}
+ */
+function _handlePath(traceId) {
+  return join(_handleDir(), `${traceId}.json`);
+}
+
+/**
+ * Persists (or refreshes) the handle record for an in-flight run. Best-effort:
+ * a failure to persist must never take down the run it describes.
+ *
+ * The record is what makes a run recoverable after the wrapper loses sight of it —
+ * it is written as soon as the child exists, refreshed the moment the child's
+ * session_id is known, and removed only once the run reaches a terminal state.
+ * A record left behind therefore means "this run never concluded observably".
+ *
+ * @param {string} traceId
+ * @param {object} record - Serialisable handle fields (merged over the identity fields).
+ * @returns {string|null} Path written, or null when persistence failed.
+ */
+function _writeHandle(traceId, record) {
+  const path = _handlePath(traceId);
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ trace_id: traceId, ...record }, null, 2) + '\n', 'utf8');
+    return path;
+  } catch (e) {
+    process.stderr.write(`[nested-claude-spawn] WARNING: cannot persist handle ${path} (${e.code || e.message})\n`);
+    return null;
+  }
+}
+
+/**
+ * Removes a handle record. Best-effort — an absent file is not an error.
+ * @param {string} traceId
+ */
+function _clearHandle(traceId) {
+  try { unlinkSync(_handlePath(traceId)); } catch { /* already gone */ }
+}
+
+/**
+ * Liveness probe for a pid. Signal 0 performs permission + existence checks
+ * without delivering a signal.
+ * @param {number} pid
+ * @returns {boolean}
+ */
+function _isAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; }
+  catch (e) { return e.code === 'EPERM'; }
+}
+
+/**
+ * Signals the child AND its descendants.
+ *
+ * A delivery phase spawns a heavy subprocess tree (test runners, build servers,
+ * whatever the project's commands invoke). Signalling the child pid alone leaves
+ * every descendant orphaned, which is how long-lived workers accumulate on the
+ * host across timeouts and retries. The child is spawned into its own process
+ * group so a negative-pid signal reaches the whole tree; the direct signal stays
+ * as the fallback for platforms without process groups and for injected test doubles.
+ *
+ * @param {import('node:child_process').ChildProcess} child
+ * @param {NodeJS.Signals} signal
+ */
+function _killTree(child, signal) {
+  const pid = child.pid;
+  if (process.platform !== 'win32' && Number.isInteger(pid) && pid > 0) {
+    try { process.kill(-pid, signal); return; }
+    catch { /* no process group (or already reaped) — fall through */ }
+  }
+  try { child.kill(signal); } catch { /* already dead */ }
+}
+
+/**
+ * Extracts the two stream-json facts the wrapper must not lose: the session_id
+ * announced at init, and the terminal `result` receipt that ends the run.
+ * Tolerant by design — non-JSON and partial lines are skipped, never thrown on.
+ *
+ * @param {string} text - One or more complete stdout lines.
+ * @param {{ sessionId: string|null, terminalReceipt: object|null }} state - Mutated in place.
+ */
+function _scanStreamEvents(text, state) {
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{')) continue;
+    let obj;
+    try { obj = JSON.parse(trimmed); } catch { continue; }
+    if (!state.sessionId && typeof obj.session_id === 'string' && obj.session_id) {
+      state.sessionId = obj.session_id;
+    }
+    if (obj.type === 'result') state.terminalReceipt = obj;
+  }
+}
+
+/**
+ * Age past which a handle is disbelieved regardless of pid liveness. No legitimate
+ * run outlives its own ceiling plus a grace window, so beyond this the pid is far
+ * more likely to have been recycled than to still belong to the recorded run.
+ */
+function _handleMaxAgeMs() {
+  const raw = process.env.GAAI_RUNNER_HANDLE_MAX_AGE_MS;
+  if (raw !== undefined && raw !== '') {
+    const override = Number(raw);
+    if (Number.isFinite(override) && override > 0) return override;
+  }
+  return GLOBAL_TIMEOUT_MS + HEARTBEAT_TIMEOUT_MS;
+}
+
+/**
+ * Reconciles persisted handles against the processes actually running.
+ *
+ * Recovery re-launches a phase from its recorded state; without this check it
+ * cannot tell "the previous runner died" from "the previous runner is still
+ * working", and re-launching in the second case spawns a duplicate against the
+ * same worktree. Call this before deciding to re-launch.
+ *
+ * @param {{ reap?: boolean }} [opts]
+ *   reap — SIGKILL the process group of handles still alive (default false: report only).
+ * @returns {{ live: object[], stale: object[], expired: object[], unreadable: string[] }}
+ *   live       — handle records whose pid is still running and whose age is plausible
+ *   stale      — handle records whose pid is gone (their files are removed)
+ *   expired    — records too old to be believed, pid notwithstanding (files removed,
+ *                processes left strictly alone — see below)
+ *   unreadable — paths that could not be parsed (left in place for inspection)
+ */
+export function reconcileHandles({ reap = false } = {}) {
+  const dir = _handleDir();
+  const out = { live: [], stale: [], expired: [], unreadable: [] };
+  const maxAgeMs = _handleMaxAgeMs();
+  const now = Date.now();
+  let entries;
+  try { entries = readdirSync(dir); } catch { return out; }
+
+  for (const name of entries) {
+    if (!name.endsWith('.json')) continue;
+    const path = join(dir, name);
+    let record;
+    try { record = JSON.parse(readFileSync(path, 'utf8')); }
+    catch { out.unreadable.push(path); continue; }
+
+    if (!_isAlive(record.pid)) {
+      out.stale.push(record);
+      try { unlinkSync(path); } catch { /* already gone */ }
+      continue;
+    }
+
+    // A SIGKILLed wrapper never clears its handle, so the record outlives the run.
+    // Once the OS recycles that pid, a liveness probe alone reports it live forever
+    // and recovery refuses to relaunch the story for good. Age breaks that deadlock.
+    // Crucially the process is NOT signalled here: on this branch the pid most
+    // likely belongs to something unrelated, and killing it would be the real damage.
+    const startedAt = Date.parse(record.started_at ?? '');
+    if (Number.isFinite(startedAt) && (now - startedAt) > maxAgeMs) {
+      out.expired.push(record);
+      try { unlinkSync(path); } catch { /* already gone */ }
+      continue;
+    }
+
+    out.live.push(record);
+    if (reap) {
+      if (process.platform !== 'win32') {
+        try { process.kill(-record.pid, 'SIGKILL'); } catch { /* no group */ }
+      }
+      try { process.kill(record.pid, 'SIGKILL'); } catch { /* already gone */ }
+      try { unlinkSync(path); } catch { /* already gone */ }
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Core spawn logic (shared between all public exports)
 // ---------------------------------------------------------------------------
 
@@ -532,6 +747,9 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
         model_fallback_triggered: false,
         provider_base_url:       baseUrl,
         telemetry:               null,
+        session_id:              null,
+        terminal_receipt:        false,
+        observation_window_expired: false,
       });
       return;
     }
@@ -540,6 +758,9 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
     const env   = envFn();
     const spawnOpts = { env, shell: false, stdio: ['ignore', 'pipe', 'pipe'] };
     if (cwd) spawnOpts.cwd = cwd;
+    // Own process group so descendants can be signalled as a tree (see _killTree).
+    // Never unref'd — the parent keeps the pipes and stays attached for the receipt.
+    if (process.platform !== 'win32') spawnOpts.detached = true;
     const child = _spawnFn(claudePath, args, spawnOpts);
 
     const stdoutChunks = [];
@@ -549,36 +770,163 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
 
     let globalTimer    = null;
     let heartbeatTimer = null;
+    let pollTimer      = null;
+    let pollDeadline   = 0;
+    let pollReason     = null;
+    let inPollMode     = false;
+    let everPolled     = false;
+    // The global window is a hard ceiling, so it is held as an absolute instant
+    // rather than as a one-shot timer. A timer alone was defeated two ways: it
+    // fires once, so firing while a heartbeat poll was already running was
+    // swallowed by enterPollMode's guard, and any later stdout byte left poll mode
+    // and re-armed only the heartbeat. Either way nothing bounded the run again.
+    const globalDeadline = startMs + globalTimeoutMs;
     const logFlusher   = _makeLogFlusher(logFile);
+    const streamState  = { sessionId: null, terminalReceipt: null };
+    const pollBudgetMs = _pollBudgetMs(heartbeatTimeoutMs);
+    let scanBuffer     = '';
+
+    // Handle record — written before any window can expire, so a run is never
+    // unrecoverable, and refreshed as soon as the session_id is announced.
+    _writeHandle(traceId, {
+      pid:         child.pid ?? null,
+      session_id:  null,
+      state:       'running',
+      started_at:  new Date(startMs).toISOString(),
+      log_file:    logFile || null,
+      report_path: implReportPath || null,
+      cwd:         cwd || null,
+    });
+
+    function refreshHandle(state, extra = {}) {
+      _writeHandle(traceId, {
+        pid:         child.pid ?? null,
+        session_id:  streamState.sessionId,
+        state,
+        started_at:  new Date(startMs).toISOString(),
+        log_file:    logFile || null,
+        report_path: implReportPath || null,
+        cwd:         cwd || null,
+        ...extra,
+      });
+    }
+
+    // Wrapper death must not strand the tree it spawned. The child now has its own
+    // process group, so it no longer dies with us by default. 'exit' covers the
+    // orderly path; the signal handlers cover the one the daemon actually uses, and
+    // they re-raise so the wrapper's own exit status keeps its usual meaning.
+    const onParentExit = () => _killTree(child, 'SIGKILL');
+    const onParentSignal = (sig) => {
+      _killTree(child, 'SIGKILL');
+      process.removeListener('SIGTERM', onParentSignal);
+      process.removeListener('SIGINT',  onParentSignal);
+      process.kill(process.pid, sig);
+    };
+    process.once('exit', onParentExit);
+    process.once('SIGTERM', onParentSignal);
+    process.once('SIGINT',  onParentSignal);
 
     function clearTimers() {
       if (globalTimer)    { clearTimeout(globalTimer);    globalTimer    = null; }
       if (heartbeatTimer) { clearTimeout(heartbeatTimer); heartbeatTimer = null; }
+      if (pollTimer)      { clearTimeout(pollTimer);      pollTimer      = null; }
     }
 
     function killChild(reason) {
       if (killed) return;
       killed       = true;
       presetReason = reason;
-      console.log(`[nested-claude-spawn] killing child reason=${reason} trace_id=${traceId}`);
-      child.kill('SIGTERM');
-      setTimeout(() => {
-        try { child.kill('SIGKILL'); } catch { /* already dead */ }
-      }, SIGKILL_GRACE_MS);
+      console.log(`[nested-claude-spawn] killing child tree reason=${reason} trace_id=${traceId} session_id=${streamState.sessionId ?? 'unknown'}`);
+      refreshHandle('killed', { kill_reason: reason });
+      _killTree(child, 'SIGTERM');
+      setTimeout(() => _killTree(child, 'SIGKILL'), SIGKILL_GRACE_MS);
+    }
+
+    /**
+     * An observation window expired. The run is not concluded by that fact alone,
+     * so retain the handle and probe it until a terminal receipt, the child's own
+     * exit, or the poll budget running out — only the last of which is a kill.
+     */
+    function enterPollMode(reason) {
+      if (killed) return;
+      if (pollBudgetMs <= 0) { killChild(reason); return; }
+
+      // Already polling: nothing to do. The active poll already carries a bounded
+      // deadline, and exitPollMode() refuses to leave poll mode past the ceiling,
+      // so the run stays bounded whichever window opened it.
+      if (inPollMode) return;
+
+      inPollMode   = true;
+      everPolled   = true;
+      pollReason   = reason;
+      // Grace never extends past the ceiling plus one budget — that sum is the
+      // absolute end of the run.
+      pollDeadline = Math.min(Date.now() + pollBudgetMs, globalDeadline + pollBudgetMs);
+      console.log(`[nested-claude-spawn] observation window expired reason=${reason} trace_id=${traceId} session_id=${streamState.sessionId ?? 'unknown'} — polling handle for terminal receipt (budget_ms=${pollBudgetMs})`);
+      refreshHandle('polling', { poll_reason: reason });
+      schedulePoll();
+    }
+
+    function schedulePoll() {
+      const remaining = pollDeadline - Date.now();
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = setTimeout(pollOnce, Math.max(1, Math.min(POLL_INTERVAL_MS, remaining)));
+    }
+
+    function pollOnce() {
+      if (killed || !inPollMode) return;
+
+      // Still inside the budget: keep the handle and keep waiting. A child that
+      // exits on its own fires 'close', which clears these timers.
+      if (Date.now() < pollDeadline) { schedulePoll(); return; }
+
+      // Budget spent. 'close' only fires once every holder of the child's stdout
+      // is gone, so a lingering descendant can keep it pending indefinitely — the
+      // budget is what stops that from becoming an unbounded wait.
+      if (streamState.terminalReceipt) {
+        console.log(`[nested-claude-spawn] terminal receipt in hand, tree still holding stdout — reaping trace_id=${traceId} session_id=${streamState.sessionId ?? 'unknown'}`);
+      } else {
+        console.log(`[nested-claude-spawn] no terminal receipt within poll budget trace_id=${traceId} session_id=${streamState.sessionId ?? 'unknown'}`);
+      }
+      killChild(pollReason);
+    }
+
+    function exitPollMode() {
+      if (!inPollMode) return;
+      // Past the hard ceiling, resumed output no longer buys time. Without this a
+      // child chatty enough to stay under the heartbeat could run unbounded.
+      if (Date.now() >= globalDeadline) return;
+      inPollMode = false;
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+      console.log(`[nested-claude-spawn] output resumed — leaving poll mode trace_id=${traceId}`);
+      refreshHandle('running');
     }
 
     function resetHeartbeat() {
       if (heartbeatTimer) { clearTimeout(heartbeatTimer); }
-      heartbeatTimer = setTimeout(() => killChild('HEARTBEAT_TIMEOUT'), heartbeatTimeoutMs);
+      heartbeatTimer = setTimeout(() => enterPollMode('HEARTBEAT_TIMEOUT'), heartbeatTimeoutMs);
     }
 
-    // Start timers
-    globalTimer    = setTimeout(() => killChild('TIMEOUT'), globalTimeoutMs);
+    // Start timers. The global window goes through poll mode too, so a run that is
+    // genuinely finishing is not cut off at the line — but globalDeadline, not this
+    // timer, is what enforces the ceiling.
+    globalTimer    = setTimeout(() => enterPollMode('TIMEOUT'), globalTimeoutMs);
     resetHeartbeat();
 
     child.stdout.on('data', (chunk) => {
       logFlusher.flush(chunk);
       stdoutChunks.push(chunk);
+      // Scan complete lines only — a chunk boundary can land mid-JSON, and a
+      // session_id split across two chunks is exactly the identifier we must not lose.
+      scanBuffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const lastNewline = scanBuffer.lastIndexOf('\n');
+      if (lastNewline >= 0) {
+        const hadSession = streamState.sessionId;
+        _scanStreamEvents(scanBuffer.slice(0, lastNewline + 1), streamState);
+        scanBuffer = scanBuffer.slice(lastNewline + 1);
+        if (!hadSession && streamState.sessionId) refreshHandle(inPollMode ? 'polling' : 'running');
+      }
+      exitPollMode();
       resetHeartbeat();
     });
 
@@ -588,11 +936,22 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
 
     child.on('close', (code) => {
       clearTimers();
+      inPollMode = false;
+      process.removeListener('exit',    onParentExit);
+      process.removeListener('SIGTERM', onParentSignal);
+      process.removeListener('SIGINT',  onParentSignal);
+      _clearHandle(traceId);
 
       const stdout     = Buffer.concat(stdoutChunks).toString('utf8');
       const stderr     = Buffer.concat(stderrChunks).toString('utf8');
       const duration   = Date.now() - startMs;
       const modelActual = extractModelActual(stdout);
+
+      // Final authoritative scan over the whole stream — the incremental scan is
+      // an optimisation for the live path, this is what the outcome is decided on.
+      _scanStreamEvents(stdout, streamState);
+      const receipt   = streamState.terminalReceipt;
+      const receiptOk = !!receipt && receipt.is_error !== true;
 
       // Determine completion marker presence
       const hasCompletionMarker = stdout.includes('## QA') || stdout.includes('## Implementation') || stdout.includes('impl_report');
@@ -602,7 +961,12 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
       // is given — the child's responsibility is to WRITE the file, not to emit stdout markers.
       // When no implReportPath is given (e.g., unit tests), fall back to completion markers.
       // (Updated 2026-04-19 after E63S03 PARSE_ERROR'd despite 7KB impl-report.md being written.)
-      const success = (code === 0) && (implReportPath
+      //
+      // A clean terminal receipt counts alongside exit 0: when the wrapper had to
+      // stop watching and later signalled the tree, the exit code reports our kill,
+      // not the run. Receipt plus artefact means the work landed — grading that as
+      // a failure is the defect this path exists to prevent.
+      const success = (code === 0 || receiptOk) && (implReportPath
         ? reportExists
         : hasCompletionMarker);
 
@@ -645,7 +1009,7 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
         telemetry = fields;
       }
 
-      console.log(`[nested-claude-spawn] done trace_id=${traceId} success=${success} reason=${errorReason} duration_ms=${duration}`);
+      console.log(`[nested-claude-spawn] done trace_id=${traceId} session_id=${streamState.sessionId ?? 'unknown'} success=${success} reason=${errorReason} terminal_receipt=${!!receipt} polled=${everPolled} duration_ms=${duration}`);
 
       resolve({
         trace_id:         traceId,
@@ -659,6 +1023,9 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
         model_fallback_triggered: modelFallbackTriggered,
         provider_base_url:       baseUrl,
         telemetry,
+        session_id:              streamState.sessionId,
+        terminal_receipt:        !!receipt,
+        observation_window_expired: everPolled,
       });
     });
   });
@@ -932,6 +1299,9 @@ export async function spawnNestedClaude(prompt, implReportPath, extraArgs = [], 
       model_requested:  process.env.GAAI_IMPL_MODEL   || '',
       model_fallback_triggered: false,
       provider_base_url:       process.env.GAAI_IMPL_BASE_URL || '',
+      session_id:              null,
+      terminal_receipt:        false,
+      observation_window_expired: false,
     };
   }
 
@@ -973,6 +1343,9 @@ export async function _spawnWithTimerOverride(prompt, implReportPath, extraArgs,
       model_requested:  process.env.GAAI_IMPL_MODEL   || '',
       model_fallback_triggered: false,
       provider_base_url:       process.env.GAAI_IMPL_BASE_URL || '',
+      session_id:              null,
+      terminal_receipt:        false,
+      observation_window_expired: false,
     };
   }
 
@@ -1002,8 +1375,6 @@ export async function _spawnWithTimerOverride(prompt, implReportPath, extraArgs,
 // When --story-id is absent:   uses spawnNestedClaude() — legacy secondary-only path (AC7).
 // AC12: audit log emission uses logPhase() library (imported above), not a separate CLI spawn.
 
-import { readFileSync } from 'node:fs';
-
 async function _cli() {
   const args = process.argv.slice(2);
   const opts = {};
@@ -1017,6 +1388,8 @@ async function _cli() {
     else if (k === '--story-id') opts.storyId = args[++i];
     else if (k === '--impl-model-tag') opts.implModelTag = args[++i];
     else if (k === '--worktree-path') opts.worktreePath = args[++i];
+    else if (k === '--reconcile-handles') opts.reconcileHandles = true;
+    else if (k === '--reap') opts.reap = true;
     else if (k === '--help' || k === '-h') {
       process.stdout.write(`Usage: node nested-claude-spawn.js [options]
 
@@ -1028,6 +1401,8 @@ Options:
   --impl-model-tag <tag>     Routing tag: primary|secondary|absent (default: absent)
   --extra-arg <arg>          Append extra argv to child (repeatable)
   --log-file <path>          Append child stdout stream-json lines to this log file
+  --reconcile-handles        Report in-flight runner handles and prune dead ones, then exit
+  --reap                     With --reconcile-handles: also SIGKILL the tree of live handles
   --help, -h                 Show this help
 
 When --story-id is provided: uses runImpl() — deterministic routing + internal audit log emit.
@@ -1041,6 +1416,14 @@ Output: SpawnResult JSON on stdout. Exit 1 on invocation error.
 
   if (!opts.logFile && process.env.GAAI_DELIVERY_LOG_FILE) {
     opts.logFile = process.env.GAAI_DELIVERY_LOG_FILE;
+  }
+
+  // Reconciliation is a standalone maintenance mode — it spawns nothing and
+  // needs none of the run arguments below.
+  if (opts.reconcileHandles) {
+    const report = reconcileHandles({ reap: !!opts.reap });
+    process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+    process.exit(0);
   }
 
   if (!opts.reportPath) {
