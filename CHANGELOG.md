@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- docs: the post-merge cleanup clause prescribed a flag that breaks an invariant
 - fix: record run identity on the handle instead of inferring it
 - fix: keep and poll the handle until a terminal receipt
 - fix: make generated execution plans carry artefact frontmatter
