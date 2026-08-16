@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: keep and poll the handle until a terminal receipt
+- fix: make generated execution plans carry artefact frontmatter
 -: Make hosted CI the sole daemon merge authority
 -: Consume the two-axis handoff and route remediation
 -: 'The CI test-gate wait outlasts a normal CI run, so local

@@ -2095,6 +2095,33 @@ _recovery_relaunch() {
     return 1
   fi
 
+  # Handle reconciliation : a phase can look stranded merely because its wrapper
+  # stopped watching — the runner it spawned may still be working in the worktree.
+  # Relaunching then puts two live sessions on one worktree, and the losing one's
+  # files get overwritten. The reconcile pass prunes handles whose process is gone
+  # (those are genuinely stranded and SHOULD relaunch) and reports the ones still
+  # running; a live handle rooted in this story's worktree means there is nothing
+  # to relaunch yet. Best-effort: any failure here falls through to the relaunch,
+  # preserving prior behaviour rather than stalling recovery.
+  local _handles_json _live_here=""
+  _handles_json=$(node "$PROJECT_DIR/.gaai/core/adapters/claude-code/nested-claude-spawn.js" \
+    --reconcile-handles 2>/dev/null || true)
+  if [[ -n "$_handles_json" ]]; then
+    _live_here=$(printf '%s' "$_handles_json" | python3 -c '
+import json, sys
+try:
+    live = json.load(sys.stdin).get("live", [])
+except Exception:
+    sys.exit(0)
+needle = sys.argv[1] + "-workspace"
+print("1" if any(needle in (h.get("cwd") or "") for h in live) else "")
+' "$sid" 2>/dev/null || true)
+  fi
+  if [[ "$_live_here" == "1" ]]; then
+    log "${YELLOW}[RECOVERY] $sid : live runner handle still rooted in this worktree — skipping relaunch to avoid a duplicate session${NC}"
+    return 1
+  fi
+
   local trace_id
   trace_id=$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \
     || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \

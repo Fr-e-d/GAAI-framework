@@ -38,6 +38,22 @@ For simple Stories (1-2 files, clear criteria, no order constraints), `delivery-
 
 ## Process
 
+**CRITICAL — Frontmatter Contract (MUST apply to every file this skill writes):**
+Read the plan template at `contexts/artefacts/plans/_template.plan.md` and open every
+output with its YAML frontmatter block. Both `type: artefact` and `id:` are required —
+artefact validation reads those two fields and rejects a file that lacks either. The
+requirement applies equally to `{id}.execution-plan.md` and `{id}.plan-blocked.md`;
+both live under `contexts/artefacts/plans/` and are validated identically.
+When updating an existing file, never overwrite frontmatter that is already there —
+add only what is missing.
+- **Rationale:** this skill previously documented its output as a markdown body starting
+  at the `#` heading, with no frontmatter anywhere in its instructions, while the template
+  it never told anyone to read did carry it. Generated plans therefore failed artefact
+  validation from the start, and because sibling skills (story generation) do instruct
+  reading their template, the gap showed up as plans being the one artefact class that
+  failed en masse. Fixing the backlog of files without fixing this instruction would
+  simply regenerate the defect on the next delivery.
+
 **CRITICAL — Anti-Collision Guard (MUST execute before writing any output file):**
 Before writing `contexts/artefacts/plans/{id}.execution-plan.md` (or `{id}.plan-blocked.md`), check if the target file already exists on disk:
 - If it does NOT exist → proceed normally.
@@ -125,6 +141,16 @@ invent, or suggest a custom skill not declared by the human in Discovery.
 ## Outputs
 
 ```markdown
+---
+type: artefact
+artefact_type: execution-plan
+id: {Story ID}
+track: delivery
+related_backlog_id: {Story ID}
+created_at: {YYYY-MM-DD}
+updated_at: {YYYY-MM-DD}
+---
+
 # Execution Plan — {Story ID}: {Story Title}
 
 ## Implementation Sequence
@@ -165,6 +191,7 @@ Saves to `contexts/artefacts/plans/{id}.execution-plan.md`.
 
 ## Quality Checks
 
+- The output opens with a YAML frontmatter block carrying both `type: artefact` and `id:` — a file missing either is rejected by artefact validation
 - Every acceptance criterion maps to at least one implementation step and one test checkpoint
 - Implementation sequence has no circular dependencies
 - Every risky step has an explicit rollback boundary
