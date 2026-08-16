@@ -40,7 +40,7 @@ import {
   existsSync, appendFileSync, mkdirSync,
   writeFileSync, readFileSync, readdirSync, unlinkSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { logPhase, formatPhaseStdout } from './runtime-routing-logger.js';
@@ -78,6 +78,7 @@ const MAX_TURNS            =        150;
 // reported successful long runs as failures, discarded the session_id that would
 // have allowed correlation, and truncated the output to whatever had arrived.
 const POLL_INTERVAL_MS     =     30_000; // handle probe cadence while in poll mode
+const ACTIVITY_FLUSH_MS    =     10_000; // how often last_activity_at is persisted
 
 /**
  * Poll budget once an observation window expires. Defaults to one extra heartbeat
@@ -720,11 +721,21 @@ export function reconcileHandles({ reap = false } = {}) {
  */
 function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeatTimeoutMs, logFile,
                    envFn = buildChildEnv, model = 'opus', includeFallbackModel = true, collectTelemetry = false,
-                   cwd = '') {
+                   cwd = '', context = {}) {
   const traceId   = randomUUID();
   const startMs   = Date.now();
   const modelReq  = process.env.GAAI_IMPL_MODEL   || '';
   const baseUrl   = process.env.GAAI_IMPL_BASE_URL || '';
+
+  // What this run belongs to. A handle that cannot name its own story forces
+  // consumers to infer identity from the worktree path, which is a string-shape
+  // guess rather than a fact. Explicit context wins; the daemon exports the same
+  // values into the child env, which covers callers that pass nothing.
+  const identity = {
+    story_id:     context.storyId     || process.env.GAAI_STORY_ID     || null,
+    workspace_id: context.workspaceId || process.env.GAAI_WORKSPACE_ID || null,
+    phase:        context.phase       || 'impl',
+  };
 
   // Log spawn start — never log token values
   console.log(`[nested-claude-spawn] spawn trace_id=${traceId} model=${modelReq} url=${baseUrl}`);
@@ -785,14 +796,24 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
     const streamState  = { sessionId: null, terminalReceipt: null };
     const pollBudgetMs = _pollBudgetMs(heartbeatTimeoutMs);
     let scanBuffer     = '';
+    let lastActivityAt = startMs;
+    let activityFlushAt = 0;
+
+    // Command identity, deliberately narrow: the resolved binary and the model.
+    // The argv is never recorded — it carries the prompt, and a handle file is
+    // not a place to put prompt content.
+    const command = { bin: basename(claudePath), model };
 
     // Handle record — written before any window can expire, so a run is never
     // unrecoverable, and refreshed as soon as the session_id is announced.
     _writeHandle(traceId, {
+      ...identity,
+      command,
       pid:         child.pid ?? null,
       session_id:  null,
       state:       'running',
       started_at:  new Date(startMs).toISOString(),
+      last_activity_at: new Date(startMs).toISOString(),
       log_file:    logFile || null,
       report_path: implReportPath || null,
       cwd:         cwd || null,
@@ -800,6 +821,9 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
 
     function refreshHandle(state, extra = {}) {
       _writeHandle(traceId, {
+        ...identity,
+        command,
+        last_activity_at: new Date(lastActivityAt).toISOString(),
         pid:         child.pid ?? null,
         session_id:  streamState.sessionId,
         state,
@@ -925,6 +949,15 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
         _scanStreamEvents(scanBuffer.slice(0, lastNewline + 1), streamState);
         scanBuffer = scanBuffer.slice(lastNewline + 1);
         if (!hadSession && streamState.sessionId) refreshHandle(inPollMode ? 'polling' : 'running');
+      }
+      // Liveness as an observed fact, not an inference from the file's mtime.
+      // Flushed on an interval rather than per chunk: a chatty run emits far too
+      // often to justify a write each time, and consumers only need the field
+      // accurate to the order of the windows they compare it against.
+      lastActivityAt = Date.now();
+      if (lastActivityAt - activityFlushAt >= ACTIVITY_FLUSH_MS) {
+        activityFlushAt = lastActivityAt;
+        refreshHandle(inPollMode ? 'polling' : 'running');
       }
       exitPollMode();
       resetHeartbeat();
@@ -1183,7 +1216,7 @@ export async function runImpl({ implModelTag, prompt, reportPath, storyId, extra
       prompt, reportPath, extraArgs,
       GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
       buildChildEnv, 'opus', /* includeFallbackModel */ true, /* collectTelemetry */ true,
-      worktreePath
+      worktreePath, { storyId }
     );
 
     const logFailed = _emitLog({
@@ -1209,7 +1242,7 @@ export async function runImpl({ implModelTag, prompt, reportPath, storyId, extra
         prompt, reportPath, extraArgs,
         GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
         buildPrimaryChildEnv, 'sonnet', /* includeFallbackModel */ false,
-        /* collectTelemetry */ false, worktreePath
+        /* collectTelemetry */ false, worktreePath, { storyId }
       );
 
       const primaryLogFailed = _emitLog({
@@ -1242,7 +1275,7 @@ export async function runImpl({ implModelTag, prompt, reportPath, storyId, extra
     prompt, reportPath, extraArgs,
     GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
     buildPrimaryChildEnv, 'sonnet', /* includeFallbackModel */ false,
-    /* collectTelemetry */ false, worktreePath
+    /* collectTelemetry */ false, worktreePath, { storyId }
   );
 
   const logFailed = _emitLog({
