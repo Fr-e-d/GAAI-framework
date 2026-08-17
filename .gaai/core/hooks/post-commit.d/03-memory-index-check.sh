@@ -57,4 +57,53 @@ if git diff-tree --no-commit-id --name-only -r HEAD | grep -q 'contexts/memory/.
     else
         echo "⚠️  ${UNREGISTERED} memory file(s) not found in any registry (run memory-index-sync to fix)"
     fi
+
+    # ── Registry row width ────────────────────────────────────────────────────
+    # An index row is a pointer: metadata + a short topic, capped at 200 characters
+    # by the base rules. Substance belongs in the target file.
+    #
+    # This is a RATCHET, not an audit. Registries in the wild already carry rows well
+    # past the cap, and enumerating every one of them on each memory commit would bury
+    # the signal under warnings nobody can act on in the moment. So only rows that THIS
+    # commit introduces are reported — the standing debt is left to a compaction pass
+    # (memory-index-compact), while a new violation is caught while it is still one line
+    # in one commit.
+    CAP=200
+    NEW_OVER=0
+
+    # Characters, not bytes: a topic carrying arrows or accents is shorter than its byte
+    # count, and the cap is stated in characters. Without python3 the check falls back to
+    # bytes, which can only over-report — it never lets a long row through unseen.
+    if command -v python3 >/dev/null 2>&1; then
+        _rows_over_cap() { python3 -c '
+import sys
+cap = int(sys.argv[1])
+for line in sys.stdin.read().splitlines():
+    if len(line) > cap:
+        print("%d\t%s" % (len(line), line[:72]))
+' "$CAP"; }
+    else
+        _rows_over_cap() { awk -v cap="$CAP" 'length($0) > cap { printf "%d\t%.72s\n", length($0), $0 }'; }
+    fi
+
+    for idx in "${INDEX_FILES[@]}"; do
+        rel_idx="${idx#"$ROOT"/}"
+        # Added lines only (leading '+'), table rows only, minus the header separator.
+        added="$(git diff-tree --no-commit-id -r -p HEAD -- "$rel_idx" 2>/dev/null \
+                 | sed -n 's/^+\(|.*\)$/\1/p' \
+                 | grep -Ev '^\|[-: |]+\|?[[:space:]]*$')"
+        [ -z "$added" ] && continue
+        while IFS=$'\t' read -r len excerpt; do
+            [ -z "$len" ] && continue
+            if (( NEW_OVER == 0 )); then
+                echo "⚠️  Registry rows over the ${CAP}-char pointer cap were added:"
+            fi
+            echo "  ⚠️  ${len} chars in $(basename "$rel_idx"): ${excerpt}…"
+            ((NEW_OVER++))
+        done < <(printf '%s\n' "$added" | _rows_over_cap)
+    done
+
+    if (( NEW_OVER > 0 )); then
+        echo "  → Trim to a metadata + ≤30-word topic pointer; the detail belongs in the target file."
+    fi
 fi
