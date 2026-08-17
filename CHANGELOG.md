@@ -7,18 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.49.0] - 2026-08-17
 
 ### Changed
+- feat: catch registry rows that break the pointer cap, as they are added
 - docs: the remote branch may be deleted by the forge, not by hand
 - docs: the post-merge cleanup clause prescribed a flag that breaks an invariant
 - fix: record run identity on the handle instead of inferring it
 - fix: keep and poll the handle until a terminal receipt
 - fix: make generated execution plans carry artefact frontmatter
--: Make hosted CI the sole daemon merge authority
--: Consume the two-axis handoff and route remediation
--: 'The CI test-gate wait outlasts a normal CI run, so local
--: Produce and validate the two-axis QA handoff
+
 
 ## [2.49.0] - 2026-08-11
 
