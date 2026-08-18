@@ -50,4 +50,3 @@ After install, these commands are available in Claude Code:
 - `/gaai-deliver` — Start the Delivery Daemon (alias of `/gaai-daemon`)
 - `/gaai-status` — Show current backlog and memory state
 - `/gaai-update` — Update framework core or switch AI tool adapter
-- `/gaai-switch cloud` — Connect to GAAI Cloud: migrate local contexts to a cloud workspace
