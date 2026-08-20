@@ -51,7 +51,13 @@ Activate after implementation is complete. This is a **hard quality gate**.
 - Only files within Story scope were modified
 - No feature creep introduced
 - No unrelated refactors included
-- Unexpected changes → FAIL
+- Unexpected changes → FAIL, recorded as a `findings[]` entry (`classification: blocking`,
+  `root_cause: plan | implementation`) that fails `plan_conformance` on its own. This is a
+  different mechanism from the `changed_surface_inventory` `blocking` classification used in
+  Step 7 — do NOT mark the affected surface `blocking` in the inventory or attach an
+  `evidence[]` entry for a pure scope/plan violation; there is no primary authority to cite for
+  it, and doing so produces an unsatisfiable handoff rejection (see `qa.daemon-prompt.md`
+  Two-Axis Review step 1 for the worked example).
 
 ### 3. Rule Enforcement
 - Confirm compliance with each applicable rule
@@ -99,6 +105,9 @@ TS|Error|warning" /tmp/tsc-output.txt | tail -100`.
 
 Independent of Steps 1-6, evaluate and record `state_of_the_art_conformance` — do this
 BEFORE finalizing `plan_conformance`, to avoid anchoring on "tests passed" (DEC-200 D1).
+This step's `changed_surface_inventory` `blocking` classification (and its `evidence[]`
+obligation) is scoped to currentness/materiality only — a Step 2 scope violation never
+belongs here, see Step 2's note above.
 
 - **Materiality floor.** A functionally correct implementation that passes every business
   test is still `FAIL` on this axis when any changed surface is `blocking`: a named primary
