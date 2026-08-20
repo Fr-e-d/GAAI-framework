@@ -7,7 +7,7 @@
 #
 # Controlled set (exhaustive): the public repository's root README.md,
 # docs/contributing/fork-and-own.md, and tracked LICENSE blob. Those files
-# live in Fr-e-d/GAAI-framework, NOT in this monorepo — see PUBLIC_ROOT
+# live in digipulse-engineering/GAAI-framework, NOT in this monorepo — see PUBLIC_ROOT
 # resolution below. Expanding the controlled set requires a validated
 # governance change, not an implicit glob.
 #
@@ -29,7 +29,7 @@ fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Four '..' from .gaai/core/scripts/tests/ resolves to the repository root.
-# In the synced public repo this is Fr-e-d/GAAI-framework's own root
+# In the synced public repo this is digipulse-engineering/GAAI-framework's own root
 # (correct target). In gaai-platform it resolves to this monorepo's own
 # root (deliberate — public_layout_present() turns that into a pass-through
 # "not applicable" result instead of a false failure or a silently-skipped

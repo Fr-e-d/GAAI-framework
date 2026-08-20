@@ -69,7 +69,7 @@ To switch to a different AI tool, re-run the installer with `--tool` set explici
 
 ```bash
 rm -rf /tmp/gaai
-git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai
+git clone https://github.com/digipulse-engineering/GAAI-framework.git /tmp/gaai
 bash /tmp/gaai/.gaai/core/scripts/install.sh --target /path/to/your/project --tool claude-code --yes
 rm -rf /tmp/gaai
 ```
