@@ -121,8 +121,16 @@ export function recordContribution(path, entry) {
     // contributors. Refuse; the operator repairs or deletes the file.
     throw new Error(`provenance ledger is corrupt: ${path}`);
   }
+  // De-duplication is per ATTEMPT, not per model. Collapsing attempts made the
+  // ledger unable to answer "who produced the verdict that is on disk now":
+  // a model recorded on an earlier failed attempt makes its own later, successful
+  // run a no-op, so a membership check can accept a stale evaluator. Attempts are
+  // distinct executions and are recorded as such; the exclusion set still unions
+  // them, because anyone who ever contributed stays barred from judging.
+  const attempt = entry.attempt || '';
   const dup = ledger.contributions.some(
-    (c) => c.artifact === artifact && c.model_id === modelId && c.concrete_model === concreteModel,
+    (c) => c.artifact === artifact && c.model_id === modelId
+      && c.concrete_model === concreteModel && (c.attempt || '') === attempt,
   );
   if (!dup) {
     ledger.contributions.push({
@@ -131,6 +139,7 @@ export function recordContribution(path, entry) {
       concrete_model: concreteModel,
       harness: entry.harness || '',
       role: entry.role || '',
+      attempt: attempt,
       effort: entry.effort || '',
       // Recorded now because they cannot be reconstructed later. A question
       // deferred is answerable from history; a field never written is not.
@@ -203,6 +212,19 @@ export function contributorTokens(ledger, kinds) {
     if (c.concrete_model) tokens.add(`model:${c.concrete_model}`);
   }
   return tokens;
+}
+
+/**
+ * The most recent contributor recorded for a kind — the one that produced what
+ * is on disk now, as opposed to everyone who ever produced a version of it.
+ * Exclusion uses the union; "who wrote this verdict" needs the latest.
+ * @param {{contributions: Array}} ledger
+ * @param {string} kind
+ * @returns {object|null}
+ */
+export function latestContributor(ledger, kind) {
+  const rows = (ledger.contributions || []).filter((c) => c.artifact === kind);
+  return rows.length ? rows[rows.length - 1] : null;
 }
 
 /**

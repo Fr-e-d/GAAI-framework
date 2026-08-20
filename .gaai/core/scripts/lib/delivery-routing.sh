@@ -23,25 +23,25 @@ _gaai_router_bin() {
 
 # Durable state roots. Explicit env always wins.
 #
-# The two roots are deliberately different, because they answer to different
-# lifetimes. Harness availability is daemon state — shared across stories,
-# meaningless once the outage clears — so it belongs next to the locks and must
-# NOT be committed. Provenance is the opposite: it is the record of who wrote a
-# story's artefacts, it is only ever meaningful alongside those artefacts, and it
-# has to outlive the worktree that produced it.
+# Provenance has to satisfy two properties that pull in opposite directions, and
+# getting one at the cost of the other is how this was wrong twice.
 #
-# It used to sit next to the locks too, which quietly defeated its own purpose:
-# the worktree is reaped, the daemon state is transient, and the record of which
-# model produced a plan or a diff evaporated with them. Bound into the worktree's
-# artefact tree it is staged by the commit phase's `git add -A` like every other
-# artefact, lands in the PR, and lives in git for as long as the repository does.
+#   Durable   — the record of who wrote a story's artefacts must outlive the
+#               worktree that produced it, or the audit trail dies with the story.
+#   Untamperable — it certifies the independence of the QA agent, and that agent
+#               runs inside the worktree with permissions skipped.
+#
+# Writing it beside the locks gave durability nothing (the state is transient).
+# Writing it into the worktree gave tamper-resistance nothing: the evaluator could
+# edit the very file attesting that it did not write the code it was judging.
+#
+# So the authoritative copy lives in daemon state, where no phase agent can reach
+# it, and the commit phase PUBLISHES a copy into the worktree artefact tree after
+# every agent has exited — durable because it is committed, trustworthy because
+# the only writer was the daemon.
 _gaai_routing_state_env() {
   if [[ -z "${GAAI_PROVENANCE_DIR:-}" ]]; then
-    if [[ -n "${GAAI_ROUTING_WORKTREE:-}" ]]; then
-      export GAAI_PROVENANCE_DIR="${GAAI_ROUTING_WORKTREE}/.gaai/project/contexts/artefacts/routing"
-    elif [[ -n "${LOCK_DIR:-}" ]]; then
-      # No worktree bound (ad-hoc CLI use). Fall back to daemon state rather
-      # than writing a story artefact into whatever directory we happen to be in.
+    if [[ -n "${LOCK_DIR:-}" ]]; then
       export GAAI_PROVENANCE_DIR="${LOCK_DIR}/provenance"
     fi
   fi
@@ -52,9 +52,8 @@ _gaai_routing_state_env() {
 
 # gaai_routing_bind_worktree <WORKTREE_PATH>
 #
-# Points provenance at this story's artefact tree, so the record of who produced
-# what is committed with the work it describes. Call once per phase, after the
-# worktree path is resolved and before any routing call.
+# Records which worktree this story is running in, for the commit-phase publish.
+# It deliberately does NOT point provenance into that worktree — see above.
 gaai_routing_bind_worktree() {
   local worktree_path="$1"
   [[ -n "$worktree_path" ]] || return 0
@@ -63,6 +62,30 @@ gaai_routing_bind_worktree() {
   # provenance dir would file this story's record under the previous story.
   unset GAAI_PROVENANCE_DIR
   _gaai_routing_state_env
+}
+
+# gaai_provenance_publish <STORY_ID> <WORKTREE_PATH>
+#
+# Copies the authoritative record into the worktree so the commit phase stages it.
+# Called after every phase agent has exited, so the only writer of the committed
+# copy is the daemon. Overwrites any file an agent may have left at that path —
+# the daemon's copy is the authority, and a pre-existing file there is at best
+# noise and at worst an attempt to pre-empt this write.
+gaai_provenance_publish() {
+  local story_id="$1" worktree_path="$2"
+  [[ -n "$story_id" && -d "$worktree_path" ]] || return 0
+  gaai_routing_enabled || return 0
+  _gaai_routing_state_env
+  local src="${GAAI_PROVENANCE_DIR}/${story_id}.provenance.json"
+  [[ -s "$src" ]] || return 0
+  local dst_dir="${worktree_path}/.gaai/project/contexts/artefacts/routing"
+  mkdir -p "$dst_dir" || return 1
+  if ! cp -f "$src" "${dst_dir}/${story_id}.provenance.json"; then
+    echo "[ERROR] ${story_id}: provenance publish failed — the committed record would be missing" >&2
+    return 1
+  fi
+  echo "[ROUTING] ${story_id}: provenance published to the worktree for commit"
+  return 0
 }
 
 gaai_routing_enabled() {
@@ -153,12 +176,14 @@ gaai_provenance_record() {
   # model. Recorded now because they cannot be reconstructed later: a question
   # deferred is answerable from history, a field never written is not.
   local effort="${GAAI_ROUTE_EFFORT:-}" waived="${GAAI_ROUTE_WAIVED:-}" trace="${GAAI_ROUTE_TRACE:-}"
+  # The attempt identity: distinct executions must not collapse into one row.
+  local attempt="${GAAI_PROVENANCE_ATTEMPT:-${STORY_TRACE_ID:-}}"
   [[ -n "$model_id" ]] || return 0
   gaai_routing_enabled || return 0
   _gaai_routing_state_env
   node "$(_gaai_router_bin)" record \
     --story "$story_id" --artifact "$artifact" --model-id "$model_id" \
-    --role "$role" --effort "$effort" --waived "$waived" \
+    --role "$role" --effort "$effort" --waived "$waived" --attempt "$attempt" \
     --duration-ms "$duration_ms" --trace "$trace" --note "$note" >/dev/null 2>&1 || {
       echo "[WARN] ${story_id}: provenance record failed (artifact=${artifact} model=${model_id})" >&2
       return 1

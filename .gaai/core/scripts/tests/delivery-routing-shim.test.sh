@@ -48,44 +48,45 @@ for fn in gaai_route_select gaai_route_export_effort gaai_provenance_record \
   if declare -f "$fn" >/dev/null 2>&1; then pass "$fn is defined"; else fail "$fn is missing"; fi
 done
 
-echo "── provenance is committed with the work it describes ──"
-# It used to live next to the daemon locks, which defeated its own purpose: the
-# worktree is reaped and the record of who produced a plan or a diff went with it.
-WT_A="${TMP}/wt-a"; WT_B="${TMP}/wt-b"; mkdir -p "$WT_A" "$WT_B"
+echo "── provenance survives the worktree, and records what it must ──"
+# Durability and tamper-resistance pull opposite ways. The first version of this
+# block asserted the ledger lived INSIDE the worktree — which is durable and
+# also writable by the very agent it clears. These assertions now encode both
+# properties instead of trading one away.
 unset GAAI_PROVENANCE_DIR
 export LOCK_DIR="${TMP}/locks"
+WT_A="${TMP}/wt-a"; WT_B="${TMP}/wt-b"; mkdir -p "$WT_A" "$WT_B"
 
 gaai_routing_bind_worktree "$WT_A"
-case "$GAAI_PROVENANCE_DIR" in
-  "$WT_A"/.gaai/project/contexts/artefacts/*)
-    pass "provenance is bound inside the worktree artefact tree (staged by git add -A)" ;;
-  *) fail "provenance landed outside the artefact tree: ${GAAI_PROVENANCE_DIR}" ;;
-esac
-
 gaai_route_select PLAN_PRODUCER WT-STORY-A >/dev/null
 gaai_provenance_record WT-STORY-A PLAN "$GAAI_ROUTE_MODEL_ID" PLAN_PRODUCER
-[[ -s "$WT_A/.gaai/project/contexts/artefacts/routing/WT-STORY-A.provenance.json" ]] \
-  && pass "the record is written where the commit phase will stage it" \
-  || fail "no record written under the worktree artefact tree"
+LEDGER_A="${GAAI_PROVENANCE_DIR}/WT-STORY-A.provenance.json"
+[[ -s "$LEDGER_A" ]] \
+  && pass "the authoritative record is written to daemon state" \
+  || fail "no authoritative record written"
 
-grep -q '"effort"' "$WT_A/.gaai/project/contexts/artefacts/routing/WT-STORY-A.provenance.json" \
+grep -q '"effort"' "$LEDGER_A" \
   && pass "the record carries the effort each model ran at" \
   || fail "the record omits effort — raised effort would be unmeasurable after the fact"
+
+gaai_provenance_publish WT-STORY-A "$WT_A" >/dev/null
+[[ -s "$WT_A/.gaai/project/contexts/artefacts/routing/WT-STORY-A.provenance.json" ]] \
+  && pass "the published copy lands where the commit phase stages it" \
+  || fail "publish did not reach the worktree artefact tree"
 
 # Phases run back to back in one process; a stale binding would file story B's
 # record under story A.
 gaai_routing_bind_worktree "$WT_B"
 gaai_route_select IMPL WT-STORY-B >/dev/null
 gaai_provenance_record WT-STORY-B CODE "$GAAI_ROUTE_MODEL_ID" IMPL
+gaai_provenance_publish WT-STORY-B "$WT_B" >/dev/null
 if [[ -s "$WT_B/.gaai/project/contexts/artefacts/routing/WT-STORY-B.provenance.json" ]] \
    && [[ ! -e "$WT_A/.gaai/project/contexts/artefacts/routing/WT-STORY-B.provenance.json" ]]; then
-  pass "rebinding switches worktrees instead of accumulating"
+  pass "rebinding switches stories instead of accumulating"
 else
   fail "a stale binding filed one story's record under another"
 fi
 
-# Harness availability is daemon state with a different lifetime — it must not
-# be committed into a story's artefacts.
 gaai_harness_mark claude AVAILABLE "placement check" >/dev/null
 if find "$WT_A" "$WT_B" -name 'claude.json' 2>/dev/null | grep -q .; then
   fail "harness state leaked into a story's artefact tree"
@@ -94,6 +95,44 @@ else
 fi
 unset GAAI_ROUTING_WORKTREE GAAI_PROVENANCE_DIR
 export GAAI_PROVENANCE_DIR="${TMP}/provenance"
+
+echo "── the evaluator cannot reach the record that clears it ──"
+# The QA agent runs inside the worktree with permissions skipped. If the
+# authoritative ledger lived there, the evaluator could delete the CODE entry
+# attesting that it did not write the code it is judging.
+unset GAAI_PROVENANCE_DIR
+export LOCK_DIR="${TMP}/locks"
+WT_TAMPER="${TMP}/wt-tamper"; mkdir -p "$WT_TAMPER"
+gaai_routing_bind_worktree "$WT_TAMPER"
+case "$GAAI_PROVENANCE_DIR" in
+  "$WT_TAMPER"/*) fail "the authoritative ledger sits inside the agent-writable worktree" ;;
+  *) pass "the authoritative ledger is outside the worktree the agent can write" ;;
+esac
+
+gaai_route_select IMPL TAMPER-1 >/dev/null
+gaai_provenance_record TAMPER-1 CODE "$GAAI_ROUTE_MODEL_ID" IMPL
+if gaai_provenance_publish TAMPER-1 "$WT_TAMPER" >/dev/null; then
+  [[ -s "$WT_TAMPER/.gaai/project/contexts/artefacts/routing/TAMPER-1.provenance.json" ]] \
+    && pass "the commit phase publishes a daemon-authored copy for staging" \
+    || fail "publish reported success but wrote nothing"
+else
+  fail "provenance publish failed"
+fi
+
+# An agent that pre-empts the path must not win: the daemon's copy is authority.
+echo '{"tampered":true}' > "$WT_TAMPER/.gaai/project/contexts/artefacts/routing/TAMPER-1.provenance.json"
+gaai_provenance_publish TAMPER-1 "$WT_TAMPER" >/dev/null
+if grep -q '"tampered"' "$WT_TAMPER/.gaai/project/contexts/artefacts/routing/TAMPER-1.provenance.json"; then
+  fail "an agent-planted file survived the daemon publish"
+else
+  pass "a pre-planted file is overwritten by the daemon's copy"
+fi
+unset GAAI_ROUTING_WORKTREE GAAI_PROVENANCE_DIR
+export GAAI_PROVENANCE_DIR="${TMP}/provenance"
+
+grep -q 'PROVENANCE_WRITE_FAILED' "$DISPATCH" \
+  && pass "an unrecordable author fails the impl phase instead of advancing it" \
+  || fail "a failed provenance write is still swallowed"
 
 echo "── selection handoff ──"
 if gaai_route_select PLAN_PRODUCER TESTS01; then

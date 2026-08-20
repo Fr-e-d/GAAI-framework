@@ -843,6 +843,7 @@ function parseArgv(argv) {
       case '--concrete-model': opts.concreteModel = argv[++i]; break;
       case '--note': opts.note = argv[++i]; break;
       case '--effort': opts.effort = argv[++i]; break;
+      case '--attempt': opts.attempt = argv[++i]; break;
       case '--waived': opts.waived = argv[++i]; break;
       case '--duration-ms': opts.durationMs = argv[++i]; break;
       case '--trace': opts.trace = argv[++i]; break;
@@ -977,6 +978,7 @@ function main(argv) {
       harness: model ? model.harness : (opts.harness || ''),
       role: opts.role || '',
       effort: opts.effort || '',
+      attempt: opts.attempt || '',
       capabilityWaived: opts.waived || '',
       durationMs: opts.durationMs || 0,
       fallbackTrace: opts.trace || '',

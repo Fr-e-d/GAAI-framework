@@ -1780,14 +1780,23 @@ handle_impl_phase() {
       _emit_routing_record "$story_id" "$trace_id" "impl" "error" "NO_ARTEFACT"
       return 1
     fi
+    # Record the author BEFORE advancing the phase. Advancing first leaves a
+    # window where a crash yields a PLAN-only ledger: recovery then enters QA,
+    # the implementer looks like a non-contributor, and the independence gate
+    # clears the very model that wrote the diff. A failure to record is fatal
+    # for the same reason — an unrecorded author is an invisible one.
+    if [[ -n "$_impl_model_id" ]] && declare -f gaai_provenance_record >/dev/null 2>&1; then
+      if ! gaai_provenance_record "$story_id" CODE "$_impl_model_id" IMPL "" "${duration_ms:-0}"; then
+        echo "[ERROR] ${story_id} handle_impl_phase: could not record the CODE author [class=PROVENANCE_WRITE_FAILED]"
+        _emit_routing_record "$story_id" "$trace_id" "impl" "error" "PROVENANCE_WRITE_FAILED"
+        return 1
+      fi
+    fi
+
     if ! "$SCHEDULER" --set-phase-status "$story_id" implemented "$BACKLOG_FILE" 2>/dev/null; then
       echo "[ERROR] ${story_id} handle_impl_phase: --set-phase-status implemented failed"
       _emit_routing_record "$story_id" "$trace_id" "impl" "error" "SCHEDULER_FAILURE"
       return 1
-    fi
-
-    if [[ -n "$_impl_model_id" ]] && declare -f gaai_provenance_record >/dev/null 2>&1; then
-      gaai_provenance_record "$story_id" CODE "$_impl_model_id" IMPL "" "${duration_ms:-0}" || true
     fi
     if declare -f gaai_harness_success >/dev/null 2>&1; then
       gaai_harness_success "${_impl_harness:-codex}"
@@ -1882,9 +1891,14 @@ if d is not None:
     if declare -f gaai_harness_success >/dev/null 2>&1; then
       gaai_harness_success "${_impl_harness:-${GAAI_DAEMON_EXECUTOR:-claude}}"
     fi
+    # An unrecorded author is an invisible one: the QA independence gate would
+    # then clear the very model that wrote the diff while reporting
+    # "excluded=none". Every route records, and a write failure is fatal rather
+    # than swallowed — a phase must not claim work whose author it cannot name.
     if declare -f gaai_provenance_record >/dev/null 2>&1; then
+      _prov_ok=1
       if [[ -n "$_impl_model_id" ]]; then
-        gaai_provenance_record "$story_id" CODE "$_impl_model_id" IMPL "" "$result_duration_ms" || true
+        gaai_provenance_record "$story_id" CODE "$_impl_model_id" IMPL "" "$result_duration_ms" || _prov_ok=0
       elif [[ -z "$_impl_model_id" && "$_impl_route" != "secondary" ]] && declare -f gaai_routing_enabled >/dev/null 2>&1 && gaai_routing_enabled; then
         # Routing was off or blocked, so the legacy default wrote this code. It
         # is still an author, and an unrecorded author is invisible to the QA
@@ -1893,11 +1907,15 @@ if d is not None:
         _gaai_routing_state_env
         node "$(_gaai_router_bin)" record --story "$story_id" --artifact CODE \
           --concrete-model "${_impl_primary_model:-${GAAI_IMPL_PRIMARY_MODEL:-sonnet}}" \
-          --role IMPL --note "unrouted legacy default" >/dev/null 2>&1 || true
+          --role IMPL --note "unrouted legacy default" >/dev/null 2>&1 || _prov_ok=0
       elif [[ "$_impl_route" == "secondary" && -n "${GAAI_IMPL_MODEL:-}" ]] && declare -f gaai_routing_enabled >/dev/null 2>&1 && gaai_routing_enabled; then
         _gaai_routing_state_env
         node "$(_gaai_router_bin)" record --story "$story_id" --artifact CODE \
-          --concrete-model "$GAAI_IMPL_MODEL" --role IMPL --note "secondary route" >/dev/null 2>&1 || true
+          --concrete-model "$GAAI_IMPL_MODEL" --role IMPL --note "secondary route" >/dev/null 2>&1 || _prov_ok=0
+      fi
+      if [[ "$_prov_ok" != "1" ]]; then
+        echo "[ERROR] ${story_id} handle_impl_phase: could not record the CODE author [class=PROVENANCE_WRITE_FAILED]"
+        return 1
       fi
     fi
     if ! "$SCHEDULER" --set-phase-status "$story_id" implemented "$BACKLOG_FILE" 2>/dev/null; then
@@ -3406,6 +3424,14 @@ ${qa_snippet}"
       echo "[INFO] ${story_id} handle_commit_phase: revert skipped for ${_gf} (absent or untracked at HEAD — AC4)"
     fi
   done
+
+  # ── Publish provenance (daemon-authored, post-agent) ─────────────────────
+  # The authoritative record lives in daemon state precisely so no phase agent
+  # can edit the file attesting to its own independence. Every agent has exited
+  # by now, so the copy staged below has exactly one writer: this daemon.
+  if declare -f gaai_provenance_publish >/dev/null 2>&1; then
+    gaai_provenance_publish "$story_id" "$worktree_path" || true
+  fi
 
   # ── git add -A (AC1-iii) ─────────────────────────────────────────────────
   if ! git -C "$worktree_path" add -A 2>/dev/null; then
