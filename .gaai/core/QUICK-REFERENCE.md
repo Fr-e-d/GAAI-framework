@@ -53,4 +53,4 @@ One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`
 
 ---
 
-> [Full documentation](https://github.com/Fr-e-d/GAAI-framework/tree/main/docs)
+> [Full documentation](https://github.com/digipulse-engineering/GAAI-framework/tree/main/docs)

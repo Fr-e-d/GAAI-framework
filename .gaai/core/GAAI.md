@@ -188,18 +188,18 @@ GAAI never loads everything at once. Context is assembled on demand, in layers:
 
 ## Full Documentation
 
-The complete documentation lives in `docs/` in the [GAAI framework repo](https://github.com/Fr-e-d/GAAI-framework):
+The complete documentation lives in `docs/` in the [GAAI framework repo](https://github.com/digipulse-engineering/GAAI-framework):
 
-→ [Quick Start](https://github.com/Fr-e-d/GAAI-framework/blob/main/docs/guides/quick-start.md) — first working Story in 30 minutes
-→ [What is GAAI?](https://github.com/Fr-e-d/GAAI-framework/blob/main/docs/01-what-is-gaai.md) — the problem and the solution
-→ [Core Concepts](https://github.com/Fr-e-d/GAAI-framework/blob/main/docs/02-core-concepts.md) — dual-track, agents, backlog, memory, artefacts
-→ [Vibe Coder Guide](https://github.com/Fr-e-d/GAAI-framework/blob/main/docs/guides/vibe-coder-guide.md) — fast daily workflow
-→ [Senior Engineer Guide](https://github.com/Fr-e-d/GAAI-framework/blob/main/docs/guides/senior-engineer-guide.md) — governance and customization
+→ [Quick Start](https://github.com/digipulse-engineering/GAAI-framework/blob/main/docs/guides/quick-start.md) — first working Story in 30 minutes
+→ [What is GAAI?](https://github.com/digipulse-engineering/GAAI-framework/blob/main/docs/01-what-is-gaai.md) — the problem and the solution
+→ [Core Concepts](https://github.com/digipulse-engineering/GAAI-framework/blob/main/docs/02-core-concepts.md) — dual-track, agents, backlog, memory, artefacts
+→ [Vibe Coder Guide](https://github.com/digipulse-engineering/GAAI-framework/blob/main/docs/guides/vibe-coder-guide.md) — fast daily workflow
+→ [Senior Engineer Guide](https://github.com/digipulse-engineering/GAAI-framework/blob/main/docs/guides/senior-engineer-guide.md) — governance and customization
 
 ---
 
 ## Framework Version
 
-See `VERSION` in this folder. The framework is maintained at [gaai-framework](https://github.com/Fr-e-d/GAAI-framework).
+See `VERSION` in this folder. The framework is maintained at [gaai-framework](https://github.com/digipulse-engineering/GAAI-framework).
 
 To check framework integrity: `bash .gaai/core/scripts/health-check.sh --core-dir .gaai/core --project-dir .gaai/project`
