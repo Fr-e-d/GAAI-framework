@@ -48,6 +48,16 @@ Env vars set by `handle_plan_phase()` in `daemon-dispatch.sh`:
 | `$GAAI_WORKSPACE_ID` | Workspace UUID |
 | `$GAAI_ORG_ID` | Org UUID |
 
+### Model routing
+
+Before spawning, `handle_plan_phase()` asks the router for the `PLAN_PRODUCER` role
+(`.gaai/core/scripts/lib/delivery-routing.sh` → `delivery-router.mjs`). The selected model, its
+harness and its reasoning-effort expression are carried into the spawn; the model that produced
+the plan is then recorded as a `PLAN` contributor, which bars it from later steps that evaluate
+the plan. `GAAI_PLAN_MODEL` remains an operator pin and wins outright. PLAN_PRODUCER evaluates
+nothing, so a blocked route degrades to the legacy default rather than stalling.
+See [Delivery model routing](../docs/delivery-model-routing.md).
+
 ### Prompt source
 
 Daemon reads `.gaai/core/agents/sub-agents/planning.daemon-prompt.md` and passes it as the `claude -p` system prompt. Story file content at `$GAAI_STORY_PATH` is included in the prompt body.
@@ -118,6 +128,15 @@ result_json=$(node .gaai/core/adapters/claude-code/nested-claude-spawn.js \
 ```
 
 `--log-file` is NOT passed; the module reads `$GAAI_DELIVERY_LOG_FILE` from env.
+
+### Model routing
+
+`handle_impl_phase()` asks the router for the `IMPL` role and passes the pick down as
+`GAAI_IMPL_PRIMARY_MODEL` (claude harness) or `GAAI_CODEX_MODEL` (codex harness). The
+secondary-provider route is an explicit per-story opt-in with its own governed env contract and
+is left alone. On success the implementer is recorded as a `CODE` contributor — by registry alias,
+or by concrete model under an `external:` alias when it is off-registry — which bars it from every
+QA lane that evaluates the implementation.
 
 ### Output contract
 
@@ -202,6 +221,15 @@ or any other non-terminal state missing the sidecar — the daemon resets `phase
 `implemented` and emits `QA_CURRENTNESS_RERUN`, so QA reruns under the current contract *this same
 cycle*. Historical, completed (terminal) one-verdict reports are never reinterpreted or retro-fitted
 with a synthesized PASS — the gate only ever touches non-terminal stories still in flight.
+
+### Model routing
+
+The single QA agent covers all three lanes at once — implementation, Story acceptance criteria,
+and conformity to the governed PLAN — so its independence requirement is the union of the three
+lanes' exclusions, which is exactly the `QA_PLAN` role. This step evaluates, so it fails closed:
+a `PROVENANCE`, `CAPABILITY_FLOOR` or `CONFIG` block is structural and marks the story failed for
+a human, while an `AVAILABILITY` block leaves the phase alone so the next cycle retries after the
+harness backoff expires. No branch exists that lets a plan or code contributor grade its own work.
 
 ### Output contract
 

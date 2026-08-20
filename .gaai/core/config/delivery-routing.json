@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "_doc": "Delivery model-routing configuration. THIS FILE IS DATA. The routing engine (.gaai/core/scripts/lib/delivery-router.mjs) contains no model names and no per-model branching — replacing a model or a whole provider is an edit here, never an engine change. Operator override order: $GAAI_ROUTING_CONFIG > <project>/.gaai/project/contexts/config/delivery-routing.json > this file. See .gaai/core/docs/delivery-model-routing.md.",
+  "harnesses": {
+    "claude": {
+      "probe": "claude",
+      "_doc": "Anthropic Claude Code CLI. Verified against claude 2.1.220: `--effort` accepts low|medium|high|xhigh|max, and `-p` honours it.",
+      "features": [
+        "mcp"
+      ],
+      "effort": {
+        "mode": "arg",
+        "values": {
+          "high": [
+            "--effort",
+            "high"
+          ],
+          "xhigh": [
+            "--effort",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    "codex": {
+      "probe": "codex",
+      "_doc": "OpenAI Codex CLI (`codex exec`). Verified against codex-cli 0.144.4: there is no effort flag, so effort goes through the documented `-c` config override; `codex debug models` lists low|medium|high|xhigh|max|ultra and defaults to LOW, which is why every routed call sets it explicitly. `features` omits \"mcp\" because the daemon's codex invocation passes no --mcp-config: a phase that needs the GAAI MCP toolset must not be routed here. Add \"mcp\" once the codex spawn carries a server config.",
+      "features": [],
+      "effort": {
+        "mode": "arg",
+        "values": {
+          "high": [
+            "-c",
+            "model_reasoning_effort=high"
+          ],
+          "xhigh": [
+            "-c",
+            "model_reasoning_effort=xhigh"
+          ]
+        }
+      }
+    }
+  },
+  "_models_doc": "Concrete ids verified against `codex debug models` (gpt-5.6-sol = frontier, gpt-5.6-terra = balanced) and the shipped claude CLI's model table. Capability classes follow each vendor's own description of the model, not benchmark folklore. Re-verify after a harness upgrade; a stale id degrades safely (the harness fails, the router falls through, `doctor` shows it).",
+  "models": {
+    "codex_frontier": {
+      "concrete_model": "gpt-5.6-sol",
+      "harness": "codex",
+      "capability": "FRONTIER",
+      "available": true,
+      "supported_effort_levels": [
+        "high",
+        "xhigh"
+      ]
+    },
+    "codex_fast": {
+      "concrete_model": "gpt-5.6-terra",
+      "harness": "codex",
+      "capability": "STRONG",
+      "available": true,
+      "supported_effort_levels": [
+        "high",
+        "xhigh"
+      ]
+    },
+    "claude_frontier": {
+      "concrete_model": "claude-fable-5",
+      "harness": "claude",
+      "capability": "FRONTIER",
+      "available": true,
+      "supported_effort_levels": [
+        "high",
+        "xhigh"
+      ],
+      "cli_aliases": [
+        "fable"
+      ]
+    },
+    "claude_strong": {
+      "concrete_model": "claude-opus-5",
+      "harness": "claude",
+      "capability": "FRONTIER",
+      "available": true,
+      "supported_effort_levels": [
+        "high",
+        "xhigh"
+      ],
+      "cli_aliases": [
+        "opus"
+      ]
+    },
+    "claude_worker": {
+      "concrete_model": "claude-sonnet-5",
+      "harness": "claude",
+      "capability": "STRONG",
+      "available": true,
+      "supported_effort_levels": [
+        "high",
+        "xhigh"
+      ],
+      "cli_aliases": [
+        "sonnet"
+      ]
+    },
+    "codex_frontier_prev": {
+      "_why": "Previous-generation frontier model on the codex harness. Last in every list, so it never displaces a preferred pick in normal operation — it exists so that a total Claude outage still leaves an independent FRONTIER evaluator standing.",
+      "concrete_model": "gpt-5.5",
+      "harness": "codex",
+      "capability": "FRONTIER",
+      "available": true,
+      "supported_effort_levels": [
+        "high",
+        "xhigh"
+      ]
+    }
+  },
+  "roles": {
+    "_doc": "Founder default (2026-08): the steps that make decisions are smarter than the one that types the code. Opus plans, Fable challenges the plan, Sonnet builds against an already-bounded plan, Opus verifies. Independence rule for QA: never the implementer, the plan author is allowed. Codex sits at the end of each list as the cross-provider fallback.",
+    "PLAN_PRODUCER": {
+      "_why": "Reads the Story and the codebase, resolves ambiguity, and produces a plan another agent can execute. That is where the stronger model earns its cost over the cheaper one. Escalate to xhigh only for a genuinely complex story: architectural change, migration, concurrency, security, wide cross-cutting surface.",
+      "minimum_capability": "FRONTIER",
+      "evaluates": [],
+      "candidates": [
+        "claude_strong",
+        "claude_frontier",
+        "codex_fast",
+        "codex_frontier",
+        "codex_frontier_prev"
+      ],
+      "overrides": {
+        "codex_fast": {
+          "effort": "xhigh",
+          "capability_waiver": "Founder default: this model is a class below the floor, and is accepted in this seat specifically because it runs here at raised effort. Applies to this role only."
+        }
+      }
+    },
+    "PLAN_REVIEWER": {
+      "_why": "Must try to BREAK the plan, not restate it: forgotten requirement, wrong assumption about existing code, indirect impact, broken invariant, missing migration, impossible rollback, missing test. This seat leads with a model from a DIFFERENT FAMILY than the producer, deliberately: the producer's blind spots are inherited from its training, and a sibling model inherits the same ones. It is also the cheapest place in the pipeline to catch a defect — nothing has been built yet — which is why it is the one seat worth spending a scarce provider on. Escalate to xhigh for a delivery classed high-risk.",
+      "minimum_capability": "FRONTIER",
+      "evaluates": [
+        "PLAN"
+      ],
+      "candidates": [
+        "codex_frontier",
+        "claude_frontier",
+        "claude_strong",
+        "codex_frontier_prev",
+        "codex_fast"
+      ]
+    },
+    "IMPL": {
+      "_why": "By this point the architecture is settled, so the work is inspect / modify / test / correct. Best quality-per-cost sits with the efficient coding model. On a capability failure the escalation is to a STRONGER MODEL, not to more thinking on the same one — hence claude_strong second in this list, and no automatic effort bump.",
+      "minimum_capability": "STRONG",
+      "candidates": [
+        "claude_worker",
+        "claude_strong",
+        "codex_frontier"
+      ],
+      "evaluates": []
+    },
+    "QA_CODE": {
+      "_why": "Adversarial reading of the diff: edge cases, regressions, evidence. Must not be satisfied by green tests. Excludes implementation contributors only, so a model that planned but did not code is still eligible.",
+      "minimum_capability": "FRONTIER",
+      "evaluates": [
+        "CODE"
+      ],
+      "candidates": [
+        "claude_strong",
+        "claude_frontier",
+        "codex_fast",
+        "codex_frontier",
+        "codex_frontier_prev"
+      ],
+      "overrides": {
+        "codex_fast": {
+          "effort": "xhigh",
+          "capability_waiver": "Founder default: this model is a class below the floor, and is accepted in this seat specifically because it runs here at raised effort. Applies to this role only."
+        }
+      }
+    },
+    "QA_REQUIREMENTS": {
+      "_why": "Rebuilds expected behaviour from the Story independently, then looks for the gap against the implementation. The Story and its acceptance criteria are the normative source; the PLAN is not treated as ground truth.",
+      "minimum_capability": "FRONTIER",
+      "evaluates": [
+        "CODE"
+      ],
+      "candidates": [
+        "claude_strong",
+        "claude_frontier",
+        "codex_fast",
+        "codex_frontier",
+        "codex_frontier_prev"
+      ],
+      "overrides": {
+        "codex_fast": {
+          "effort": "xhigh",
+          "capability_waiver": "Founder default: this model is a class below the floor, and is accepted in this seat specifically because it runs here at raised effort. Applies to this role only."
+        }
+      }
+    },
+    "QA_PLAN": {
+      "_why": "Approved PLAN versus implementation. Founder policy (2026-08): the QA model MAY be the one that produced the PLAN, but MUST NOT be the one that wrote the code. Judging whether someone else's code matches your plan is a different act from judging your own code, and the failure this lane cannot catch — that the plan itself was wrong — is precisely what QA_REQUIREMENTS covers, since there the Story is normative and the PLAN is not treated as ground truth. That lane is independent of the implementer too, so the coverage holds. This also makes the pipeline servable on a single provider's three models instead of arithmetically requiring a fourth.",
+      "minimum_capability": "FRONTIER",
+      "evaluates": [
+        "CODE"
+      ],
+      "candidates": [
+        "claude_strong",
+        "claude_frontier",
+        "codex_fast",
+        "codex_frontier",
+        "codex_frontier_prev"
+      ],
+      "overrides": {
+        "codex_fast": {
+          "effort": "xhigh",
+          "capability_waiver": "Founder default: this model is a class below the floor, and is accepted in this seat specifically because it runs here at raised effort. Applies to this role only."
+        }
+      }
+    },
+    "ESCALATION_ARBITER": {
+      "_why": "Court of last resort on ESCALATE, not a permanent worker. Reserved for the deepest-reasoning model at raised effort. Excludes whoever produced the QA findings it is arbitrating.",
+      "minimum_capability": "FRONTIER",
+      "evaluates": [
+        "QA"
+      ],
+      "candidates": [
+        "claude_frontier",
+        "codex_frontier",
+        "claude_strong",
+        "codex_frontier_prev"
+      ]
+    }
+  },
+  "quota_detection": {
+    "_doc": "How a harness is recognised as out of budget, cheapest and most reliable signal first: a structured error `code`/`type` in the JSON payload if the provider emits one, then `signatures` matched case-insensitively against the tail of the log, then the wording-independent `circuit_breaker`. Deliberately narrow: a 5xx or a timeout is NOT a quota signal, and mis-parking a harness costs real capacity. `reset_hints` are regexes whose first capture group is a human-readable resume time; when one parses, it sets the backoff instead of the flat default, so a harness is not woken early only to burn another spawn failing.",
+    "signatures": [
+      "usage limit",
+      "rate limit",
+      "rate_limit",
+      "quota exceeded",
+      "quota exhausted",
+      "insufficient_quota",
+      "too many requests",
+      "429"
+    ],
+    "codes": [
+      "rate_limit_reached",
+      "rate_limit_error",
+      "usage_limit_reached",
+      "credits_depleted",
+      "insufficient_quota",
+      "quota_exceeded"
+    ],
+    "circuit_breaker": {
+      "_doc": "Wording-independent backstop. Message matching is an optimisation, not a correctness dependency: a provider can reword its error, ship it localised, or invent a failure nobody anticipated. After this many consecutive failed phase spawns a harness is parked whatever the reason, and any success resets the count. The park is short and expiring — this is meant to stop a bleed, not to retire a provider.",
+      "consecutive_failures": 3,
+      "park_sec": 900
+    },
+    "reset_hints": [
+      "try again at ([^\"\\.]+)",
+      "resets? at ([^\"\\.]+)",
+      "try again after ([^\"\\.]+)"
+    ]
+  },
+  "verdict": {
+    "required_lanes": [
+      "QA_CODE",
+      "QA_REQUIREMENTS",
+      "QA_PLAN"
+    ]
+  },
+  "quota_backoff_sec": 3600,
+  "effort_policy_doc": "high is the standard. xhigh means 'hard exception', never 'better quality so use it everywhere'. Effort is a function of (role, model), not of the role alone: a model that sits a class below a seat's floor is compensated with raised effort, declared per role in that role's `overrides`. Escalation ladder: complex PLAN -> producer xhigh; high-risk PLAN -> reviewer xhigh; IMPL capability failure -> next model at high (NOT more thinking on the same model); extremely complex IMPL -> strong model at xhigh; ambiguous QA or PLAN/IMPL conflict -> arbiter at high, then xhigh."
+}

@@ -22,6 +22,7 @@
 |---|---|
 | [What is GAAI?](01-what-is-gaai.md) | The problem GAAI solves and the solution |
 | [Core Concepts](02-core-concepts.md) | Dual-track, agents, backlog, memory, artefacts |
+| [Delivery model routing](delivery-model-routing.md) | Roles, model registry, provenance, and the no-self-evaluation invariant |
 | [GAAI.md](../GAAI.md) | Full framework orientation (in-repo reference) |
 
 ---

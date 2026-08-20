@@ -1192,6 +1192,18 @@ function _emitLog({ traceId, storyId, provider, modelActual, durationMs, fallbac
  * @returns {Promise<SpawnResult & { log_emit_failed: boolean }>}
  *   log_emit_failed — true if any routing log emit threw (best-effort; never a spawn failure)
  */
+/**
+ * --model value for the primary Impl route.
+ *
+ * The Delivery router owns model choice per role and hands its pick down as
+ * GAAI_IMPL_PRIMARY_MODEL. Absent that — routing disabled, blocked, or a direct
+ * caller — this keeps the historical default so behaviour is unchanged.
+ * @returns {string}
+ */
+function primaryModel() {
+  return process.env.GAAI_IMPL_PRIMARY_MODEL?.trim() || 'sonnet';
+}
+
 export async function runImpl({ implModelTag, prompt, reportPath, storyId, extraArgs = [], logFile = '', worktreePath = '' }) {
   const envState = {
     hasBaseUrl:   !!(process.env.GAAI_IMPL_BASE_URL?.trim()),
@@ -1241,7 +1253,7 @@ export async function runImpl({ implModelTag, prompt, reportPath, storyId, extra
       const primaryResult = await spawnCore(
         prompt, reportPath, extraArgs,
         GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
-        buildPrimaryChildEnv, 'sonnet', /* includeFallbackModel */ false,
+        buildPrimaryChildEnv, primaryModel(), /* includeFallbackModel */ false,
         /* collectTelemetry */ false, worktreePath, { storyId }
       );
 
@@ -1274,7 +1286,7 @@ export async function runImpl({ implModelTag, prompt, reportPath, storyId, extra
   const result = await spawnCore(
     prompt, reportPath, extraArgs,
     GLOBAL_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, logFile,
-    buildPrimaryChildEnv, 'sonnet', /* includeFallbackModel */ false,
+    buildPrimaryChildEnv, primaryModel(), /* includeFallbackModel */ false,
     /* collectTelemetry */ false, worktreePath, { storyId }
   );
 

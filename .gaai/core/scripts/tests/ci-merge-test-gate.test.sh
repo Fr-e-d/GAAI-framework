@@ -149,6 +149,7 @@ cat > "$REPO/.gaai/project/ci/premerge-authority.json" <<'JSON'
     ".gaai/core/scripts/lib/stuck-classifier.sh",
     ".gaai/core/scripts/lib/worktree-integrity.sh",
     ".gaai/core/scripts/lib/test-gate.sh",
+    ".gaai/core/scripts/lib/delivery-routing.sh",
     "protected.txt",
     "protected-delete.txt",
     "protected-rename.txt",

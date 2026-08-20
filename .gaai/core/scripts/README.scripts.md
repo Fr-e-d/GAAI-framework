@@ -30,6 +30,9 @@ Scripts are self-documenting. Each `.sh` file begins with a header comment descr
 | `backlog-scheduler.sh` | Parse `active.backlog.yaml` — resolve dependencies, find ready stories, update status. Supports `--next`, `--ready-ids`, `--set-status`, and `--stdin` modes. |
 | `delivery-daemon.sh` | Poll the backlog and auto-launch Claude Code delivery sessions. Cross-platform (macOS Terminal.app / Linux tmux). Supports `--status`, `--dry-run`, `--max-concurrent`. |
 | `health-check.sh` | Verify GAAI framework integrity (required files, structure). |
+| `lib/delivery-router.mjs` | Delivery model routing — pick the eligible model for a role, record artefact provenance, track harness availability, aggregate QA lane verdicts. `doctor` validates the registry. |
+| `lib/delivery-provenance.mjs` | Per-story contributor ledger backing the no-self-evaluation invariant. |
+| `lib/delivery-routing.sh` | Bash surface over the router, sourced by `daemon-dispatch.sh`. |
 
 ---
 
