@@ -10,6 +10,15 @@
 #   GAAI_STUB_DELAY_S — seconds to sleep between stubs (default: 0)
 #   ROUTING_LOG_PATH  — test-only override for --log-path (default: empty, uses logger default)
 
+# ── Model routing (roles → registry → eligible candidate) ────────────────
+# Phase handlers ask the router which model may run a step; the router owns
+# availability, capability floors, provenance and fallback order. Sourced
+# lazily-safe: every function resolves PROJECT_DIR at call time.
+_GAAI_DISPATCH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+# shellcheck source=lib/delivery-routing.sh
+[[ -f "${_GAAI_DISPATCH_LIB_DIR}/delivery-routing.sh" ]] \
+  && source "${_GAAI_DISPATCH_LIB_DIR}/delivery-routing.sh"
+
 # ── Per-phase wall-clock timeouts (OSS-7) ────────────────────────────────
 # Bound the lifetime of each phase to detect hangs that loop-breaker (which
 # only fires on identical consecutive errors) cannot catch — silent network
@@ -408,7 +417,10 @@ _run_claude_with_loop_breaker() {
   shift 5
   local threshold="${GAAI_LOOP_BREAKER_THRESHOLD:-3}"
   local disabled="${GAAI_LOOP_BREAKER_DISABLE:-0}"
-  local executor="${GAAI_DAEMON_EXECUTOR:-claude}"
+  # Per-call harness override. The router may place a single phase on a harness
+  # other than the daemon-wide executor (plan on codex while impl stays on claude,
+  # say). Unset — routing off, or blocked — falls back to the daemon default.
+  local executor="${GAAI_PHASE_HARNESS:-${GAAI_DAEMON_EXECUTOR:-claude}}"
 
   # Resolve per-phase wall-clock timeout. Caller may also pass GAAI_PHASE_TIMEOUT_SEC
   # to override; otherwise we look up the phase-specific default.
@@ -430,16 +442,29 @@ _run_claude_with_loop_breaker() {
     return 2
   fi
 
+  # Reasoning-effort expression for this harness, exactly as the routing config
+  # declares it — `--effort <level>` on one, a `-c` config override on another.
+  # Word splitting is intended: these are argv tokens, none of which contain
+  # whitespace. Empty when routing is off, which leaves each harness on its own
+  # default.
+  local _effort_argv=()
+  if [[ -n "${GAAI_PHASE_EFFORT_ARGS:-}" ]]; then
+    # shellcheck disable=SC2206
+    _effort_argv=(${GAAI_PHASE_EFFORT_ARGS})
+  fi
+
   local agent_cmd=()
   case "$executor" in
     claude)
-      agent_cmd=(claude -p "$@")
+      agent_cmd=(claude -p "$@" ${_effort_argv[@]+"${_effort_argv[@]}"})
       ;;
     codex)
       agent_cmd=(codex exec --json --sandbox "${GAAI_CODEX_SANDBOX:-workspace-write}" --cd "$worktree_path")
       [[ -n "${GAAI_CODEX_MODEL:-}" ]] && agent_cmd+=(--model "$GAAI_CODEX_MODEL")
       [[ "${GAAI_CODEX_EPHEMERAL:-1}" != "0" ]] && agent_cmd+=(--ephemeral)
       [[ "${GAAI_CODEX_IGNORE_USER_CONFIG:-0}" == "1" ]] && agent_cmd+=(--ignore-user-config)
+      agent_cmd+=(${_effort_argv[@]+"${_effort_argv[@]}"})
+      # The prompt sentinel must stay last.
       agent_cmd+=(-)
       ;;
     *)
@@ -1330,6 +1355,38 @@ Justify each marker in one line. Err toward REVISE over KEEP when uncertain.'
     fi
   fi
 
+  # Provenance lands in this story's artefact tree so it is committed with the
+  # work it describes, not in daemon state that is reaped with the worktree.
+  declare -f gaai_routing_bind_worktree >/dev/null 2>&1 && gaai_routing_bind_worktree "$worktree_path"
+
+  # ── Route PLAN_PRODUCER ───────────────────────────────────────────────────
+  # GAAI_PLAN_MODEL stays an operator pin and wins outright. Otherwise the
+  # router picks from the role's ordered candidates. PLAN_PRODUCER evaluates
+  # nothing, so a blocked route here can only be an availability problem —
+  # degrade to the legacy default rather than stall the pipeline. Evaluation
+  # roles do the opposite and fail closed (see handle_qa_phase).
+  local _plan_model="${GAAI_PLAN_MODEL:-}"
+  local _plan_model_id="" _plan_harness="" _plan_effort_args="" _plan_codex_model=""
+  # When this phase will be handed an MCP server config, the routed harness has
+  # to be able to carry it — otherwise routing would quietly cost the agent its
+  # tools. Expressed as a required feature, resolved from the registry.
+  local _route_req=()
+  if [[ ${#_plan_mcp_args[@]} -gt 0 ]]; then _route_req=(--require-feature mcp); fi
+  if [[ -z "$_plan_model" ]] && declare -f gaai_route_select >/dev/null 2>&1; then
+    if gaai_route_select PLAN_PRODUCER "$story_id" ${_route_req[@]+"${_route_req[@]}"}; then
+      _plan_model="$GAAI_ROUTE_MODEL"
+      _plan_model_id="$GAAI_ROUTE_MODEL_ID"
+      _plan_harness="$GAAI_ROUTE_HARNESS"
+      _plan_effort_args="$GAAI_ROUTE_EFFORT_ARGS"
+      [[ "$_plan_harness" == "codex" ]] && _plan_codex_model="$GAAI_ROUTE_MODEL"
+      gaai_route_export_effort
+      echo "[ROUTING] ${story_id} plan role=PLAN_PRODUCER model=${_plan_model_id} (${_plan_model}) harness=${_plan_harness} effort=${GAAI_ROUTE_EFFORT}"
+    else
+      echo "[WARN] ${story_id} plan: PLAN_PRODUCER not routed (${GAAI_ROUTE_STATUS:-unknown}: ${GAAI_ROUTE_REASON:-}) — falling back to the legacy default model"
+    fi
+  fi
+  _plan_model="${_plan_model:-sonnet}"
+
   # ── Spawn claude -p (AC1) ─────────────────────────────────────────────────
   # Duration measurement (AC4) — bash 5+ EPOCHREALTIME (microseconds); fallback date +%s
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
@@ -1347,9 +1404,12 @@ Justify each marker in one line. Err toward REVISE over KEEP when uncertain.'
   GAAI_DELIVERY_LOG_FILE="$log_path" \
   GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
+  GAAI_PHASE_HARNESS="$_plan_harness" \
+  GAAI_PHASE_EFFORT_ARGS="$_plan_effort_args" \
+  GAAI_CODEX_MODEL="${_plan_codex_model:-${GAAI_CODEX_MODEL:-}}" \
     _run_claude_with_loop_breaker \
       "$story_id" "plan" "$log_path" "$prompt_file" "$worktree_path" \
-      --model "${GAAI_PLAN_MODEL:-sonnet}" \
+      --model "$_plan_model" \
       --max-turns 60 \
       --output-format stream-json \
       --verbose \
@@ -1374,6 +1434,9 @@ Justify each marker in one line. Err toward REVISE over KEEP when uncertain.'
   fi
   if [[ "$claude_exit" -ne 0 ]]; then
     echo "[ERROR] ${story_id} handle_plan_phase: claude -p exited $claude_exit"
+    if declare -f gaai_harness_autodetect >/dev/null 2>&1; then
+      gaai_harness_autodetect "${_plan_harness:-${GAAI_DAEMON_EXECUTOR:-claude}}" "$log_path" || true
+    fi
     _emit_plan_routing_record "$story_id" "$trace_id" "error" "PLAN_PHASE_FAILED" "$duration_ms"
     return 1
   fi
@@ -1407,6 +1470,23 @@ Justify each marker in one line. Err toward REVISE over KEEP when uncertain.'
     echo "[ERROR] ${story_id} handle_plan_phase: plan file has no '## ' heading"
     _emit_plan_routing_record "$story_id" "$trace_id" "error" "PARSE_ERROR" "$duration_ms"
     return 1
+  fi
+
+  # ── Provenance: this model materially produced the PLAN ──────────────────
+  # Recorded only now, with the artefact on disk. A model that was selected and
+  # then died produced nothing, and retiring it from later evaluation roles for
+  # free would shrink the eligible pool for no reason.
+  if [[ -n "$_plan_model_id" ]] && declare -f gaai_provenance_record >/dev/null 2>&1; then
+    gaai_provenance_record "$story_id" PLAN "$_plan_model_id" PLAN_PRODUCER "" "$duration_ms" || true
+  elif [[ -n "${GAAI_PLAN_MODEL:-}" ]] && declare -f gaai_routing_enabled >/dev/null 2>&1 && gaai_routing_enabled; then
+    # A pinned producer is still the plan's author, and a future PLAN_REVIEWER
+    # exclusion can only see authors that were written down.
+    _gaai_routing_state_env
+    node "$(_gaai_router_bin)" record --story "$story_id" --artifact PLAN \
+      --concrete-model "$GAAI_PLAN_MODEL" --role PLAN_PRODUCER --note "operator pin" >/dev/null 2>&1 || true
+  fi
+  if declare -f gaai_harness_success >/dev/null 2>&1; then
+    gaai_harness_success "${_plan_harness:-${GAAI_DAEMON_EXECUTOR:-claude}}"
   fi
 
   # ── Advance phase_status: not_started → planned (AC4) ────────────────────
@@ -1552,6 +1632,42 @@ handle_impl_phase() {
   local _secondary_route_flag="false"
   [[ "$_impl_route" == "secondary" ]] && _secondary_route_flag="true"
 
+  declare -f gaai_routing_bind_worktree >/dev/null 2>&1 && gaai_routing_bind_worktree "$worktree_path"
+
+  # ── Route IMPL ────────────────────────────────────────────────────────────
+  # The secondary provider route is an explicit per-story operator opt-in with
+  # its own governed env contract; routing does not second-guess it. On the
+  # primary route the router picks the implementer from the IMPL candidates.
+  # IMPL evaluates nothing, so a blocked route degrades to legacy behaviour
+  # rather than stalling.
+  local _impl_model_id="" _impl_harness="" _impl_effort_args="" _impl_codex_model="" _impl_primary_model=""
+  local _impl_effort_extra=()
+  # When this phase will be handed an MCP server config, the routed harness has
+  # to be able to carry it — otherwise routing would quietly cost the agent its
+  # tools. Expressed as a required feature, resolved from the registry.
+  local _route_req=()
+  if [[ ${#_impl_mcp_extra[@]} -gt 0 ]]; then _route_req=(--require-feature mcp); fi
+  if [[ "$_impl_route" != "secondary" ]] && declare -f gaai_route_select >/dev/null 2>&1; then
+    if gaai_route_select IMPL "$story_id" ${_route_req[@]+"${_route_req[@]}"}; then
+      _impl_model_id="$GAAI_ROUTE_MODEL_ID"
+      _impl_harness="$GAAI_ROUTE_HARNESS"
+      _impl_effort_args="$GAAI_ROUTE_EFFORT_ARGS"
+      _impl_primary_model="$GAAI_ROUTE_MODEL"
+      [[ "$_impl_harness" == "codex" ]] && _impl_codex_model="$GAAI_ROUTE_MODEL"
+      # nested-claude-spawn takes repeated --extra-arg pairs, not a raw argv
+      # string, so the effort expression is rewritten into that shape.
+      if [[ "$_impl_harness" != "codex" && -n "$GAAI_ROUTE_EFFORT_ARGS" ]]; then
+        local _ea
+        # shellcheck disable=SC2086
+        for _ea in ${GAAI_ROUTE_EFFORT_ARGS}; do _impl_effort_extra+=(--extra-arg "$_ea"); done
+      fi
+      gaai_route_export_effort
+      echo "[ROUTING] ${story_id} impl role=IMPL model=${_impl_model_id} (${_impl_primary_model}) harness=${_impl_harness} effort=${GAAI_ROUTE_EFFORT}"
+    else
+      echo "[WARN] ${story_id} impl: IMPL not routed (${GAAI_ROUTE_STATUS:-unknown}: ${GAAI_ROUTE_REASON:-}) — falling back to the legacy default model"
+    fi
+  fi
+
   # ── HARD GATE — Tier 2 stories MUST NOT run on secondary route ─────────────
   # Per PAT-STORY-SCOPE-DISCIPLINE-001 + empirical evidence (E135S02 2026-05-06
   # — Tier 2 secondary triggered 3 compacts in 47 events then cascaded to
@@ -1616,7 +1732,7 @@ handle_impl_phase() {
     return 1
   fi
 
-  if [[ "${GAAI_DAEMON_EXECUTOR:-claude}" == "codex" ]]; then
+  if [[ "${_impl_harness:-${GAAI_DAEMON_EXECUTOR:-claude}}" == "codex" ]]; then
     local codex_exit t_start_ms t_end_ms duration_ms
     if [[ -n "${EPOCHREALTIME:-}" ]]; then
       t_start_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
@@ -1631,6 +1747,9 @@ handle_impl_phase() {
     GAAI_IMPL_REPORT_PATH="$impl_report_path" \
     GAAI_EPIC_PATH="${epic_path:-}" \
     GAAI_DELIVERY_LOG_FILE="$log_path" \
+    GAAI_PHASE_HARNESS="${_impl_harness:-codex}" \
+    GAAI_PHASE_EFFORT_ARGS="$_impl_effort_args" \
+    GAAI_CODEX_MODEL="${_impl_codex_model:-${GAAI_CODEX_MODEL:-}}" \
       _run_claude_with_loop_breaker \
         "$story_id" "impl" "$log_path" "$prompt_file" "$worktree_path"
     codex_exit=$?
@@ -1650,6 +1769,9 @@ handle_impl_phase() {
     fi
     if [[ "$codex_exit" -ne 0 ]]; then
       echo "[ERROR] ${story_id} handle_impl_phase: codex exec exited $codex_exit"
+      if declare -f gaai_harness_autodetect >/dev/null 2>&1; then
+        gaai_harness_autodetect "${_impl_harness:-codex}" "$log_path" || true
+      fi
       _emit_routing_record "$story_id" "$trace_id" "impl" "error" "IMPL_PHASE_FAILED"
       return 1
     fi
@@ -1664,6 +1786,12 @@ handle_impl_phase() {
       return 1
     fi
 
+    if [[ -n "$_impl_model_id" ]] && declare -f gaai_provenance_record >/dev/null 2>&1; then
+      gaai_provenance_record "$story_id" CODE "$_impl_model_id" IMPL "" "${duration_ms:-0}" || true
+    fi
+    if declare -f gaai_harness_success >/dev/null 2>&1; then
+      gaai_harness_success "${_impl_harness:-codex}"
+    fi
     _emit_routing_record "$story_id" "$trace_id" "impl" "codex" "null"
     _run_worktree_audit "$story_id" "impl" "$log_path" "$worktree_path"
     ts=$(date '+%H:%M:%S')
@@ -1692,6 +1820,7 @@ handle_impl_phase() {
     GAAI_EPIC_PATH="${epic_path:-}" \
     GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-}" \
     GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
+    GAAI_IMPL_PRIMARY_MODEL="${_impl_primary_model:-${GAAI_IMPL_PRIMARY_MODEL:-}}" \
       ${_impl_to_prefix[@]+"${_impl_to_prefix[@]}"} node "$spawn_script" \
         --story-id       "$story_id" \
         --report-path    "$impl_report_path" \
@@ -1700,6 +1829,7 @@ handle_impl_phase() {
         --log-file       "$log_path" \
         --worktree-path  "$worktree_path" \
         ${_impl_mcp_extra[@]+"${_impl_mcp_extra[@]}"} \
+        ${_impl_effort_extra[@]+"${_impl_effort_extra[@]}"} \
         2>>"$log_path"
   )
   spawn_rc=$?
@@ -1732,14 +1862,44 @@ if d is None:
         try: d = json.loads(l); break
         except Exception: continue
 if d is not None:
-    print(str(d.get('success', False)) + '|' + str(d.get('error_reason') or 'null'))
-" 2>/dev/null || echo "False|PARSE_ERROR")
+    print(str(d.get('success', False)) + '|' + str(d.get('error_reason') or 'null') + '|' + str(d.get('duration_ms') or 0))
+" 2>/dev/null || echo "False|PARSE_ERROR|0")
 
   local result_success="${parsed_json%%|*}"
-  local result_error="${parsed_json#*|}"
+  local _rest="${parsed_json#*|}"
+  local result_error="${_rest%%|*}"
+  # Duration is only known to the spawner; without it, per-seat cost on this
+  # route would be permanently unrecorded.
+  local result_duration_ms="${_rest#*|}"
+  [[ "$result_duration_ms" =~ ^[0-9]+$ ]] || result_duration_ms=0
 
   # ── JSON-driven outcome dispatch (AC4 — daemon does NOT duplicate-emit routing record) ──
   if [[ "$result_success" == "True" ]] && [[ -s "$impl_report_path" ]]; then
+    # ── Provenance: this model wrote the code ───────────────────────────────
+    # On the secondary route the implementer is not a registry alias, so it is
+    # recorded by concrete model. Either way it is now barred from every lane
+    # that evaluates the implementation.
+    if declare -f gaai_harness_success >/dev/null 2>&1; then
+      gaai_harness_success "${_impl_harness:-${GAAI_DAEMON_EXECUTOR:-claude}}"
+    fi
+    if declare -f gaai_provenance_record >/dev/null 2>&1; then
+      if [[ -n "$_impl_model_id" ]]; then
+        gaai_provenance_record "$story_id" CODE "$_impl_model_id" IMPL "" "$result_duration_ms" || true
+      elif [[ -z "$_impl_model_id" && "$_impl_route" != "secondary" ]] && declare -f gaai_routing_enabled >/dev/null 2>&1 && gaai_routing_enabled; then
+        # Routing was off or blocked, so the legacy default wrote this code. It
+        # is still an author, and an unrecorded author is invisible to the QA
+        # independence gate — which would then clear the very model that wrote
+        # the diff, while reporting "excluded=none".
+        _gaai_routing_state_env
+        node "$(_gaai_router_bin)" record --story "$story_id" --artifact CODE \
+          --concrete-model "${_impl_primary_model:-${GAAI_IMPL_PRIMARY_MODEL:-sonnet}}" \
+          --role IMPL --note "unrouted legacy default" >/dev/null 2>&1 || true
+      elif [[ "$_impl_route" == "secondary" && -n "${GAAI_IMPL_MODEL:-}" ]] && declare -f gaai_routing_enabled >/dev/null 2>&1 && gaai_routing_enabled; then
+        _gaai_routing_state_env
+        node "$(_gaai_router_bin)" record --story "$story_id" --artifact CODE \
+          --concrete-model "$GAAI_IMPL_MODEL" --role IMPL --note "secondary route" >/dev/null 2>&1 || true
+      fi
+    fi
     if ! "$SCHEDULER" --set-phase-status "$story_id" implemented "$BACKLOG_FILE" 2>/dev/null; then
       echo "[ERROR] ${story_id} handle_impl_phase: --set-phase-status implemented failed"
       return 1
@@ -1752,6 +1912,9 @@ if d is not None:
   else
     if [[ "$result_success" != "True" ]]; then
       echo "[ERROR] ${story_id} handle_impl_phase: impl failed: ${result_error}"
+      if declare -f gaai_harness_autodetect >/dev/null 2>&1; then
+        gaai_harness_autodetect "${_impl_harness:-claude}" "$log_path" || true
+      fi
     else
       echo "[ERROR] ${story_id} handle_impl_phase: impl-report.md missing or empty at $impl_report_path"
     fi
@@ -2035,6 +2198,100 @@ handle_qa_phase() {
     return 1
   fi
 
+  declare -f gaai_routing_bind_worktree >/dev/null 2>&1 && gaai_routing_bind_worktree "$worktree_path"
+
+  # ── Route the QA evaluator ────────────────────────────────────────────────
+  # One QA agent covers all three lanes today: it judges the implementation
+  # (state_of_the_art_conformance), the Story ACs, and conformity to the
+  # governed PLAN (plan_conformance). It routes as QA_PLAN, the lane whose
+  # exclusions cover all three. Per policy the QA model may be the one that
+  # produced the PLAN, but never the one that wrote the code. When the lanes are
+  # split into separate spawns, each simply asks the router for its own role.
+  #
+  # This step EVALUATES, so it fails closed. There is no "everything else is
+  # busy, let the author grade itself" branch, by construction.
+  local _qa_model="${GAAI_QA_MODEL:-}"
+  local _qa_model_id="" _qa_harness="" _qa_effort_args="" _qa_codex_model=""
+  if [[ -n "$_qa_model" ]]; then
+    # A pin selects the evaluator; it does not get to select an author. The one
+    # gate that is absolute still applies, and failing it is fatal rather than a
+    # warning — an operator who really wants the author in the seat must turn
+    # routing off explicitly, which says what it is doing.
+    local _pin_checked=0
+    if declare -f gaai_pin_is_independent >/dev/null 2>&1; then
+      _pin_checked=1
+    fi
+    if [[ "$_pin_checked" != "1" ]]; then
+      # The routing substrate is absent, so this pin cannot be checked. An
+      # unverifiable pin is indistinguishable from an unresolvable one, and the
+      # gate clears only what it can identify — otherwise "pin the evaluator"
+      # plus "remove the library" composes into author-as-judge without ever
+      # touching the switch that says so.
+      echo "[ERROR] ${story_id} handle_qa_phase: GAAI_QA_MODEL=${_qa_model} pins the evaluator but the routing substrate is absent, so independence cannot be verified [class=QA_PIN_UNVERIFIABLE]"
+      echo "[ERROR] ${story_id} restore the routing substrate, drop the pin, or set GAAI_MODEL_ROUTING=0 to forfeit the guarantee explicitly"
+      _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_PIN_UNVERIFIABLE" "0"
+      rm -f "$prompt_file" "$expected_surfaces_path" 2>/dev/null || true
+      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      return 1
+    fi
+    if ! gaai_pin_is_independent "$story_id" QA_PLAN "$_qa_model"; then
+      echo "[ERROR] ${story_id} handle_qa_phase: GAAI_QA_MODEL=${_qa_model} contributed to this story's implementation — pinning it would let a model grade its own work [class=QA_PIN_NOT_INDEPENDENT]"
+      echo "[ERROR] ${story_id} to run QA on a contributor anyway, set GAAI_MODEL_ROUTING=0 — which forfeits the guarantee explicitly instead of quietly"
+      _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_PIN_NOT_INDEPENDENT" "0"
+      rm -f "$prompt_file" "$expected_surfaces_path" 2>/dev/null || true
+      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      return 1
+    fi
+    echo "[WARN] ${story_id} qa: GAAI_QA_MODEL=${_qa_model} pins the evaluator; independence verified, candidate ordering skipped"
+    # F-3: a pinned step is still a step. Record what ran, by the spelling the
+    # operator used, or the record claims a phase nobody executed.
+    if declare -f gaai_routing_enabled >/dev/null 2>&1 && gaai_routing_enabled; then
+      _gaai_routing_state_env
+      node "$(_gaai_router_bin)" record --story "$story_id" --artifact QA \
+        --concrete-model "$_qa_model" --role QA_PLAN --note "operator pin" >/dev/null 2>&1 || true
+    fi
+  elif declare -f gaai_route_select >/dev/null 2>&1; then
+    local _route_req=()
+    if [[ ${#_qa_mcp_args[@]} -gt 0 ]]; then _route_req=(--require-feature mcp); fi
+    if gaai_route_select QA_PLAN "$story_id" ${_route_req[@]+"${_route_req[@]}"}; then
+      _qa_model="$GAAI_ROUTE_MODEL"
+      _qa_model_id="$GAAI_ROUTE_MODEL_ID"
+      _qa_harness="$GAAI_ROUTE_HARNESS"
+      _qa_effort_args="$GAAI_ROUTE_EFFORT_ARGS"
+      [[ "$_qa_harness" == "codex" ]] && _qa_codex_model="$GAAI_ROUTE_MODEL"
+      gaai_route_export_effort
+      echo "[ROUTING] ${story_id} qa role=QA_PLAN model=${_qa_model_id} (${_qa_model}) harness=${_qa_harness} effort=${GAAI_ROUTE_EFFORT} excluded=${GAAI_ROUTE_EXCLUDED:-none}"
+    elif [[ "${GAAI_ROUTE_STATUS:-}" == "DISABLED" || "${GAAI_ROUTE_STATUS:-}" == "ROUTER_MISSING" ]]; then
+      # Routing switched off by the operator, or the substrate is not installed.
+      # Neither is the router refusing to seat an evaluator, so the phase runs on
+      # its legacy default — without the independence guarantee, and saying so.
+      echo "[WARN] ${story_id} qa: model routing unavailable (${GAAI_ROUTE_STATUS}: ${GAAI_ROUTE_REASON:-}) — running QA on the legacy default model WITHOUT the no-self-evaluation guarantee"
+    else
+      local _qa_block="${GAAI_ROUTE_BLOCKED_CLASS:-}"
+      # A router that could not run at all is a config/substrate fault, not a
+      # transient one: treat it as structural rather than retrying forever.
+      [[ "${GAAI_ROUTE_STATUS:-}" == "ROUTER_ERROR" ]] && _qa_block="CONFIG"
+      echo "[ERROR] ${story_id} handle_qa_phase: no eligible QA model [class=QA_NO_ELIGIBLE_MODEL blocked=${_qa_block:-${GAAI_ROUTE_STATUS:-unknown}}] ${GAAI_ROUTE_REASON:-}"
+      [[ -n "${GAAI_ROUTE_TRACE:-}" ]] && echo "[ROUTING] ${story_id} qa candidate trace: ${GAAI_ROUTE_TRACE}"
+      declare -f gaai_provenance_blocked >/dev/null 2>&1 && gaai_provenance_blocked "$story_id" QA_PLAN
+      _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_NO_ELIGIBLE_MODEL" "0"
+      rm -f "$prompt_file" "$expected_surfaces_path" 2>/dev/null || true
+      case "$_qa_block" in
+        PROVENANCE|CAPABILITY_FLOOR|CONFIG)
+          # Structural: no amount of waiting produces an independent evaluator.
+          # Hand it to a human instead of looping.
+          "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+          ;;
+        *)
+          # Availability only (quota/outage). The backoff window expires on its
+          # own, so leave the phase where it is and let the next cycle retry.
+          ;;
+      esac
+      return 1
+    fi
+  fi
+  _qa_model="${_qa_model:-sonnet}"
+
   # ── Duration measurement ──────────────────────────────────────────────────
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
     t_start_ms=$(( ${EPOCHREALTIME/[.,]/} / 1000 ))
@@ -2059,9 +2316,12 @@ handle_qa_phase() {
   GAAI_MEMORY_DELTA_PATH="$memory_delta_path" \
   GAAI_WORKSPACE_ID="${GAAI_WORKSPACE_ID:-}" \
   GAAI_ORG_ID="${GAAI_ORG_ID:-}" \
+  GAAI_PHASE_HARNESS="$_qa_harness" \
+  GAAI_PHASE_EFFORT_ARGS="$_qa_effort_args" \
+  GAAI_CODEX_MODEL="${_qa_codex_model:-${GAAI_CODEX_MODEL:-}}" \
     _run_claude_with_loop_breaker \
       "$story_id" "qa" "$log_path" "$prompt_file" "$worktree_path" \
-      --model "${GAAI_QA_MODEL:-sonnet}" \
+      --model "$_qa_model" \
       --max-turns "$GAAI_QA_MAX_TURNS" \
       --output-format stream-json \
       --verbose \
@@ -2087,6 +2347,9 @@ handle_qa_phase() {
   # ── AC5(a): spawn-error — claude -p exit non-zero ─────────────────────────
   if [[ "$claude_exit" -ne 0 ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: claude -p exited ${claude_exit} [class=QA_SPAWN_FAILED]"
+    if declare -f gaai_harness_autodetect >/dev/null 2>&1; then
+      gaai_harness_autodetect "${_qa_harness:-${GAAI_DAEMON_EXECUTOR:-claude}}" "$log_path" || true
+    fi
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SPAWN_FAILED" "$duration_ms"
     touch "${LOCK_DIR}/.qa-spawn-death-pending-${story_id}" 2>/dev/null || true
     return 1
@@ -2102,6 +2365,14 @@ handle_qa_phase() {
   # expected_surfaces_path's job (spawn-time agent context) is done — the
   # resolver below derives its own independent copy for validation.
   rm -f "$expected_surfaces_path" 2>/dev/null || true
+
+  # ── Provenance: this model produced the QA findings ──────────────────────
+  if [[ -n "$_qa_model_id" ]] && declare -f gaai_provenance_record >/dev/null 2>&1; then
+    gaai_provenance_record "$story_id" QA "$_qa_model_id" QA_PLAN "" "$duration_ms" || true
+  fi
+  if declare -f gaai_harness_success >/dev/null 2>&1; then
+    gaai_harness_success "${_qa_harness:-${GAAI_DAEMON_EXECUTOR:-claude}}"
+  fi
 
   # ── DEC-200 JSON handoff — the shared resolver (_qa_verdict_resolve) is the
   # sole machine authority for the aggregate/route/replan driving routing below

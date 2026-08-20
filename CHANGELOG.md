@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.51.0] - 2026-08-20
+
+### Changed
+- feat: role-based model routing with provenance-enforced independence
+- feat: catch registry rows that break the pointer cap, as they are added
+- docs: the remote branch may be deleted by the forge, not by hand
+- docs: the post-merge cleanup clause prescribed a flag that breaks an invariant
+- fix: record run identity on the handle instead of inferring it
+- fix: make generated execution plans carry artefact frontmatter
+- fix: keep and poll the handle until a terminal receipt
+-: Make hosted CI the sole daemon merge authority
+
+
 ## [2.50.0] - 2026-08-18
 
 ### Changed
