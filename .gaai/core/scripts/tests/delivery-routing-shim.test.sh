@@ -359,6 +359,58 @@ grep -q 'gaai_harness_success' "$DISPATCH" \
   && pass "the daemon reports phase successes, so the count reflects reality" \
   || fail "the daemon never reports success — the count would only ever climb"
 
+echo "── an agent cannot erase its way into the evaluator seat ──"
+# The realistic attack is not the evaluator erasing its own trace: it is the
+# IMPL agent erasing its CODE entry so QA routing sees no contributor and seats
+# the implementer as its own judge. It only bites when the implementer is also a
+# QA candidate, so the fixture forces that case rather than assuming it.
+SEAL_DIR="${TMP}/seal"; mkdir -p "$SEAL_DIR"
+( export GAAI_PROVENANCE_DIR="$SEAL_DIR" GAAI_MODEL_DISABLE=claude_worker
+  gaai_route_select IMPL SEAL-STORY >/dev/null
+  impl="$GAAI_ROUTE_MODEL_ID"
+  gaai_provenance_record SEAL-STORY CODE "$impl" IMPL
+  gaai_route_select QA_PLAN SEAL-STORY >/dev/null
+  [[ "$GAAI_ROUTE_MODEL_ID" != "$impl" ]] || exit 1        # intact: implementer excluded
+  gaai_provenance_seal SEAL-STORY
+  python3 -c "
+import json,sys
+p=sys.argv[1]; d=json.load(open(p))
+d['contributions']=[c for c in d['contributions'] if c['artifact']!='CODE']
+json.dump(d,open(p,'w'))" "$SEAL_DIR/SEAL-STORY.provenance.json"
+  gaai_route_select QA_PLAN SEAL-STORY >/dev/null
+  [[ "$GAAI_ROUTE_MODEL_ID" == "$impl" ]] || exit 2         # erasure did re-seat the author
+  gaai_provenance_verify_seal SEAL-STORY && exit 3          # seal must catch it
+  exit 0                                                     # the failing verify is the PASS here
+) && pass "erasing a CODE entry mid-spawn is detected before the routing it would corrupt" \
+  || fail "the seal did not catch an erasure that re-seats the implementer as judge"
+
+( export GAAI_PROVENANCE_DIR="${TMP}/seal-clean"
+  mkdir -p "$GAAI_PROVENANCE_DIR"
+  gaai_route_select PLAN_PRODUCER SEAL-CLEAN >/dev/null
+  gaai_provenance_record SEAL-CLEAN PLAN "$GAAI_ROUTE_MODEL_ID" PLAN_PRODUCER
+  gaai_provenance_seal SEAL-CLEAN
+  gaai_provenance_verify_seal SEAL-CLEAN
+) && pass "an untouched record verifies clean (no false positive on every phase)" \
+  || fail "the seal reports tampering on an untouched record"
+
+( export GAAI_PROVENANCE_DIR="${TMP}/seal-new"
+  mkdir -p "$GAAI_PROVENANCE_DIR"
+  gaai_provenance_seal SEAL-NEW                              # sealed while absent
+  gaai_provenance_record SEAL-NEW PLAN claude_strong PLAN_PRODUCER
+  gaai_provenance_verify_seal SEAL-NEW && exit 1
+  exit 0
+) && pass "a record that APPEARS during a spawn is a tamper signal too" \
+  || fail "a record appearing mid-spawn went undetected"
+
+grep -q 'PROVENANCE_TAMPERED' "$DISPATCH" \
+  && pass "the daemon fails the phase on a tampered record rather than continuing" \
+  || fail "the daemon does not act on a tampered record"
+
+SEAL_POINTS=$(grep -c 'gaai_provenance_seal "\$story_id"' "$DISPATCH")
+[[ "$SEAL_POINTS" -ge 3 ]] \
+  && pass "every phase boundary seals, not just QA (${SEAL_POINTS} points)" \
+  || fail "only ${SEAL_POINTS} phase boundaries seal — the IMPL vector stays open"
+
 echo "── verdict aggregation ──"
 gaai_qa_aggregate QA_CODE=PASS QA_REQUIREMENTS=PASS QA_PLAN=PASS \
   && pass "all-PASS aggregates to PASS" || fail "all-PASS did not aggregate to PASS"

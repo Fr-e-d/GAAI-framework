@@ -1387,6 +1387,9 @@ Justify each marker in one line. Err toward REVISE over KEEP when uncertain.'
   fi
   _plan_model="${_plan_model:-sonnet}"
 
+  # Seal the authority record into daemon memory before the agent gets control.
+  declare -f gaai_provenance_seal >/dev/null 2>&1 && gaai_provenance_seal "$story_id"
+
   # ── Spawn claude -p (AC1) ─────────────────────────────────────────────────
   # Duration measurement (AC4) — bash 5+ EPOCHREALTIME (microseconds); fallback date +%s
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
@@ -1469,6 +1472,15 @@ Justify each marker in one line. Err toward REVISE over KEEP when uncertain.'
   if ! grep -q '^## ' "$plan_path"; then
     echo "[ERROR] ${story_id} handle_plan_phase: plan file has no '## ' heading"
     _emit_plan_routing_record "$story_id" "$trace_id" "error" "PARSE_ERROR" "$duration_ms"
+    return 1
+  fi
+
+  # Verify before the daemon's own writes, which legitimately change the file.
+  if declare -f gaai_provenance_verify_seal >/dev/null 2>&1 \
+     && ! gaai_provenance_verify_seal "$story_id"; then
+    echo "[ERROR] ${story_id} handle_plan_phase: the provenance record changed while the agent held control [class=PLAN_PROVENANCE_TAMPERED]"
+    echo "[ERROR] ${story_id} the record certifies which model may judge this story; an agent that can edit it can seat itself as its own judge"
+    _emit_plan_routing_record "$story_id" "$trace_id" "error" "PLAN_PROVENANCE_TAMPERED" "$duration_ms"
     return 1
   fi
 
@@ -1732,6 +1744,9 @@ handle_impl_phase() {
     return 1
   fi
 
+  # Seal the authority record into daemon memory before the agent gets control.
+  declare -f gaai_provenance_seal >/dev/null 2>&1 && gaai_provenance_seal "$story_id"
+
   if [[ "${_impl_harness:-${GAAI_DAEMON_EXECUTOR:-claude}}" == "codex" ]]; then
     local codex_exit t_start_ms t_end_ms duration_ms
     if [[ -n "${EPOCHREALTIME:-}" ]]; then
@@ -1785,6 +1800,12 @@ handle_impl_phase() {
     # the implementer looks like a non-contributor, and the independence gate
     # clears the very model that wrote the diff. A failure to record is fatal
     # for the same reason — an unrecorded author is an invisible one.
+    if declare -f gaai_provenance_verify_seal >/dev/null 2>&1 \
+       && ! gaai_provenance_verify_seal "$story_id"; then
+      echo "[ERROR] ${story_id} handle_impl_phase: the provenance record changed while the agent held control [class=IMPL_PROVENANCE_TAMPERED]"
+      _emit_routing_record "$story_id" "$trace_id" "impl" "error" "IMPL_PROVENANCE_TAMPERED"
+      return 1
+    fi
     if [[ -n "$_impl_model_id" ]] && declare -f gaai_provenance_record >/dev/null 2>&1; then
       if ! gaai_provenance_record "$story_id" CODE "$_impl_model_id" IMPL "" "${duration_ms:-0}"; then
         echo "[ERROR] ${story_id} handle_impl_phase: could not record the CODE author [class=PROVENANCE_WRITE_FAILED]"
@@ -1884,6 +1905,12 @@ if d is not None:
 
   # ── JSON-driven outcome dispatch (AC4 — daemon does NOT duplicate-emit routing record) ──
   if [[ "$result_success" == "True" ]] && [[ -s "$impl_report_path" ]]; then
+    if declare -f gaai_provenance_verify_seal >/dev/null 2>&1 \
+       && ! gaai_provenance_verify_seal "$story_id"; then
+      echo "[ERROR] ${story_id} handle_impl_phase: the provenance record changed while the agent held control [class=IMPL_PROVENANCE_TAMPERED]"
+      _emit_routing_record "$story_id" "$trace_id" "impl" "error" "IMPL_PROVENANCE_TAMPERED"
+      return 1
+    fi
     # ── Provenance: this model wrote the code ───────────────────────────────
     # On the secondary route the implementer is not a registry alias, so it is
     # recorded by concrete model. Either way it is now barred from every lane
@@ -2317,6 +2344,9 @@ handle_qa_phase() {
     t_start_ms=$(( $(date +%s) * 1000 ))
   fi
 
+  # Seal the authority record into daemon memory before the agent gets control.
+  declare -f gaai_provenance_seal >/dev/null 2>&1 && gaai_provenance_seal "$story_id"
+
   # ── Spawn claude -p (AC1 — child bash subshell, NOT nested-claude-spawn.js) ──
   local claude_exit
   GAAI_STORY_ID="$story_id" \
@@ -2383,6 +2413,15 @@ handle_qa_phase() {
   # expected_surfaces_path's job (spawn-time agent context) is done — the
   # resolver below derives its own independent copy for validation.
   rm -f "$expected_surfaces_path" 2>/dev/null || true
+
+  # Verify before the daemon's own writes, which legitimately change the file.
+  if declare -f gaai_provenance_verify_seal >/dev/null 2>&1 \
+     && ! gaai_provenance_verify_seal "$story_id"; then
+    echo "[ERROR] ${story_id} handle_qa_phase: the provenance record changed while the agent held control [class=QA_PROVENANCE_TAMPERED]"
+    echo "[ERROR] ${story_id} the record certifies which model may judge this story; an agent that can edit it can seat itself as its own judge"
+    _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_PROVENANCE_TAMPERED" "$duration_ms"
+    return 1
+  fi
 
   # ── Provenance: this model produced the QA findings ──────────────────────
   if [[ -n "$_qa_model_id" ]] && declare -f gaai_provenance_record >/dev/null 2>&1; then
