@@ -215,6 +215,36 @@ overwritten, not merged.
 Harness availability goes the other way — it is daemon state, shared across
 stories, meaningless once the outage clears — so it stays out of the commit.
 
+### The record is tamper-evident, not tamper-proof
+
+Placing the authority copy outside the worktree stops the codex harness reaching
+it — that one runs under `--sandbox workspace-write`. It does **not** stop the
+claude harness, which runs as the same OS user with `--dangerously-skip-permissions`
+and no filesystem jail: against that, a location is not a boundary. Believing
+otherwise was the original mistake, and moving the file only changed the path.
+
+The boundary that does exist is the daemon's own memory. The daemon blocks on the
+phase agent, so a value held across the spawn is unreachable by the child. The
+daemon therefore **seals** the record — a digest, held only in memory — before
+handing control to any agent, and verifies it the moment the agent exits, before
+its own writes legitimately change the file. A mismatch fails the phase.
+
+The seal spans **every** phase boundary, not only QA, because the attack that
+matters is not the evaluator erasing its own trace. It is the implementer erasing
+its CODE entry, so that QA routing sees no contributor and seats the implementer
+as its own judge. That only bites when the implementer is also a QA candidate —
+which happens the moment the cheap coding model is unavailable and IMPL falls back
+onto one.
+
+**What this does not close, stated because an invariant that hides its limits is
+not absolute:** this detects rather than prevents, so a tampered record costs a
+failed story rather than a laundered verdict — acceptable. But detection cannot
+distinguish *altered* from *broken*: an agent that corrupts the record in a way
+that also looks like infrastructure failure gets the same outcome as a disk error.
+And a record altered before the daemon process started — across a crash-recovery
+boundary — was never sealed by that process and cannot be checked against
+anything.
+
 Two entries are the **same contributor** when they name the same registry alias
 *or* the same concrete model. Matching on the concrete model as well is what
 keeps the invariant intact when two aliases are pointed at one underlying model

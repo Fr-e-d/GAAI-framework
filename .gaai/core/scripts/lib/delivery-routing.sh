@@ -71,6 +71,75 @@ gaai_routing_bind_worktree() {
 # copy is the daemon. Overwrites any file an agent may have left at that path —
 # the daemon's copy is the authority, and a pre-existing file there is at best
 # noise and at worst an attempt to pre-empt this write.
+# ── Tamper evidence across an agent spawn ──────────────────────────────────
+#
+# The authority record lives outside the worktree, which stops the codex harness
+# reaching it (it runs under --sandbox workspace-write) but NOT the claude one,
+# which runs as the same OS user with --dangerously-skip-permissions and no
+# filesystem jail. Against that harness no file location is out of reach, so
+# location alone is not a trust boundary and treating it as one was a mistake.
+#
+# The one boundary that does exist is the daemon's own memory: the daemon blocks
+# on the phase agent, so a variable held across the spawn is unreachable by the
+# child. The seal is kept there and nowhere else.
+#
+# This detects rather than prevents. That is sufficient for the invariant it
+# guards: a tampered record fails its phase, so the outcome an agent could buy by
+# editing its own provenance is a failed story, not a laundered verdict. The
+# attack it does NOT distinguish is tampering that also makes verification look
+# like infrastructure failure — "altered" versus "broken", not "altered" versus
+# "intact".
+#
+# The seal spans EVERY agent spawn, not only QA. The realistic attack is not the
+# evaluator erasing its own trace, it is the IMPL agent erasing its CODE entry so
+# that QA routing sees no contributor and seats the implementer as its own judge.
+
+_gaai_digest() {
+  local f="$1"
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$f" 2>/dev/null | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$f" 2>/dev/null | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 "$f" 2>/dev/null | awk '{print $NF}'
+  else echo "NO_DIGEST_TOOL"; fi
+}
+
+# gaai_provenance_seal <STORY_ID>
+# Capture the authority record's state into daemon memory. Call immediately
+# before handing control to an agent.
+gaai_provenance_seal() {
+  local story_id="$1"
+  _GAAI_PROVENANCE_SEAL=""
+  gaai_routing_enabled || return 0
+  _gaai_routing_state_env
+  local f="${GAAI_PROVENANCE_DIR}/${story_id}.provenance.json"
+  if [[ -s "$f" ]]; then
+    _GAAI_PROVENANCE_SEAL="$(_gaai_digest "$f")"
+  else
+    # Absent is a state worth sealing: a record appearing during a spawn is as
+    # much a tamper signal as one changing.
+    _GAAI_PROVENANCE_SEAL="ABSENT"
+  fi
+  return 0
+}
+
+# gaai_provenance_verify_seal <STORY_ID>
+# 0 = intact or nothing was sealed; 1 = the record changed while an agent held
+# control. Call immediately after the agent exits, BEFORE the daemon makes its
+# own writes (which legitimately change the file).
+gaai_provenance_verify_seal() {
+  local story_id="$1"
+  [[ -n "${_GAAI_PROVENANCE_SEAL:-}" ]] || return 0
+  gaai_routing_enabled || return 0
+  _gaai_routing_state_env
+  local f="${GAAI_PROVENANCE_DIR}/${story_id}.provenance.json" now
+  if [[ -s "$f" ]]; then now="$(_gaai_digest "$f")"; else now="ABSENT"; fi
+  if [[ "$now" == "NO_DIGEST_TOOL" || "$_GAAI_PROVENANCE_SEAL" == "NO_DIGEST_TOOL" ]]; then
+    # No digest tool: say so rather than reporting an integrity check that never ran.
+    echo "[WARN] ${story_id}: no sha256 tool available — provenance integrity was NOT verified" >&2
+    return 0
+  fi
+  [[ "$now" == "$_GAAI_PROVENANCE_SEAL" ]]
+}
+
 gaai_provenance_publish() {
   local story_id="$1" worktree_path="$2"
   [[ -n "$story_id" && -d "$worktree_path" ]] || return 0
@@ -78,6 +147,10 @@ gaai_provenance_publish() {
   _gaai_routing_state_env
   local src="${GAAI_PROVENANCE_DIR}/${story_id}.provenance.json"
   [[ -s "$src" ]] || return 0
+  if ! gaai_provenance_verify_seal "$story_id"; then
+    echo "[ERROR] ${story_id}: provenance changed since it was sealed — refusing to publish a record that may have been altered by an agent" >&2
+    return 1
+  fi
   local dst_dir="${worktree_path}/.gaai/project/contexts/artefacts/routing"
   mkdir -p "$dst_dir" || return 1
   if ! cp -f "$src" "${dst_dir}/${story_id}.provenance.json"; then

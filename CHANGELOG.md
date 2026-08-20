@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: seal the provenance record across every agent spawn
 - fix: blocking classification is SOTA-only, not for plan-conformance findings
 - fix: settle what the blocked state may do, from the transitions actually made
 - fix: the evaluator could edit the record clearing it
