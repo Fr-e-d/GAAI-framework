@@ -127,6 +127,28 @@ form or write down your `plan_conformance` conclusion.
      identifies the current replacement/migration AND continued use materially impairs
      security, reliability, interoperability or supported maintenance — even if not yet
      formally deprecated.
+
+   > **Inventory `blocking` is state-of-the-art-only — never use it to record a scope/plan
+   > problem.** This inventory classification exists solely to answer "does this surface, on
+   > its own technical merits, breach the currentness/materiality floor" — and `blocking` here
+   > is the ONLY thing that obligates a matching `evidence[]` entry (step 2) with a named
+   > primary authority. A `plan_conformance` defect — an undisclosed diff, an out-of-scope
+   > change, code the PLAN said was untouched, anything that contradicts the Story/PLAN/Epic —
+   > is a completely different kind of problem: there is no "official standard" to cite for "the
+   > plan said X and the diff shows Y." Record it as a `findings[]` entry with
+   > `classification: blocking` and `root_cause: plan | implementation` (below) — that alone
+   > fails `plan_conformance`, and it needs **no** `evidence[]` entry. Leave the surface's own
+   > `changed_surface_inventory` classification at whatever its currentness merits actually are
+   > (usually `non_blocking`) unless it *also* independently breaches the materiality floor.
+   > Marking a surface `blocking` in the inventory for a pure scope/plan reason forces an
+   > authority-evidence obligation you cannot satisfy, and the validator will reject the whole
+   > handoff as `QA_HANDOFF_INVALID: blocking finding '<id>' ... has no supporting evidence` —
+   > a real observed failure mode: a genuine scope-violation finding, correctly identified,
+   > repeatedly rejected on handoff because its surface was inventory-classified `blocking`
+   > with no authority to back it. The correct shape: a `findings[]` entry with
+   > `classification: blocking`/`root_cause: plan` naming the surface, that surface's
+   > `changed_surface_inventory` entry left `non_blocking`, and no evidence entry for that
+   > finding at all.
 2. **Gather primary-authority evidence for every non-N/A surface.** Primary authority is
    closed to: an official standard/regulator publication, official vendor/runtime/framework
    documentation or advisory, official maintainer release/security notes, or a product-owned
