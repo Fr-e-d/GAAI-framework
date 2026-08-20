@@ -29,6 +29,7 @@ const {
 
 const {
   readLedger, recordContribution, contributorTokens, isContributor, recordBlocked,
+  latestContributor,
 } = await import(join(LIB, 'delivery-provenance.mjs'));
 
 // The shipped config is the contract under test — a routing rule that only
@@ -733,6 +734,41 @@ describe('provenance ledger', () => {
       storyId: 'S', artifact: 'PLAN', modelId: 'claude_strong', concreteModel: 'x',
     });
     assert.equal(ledger().blocked.length, 1, 'a later contribution erased the block record');
+  });
+
+  test('distinct attempts are distinct rows, so a retry is not a no-op', () => {
+    // Collapsing attempts made the ledger unable to say who produced the verdict
+    // on disk NOW: a model recorded on an earlier failed attempt made its own
+    // later successful run a no-op, and a membership check could then accept a
+    // stale evaluator.
+    const rec = (model, attempt) => recordContribution(ledgerPath(), {
+      storyId: 'S', artifact: 'QA', modelId: model, concreteModel: `c-${model}`, attempt,
+    });
+    assert.equal(rec('b', 'attempt-1').recorded, true);
+    assert.equal(rec('a', 'attempt-2').recorded, true);
+    assert.equal(rec('b', 'attempt-3').recorded, true, 'B retrying was collapsed into its earlier row');
+    assert.equal(ledger().contributions.length, 3);
+  });
+
+  test('the same model in the same attempt is still de-duplicated', () => {
+    const rec = () => recordContribution(ledgerPath(), {
+      storyId: 'S', artifact: 'QA', modelId: 'b', concreteModel: 'c-b', attempt: 'attempt-1',
+    });
+    assert.equal(rec().recorded, true);
+    assert.equal(rec().recorded, false, 'a repeated write inside one attempt inflated the ledger');
+  });
+
+  test('latest contributor answers "who produced this", exclusion still unions all', () => {
+    const rec = (model, attempt) => recordContribution(ledgerPath(), {
+      storyId: 'S', artifact: 'CODE', modelId: model, concreteModel: `c-${model}`, attempt,
+    });
+    rec('first', 'a1'); rec('second', 'a2');
+    assert.equal(latestContributor(ledger(), 'CODE').model_id, 'second');
+    const tokens = contributorTokens(ledger(), ['CODE']);
+    for (const m of ['first', 'second']) {
+      assert.ok(isContributor({ id: m, concrete_model: `c-${m}` }, tokens),
+        `${m} escaped the exclusion set`);
+    }
   });
 
   test('a corrupt ledger is reported, never silently read as empty', () => {

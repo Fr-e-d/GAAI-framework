@@ -193,17 +193,24 @@ otherwise -> BLOCKED_NO_ELIGIBLE_MODEL
 Every artefact records the models that materially contributed to it, in a
 per-story ledger. Tracked kinds: `PLAN`, `PLAN_REVIEW`, `CODE`, `QA`.
 
-The ledger is written **into the story's own artefact tree**
-(`.gaai/project/contexts/artefacts/routing/{story}.provenance.json`), so the
-commit phase stages it like any other artefact and it lands in the PR.
+The ledger has to satisfy two properties that pull in opposite directions, and
+it was wrong twice before it held both:
 
-That placement is the whole point, and it was wrong at first. The ledger
-originally sat beside the daemon's lock directory — transient state, reaped with
-the worktree. So the record of which model produced a plan or a diff evaporated
-along with the worktree that produced it, and the audit trail this system exists
-to provide survived exactly as long as the story did. Provenance is only ever
-meaningful next to the artefacts it describes; it has to outlive the worktree,
-and the artefact tree already does.
+- **Durable** — the record must outlive the worktree, or the audit trail dies
+  with the story it describes.
+- **Untamperable** — it certifies that the QA agent did not write the code it is
+  judging, and that agent runs *inside the worktree* with permissions skipped.
+
+Beside the daemon locks: durable, no — the state is transient and reaped. Inside
+the worktree: tamper-resistant, no — the evaluator could delete the very entry
+clearing it.
+
+So the **authoritative copy lives in daemon state**, where no phase agent can
+reach it, and the **commit phase publishes a copy** into
+`.gaai/project/contexts/artefacts/routing/{story}.provenance.json` once every
+agent has exited. Durable because it is committed; trustworthy because its only
+writer was the daemon. A file an agent leaves at the published path is
+overwritten, not merged.
 
 Harness availability goes the other way — it is daemon state, shared across
 stories, meaningless once the outage clears — so it stays out of the commit.
