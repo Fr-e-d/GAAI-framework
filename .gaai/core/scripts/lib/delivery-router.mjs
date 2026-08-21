@@ -25,7 +25,9 @@
  * Node stdlib only — no dependencies (ships in the OSS substrate).
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
+import {
+  readFileSync, writeFileSync, mkdirSync, existsSync, statSync, realpathSync,
+} from 'node:fs';
 import { dirname, join, resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -1228,7 +1230,20 @@ function main(argv) {
   return 2;
 }
 
-if (process.argv[1] && pathResolve(process.argv[1]) === pathResolve(__filename)) {
+// Compare physical paths: Node resolves the loaded module through filesystem
+// symlinks, while argv preserves the caller's spelling. On macOS, for example,
+// `/tmp/x.mjs` can load as `/private/tmp/x.mjs`; lexical resolution alone then
+// skips main(), returns 0 and emits nothing. Resolution failure is import-like,
+// never permission to execute a CLI entry point.
+let isMain = false;
+if (process.argv[1]) {
+  try {
+    isMain = realpathSync(process.argv[1]) === realpathSync(__filename);
+  } catch {
+    isMain = false;
+  }
+}
+if (isMain) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (err) {

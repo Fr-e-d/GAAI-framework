@@ -61,6 +61,7 @@
 #   T52  correction  AC6         real Bash 3.2 execution when a 3.2 interpreter exists
 #   T53  correction  AC6         no gh/curl/network primitive in production code
 #   T54  correction  AC6         verification mutates nothing in the repository
+#   T55  local-first AC6         resolver's hermetic Node matrix is part of the OSS corpus
 set -uo pipefail
 
 PASS_COUNT=0
@@ -89,7 +90,7 @@ mkdir -p "$FIXTURE_BASE"
 # not a coincidence of both drifting together.
 CANONICAL_EVIDENCE_KEYS='["repository","mode","identity","merge_ref","base_sha","head_sha","merge_sha","tree_sha","run","manifest_digest","validation_profile","jobs"]'
 CANONICAL_PRIORITY_ORDER='environment_error, schema_invalid, identity_mode_conflict, commit_unresolvable, parent_mismatch, tuple_forged, tree_mismatch, manifest_digest_mismatch, provenance_mismatch, policy_missing, trust_surface_changed, run_attempt_mismatch, job_missing, job_duplicate, job_not_success'
-CANONICAL_TRUST_SURFACES='[".gaai/core/ci/premerge-policy.schema.json",".gaai/core/templates/ci/premerge-policy.json",".gaai/core/scripts/lib/premerge-proof.sh"]'
+CANONICAL_TRUST_SURFACES='[".gaai/core/ci/premerge-policy.schema.json",".gaai/core/templates/ci/premerge-policy.json",".gaai/core/scripts/lib/premerge-proof.sh",".gaai/core/scripts/lib/local-admission-resolver.mjs"]'
 
 # Key sets + closed reason list read from the shipped schema, used by the
 # fail-closed verdict predicate below. Always available; a real JSON-Schema
@@ -900,7 +901,7 @@ fi
 # ── T45: default policy covers exactly the existing trust surfaces ───────────
 echo ""; echo "T45: default policy trust surface and forward-declared workflow identity"
 [[ "$(jq -c '.covered_paths' "$TEMPLATE_PATH")" == "$CANONICAL_TRUST_SURFACES" ]] \
-  && pass "T45a: covered_paths is exactly the three existing trust surfaces" \
+  && pass "T45a: covered_paths is exactly the four existing trust surfaces" \
   || fail "T45a: covered_paths drifted: $(jq -c '.covered_paths' "$TEMPLATE_PATH")"
 t45_bad=0
 while IFS= read -r surface; do
@@ -1117,6 +1118,12 @@ after="$(snapshot_repo "$R54")"
 tmp_leftovers="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' -newer "$E54" -type d 2>/dev/null | wc -l | tr -d ' ')"
 [[ "$tmp_leftovers" -eq 0 ]] && pass "T54c: no temporary trust-root directory is left behind" \
   || skip "T54c: ${tmp_leftovers} recent temp dir(s) present; not attributable to this run on a shared host"
+
+# ── T55: local-admission resolver regression matrix stays in the OSS corpus ──
+echo ""; echo "T55: local-admission resolver hermetic regression matrix"
+node --test "${SCRIPT_DIR}/tests/local-admission-resolver.test.mjs" \
+  && pass "T55: resolver matrix passed" \
+  || fail "T55: resolver matrix failed"
 
 echo ""
 echo "════════════════════════════════════════"

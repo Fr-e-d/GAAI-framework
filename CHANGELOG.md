@@ -7,14 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [2.49.0] - 2026-08-21
 
 ### Changed
+- feat: add base-held local admission resolver
+- fix: recognize symlinked router invocation
 - fix: seal the provenance record across every agent spawn
 - fix: blocking classification is SOTA-only, not for plan-conformance findings
 - fix: settle what the blocked state may do, from the transitions actually made
 - fix: the evaluator could edit the record clearing it
 - fix: repoint repository identity after transfer to digipulse-engineering
+
 
 ## [2.51.0] - 2026-08-20
 
