@@ -44,7 +44,8 @@
 # file): _test_gate_resolve_units, _test_gate_run_units,
 # _test_gate_parse_junit_failures, _test_gate_resolve_pm,
 # _test_gate_pkg_script, _test_gate_append_report, _test_gate_restore,
-# _test_gate_observe_authority_once, _test_gate_poll_hosted_authority.
+# _test_gate_observe_authority_once, _test_gate_poll_hosted_authority,
+# _test_gate_outcome_is_deterministic.
 #
 # Hosted merge-authority env vars (all optional, have defaults):
 #   GAAI_CI_TEST_GATE_TIMEOUT_SEC        — technical poll timeout (default:
@@ -583,6 +584,7 @@ _test_gate_required_controller_paths() {
     ".gaai/core/scripts/daemon-dispatch.sh" \
     ".gaai/core/scripts/lib/backlog-yaml.sh" \
     ".gaai/core/scripts/lib/chore-commit.sh" \
+    ".gaai/core/scripts/lib/commit-retry-containment.sh" \
     ".gaai/core/scripts/lib/daemon-home.sh" \
     ".gaai/core/scripts/lib/home-branch-guard.sh" \
     ".gaai/core/scripts/lib/stuck-classifier.sh" \
@@ -931,7 +933,7 @@ _test_gate_observe_authority_once() {
     echo "blocked:repository_mismatch"; return 0
   fi
   [[ "$base_ref" == "$policy_base_ref" ]] \
-    || { echo "blocked:pr_tuple_mismatch"; return 0; }
+    || { echo "blocked:policy_base_ref_mismatch"; return 0; }
   live_ref=$(_test_gate_gh_json "$api_timeout_sec" \
     "repos/{owner}/{repo}/git/ref/heads/${policy_base_ref}") \
     || { echo "blocked:github_unavailable"; return 0; }
@@ -1038,7 +1040,7 @@ _test_gate_poll_hosted_authority() {
     readiness=""
     IFS=$'\t' read -r _ readiness _ <<<"$observation"
     case "$outcome" in
-      hosted_pass|human_required:*|blocked:pr_closed|blocked:pr_draft|blocked:repository_mismatch|blocked:workflow_mismatch|blocked:event_mismatch|blocked:pr_tuple_mismatch|blocked:head_changed|blocked:stale_base|blocked:run_ambiguous|blocked:run_superseded|blocked:run_failed|blocked:run_skipped|blocked:run_neutral|blocked:run_cancelled|blocked:run_timed_out|blocked:authority_job_missing|blocked:authority_job_ambiguous|blocked:authority_job_failed|blocked:authority_job_skipped|blocked:authority_job_neutral|blocked:authority_job_cancelled|blocked:authority_job_timed_out)
+      hosted_pass|human_required:*|blocked:pr_closed|blocked:pr_draft|blocked:repository_mismatch|blocked:workflow_mismatch|blocked:event_mismatch|blocked:policy_base_ref_mismatch|blocked:pr_tuple_mismatch|blocked:head_changed|blocked:stale_base|blocked:run_ambiguous|blocked:run_superseded|blocked:run_failed|blocked:run_skipped|blocked:run_neutral|blocked:run_cancelled|blocked:run_timed_out|blocked:authority_job_missing|blocked:authority_job_ambiguous|blocked:authority_job_failed|blocked:authority_job_skipped|blocked:authority_job_neutral|blocked:authority_job_cancelled|blocked:authority_job_timed_out)
         printf '%s\n' "$observation"; return 0 ;;
       blocked:github_unavailable)
         github_error_streak=$(( github_error_streak + 1 ))
@@ -1166,6 +1168,29 @@ _test_gate_recheck_pr_tuple() {
     || { echo "blocked:run_superseded"; return 1; }
   echo "hosted_pass"
   return 0
+}
+
+# ── Deterministic (non-retryable) block classification ──────────────────────
+# A blocked outcome is deterministic when re-observing the same candidate can
+# never change it: the base-held policy and the live GitHub identity disagree on
+# repository, workflow, event or target base ref. Re-running the commit phase re-pushes
+# the candidate and buys another full hosted run for an outcome that is already
+# decided, so the caller must stall these for an operator instead of retrying.
+#
+# Every other blocked outcome stays retryable, deliberately:
+#   - github_unavailable / run_missing are transient by definition;
+#   - head_changed / stale_base are resolved by the next observation;
+#   - pr_closed / pr_draft leave the heavy lanes unexecuted, so a retry is cheap;
+#   - run_* carry a real hosted verdict and keep the existing lifecycle.
+_test_gate_outcome_is_deterministic() {
+  case "${1:-}" in
+    blocked:repository_mismatch|blocked:workflow_mismatch|blocked:event_mismatch|blocked:policy_base_ref_mismatch)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 _run_merge_test_gate() {

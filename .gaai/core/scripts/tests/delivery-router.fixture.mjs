@@ -10,10 +10,13 @@
 
 import { describe, test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
@@ -34,7 +37,8 @@ const {
 
 // The shipped config is the contract under test — a routing rule that only
 // holds for a bespoke fixture proves nothing about the daemon's behaviour.
-const { config: SHIPPED } = loadConfig(join(LIB, '..', '..', 'config', 'delivery-routing.json'));
+const SHIPPED_CONFIG_PATH = join(LIB, '..', '..', 'config', 'delivery-routing.json');
+const { config: SHIPPED } = loadConfig(SHIPPED_CONFIG_PATH);
 
 const allUp = () => ({ status: 'AVAILABLE', source: 'test', reason: '', until: null });
 /** Routable roles — the config allows `_`-prefixed keys for inline commentary. */
@@ -58,6 +62,52 @@ const contribute = (artifact, modelId, cfg = SHIPPED) => recordContribution(ledg
 const ledger = () => readLedger(ledgerPath(), 'ROUTER-TEST-STORY');
 const pick = (role, extra = {}) => selectCandidate({
   role, config: SHIPPED, ledger: ledger(), harnessResolver: allUp, ...extra,
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+describe('CLI entry identity', () => {
+  const routerPath = join(LIB, 'delivery-router.mjs');
+  const cliEnv = () => {
+    const env = { ...process.env };
+    delete env.GAAI_ROUTING_CONFIG;
+    delete env.GAAI_MODEL_DISABLE;
+    for (const key of Object.keys(env)) {
+      if (key.startsWith('GAAI_HARNESS_STATUS_')) delete env[key];
+    }
+    for (const harness of Object.keys(SHIPPED.harnesses)) {
+      if (!harness.startsWith('_')) {
+        env[`GAAI_HARNESS_STATUS_${harness.toUpperCase()}`] = 'AVAILABLE';
+      }
+    }
+    return env;
+  };
+
+  test('executes through a symlinked directory path', () => {
+    const alias = join(tmp, 'lib-alias');
+    symlinkSync(LIB, alias, 'dir');
+
+    const result = spawnSync(process.execPath, [
+      join(alias, 'delivery-router.mjs'),
+      'select', '--role', 'PLAN_PRODUCER', '--story', 'SYMLINK-CLI', '--format', 'sh',
+      '--config', SHIPPED_CONFIG_PATH, '--ledger', join(tmp, 'cli.provenance.json'),
+    ], { encoding: 'utf8', env: cliEnv() });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^GAAI_ROUTE_STATUS='SELECTED'$/m);
+    assert.notEqual(result.stdout.length, 0);
+  });
+
+  test('importing the module does not execute the CLI', () => {
+    const source = `await import(${JSON.stringify(pathToFileURL(routerPath).href)});`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', source], {
+      encoding: 'utf8',
+      env: cliEnv(),
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, '');
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────

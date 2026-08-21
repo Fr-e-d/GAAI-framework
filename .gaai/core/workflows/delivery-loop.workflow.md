@@ -21,13 +21,31 @@ The daemon (`delivery-daemon.sh`) directly spawns three standalone `claude -p` p
 Daemon (bash)
   ├─ Phase 1 Plan  → claude -p (planning.daemon-prompt.md)  → execution-plan.md  → phase_status: planned
   ├─ Phase 2 Impl  → nested-claude-spawn.js runImpl()        → impl-report.md     → phase_status: implemented
-  ├─ Phase 3 QA    → claude -p (qa.daemon-prompt.md)         → qa-report.md       → phase_status: qa_passed
-  └─ Commit phase  → deterministic bash (git + gh)            → PR merged          → phase_status: done
+  ├─ Local pre-QA  → seal + reconcile + project checks        → pre_qa receipt      → QA spend admitted
+  ├─ Phase 3 QA    → claude -p (qa.daemon-prompt.md)           → qa-report.md        → phase_status: qa_passed
+  ├─ Local final   → commit + reconcile + project checks       → final receipt       → publication admitted
+  └─ Commit phase  → exact-SHA push + hosted authority         → PR merged           → phase_status: done
 ```
 
 Each phase has an isolated context window: cumulative-context risk is bounded per phase, not accumulated across the full story lifecycle.
 
 For daemon state machine internals, see `daemon-dispatch.sh`.
+
+---
+
+## Local admission versus merge authority
+
+The target project owns a base-held, closed-world local-admission policy. After implementation the
+daemon creates a local seal commit, reconciles the current base and requires a current `pre_qa` PASS
+before selecting or spawning semantic QA. After QA evidence and the final delivery commit, it
+reconciles and executes the policy again; only that distinct `final` PASS may publish its explicitly
+admitted SHA. A failed push is first observed as possibly accepted, while every real retry re-fetches,
+reconciles and re-runs final admission. Missing, stale, skipped, timed-out or failed evidence blocks
+the downstream model or remote call and routes to implementation or human attention.
+
+Local receipts authorize only the named spend/publication boundary. They never emit QA authority,
+authorize acceptance or replace the hosted exact-candidate gate. Hosted CI remains the independent
+merge authority for the exact PR/head/base/run tuple.
 
 ---
 

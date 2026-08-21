@@ -18,6 +18,8 @@ _GAAI_DISPATCH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 # shellcheck source=lib/delivery-routing.sh
 [[ -f "${_GAAI_DISPATCH_LIB_DIR}/delivery-routing.sh" ]] \
   && source "${_GAAI_DISPATCH_LIB_DIR}/delivery-routing.sh"
+# shellcheck source=lib/commit-retry-containment.sh
+source "${_GAAI_DISPATCH_LIB_DIR}/commit-retry-containment.sh"
 
 # ── Per-phase wall-clock timeouts (OSS-7) ────────────────────────────────
 # Bound the lifetime of each phase to detect hangs that loop-breaker (which
@@ -226,16 +228,55 @@ if [[ -z "${_TEST_GATE_SH_SOURCED:-}" ]]; then
   _TEST_GATE_SH_SOURCED=1
 fi
 if ! declare -F _run_merge_test_gate >/dev/null 2>&1 \
-    || ! declare -F _test_gate_recheck_pr_tuple >/dev/null 2>&1; then
+    || ! declare -F _test_gate_recheck_pr_tuple >/dev/null 2>&1 \
+    || ! declare -F _test_gate_outcome_is_deterministic >/dev/null 2>&1; then
   echo "[ERROR] dispatcher initialization: hosted merge authority controller is incomplete" >&2
   return 1 2>/dev/null || exit 1
 fi
+
+# Local admission is the publication/spend boundary; unlike an optional hook,
+# an unavailable adapter must stop dispatcher initialization.
+if [[ -z "${_LOCAL_ADMISSION_SH_SOURCED:-}" ]]; then
+  if ! source "${_DISPATCH_SCRIPT_DIR}/lib/local-admission.sh"; then
+    echo "[ERROR] dispatcher initialization: local admission adapter could not be loaded" >&2
+    return 1 2>/dev/null || exit 1
+  fi
+  _LOCAL_ADMISSION_SH_SOURCED=1
+fi
+declare -F _run_local_admission >/dev/null 2>&1 || {
+  echo "[ERROR] dispatcher initialization: local admission adapter is incomplete" >&2
+  return 1 2>/dev/null || exit 1
+}
 
 # ── Active-spawn marker directory (AC1) ──────────────────────────────────
 # LOCK_DIR is set by delivery-daemon.sh before sourcing this library.
 # Provide a fallback so this library is usable in tests without the full daemon env.
 _marker_dir() {
   echo "${LOCK_DIR:-${PROJECT_DIR}/.gaai/project/contexts/backlog/.delivery-locks}"
+}
+
+_commit_policy_stall_marker_path() {
+  local story_id="$1"
+  printf '%s/.commit-policy-stalled-%s\n' "$(_marker_dir)" "$story_id"
+}
+
+# Fallback durability for a terminal commit-policy mismatch. The backlog phase
+# remains the primary state, but a scheduler mutation can fail during a push
+# race or repository outage. Recovery reads this atomically-published marker
+# before any relaunch decision and never clears it during an ordinary scan.
+_write_commit_policy_stall_marker() {
+  local story_id="$1" outcome="$2" marker tmp marker_dir
+  marker=$(_commit_policy_stall_marker_path "$story_id")
+  marker_dir=$(dirname "$marker")
+  tmp="${marker}.tmp.$$"
+  mkdir -p "$marker_dir" 2>/dev/null || return 1
+  (
+    umask 077
+    printf 'story_id=%s\noutcome=%s\ncreated_at=%s\n' \
+      "$story_id" "$outcome" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$tmp"
+  ) || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  mv "$tmp" "$marker" 2>/dev/null \
+    || { rm -f "$tmp" 2>/dev/null || true; return 1; }
 }
 
 _write_active_marker() {
@@ -917,6 +958,14 @@ _emit_commit_routing_record() {
   local impl_tag
   impl_tag=$(get_impl_model_tag "$story_id")
 
+  # Recovery consumes this one-shot observation after a failed commit phase.
+  # It is daemon state, not candidate evidence, and never authorizes a merge.
+  if [[ "$provider" == "error" ]]; then
+    _commit_retry_write_observation "$story_id" "$fallback_reason" || true
+  else
+    _commit_retry_clear "$story_id"
+  fi
+
   local log_path_args=()
   if [[ -n "${ROUTING_LOG_PATH:-}" ]]; then
     log_path_args=(--log-path "$ROUTING_LOG_PATH")
@@ -936,6 +985,123 @@ _emit_commit_routing_record() {
     --auto-merge-applied "$auto_merge_applied" \
     ${log_path_args[@]+"${log_path_args[@]}"} \
     2>/dev/null || _emit_routing_record_fallback "$trace_id" "$story_id" "commit" "$provider" "n/a" "$duration_ms" "$fallback_reason" "$impl_tag" "3phase" "$pr_url" "$auto_merge_applied"
+}
+
+# ── Local admission boundaries ───────────────────────────────────────────
+GAAI_ADMITTED_SHA=""
+GAAI_ADMITTED_BASE_SHA=""
+GAAI_ADMISSION_RECEIPT=""
+
+_admission_retryable() {
+  case "$1" in
+    blocked:empty_candidate_diff|blocked:command_*|blocked:execution_failed|blocked:stale_evidence)
+      return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_route_admission_block() {
+  local story_id="$1" trace_id="$2" boundary="$3" outcome="$4"
+  local phase="commit"
+  LOCAL_ADMISSION_OUTCOME="$outcome"
+  [[ "$boundary" == pre_qa ]] && phase="qa"
+  echo "[LOCAL-ADMISSION] story=${story_id} boundary=${boundary} outcome=${outcome} publication_admitted=false"
+  if [[ "$phase" == qa ]]; then
+    _emit_qa_routing_record "$story_id" "$trace_id" error "$outcome" 0
+  else
+    _emit_commit_routing_record "$story_id" "$trace_id" error "$outcome" 0 "" false
+  fi
+  if _admission_retryable "$outcome"; then
+    local route="${LOCK_DIR}/.qa-route-${story_id}" tmp="${LOCK_DIR}/.qa-route-${story_id}.tmp.$$"
+    mkdir -p "$LOCK_DIR" 2>/dev/null || true
+    printf 'impl\n' > "$tmp" 2>/dev/null && mv "$tmp" "$route" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    "$SCHEDULER" --set-phase-status "$story_id" qa_failed "$BACKLOG_FILE" 2>/dev/null || true
+  else
+    local terminal="commit_stalled"; [[ "$boundary" == pre_qa ]] && terminal="qa_escalated"
+    "$SCHEDULER" --set-phase-status "$story_id" "$terminal" "$BACKLOG_FILE" 2>/dev/null || true
+    declare -F notify_escalation_inline >/dev/null 2>&1 && \
+      notify_escalation_inline "$story_id" "$outcome" "Local ${boundary} admission requires operator attention before any downstream spend"
+  fi
+}
+
+_restore_delivery_governance() {
+  local repo="$1" path
+  for path in .gaai/project/contexts/backlog/active.backlog.yaml \
+      .gaai/core/skills/skills-index.yaml .gaai/project/skills/skills-index.yaml; do
+    git -C "$repo" restore --source=HEAD --staged --worktree -- "$path" 2>/dev/null || true
+  done
+}
+
+_reconcile_admission_base() {
+  local repo="$1" base="${TARGET_BRANCH:-staging}"
+  git -C "$repo" fetch origin "$base" --quiet 2>/dev/null || return 1
+  if ! git -C "$repo" merge --no-edit "origin/${base}" >/dev/null 2>&1; then
+    git -C "$repo" merge --abort >/dev/null 2>&1 || true
+    return 1
+  fi
+  [[ -z "$(git -C "$repo" status --porcelain 2>/dev/null)" ]]
+}
+
+_local_admission_gate() {
+  local boundary="$1" story_id="$2" trace_id="$3" repo="$4"
+  local receipts="$(_marker_dir)/local-admission-receipts" expected_publication=false
+  GAAI_ADMITTED_SHA=""; GAAI_ADMITTED_BASE_SHA=""; GAAI_ADMISSION_RECEIPT=""
+  [[ "$boundary" == final ]] && expected_publication=true
+  if ! _run_local_admission "$boundary" "$story_id" "$repo" "${TARGET_BRANCH:-staging}" "$receipts"; then
+    _route_admission_block "$story_id" "$trace_id" "$boundary" "${LOCAL_ADMISSION_OUTCOME:-blocked:unknown}"
+    return 1
+  fi
+  local fields receipt_head receipt_base receipt_outcome receipt_publication selected
+  fields=$(node -e 'const r=require(process.argv[1]); console.log([r.candidate?.head_sha||"",r.candidate?.base_sha||"",r.outcome||"",String(r.publication_admitted),[...(r.selected_surface_ids||[]),...(r.selected_command_ids||[])].join(",")].join("\t"))' "$LOCAL_ADMISSION_RECEIPT_PATH" 2>/dev/null) || fields=""
+  IFS=$'\t' read -r receipt_head receipt_base receipt_outcome receipt_publication selected <<<"$fields"
+  if [[ ! "$receipt_head" =~ ^[0-9a-f]{40}$ || "$receipt_head" != "$(git -C "$repo" rev-parse HEAD 2>/dev/null)" \
+      || ! "$receipt_base" =~ ^[0-9a-f]{40}$ || "$receipt_outcome" != pass \
+      || "$receipt_publication" != "$expected_publication" ]]; then
+    rm -f "$LOCAL_ADMISSION_RECEIPT_PATH" 2>/dev/null || true
+    _route_admission_block "$story_id" "$trace_id" "$boundary" blocked:receipt_invalid
+    return 1
+  fi
+  GAAI_ADMITTED_SHA="$receipt_head"; GAAI_ADMITTED_BASE_SHA="$receipt_base"
+  GAAI_ADMISSION_RECEIPT="$LOCAL_ADMISSION_RECEIPT_PATH"
+  echo "[LOCAL-ADMISSION] story=${story_id} boundary=${boundary} outcome=pass head=${receipt_head} selected=${selected:-none} publication_admitted=${receipt_publication}"
+}
+
+_admit_current_candidate() {
+  local boundary="$1" story_id="$2" trace_id="$3" repo="$4"
+  if ! _reconcile_admission_base "$repo"; then
+    _route_admission_block "$story_id" "$trace_id" "$boundary" blocked:base_reconcile_failed
+    return 1
+  fi
+  _local_admission_gate "$boundary" "$story_id" "$trace_id" "$repo"
+}
+
+_prepare_pre_qa_admission() {
+  local story_id="$1" trace_id="$2" repo="$3" base="${TARGET_BRANCH:-staging}"
+  local candidate_paths=(. \
+    ":(exclude,top,literal).gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md" \
+    ":(exclude,top,literal).gaai/project/contexts/artefacts/impl-reports/${story_id}.impl-report.md" \
+    ":(exclude,top,literal).gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-report.md" \
+    ":(exclude,top,literal).gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-verdict.json" \
+    ":(exclude,top,literal).gaai/project/contexts/artefacts/memory-deltas/${story_id}.memory-delta.md")
+  _restore_delivery_governance "$repo"
+  git -C "$repo" add -A 2>/dev/null || {
+    _route_admission_block "$story_id" "$trace_id" pre_qa blocked:seal_stage_failed; return 1; }
+  git -C "$repo" fetch origin "$base" --quiet 2>/dev/null || {
+    _route_admission_block "$story_id" "$trace_id" pre_qa blocked:base_fetch_failed; return 1; }
+  if git -C "$repo" diff --cached --quiet "origin/${base}" -- "${candidate_paths[@]}"; then
+    _route_admission_block "$story_id" "$trace_id" pre_qa blocked:empty_candidate_diff
+    return 1
+  fi
+  if ! git -C "$repo" diff --cached --quiet; then
+    git -C "$repo" commit -m "chore(${story_id}): local implementation seal" \
+      -m '[gaai-local-admission:pre_qa]' >/dev/null 2>&1 || {
+      _route_admission_block "$story_id" "$trace_id" pre_qa blocked:seal_commit_failed; return 1; }
+  elif ! git -C "$repo" log -1 --format=%B | grep -q '^\[gaai-local-admission:pre_qa\]$'; then
+    git -C "$repo" commit --allow-empty -m "chore(${story_id}): local implementation seal" \
+      -m '[gaai-local-admission:pre_qa]' >/dev/null 2>&1 || {
+      _route_admission_block "$story_id" "$trace_id" pre_qa blocked:seal_commit_failed; return 1; }
+  fi
+  _admit_current_candidate pre_qa "$story_id" "$trace_id" "$repo"
 }
 
 # ── Worktree dependency marker ─────────────────────────────────────────────
@@ -2169,6 +2335,13 @@ handle_qa_phase() {
     return 1
   fi
 
+  # Seal, reconcile and execute the deterministic project gate before any QA
+  # model is selected or spawned. A blocked gate has already persisted its
+  # implementation/human route and emits no semantic-evaluation spend.
+  if ! _prepare_pre_qa_admission "$story_id" "$trace_id" "$worktree_path"; then
+    return 0
+  fi
+
   # ── Ensure output directories exist ──────────────────────────────────────
   mkdir -p "$(dirname "$qa_report_path")"
   mkdir -p "$(dirname "$memory_delta_path")"
@@ -2636,7 +2809,7 @@ _auto_resolve_pr_conflicts() {
     if [[ "$conflicting_files_count" -eq 0 ]]; then
       git -C "$worktree_path" commit --no-edit 2>/dev/null || \
         git -C "$worktree_path" commit -m "chore(merge): integrate staging drift (auto-resolve)" 2>/dev/null || true
-      if _auto_resolve_push "$worktree_path" "$branch_name" "$pre_merge_head" "$story_id"; then
+      if _auto_resolve_push "$worktree_path" "$branch_name" "$pre_merge_head" "$story_id" "$trace_id"; then
         _emit_auto_resolve_routing_record "$story_id" "$trace_id" \
           "auto_merge_resolved" "$pr_url" "0" \
           '{"theirs_count":0,"ours_count":0,"auto_section_count":0}' "$resolve_attempt"
@@ -2708,7 +2881,7 @@ _auto_resolve_pr_conflicts() {
     git -C "$worktree_path" commit --no-edit 2>/dev/null || \
       git -C "$worktree_path" commit -m "chore(merge): integrate staging drift (auto-resolve)" 2>/dev/null || true
 
-    if ! _auto_resolve_push "$worktree_path" "$branch_name" "$pre_merge_head" "$story_id"; then
+    if ! _auto_resolve_push "$worktree_path" "$branch_name" "$pre_merge_head" "$story_id" "$trace_id"; then
       git -C "$worktree_path" reset --hard HEAD~1 2>/dev/null || true
       continue
     fi
@@ -2731,7 +2904,9 @@ _auto_resolve_pr_conflicts() {
 
 # Push helper for auto-resolve (AC4 — conditional GAAI_SKIP_OSS_REFCHECK)
 _auto_resolve_push() {
-  local worktree_path="$1" branch_name="$2" pre_merge_head="$3" story_id="$4"
+  local worktree_path="$1" branch_name="$2" pre_merge_head="$3" story_id="$4" trace_id="$5"
+  _admit_current_candidate final "$story_id" "$trace_id" "$worktree_path" || return 1
+  local admitted_sha="$GAAI_ADMITTED_SHA"
   local push_env=""
   if [[ -n "$pre_merge_head" ]] && \
      git -C "$worktree_path" diff --name-only "${pre_merge_head}..HEAD" 2>/dev/null \
@@ -2740,16 +2915,25 @@ _auto_resolve_push() {
   fi
   local push_stderr push_exit
   if [[ -n "$push_env" ]]; then
-    push_stderr=$(env GAAI_SKIP_OSS_REFCHECK=1 git -C "$worktree_path" push origin "$branch_name" 2>&1)
+    push_stderr=$(env GAAI_SKIP_OSS_REFCHECK=1 git -C "$worktree_path" push origin \
+      "${admitted_sha}:refs/heads/${branch_name}" 2>&1)
   else
-    push_stderr=$(git -C "$worktree_path" push origin "$branch_name" 2>&1)
+    push_stderr=$(git -C "$worktree_path" push origin \
+      "${admitted_sha}:refs/heads/${branch_name}" 2>&1)
   fi
   push_exit=$?
-  if [[ "$push_exit" -ne 0 ]]; then
-    echo "[WARN] ${story_id} auto-resolve push failed: ${push_stderr: -200}"
-    return 1
+  local remote_head remote_base
+  remote_head=$(git -C "$worktree_path" ls-remote --heads origin "refs/heads/${branch_name}" 2>/dev/null \
+    | awk 'NR==1{print $1}')
+  remote_base=$(git -C "$worktree_path" ls-remote --heads origin \
+    "refs/heads/${TARGET_BRANCH:-staging}" 2>/dev/null | awk 'NR==1{print $1}')
+  if [[ "$remote_head" == "$admitted_sha" && "$remote_base" == "$GAAI_ADMITTED_BASE_SHA" ]]; then
+    [[ "$push_exit" -eq 0 ]] || \
+      echo "[INFO] ${story_id} auto-resolve push reported failure but exact remote SHA was accepted"
+    return 0
   fi
-  return 0
+  echo "[WARN] ${story_id} auto-resolve push not accepted: ${push_stderr: -200}"
+  return 1
 }
 
 # Merge exactly one validated PR head without enabling a persistent auto-merge
@@ -3451,18 +3635,7 @@ ${qa_snippet}"
   # plan/impl/qa phases — they must NOT appear in the story-branch PR diff.
   # git restore --source=HEAD --staged --worktree clobbers both index and WD.
   # Non-fatal if a path is absent/untracked at HEAD (AC4).
-  local _governed_files=(
-    ".gaai/project/contexts/backlog/active.backlog.yaml"
-    ".gaai/core/skills/skills-index.yaml"
-    ".gaai/project/skills/skills-index.yaml"
-  )
-  for _gf in "${_governed_files[@]}"; do
-    if git -C "$worktree_path" restore --source=HEAD --staged --worktree -- "$_gf" 2>/dev/null; then
-      echo "[INFO] ${story_id} handle_commit_phase: reverted governed file ${_gf}"
-    else
-      echo "[INFO] ${story_id} handle_commit_phase: revert skipped for ${_gf} (absent or untracked at HEAD — AC4)"
-    fi
-  done
+  _restore_delivery_governance "$worktree_path"
 
   # ── Publish provenance (daemon-authored, post-agent) ─────────────────────
   # The authoritative record lives in daemon state precisely so no phase agent
@@ -3520,32 +3693,42 @@ ${qa_snippet}"
     fi
   fi
 
-  # ── git push with retry-backoff (AC1-iii + AC5-a) ────────────────────────
-  # Note : stderr captured (NOT 2>/dev/null) so push errors are diagnosable.
-  # Empirical : silent stderr previously hid stalls (auth prompts, network
-  # timeouts, pre-push hook rejections) until heartbeat fired ~30+ min later
-  # with no log evidence. Capturing stderr to the wrapper's output stream
-  # routes it to the daemon's dispatch log for forensics.
-  local push_exit=1 push_attempt=0 push_max=3 push_stderr=""
-  while [[ $push_attempt -lt $push_max ]]; do
-    push_attempt=$(( push_attempt + 1 ))
-    push_stderr=$(git -C "$worktree_path" push origin "$branch" 2>&1)
-    if [[ $? -eq 0 ]]; then
-      push_exit=0; break
-    fi
-    echo "[WARN] ${story_id} handle_commit_phase: git push attempt ${push_attempt}/${push_max} failed: ${push_stderr: -300}"
-    [[ $push_attempt -lt $push_max ]] && sleep $((push_attempt * 2))
-  done
-  if [[ "$push_exit" -ne 0 ]]; then
-    echo "[ERROR] ${story_id} handle_commit_phase: git push failed after ${push_max} attempts: ${push_stderr: -300} [class=PUSH_FAILED]"
-    _emit_commit_routing_record "$story_id" "$trace_id" "error" "PUSH_FAILED" "0" "" "false"
+  # Final deterministic admission runs after every candidate/base mutation.
+  # Its exact SHA is the only object the publication loop may push.
+  if ! _admit_current_candidate final "$story_id" "$trace_id" "$worktree_path"; then
     return 1
   fi
-  local pushed_head_sha
-  pushed_head_sha=$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null || true)
-  if [[ ! "$pushed_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
-    echo "[ERROR] ${story_id} handle_commit_phase: pushed HEAD SHA could not be resolved [class=PUSH_FAILED]"
-    _emit_commit_routing_record "$story_id" "$trace_id" "error" "PUSH_FAILED" "0" "" "false"
+  local pushed_head_sha="$GAAI_ADMITTED_SHA"
+
+  # A failed transport may still have been accepted remotely. Observe first;
+  # every real retry then re-fetches/reconciles/re-admits after backoff.
+  local push_exit=1 push_attempt=0 push_max=3 push_stderr="" remote_head="" remote_base=""
+  while [[ $push_attempt -lt $push_max ]]; do
+    push_attempt=$(( push_attempt + 1 ))
+    if push_stderr=$(git -C "$worktree_path" push origin \
+        "${pushed_head_sha}:refs/heads/${branch}" 2>&1); then
+      push_exit=0
+    else
+      push_exit=$?
+    fi
+    remote_head=$(git -C "$worktree_path" ls-remote --heads origin \
+      "refs/heads/${branch}" 2>/dev/null | awk 'NR==1{print $1}')
+    remote_base=$(git -C "$worktree_path" ls-remote --heads origin \
+      "refs/heads/${TARGET_BRANCH:-staging}" 2>/dev/null | awk 'NR==1{print $1}')
+    if [[ "$remote_head" == "$pushed_head_sha" && "$remote_base" == "$GAAI_ADMITTED_BASE_SHA" ]]; then
+      push_exit=0; break
+    fi
+    echo "[WARN] ${story_id} handle_commit_phase: exact-SHA push attempt ${push_attempt}/${push_max} not accepted: ${push_stderr: -300}"
+    if [[ $push_attempt -lt $push_max ]]; then
+      sleep $((push_attempt * 2))
+      _admit_current_candidate final "$story_id" "$trace_id" "$worktree_path" || return 1
+      pushed_head_sha="$GAAI_ADMITTED_SHA"
+    fi
+  done
+  if [[ "$push_exit" -ne 0 || "$remote_head" != "$pushed_head_sha" \
+      || "$remote_base" != "$GAAI_ADMITTED_BASE_SHA" ]]; then
+    echo "[ERROR] ${story_id} handle_commit_phase: exact admitted SHA was not published [class=PUSH_FAILED]"
+    _emit_commit_routing_record "$story_id" "$trace_id" error PUSH_FAILED 0 "" false
     return 1
   fi
 
@@ -3570,8 +3753,15 @@ ${qa_snippet}"
   # Fast-path: catches true-merge / fast-forward / re-push of an already-pushed
   # HEAD. NOT effective after squash-merge (squash yields a new commit). Fail-open.
   local pr_url="" _skip_pr_create=0
-  if git -C "$worktree_path" fetch origin staging 2>/dev/null && \
-     git -C "$worktree_path" merge-base --is-ancestor HEAD origin/staging 2>/dev/null; then
+  if ! git -C "$worktree_path" fetch origin staging 2>/dev/null; then
+    _route_admission_block "$story_id" "$trace_id" final blocked:base_fetch_failed
+    return 1
+  fi
+  if [[ "$(git -C "$worktree_path" rev-parse origin/staging 2>/dev/null)" != "$GAAI_ADMITTED_BASE_SHA" ]]; then
+    _route_admission_block "$story_id" "$trace_id" final blocked:stale_evidence
+    return 1
+  fi
+  if git -C "$worktree_path" merge-base --is-ancestor HEAD origin/staging 2>/dev/null; then
     echo "[INFO] ${story_id} handle_commit_phase: Guard 1 — HEAD is ancestor of origin/staging — skipping gh pr create"
     pr_url=$(gh pr list --state all --head "$branch" --json url --jq '.[0].url' 2>/dev/null || true)
     [[ "$pr_url" == "null" ]] && pr_url=""
@@ -3723,6 +3913,31 @@ ${qa_snippet}"
     commit_outcome="$TEST_GATE_OUTCOME"
     declare -F notify_escalation_inline >/dev/null 2>&1 && \
       notify_escalation_inline "$story_id" "$TEST_GATE_OUTCOME" "Human review required for ${pr_url}"
+  elif [[ "$gate_rc" -ne 0 ]] && _test_gate_outcome_is_deterministic "$TEST_GATE_OUTCOME"; then
+    # Circuit breaker: the base-held policy and the live GitHub identity
+    # disagree, so re-observing this candidate can only return the same
+    # outcome. Leaving the durable qa_passed phase in place would let RECOVERY
+    # re-launch the wrapper on every scan, and each re-launch re-pushes the
+    # candidate and buys another complete hosted run. The bounded-death counter
+    # cannot contain that: it resets whenever the worktree HEAD moves, which the
+    # re-push itself causes. Stall for the operator instead of spending hosted
+    # minutes on an outcome that is already decided.
+    echo "[ERROR] ${story_id} handle_commit_phase: ${TEST_GATE_OUTCOME} cannot be resolved by retry; stalling for the operator [class=TEST_GATE_POLICY_MISMATCH]"
+    local stall_persistence_mode="none" stall_marker
+    stall_marker=$(_commit_policy_stall_marker_path "$story_id")
+    if "$SCHEDULER" --set-phase-status "$story_id" commit_stalled "$BACKLOG_FILE" 2>/dev/null; then
+      stall_persistence_mode="backlog"
+    elif _write_commit_policy_stall_marker "$story_id" "$TEST_GATE_OUTCOME"; then
+      stall_persistence_mode="marker"
+      echo "[WARN] ${story_id} handle_commit_phase: scheduler mutation failed; durable recovery inhibit published at ${stall_marker}"
+    else
+      echo "[ERROR] ${story_id} handle_commit_phase: STALL_PERSISTENCE_FAILED — neither backlog nor recovery marker is durable; stop the daemon and repair state before any restart"
+    fi
+    declare -F notify_escalation_inline >/dev/null 2>&1 && \
+      notify_escalation_inline "$story_id" "$TEST_GATE_OUTCOME" \
+        "Hosted merge authority disagrees with the base-held policy for ${pr_url}. Persistence=${stall_persistence_mode}. Retrying cannot resolve it: reconcile the policy with the live repository; if present remove ${stall_marker}; then reset phase_status to qa_passed."
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "$TEST_GATE_OUTCOME" "0" "$pr_url" "false"
+    return 1
   elif [[ "$gate_rc" -ne 0 ]]; then
     # Preserve the pre-cutover commit-phase lifecycle: a hosted observation
     # block stops this wrapper with the exact reason, but does not convert a
@@ -4115,11 +4330,11 @@ dispatch_3phase_story() {
       _remove_active_marker "$story_id" "commit"
       [[ $_commit_rc -ne 0 ]] && return 1
       ;;
-    done|failed|escalated|qa_escalated)
+    done|failed|escalated|qa_escalated|commit_stalled)
       return 0
       ;;
     *)
-      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated commit_failed done failed escalated worktree_recovery_failed[intermediate]"
+      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated commit_failed commit_stalled done failed escalated worktree_recovery_failed[intermediate]"
       _emit_routing_record "$story_id" "$trace_id" "plan" "error" "invalid_phase_status:${ps}"
       return 1
       ;;

@@ -144,6 +144,7 @@ cat > "$REPO/.gaai/project/ci/premerge-authority.json" <<'JSON'
     ".gaai/core/scripts/daemon-dispatch.sh",
     ".gaai/core/scripts/lib/backlog-yaml.sh",
     ".gaai/core/scripts/lib/chore-commit.sh",
+    ".gaai/core/scripts/lib/commit-retry-containment.sh",
     ".gaai/core/scripts/lib/daemon-home.sh",
     ".gaai/core/scripts/lib/home-branch-guard.sh",
     ".gaai/core/scripts/lib/stuck-classifier.sh",
@@ -166,6 +167,7 @@ printf 'controller\n' > "$REPO/.gaai/core/scripts/lib/test-gate.sh"
 printf 'merge\n' > "$REPO/.gaai/core/scripts/daemon-dispatch.sh"
 printf 'yaml\n' > "$REPO/.gaai/core/scripts/lib/backlog-yaml.sh"
 printf 'commit\n' > "$REPO/.gaai/core/scripts/lib/chore-commit.sh"
+printf 'containment\n' > "$REPO/.gaai/core/scripts/lib/commit-retry-containment.sh"
 printf 'home\n' > "$REPO/.gaai/core/scripts/lib/daemon-home.sh"
 printf 'guard\n' > "$REPO/.gaai/core/scripts/lib/home-branch-guard.sh"
 printf 'classify\n' > "$REPO/.gaai/core/scripts/lib/stuck-classifier.sh"
@@ -371,6 +373,10 @@ jq_replace repository.json '.id=99'
 expect_outcome "repository identity mismatch" blocked:repository_mismatch
 
 reset_nominal
+jq_replace pr.json '.base.ref="main"'
+expect_outcome "policy target base-ref mismatch" blocked:policy_base_ref_mismatch
+
+reset_nominal
 jq_replace workflow.json '.name="Other"'
 expect_outcome "workflow identity mismatch" blocked:workflow_mismatch
 
@@ -383,6 +389,11 @@ reset_nominal
 jq_replace run-detail.json '.head_branch="other"'
 jq -n --slurpfile run "$FIXTURES/run-detail.json" '{total_count:1,workflow_runs:$run}' > "$FIXTURES/runs.json"
 expect_outcome "run-to-PR tuple mismatch" blocked:pr_tuple_mismatch
+
+reset_nominal
+jq_replace run-detail.json '.pull_requests[0].base.sha="0000000000000000000000000000000000000003"'
+jq -n --slurpfile run "$FIXTURES/run-detail.json" '{total_count:1,workflow_runs:$run}' > "$FIXTURES/runs.json"
+expect_outcome "run-to-PR base association mismatch" blocked:pr_tuple_mismatch
 
 reset_nominal
 jq_replace run-detail.json '.pull_requests=[]'
@@ -585,6 +596,14 @@ PR_API_READS=$(grep -c 'api --method GET repos/{owner}/{repo}/pulls/7' "$GH_CALL
 [[ "$POLL_OUT" == blocked:pr_not_merge_ready && "$PR_API_READS" -eq 1 ]] \
   && pass "definitively unmergeable PR is terminal without needless polling" \
   || fail "terminal mergeability mismatch (outcome=$POLL_OUT reads=$PR_API_READS)"
+
+reset_nominal
+jq_replace pr.json '.base.ref="main"'
+POLL_OUT=$(_test_gate_poll_hosted_authority T "$REPO" "$SAFE_HEAD" | awk -F '\t' '{print $1}')
+PR_API_READS=$(grep -c 'api --method GET repos/{owner}/{repo}/pulls/7' "$GH_CALL_LOG" || true)
+[[ "$POLL_OUT" == blocked:policy_base_ref_mismatch && "$PR_API_READS" -eq 1 ]] \
+  && pass "policy base-ref mismatch returns immediately from the hosted poll" \
+  || fail "terminal policy poll mismatch (outcome=$POLL_OUT reads=$PR_API_READS)"
 
 echo "=== controller-first and final mutation binding ==="
 
@@ -1003,6 +1022,55 @@ unset GAAI_CI_TEST_GATE_TIMEOUT_SEC GAAI_CI_TEST_GATE_MATERIALIZE_SEC \
   GAAI_MERGE_AUTHORITY_LOCK_TIMEOUT_SEC GAAI_MERGE_AUTHORITY_LOCK_POLL_SEC \
   GAAI_AUTO_MERGE_ADMIN_FALLBACK GH_MERGE_RC GH_ADMIN_RC EXPECT_LOCK_PATH \
   CONCURRENT_MARKER CONCURRENT_VIOLATION
+
+echo ""
+echo "=== deterministic-block classification (commit-phase circuit breaker) ==="
+
+# The four policy-identity mismatches are decided the moment the base-held
+# policy and live GitHub disagree. Re-observing the same candidate returns the
+# same answer, so the commit phase must stall rather than re-push and buy
+# another hosted run.
+TERMINAL_OUTCOMES=(
+  blocked:repository_mismatch blocked:workflow_mismatch
+  blocked:event_mismatch blocked:policy_base_ref_mismatch
+)
+for outcome in "${TERMINAL_OUTCOMES[@]}"; do
+  _test_gate_outcome_is_deterministic "$outcome" \
+    && pass "${outcome} is non-retryable" \
+    || fail "${outcome} must be classified non-retryable"
+done
+
+# Everything else stays retryable. Keep this matrix exhaustive over every
+# outcome emitted by the controller so a future vocabulary addition cannot
+# silently inherit terminal behavior or escape classification coverage.
+RETRYABLE_OUTCOMES=(
+  blocked:authority_job_ambiguous blocked:authority_job_cancelled \
+  blocked:authority_job_failed blocked:authority_job_missing \
+  blocked:authority_job_neutral blocked:authority_job_pending \
+  blocked:authority_job_skipped blocked:authority_job_timed_out \
+  blocked:github_unavailable blocked:head_changed \
+  blocked:pr_ambiguous blocked:pr_closed blocked:pr_draft blocked:pr_missing \
+  blocked:pr_not_merge_ready blocked:pr_tuple_mismatch \
+  blocked:run_ambiguous blocked:run_cancelled blocked:run_failed \
+  blocked:run_missing blocked:run_neutral blocked:run_pending \
+  blocked:run_skipped blocked:run_superseded blocked:run_timed_out \
+  blocked:stale_base hosted_pass human_required:trust_surface_changed ""
+)
+for outcome in "${RETRYABLE_OUTCOMES[@]}"; do
+  _test_gate_outcome_is_deterministic "$outcome" \
+    && fail "${outcome:-<empty>} must stay retryable" \
+    || pass "${outcome:-<empty>} stays retryable"
+done
+
+EMITTED_BLOCKED_OUTCOMES=$(grep -Eo 'blocked:[a-z_]+' "$SCRIPT_DIR/../lib/test-gate.sh" | sort -u)
+CLASSIFIED_BLOCKED_OUTCOMES=$(printf '%s\n' \
+  "${TERMINAL_OUTCOMES[@]}" "${RETRYABLE_OUTCOMES[@]}" \
+  | grep '^blocked:' | sort -u)
+if [[ "$EMITTED_BLOCKED_OUTCOMES" == "$CLASSIFIED_BLOCKED_OUTCOMES" ]]; then
+  pass "every emitted blocked outcome has an explicit retry classification"
+else
+  fail "blocked-outcome classification matrix drifted (emitted=$(tr '\n' ',' <<<"$EMITTED_BLOCKED_OUTCOMES") classified=$(tr '\n' ',' <<<"$CLASSIFIED_BLOCKED_OUTCOMES"))"
+fi
 
 echo ""
 echo "  ${PASS_COUNT} passed, ${FAIL_COUNT} failed"

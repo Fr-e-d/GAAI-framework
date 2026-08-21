@@ -9,7 +9,12 @@
   "covered_paths": [
     ".gaai/core/ci/premerge-policy.schema.json",
     ".gaai/core/templates/ci/premerge-policy.json",
-    ".gaai/core/scripts/lib/premerge-proof.sh"
+    ".gaai/core/scripts/lib/premerge-proof.sh",
+    ".gaai/core/scripts/lib/local-admission-resolver.mjs",
+    ".gaai/core/scripts/lib/local-admission-executor.mjs",
+    ".gaai/core/scripts/lib/local-admission.sh",
+    ".gaai/core/scripts/daemon-dispatch.sh",
+    ".gaai/core/workflows/delivery-loop.workflow.md"
   ],
   "required_jobs": [
     "premerge-validate"

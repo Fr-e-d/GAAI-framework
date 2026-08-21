@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DAEMON="$SCRIPT_DIR/../delivery-daemon.sh"
 SCHEDULER="$SCRIPT_DIR/../backlog-scheduler.sh"
 BACKLIB="$SCRIPT_DIR/../lib/backlog-yaml.sh"
+RETRYLIB="$SCRIPT_DIR/../lib/commit-retry-containment.sh"
 
 # ── Fixture setup ──────────────────────────────────────────────────────────────
 FIXTURE_DIR="/tmp/gaai-orphan-lock-test-$$"
@@ -134,6 +135,7 @@ _recovery_set_status() { return 0; }
 
 # Source backlog-yaml helpers
 source "$BACKLIB" 2>/dev/null || true
+source "$RETRYLIB"
 
 # Extract functions from delivery-daemon.sh
 eval "\$(awk '

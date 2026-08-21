@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # E160S08 regression tests: wrapper output capture + bounded-retry commit-stall guard
-# Self-contained — uses TMPDIR, no git ops, no backlog touch.
+# Self-contained — uses only a temporary git repository and daemon-state files.
 # Exit 0 = all pass (T1 skipped if tmux unavailable or < 2.6).
 
 set -euo pipefail
@@ -67,62 +67,101 @@ else
   _skip "T1b: tmux >= 2.6 not available"
 fi
 
-# ── T2a: counter reaches threshold → stall condition detected ─────────────
+# ── T2: retry containment follows content + outcome, not HEAD ─────────────
+ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
+# shellcheck source=../lib/commit-retry-containment.sh
+source "$ROOT/.gaai/core/scripts/lib/commit-retry-containment.sh"
+
 LOCK_DIR="$TMP/locks"
 mkdir -p "$LOCK_DIR"
+# This unit matrix exercises the pre-threshold reset rules. Terminal behavior
+# at the production default threshold is covered by T-COMMIT-RETRY-THRESHOLD.
+COMMIT_PHASE_RETRY_THRESHOLD=10
 SID="test-story-t2"
-CD_FILE="$LOCK_DIR/.commit-deaths-${SID}"
-CD_HEAD="$LOCK_DIR/.commit-deaths-${SID}.head"
+REPO="$TMP/repo"
+git init -q "$REPO"
+git -C "$REPO" config user.email test@example.com
+git -C "$REPO" config user.name Test
+printf 'base\n' > "$REPO/app.txt"
+git -C "$REPO" add app.txt
+git -C "$REPO" commit -qm base
+git -C "$REPO" branch base
+git -C "$REPO" switch -qc story
+printf 'implementation\n' >> "$REPO/app.txt"
+git -C "$REPO" commit -qam implementation -q
 
-# Simulate 3 consecutive deaths with same HEAD
-echo "abc123" > "$CD_HEAD"
-for i in 1 2 3; do
-  _cur=$(cat "$CD_FILE" 2>/dev/null | tr -d '[:space:]' || echo 0)
-  _cur=$(( _cur > 1000 ? 1000 : _cur ))
-  # HEAD unchanged → increment
-  _new=$(( _cur + 1 ))
-  _new=$(( _new > 1000 ? 1000 : _new ))
-  printf '%s\n' "$_new" > "${CD_FILE}.tmp" && mv "${CD_FILE}.tmp" "$CD_FILE"
-done
-
-_counter=$(cat "$CD_FILE" | tr -d '[:space:]')
-if (( _counter >= 3 )); then
-  _ok "T2a: counter reaches ${_counter} >= 3 → stall threshold met"
+_commit_retry_write_observation "$SID" "blocked:tests_failed"
+IFS='|' read -r C1 O1 P1 <<< "$(_commit_retry_observe "$SID" "$REPO" base)"
+if [[ "$C1|$O1|$P1" == "1|blocked:tests_failed|initial" ]]; then
+  _ok "T2a: first blocking outcome starts a bounded sequence"
 else
-  _fail "T2a: counter is ${_counter}, expected >= 3"
+  _fail "T2a: unexpected first observation '$C1|$O1|$P1'"
 fi
 
-# Clean up for next test
-rm -f "$CD_FILE" "$CD_HEAD"
-
-# ── T2b: counter files removed on non-qa_passed transition ────────────────
-echo "5" > "$CD_FILE"
-echo "def456" > "$CD_HEAD"
-rm -f "$CD_FILE" "$CD_HEAD" 2>/dev/null || true
-if [[ ! -f "$CD_FILE" && ! -f "$CD_HEAD" ]]; then
-  _ok "T2b: counter files removed (simulating terminal transition)"
+mkdir -p "$REPO/.gaai/project/contexts/artefacts/qa-reports"
+printf 'verdict cycle 1\n' > "$REPO/.gaai/project/contexts/artefacts/qa-reports/${SID}.qa-report.md"
+git -C "$REPO" add .
+git -C "$REPO" commit -qm 'bookkeeping cycle 1'
+_commit_retry_write_observation "$SID" "blocked:tests_failed"
+IFS='|' read -r C2 O2 P2 <<< "$(_commit_retry_observe "$SID" "$REPO" base)"
+printf 'verdict cycle 2\n' >> "$REPO/.gaai/project/contexts/artefacts/qa-reports/${SID}.qa-report.md"
+git -C "$REPO" commit -qam 'bookkeeping cycle 2' -q
+_commit_retry_write_observation "$SID" "blocked:tests_failed"
+IFS='|' read -r C3 O3 P3 <<< "$(_commit_retry_observe "$SID" "$REPO" base)"
+if [[ "$C2|$P2|$C3|$P3" == "2|repeated|3|repeated" ]]; then
+  _ok "T2b: bookkeeping commits cannot reset repeated-outcome containment"
 else
-  _fail "T2b: counter files still exist after removal"
+  _fail "T2b: expected repeated counts 2 then 3, got '$C2|$P2|$C3|$P3'"
 fi
 
-# ── T2c: counter value 999 passes clamp unchanged ─────────────────────────
-echo "999" > "$CD_FILE"
-_val=$(cat "$CD_FILE" | tr -d '[:space:]')
-_val=$(( _val > 1000 ? 1000 : _val ))
-if (( _val == 999 )); then
-  _ok "T2c: counter value 999 passes clamp unchanged (stays 999)"
+_commit_retry_write_observation "$SID" "blocked:github_unavailable"
+IFS='|' read -r C4 O4 P4 <<< "$(_commit_retry_observe "$SID" "$REPO" base)"
+if [[ "$C4|$O4|$P4" == "1|blocked:github_unavailable|outcome_changed" ]]; then
+  _ok "T2c: a different blocking outcome clears the sequence"
 else
-  _fail "T2c: expected 999, got ${_val}"
+  _fail "T2c: outcome change did not reset: '$C4|$O4|$P4'"
 fi
 
-# ── T2d: counter value 1001 clamped to 1000 ───────────────────────────────
-echo "1001" > "$CD_FILE"
-_val=$(cat "$CD_FILE" | tr -d '[:space:]')
-_val=$(( _val > 1000 ? 1000 : _val ))
-if (( _val == 1000 )); then
-  _ok "T2d: counter value 1001 clamped to 1000"
+printf 'real fix\n' >> "$REPO/app.txt"
+git -C "$REPO" commit -qam 'implementation progress' -q
+_commit_retry_write_observation "$SID" "blocked:github_unavailable"
+IFS='|' read -r C5 O5 P5 <<< "$(_commit_retry_observe "$SID" "$REPO" base)"
+if [[ "$C5|$O5|$P5" == "1|blocked:github_unavailable|content_changed" ]]; then
+  _ok "T2d: real implementation content clears the sequence despite the same outcome"
 else
-  _fail "T2d: expected 1000, got ${_val}"
+  _fail "T2d: implementation progress did not reset: '$C5|$O5|$P5'"
+fi
+
+printf 'bookkeeping after progress\n' >> "$REPO/.gaai/project/contexts/artefacts/qa-reports/${SID}.qa-report.md"
+git -C "$REPO" commit -qam 'bookkeeping after progress' -q
+_commit_retry_write_observation "$SID" "blocked:github_unavailable"
+_ORIGINAL_SHA_HELPER=$(declare -f _commit_retry_sha256_stdin)
+_commit_retry_sha256_stdin() { return 1; }
+if _commit_retry_observe "$SID" "$REPO" base >/dev/null 2>&1; then
+  _fail "T2e: unavailable content digest authorized another observation"
+elif [[ -f "$(_commit_retry_observation_path "$SID")" ]] \
+  && grep -q '^count=1$' "$(_commit_retry_state_path "$SID")"; then
+  _ok "T2e: unavailable digest preserves outcome/state and cannot authorize relaunch"
+else
+  _fail "T2e: unavailable digest lost its one-shot outcome or prior state"
+fi
+eval "$_ORIGINAL_SHA_HELPER"
+
+DAEMON="$ROOT/.gaai/core/scripts/delivery-daemon.sh"
+if grep -q 'GAAI_COMMIT_PHASE_RETRY_THRESHOLD:-3' "$DAEMON" \
+  && grep -q '_commit_retry_observe' "$DAEMON" \
+  && grep -q 'repeated for ${_cd_new} cycles' "$DAEMON"; then
+  _ok "T2f: configurable threshold, recovery integration and actionable cycle notification are wired"
+else
+  _fail "T2f: retry containment integration contract is incomplete"
+fi
+
+_commit_retry_clear "$SID"
+if [[ ! -e "$(_commit_retry_state_path "$SID")" \
+      && ! -e "$(_commit_retry_observation_path "$SID")" ]]; then
+  _ok "T2g: terminal/reset cleanup removes retry state"
+else
+  _fail "T2g: retry state survived cleanup"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────

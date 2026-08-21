@@ -195,6 +195,25 @@ CYAN="" YELLOW="" NC="" RED="" GREEN="" BOLD=""
 _ensure_worktree_deps_fresh()  { return 0; }
 _check_worktree_integrity()    { return 0; }
 _recover_worktree_safe_base()  { return 1; }
+_admit_current_candidate()     {
+  GAAI_ADMITTED_SHA=$(git -C "$4" rev-parse HEAD)
+  GAAI_ADMITTED_BASE_SHA=$(git -C "$4" rev-parse origin/staging)
+  if [[ "${GAAI_TEST_MOVE_BASE_AFTER_ADMISSION:-false}" == true ]]; then
+    GAAI_TEST_ADMISSION_CALLS=$(( ${GAAI_TEST_ADMISSION_CALLS:-0} + 1 ))
+    if [[ "$GAAI_TEST_ADMISSION_CALLS" -eq 1 ]]; then
+      printf 'advanced\n' > "$PROJ/admission-base-advanced.txt"
+      git -C "$PROJ" add admission-base-advanced.txt
+      git -C "$PROJ" commit -q -m 'advance base after admission'
+      git -C "$PROJ" push -q origin staging
+    else
+      git -C "$4" fetch -q origin staging
+      git -C "$4" merge -q --no-edit origin/staging
+      GAAI_ADMITTED_SHA=$(git -C "$4" rev-parse HEAD)
+      GAAI_ADMITTED_BASE_SHA=$(git -C "$4" rev-parse origin/staging)
+    fi
+  fi
+  return 0
+}
 chore_commit_field()           { return 0; }
 chore_commit_multi_field()     { return 0; }
 notify_escalation_inline()     { printf '%s|%s|%s\n' "$1" "$2" "$3" >>"$NOTIFY_CAPTURE"; }
@@ -595,6 +614,164 @@ if [[ "$T9_RC" -ne 0 && "$T9_PHASE" == qa_passed \
 else
   fail "T9: missing-controller route mismatch (rc=$T9_RC phase=$T9_PHASE)"
 fi
+
+# ────────────────────────────────────────────────────────────────────────────
+# T10: a deterministic policy-identity block must stall, not retry. Leaving the
+#      durable qa_passed phase in place lets RECOVERY re-launch the wrapper on
+#      every scan; each re-launch re-pushes the candidate and buys another
+#      complete hosted run, and the bounded-death counter cannot contain it
+#      because it resets whenever the worktree HEAD moves.
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T10: deterministic policy mismatch stalls instead of retrying ---"
+SID10="TST-PCS10"
+setup_story "$SID10"
+write_backlog "$SID10"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID10")"
+export GH_PR_STALE_URL="https://github.com/test/repo/pull/110"
+export GH_PR_STATE="OPEN"
+export GH_PR_NUMBER="110"
+export GAAI_TEST_AUTHORITY_OUTCOME="blocked:repository_mismatch"
+T10_MARKER="$LOCK_DIR/.commit-policy-stalled-${SID10}"
+printf 'story_id=%s\noutcome=blocked:repository_mismatch\n' "$SID10" > "$T10_MARKER"
+: > "$GH_CALL_LOG"; : > "$ROUTING_CAPTURE"; : > "$NOTIFY_CAPTURE"
+
+set +e
+handle_commit_phase "$SID10" "trace-t10"
+T10_RC=$?
+set -e
+
+T10_PHASE=$(grep -A 10 "id: ${SID10}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T10_RC" -ne 0 && "$T10_PHASE" == commit_stalled && -f "$T10_MARKER" ]]; then
+  pass "T10a: deterministic block stalls at commit_stalled without clearing an operator marker"
+else
+  fail "T10a: expected rc!=0, commit_stalled, and preserved marker (rc=$T10_RC phase='${T10_PHASE}' marker=$(test -f "$T10_MARKER" && echo yes || echo no))"
+fi
+
+if [[ $(grep -cE 'gh api --method PUT .*pulls/[0-9]+/merge|gh pr merge' "$GH_CALL_LOG" || true) -eq 0 ]]; then
+  pass "T10b: no merge was attempted on a blocked candidate"
+else
+  fail "T10b: merge attempted despite a blocked hosted authority"
+fi
+
+if [[ $(grep -c 'blocked:repository_mismatch' "$ROUTING_CAPTURE" || true) -ge 1 \
+      && $(grep -c 'blocked:repository_mismatch' "$NOTIFY_CAPTURE" || true) -ge 1 ]]; then
+  pass "T10c: the exact outcome reaches both the routing record and the operator"
+else
+  fail "T10c: deterministic outcome missing from routing/notification capture"
+fi
+
+# ────────────────────────────────────────────────────────────────────────────
+# T11: the circuit breaker must not swallow a recoverable run/PR association
+#      mismatch. It keeps qa_passed so the existing recovery path owns it.
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T11: run/PR tuple mismatch remains retryable ---"
+SID11="TST-PCS11"
+setup_story "$SID11"
+write_backlog "$SID11"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID11")"
+export GH_PR_STALE_URL="https://github.com/test/repo/pull/111"
+export GH_PR_STATE="OPEN"
+export GH_PR_NUMBER="111"
+export GAAI_TEST_AUTHORITY_OUTCOME="blocked:pr_tuple_mismatch"
+: > "$GH_CALL_LOG"; : > "$ROUTING_CAPTURE"
+
+set +e
+handle_commit_phase "$SID11" "trace-t11"
+T11_RC=$?
+set -e
+
+T11_PHASE=$(grep -A 10 "id: ${SID11}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T11_RC" -ne 0 && "$T11_PHASE" == qa_passed ]]; then
+  pass "T11: recoverable PR tuple mismatch leaves the story resumable at qa_passed"
+else
+  fail "T11: expected rc!=0 and phase_status=qa_passed (rc=$T11_RC phase='${T11_PHASE}')"
+fi
+
+unset GAAI_TEST_AUTHORITY_OUTCOME
+
+# ────────────────────────────────────────────────────────────────────────────
+# T12: if the primary backlog mutation fails, publish an atomic fallback marker
+#      that crash recovery treats as a durable no-relaunch instruction.
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T12: scheduler failure publishes durable recovery inhibit ---"
+SID12="TST-PCS12"
+setup_story "$SID12"
+write_backlog "$SID12"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID12")"
+export GH_PR_STALE_URL="https://github.com/test/repo/pull/112"
+export GH_PR_STATE="OPEN"
+export GH_PR_NUMBER="112"
+export GAAI_TEST_AUTHORITY_OUTCOME="blocked:policy_base_ref_mismatch"
+REAL_SCHEDULER="$SCRIPTS/backlog-scheduler.sh"
+export REAL_SCHEDULER
+cat > "$STUB_BIN/failing-commit-stall-scheduler" <<'SCHEDULER_EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--set-phase-status" && "${3:-}" == "commit_stalled" ]]; then
+  exit 70
+fi
+exec "$REAL_SCHEDULER" "$@"
+SCHEDULER_EOF
+chmod +x "$STUB_BIN/failing-commit-stall-scheduler"
+SCHEDULER="$STUB_BIN/failing-commit-stall-scheduler"
+export SCHEDULER
+T12_MARKER="$LOCK_DIR/.commit-policy-stalled-${SID12}"
+: > "$GH_CALL_LOG"; : > "$ROUTING_CAPTURE"; : > "$NOTIFY_CAPTURE"
+
+set +e
+handle_commit_phase "$SID12" "trace-t12"
+T12_RC=$?
+set -e
+
+T12_PHASE=$(grep -A 10 "id: ${SID12}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T12_RC" -ne 0 && "$T12_PHASE" == qa_passed && -f "$T12_MARKER" \
+      && $(grep -c '^outcome=blocked:policy_base_ref_mismatch$' "$T12_MARKER" || true) -eq 1 ]]; then
+  pass "T12a: scheduler failure leaves qa_passed plus an exact durable stall marker"
+else
+  fail "T12a: fallback persistence mismatch (rc=$T12_RC phase='${T12_PHASE}' marker=$(test -f "$T12_MARKER" && echo yes || echo no))"
+fi
+
+if [[ $(grep -cE 'gh api --method PUT .*pulls/[0-9]+/merge|gh pr merge' "$GH_CALL_LOG" || true) -eq 0 \
+      && $(grep -c 'Persistence=marker' "$NOTIFY_CAPTURE" || true) -ge 1 ]]; then
+  pass "T12b: fallback route attempts no merge and tells the operator how it persisted"
+else
+  fail "T12b: fallback route merged or omitted persistence evidence"
+fi
+
+SCHEDULER="$SCRIPTS/backlog-scheduler.sh"
+export SCHEDULER
+unset GAAI_TEST_AUTHORITY_OUTCOME REAL_SCHEDULER
+
+# ────────────────────────────────────────────────────────────────────────────
+# T13: base movement after a successful admission cannot reuse that receipt.
+#      The first exact push is observed stale; retry admission merges the new
+#      base, emits a new SHA and only then may PR creation occur.
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T13: moved base forces final re-admission before PR creation ---"
+SID13="TST-PCS13"
+setup_story "$SID13"
+write_backlog "$SID13"
+export GH_PR_STALE_URL="" GH_PR_FRESH_URL="https://github.com/test/repo/pull/113"
+export GH_PR_STATE="OPEN" GH_PR_NUMBER="113"
+export GAAI_TEST_AUTHORITY_OUTCOME="human_required:trust_surface_changed"
+export GAAI_TEST_MOVE_BASE_AFTER_ADMISSION=true GAAI_TEST_ADMISSION_CALLS=0
+: > "$GH_CALL_LOG"; : > "$ROUTING_CAPTURE"
+
+set +e
+handle_commit_phase "$SID13" "trace-t13"
+T13_RC=$?
+set -e
+T13_WT="$WT_BASE/${SID13}-workspace"
+T13_REMOTE_HEAD=$(git -C "$PROJ" rev-parse "origin/story/${SID13}")
+T13_LOCAL_HEAD=$(git -C "$T13_WT" rev-parse HEAD)
+if [[ "$T13_RC" -eq 0 && "$GAAI_TEST_ADMISSION_CALLS" -eq 2 \
+      && "$T13_REMOTE_HEAD" == "$T13_LOCAL_HEAD" \
+      && $(grep -c '^gh pr create ' "$GH_CALL_LOG" || true) -eq 1 ]] \
+    && git -C "$T13_WT" merge-base --is-ancestor origin/staging HEAD; then
+  pass "T13: stale first receipt is re-admitted on the moved base before the sole PR create"
+else
+  fail "T13: expected two admissions, exact updated remote head and one PR (rc=$T13_RC calls=$GAAI_TEST_ADMISSION_CALLS)"
+fi
+unset GAAI_TEST_MOVE_BASE_AFTER_ADMISSION GAAI_TEST_ADMISSION_CALLS GAAI_TEST_AUTHORITY_OUTCOME
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
