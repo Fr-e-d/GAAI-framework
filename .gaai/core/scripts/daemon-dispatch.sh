@@ -18,6 +18,8 @@ _GAAI_DISPATCH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 # shellcheck source=lib/delivery-routing.sh
 [[ -f "${_GAAI_DISPATCH_LIB_DIR}/delivery-routing.sh" ]] \
   && source "${_GAAI_DISPATCH_LIB_DIR}/delivery-routing.sh"
+# shellcheck source=lib/commit-retry-containment.sh
+source "${_GAAI_DISPATCH_LIB_DIR}/commit-retry-containment.sh"
 
 # ── Per-phase wall-clock timeouts (OSS-7) ────────────────────────────────
 # Bound the lifetime of each phase to detect hangs that loop-breaker (which
@@ -226,7 +228,8 @@ if [[ -z "${_TEST_GATE_SH_SOURCED:-}" ]]; then
   _TEST_GATE_SH_SOURCED=1
 fi
 if ! declare -F _run_merge_test_gate >/dev/null 2>&1 \
-    || ! declare -F _test_gate_recheck_pr_tuple >/dev/null 2>&1; then
+    || ! declare -F _test_gate_recheck_pr_tuple >/dev/null 2>&1 \
+    || ! declare -F _test_gate_outcome_is_deterministic >/dev/null 2>&1; then
   echo "[ERROR] dispatcher initialization: hosted merge authority controller is incomplete" >&2
   return 1 2>/dev/null || exit 1
 fi
@@ -236,6 +239,30 @@ fi
 # Provide a fallback so this library is usable in tests without the full daemon env.
 _marker_dir() {
   echo "${LOCK_DIR:-${PROJECT_DIR}/.gaai/project/contexts/backlog/.delivery-locks}"
+}
+
+_commit_policy_stall_marker_path() {
+  local story_id="$1"
+  printf '%s/.commit-policy-stalled-%s\n' "$(_marker_dir)" "$story_id"
+}
+
+# Fallback durability for a terminal commit-policy mismatch. The backlog phase
+# remains the primary state, but a scheduler mutation can fail during a push
+# race or repository outage. Recovery reads this atomically-published marker
+# before any relaunch decision and never clears it during an ordinary scan.
+_write_commit_policy_stall_marker() {
+  local story_id="$1" outcome="$2" marker tmp marker_dir
+  marker=$(_commit_policy_stall_marker_path "$story_id")
+  marker_dir=$(dirname "$marker")
+  tmp="${marker}.tmp.$$"
+  mkdir -p "$marker_dir" 2>/dev/null || return 1
+  (
+    umask 077
+    printf 'story_id=%s\noutcome=%s\ncreated_at=%s\n' \
+      "$story_id" "$outcome" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$tmp"
+  ) || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+  mv "$tmp" "$marker" 2>/dev/null \
+    || { rm -f "$tmp" 2>/dev/null || true; return 1; }
 }
 
 _write_active_marker() {
@@ -916,6 +943,14 @@ _emit_commit_routing_record() {
   local pr_url="${6:-}" auto_merge_applied="${7:-false}"
   local impl_tag
   impl_tag=$(get_impl_model_tag "$story_id")
+
+  # Recovery consumes this one-shot observation after a failed commit phase.
+  # It is daemon state, not candidate evidence, and never authorizes a merge.
+  if [[ "$provider" == "error" ]]; then
+    _commit_retry_write_observation "$story_id" "$fallback_reason" || true
+  else
+    _commit_retry_clear "$story_id"
+  fi
 
   local log_path_args=()
   if [[ -n "${ROUTING_LOG_PATH:-}" ]]; then
@@ -3723,6 +3758,31 @@ ${qa_snippet}"
     commit_outcome="$TEST_GATE_OUTCOME"
     declare -F notify_escalation_inline >/dev/null 2>&1 && \
       notify_escalation_inline "$story_id" "$TEST_GATE_OUTCOME" "Human review required for ${pr_url}"
+  elif [[ "$gate_rc" -ne 0 ]] && _test_gate_outcome_is_deterministic "$TEST_GATE_OUTCOME"; then
+    # Circuit breaker: the base-held policy and the live GitHub identity
+    # disagree, so re-observing this candidate can only return the same
+    # outcome. Leaving the durable qa_passed phase in place would let RECOVERY
+    # re-launch the wrapper on every scan, and each re-launch re-pushes the
+    # candidate and buys another complete hosted run. The bounded-death counter
+    # cannot contain that: it resets whenever the worktree HEAD moves, which the
+    # re-push itself causes. Stall for the operator instead of spending hosted
+    # minutes on an outcome that is already decided.
+    echo "[ERROR] ${story_id} handle_commit_phase: ${TEST_GATE_OUTCOME} cannot be resolved by retry; stalling for the operator [class=TEST_GATE_POLICY_MISMATCH]"
+    local stall_persistence_mode="none" stall_marker
+    stall_marker=$(_commit_policy_stall_marker_path "$story_id")
+    if "$SCHEDULER" --set-phase-status "$story_id" commit_stalled "$BACKLOG_FILE" 2>/dev/null; then
+      stall_persistence_mode="backlog"
+    elif _write_commit_policy_stall_marker "$story_id" "$TEST_GATE_OUTCOME"; then
+      stall_persistence_mode="marker"
+      echo "[WARN] ${story_id} handle_commit_phase: scheduler mutation failed; durable recovery inhibit published at ${stall_marker}"
+    else
+      echo "[ERROR] ${story_id} handle_commit_phase: STALL_PERSISTENCE_FAILED — neither backlog nor recovery marker is durable; stop the daemon and repair state before any restart"
+    fi
+    declare -F notify_escalation_inline >/dev/null 2>&1 && \
+      notify_escalation_inline "$story_id" "$TEST_GATE_OUTCOME" \
+        "Hosted merge authority disagrees with the base-held policy for ${pr_url}. Persistence=${stall_persistence_mode}. Retrying cannot resolve it: reconcile the policy with the live repository; if present remove ${stall_marker}; then reset phase_status to qa_passed."
+    _emit_commit_routing_record "$story_id" "$trace_id" "error" "$TEST_GATE_OUTCOME" "0" "$pr_url" "false"
+    return 1
   elif [[ "$gate_rc" -ne 0 ]]; then
     # Preserve the pre-cutover commit-phase lifecycle: a hosted observation
     # block stops this wrapper with the exact reason, but does not convert a
@@ -4115,11 +4175,11 @@ dispatch_3phase_story() {
       _remove_active_marker "$story_id" "commit"
       [[ $_commit_rc -ne 0 ]] && return 1
       ;;
-    done|failed|escalated|qa_escalated)
+    done|failed|escalated|qa_escalated|commit_stalled)
       return 0
       ;;
     *)
-      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated commit_failed done failed escalated worktree_recovery_failed[intermediate]"
+      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated commit_failed commit_stalled done failed escalated worktree_recovery_failed[intermediate]"
       _emit_routing_record "$story_id" "$trace_id" "plan" "error" "invalid_phase_status:${ps}"
       return 1
       ;;

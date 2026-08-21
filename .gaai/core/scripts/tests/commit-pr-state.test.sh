@@ -596,6 +596,132 @@ else
   fail "T9: missing-controller route mismatch (rc=$T9_RC phase=$T9_PHASE)"
 fi
 
+# ────────────────────────────────────────────────────────────────────────────
+# T10: a deterministic policy-identity block must stall, not retry. Leaving the
+#      durable qa_passed phase in place lets RECOVERY re-launch the wrapper on
+#      every scan; each re-launch re-pushes the candidate and buys another
+#      complete hosted run, and the bounded-death counter cannot contain it
+#      because it resets whenever the worktree HEAD moves.
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T10: deterministic policy mismatch stalls instead of retrying ---"
+SID10="TST-PCS10"
+setup_story "$SID10"
+write_backlog "$SID10"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID10")"
+export GH_PR_STALE_URL="https://github.com/test/repo/pull/110"
+export GH_PR_STATE="OPEN"
+export GH_PR_NUMBER="110"
+export GAAI_TEST_AUTHORITY_OUTCOME="blocked:repository_mismatch"
+T10_MARKER="$LOCK_DIR/.commit-policy-stalled-${SID10}"
+printf 'story_id=%s\noutcome=blocked:repository_mismatch\n' "$SID10" > "$T10_MARKER"
+: > "$GH_CALL_LOG"; : > "$ROUTING_CAPTURE"; : > "$NOTIFY_CAPTURE"
+
+set +e
+handle_commit_phase "$SID10" "trace-t10"
+T10_RC=$?
+set -e
+
+T10_PHASE=$(grep -A 10 "id: ${SID10}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T10_RC" -ne 0 && "$T10_PHASE" == commit_stalled && -f "$T10_MARKER" ]]; then
+  pass "T10a: deterministic block stalls at commit_stalled without clearing an operator marker"
+else
+  fail "T10a: expected rc!=0, commit_stalled, and preserved marker (rc=$T10_RC phase='${T10_PHASE}' marker=$(test -f "$T10_MARKER" && echo yes || echo no))"
+fi
+
+if [[ $(grep -cE 'gh api --method PUT .*pulls/[0-9]+/merge|gh pr merge' "$GH_CALL_LOG" || true) -eq 0 ]]; then
+  pass "T10b: no merge was attempted on a blocked candidate"
+else
+  fail "T10b: merge attempted despite a blocked hosted authority"
+fi
+
+if [[ $(grep -c 'blocked:repository_mismatch' "$ROUTING_CAPTURE" || true) -ge 1 \
+      && $(grep -c 'blocked:repository_mismatch' "$NOTIFY_CAPTURE" || true) -ge 1 ]]; then
+  pass "T10c: the exact outcome reaches both the routing record and the operator"
+else
+  fail "T10c: deterministic outcome missing from routing/notification capture"
+fi
+
+# ────────────────────────────────────────────────────────────────────────────
+# T11: the circuit breaker must not swallow a recoverable run/PR association
+#      mismatch. It keeps qa_passed so the existing recovery path owns it.
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T11: run/PR tuple mismatch remains retryable ---"
+SID11="TST-PCS11"
+setup_story "$SID11"
+write_backlog "$SID11"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID11")"
+export GH_PR_STALE_URL="https://github.com/test/repo/pull/111"
+export GH_PR_STATE="OPEN"
+export GH_PR_NUMBER="111"
+export GAAI_TEST_AUTHORITY_OUTCOME="blocked:pr_tuple_mismatch"
+: > "$GH_CALL_LOG"; : > "$ROUTING_CAPTURE"
+
+set +e
+handle_commit_phase "$SID11" "trace-t11"
+T11_RC=$?
+set -e
+
+T11_PHASE=$(grep -A 10 "id: ${SID11}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T11_RC" -ne 0 && "$T11_PHASE" == qa_passed ]]; then
+  pass "T11: recoverable PR tuple mismatch leaves the story resumable at qa_passed"
+else
+  fail "T11: expected rc!=0 and phase_status=qa_passed (rc=$T11_RC phase='${T11_PHASE}')"
+fi
+
+unset GAAI_TEST_AUTHORITY_OUTCOME
+
+# ────────────────────────────────────────────────────────────────────────────
+# T12: if the primary backlog mutation fails, publish an atomic fallback marker
+#      that crash recovery treats as a durable no-relaunch instruction.
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T12: scheduler failure publishes durable recovery inhibit ---"
+SID12="TST-PCS12"
+setup_story "$SID12"
+write_backlog "$SID12"
+export GH_PR_HEAD_SHA="$(git -C "$PROJ" rev-parse "story/$SID12")"
+export GH_PR_STALE_URL="https://github.com/test/repo/pull/112"
+export GH_PR_STATE="OPEN"
+export GH_PR_NUMBER="112"
+export GAAI_TEST_AUTHORITY_OUTCOME="blocked:policy_base_ref_mismatch"
+REAL_SCHEDULER="$SCRIPTS/backlog-scheduler.sh"
+export REAL_SCHEDULER
+cat > "$STUB_BIN/failing-commit-stall-scheduler" <<'SCHEDULER_EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--set-phase-status" && "${3:-}" == "commit_stalled" ]]; then
+  exit 70
+fi
+exec "$REAL_SCHEDULER" "$@"
+SCHEDULER_EOF
+chmod +x "$STUB_BIN/failing-commit-stall-scheduler"
+SCHEDULER="$STUB_BIN/failing-commit-stall-scheduler"
+export SCHEDULER
+T12_MARKER="$LOCK_DIR/.commit-policy-stalled-${SID12}"
+: > "$GH_CALL_LOG"; : > "$ROUTING_CAPTURE"; : > "$NOTIFY_CAPTURE"
+
+set +e
+handle_commit_phase "$SID12" "trace-t12"
+T12_RC=$?
+set -e
+
+T12_PHASE=$(grep -A 10 "id: ${SID12}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T12_RC" -ne 0 && "$T12_PHASE" == qa_passed && -f "$T12_MARKER" \
+      && $(grep -c '^outcome=blocked:policy_base_ref_mismatch$' "$T12_MARKER" || true) -eq 1 ]]; then
+  pass "T12a: scheduler failure leaves qa_passed plus an exact durable stall marker"
+else
+  fail "T12a: fallback persistence mismatch (rc=$T12_RC phase='${T12_PHASE}' marker=$(test -f "$T12_MARKER" && echo yes || echo no))"
+fi
+
+if [[ $(grep -cE 'gh api --method PUT .*pulls/[0-9]+/merge|gh pr merge' "$GH_CALL_LOG" || true) -eq 0 \
+      && $(grep -c 'Persistence=marker' "$NOTIFY_CAPTURE" || true) -ge 1 ]]; then
+  pass "T12b: fallback route attempts no merge and tells the operator how it persisted"
+else
+  fail "T12b: fallback route merged or omitted persistence evidence"
+fi
+
+SCHEDULER="$SCRIPTS/backlog-scheduler.sh"
+export SCHEDULER
+unset GAAI_TEST_AUTHORITY_OUTCOME REAL_SCHEDULER
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed"

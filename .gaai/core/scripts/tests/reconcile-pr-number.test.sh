@@ -26,6 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DAEMON="$SCRIPT_DIR/../delivery-daemon.sh"
 SCHEDULER="$SCRIPT_DIR/../backlog-scheduler.sh"
 CHORE_LIB="$SCRIPT_DIR/../lib/chore-commit.sh"
+BACKLOG_LIB="$SCRIPT_DIR/../lib/backlog-yaml.sh"
 
 RUN=$(mktemp -d)
 cleanup() { rm -rf "$RUN"; }
@@ -35,6 +36,7 @@ trap cleanup EXIT
 # BASH_SOURCE-relative lookup finds it and takes the chore-commit branch.
 mkdir -p "$RUN/lib"
 cp "$CHORE_LIB" "$RUN/lib/chore-commit.sh"
+cp "$BACKLOG_LIB" "$RUN/lib/backlog-yaml.sh"
 
 # temp git repo (bare remote + clone on staging) with one merged-but-unreconciled story
 PROJ="$RUN/proj"; REMOTE="$RUN/proj_remote.git"
@@ -44,11 +46,13 @@ git -C "$PROJ" config user.email t@gaai.local; git -C "$PROJ" config user.name "
 git -C "$PROJ" checkout -b staging -q 2>/dev/null || git -C "$PROJ" checkout staging -q
 mkdir -p "$PROJ/.gaai/project/contexts/backlog"
 cat > "$PROJ/.gaai/project/contexts/backlog/active.backlog.yaml" <<YAML
+items:
 - id: RECON-01
   status: in_progress
   phase_status: qa_passed
   pr_url: https://github.com/org/repo/pull/42
   delivery_pipeline: 3phase
+  started_at: "2026-07-18T08:00:00Z"
 YAML
 git -C "$PROJ" add .; git -C "$PROJ" commit -m init -q; git -C "$PROJ" push -u origin staging -q
 
@@ -70,12 +74,12 @@ log(){ :; }
 with_staging_lock(){ "\$@"; }
 export LOCK_DIR BACKLOG BACKLOG_FILE BACKLOG_REL TARGET_BRANCH SCHEDULER
 eval "\$(awk '
-  /^_reconcile_merged_pr\(\)/{p=1; depth=0}
+  /^_merged_pr_started_at\(\)|^_merged_pr_is_current_cycle\(\)|^_reconcile_merged_pr\(\)/{p=1; depth=0}
   p { print
     for (i=1;i<=length(\$0);i++){c=substr(\$0,i,1); if(c=="{")depth++; if(c=="}")depth--}
     if (p && depth==0 && NR>1){p=0}
   }' "$DAEMON")"
-_reconcile_merged_pr RECON-01 "2026-07-18T10:00:00Z" 42
+_reconcile_merged_pr RECON-01 "2026-07-18T10:00:00Z" 42 "2026-07-18T09:00:00Z"
 RUNNER
 chmod +x "$RUN/runner.sh"
 
@@ -94,7 +98,7 @@ fi
 if [[ "$FINAL" == "done" ]]; then
   pass "merged story reconciled to status:done"
 else
-  fail "expected status:done, got '${FINAL:-<none>}'"
+  fail "expected status:done, got '${FINAL:-<none>}' — $(tail -1 "$ERRLOG" 2>/dev/null)"
 fi
 
 echo ""

@@ -200,6 +200,7 @@ _recovery_set_status() { return 0; }
 # NOTE: this heredoc is unquoted — keep comments here backtick-free.
 # shellcheck source=../lib/backlog-yaml.sh
 source "$SCRIPT_DIR/../lib/backlog-yaml.sh"
+source "$SCRIPT_DIR/../lib/commit-retry-containment.sh"
 # The lib declares "set -euo pipefail" and source is not scope-limited; the
 # extracted daemon functions rely on non-zero commands staying non-fatal.
 set +e
@@ -209,6 +210,7 @@ set +e
 eval "\$(awk '
   /^_write_drift_marker\(\)/{p=1; depth=0}
   /^_clear_drift_marker_if_clean\(\)/{p=1; depth=0}
+  /^_recovery_commit_story_phase_drift\(\)/{p=1; depth=0}
   /^crash_recovery_scan\(\)/{p=1; depth=0}
   p {
     print
@@ -886,11 +888,13 @@ _recovery_revert_refined() { echo "called" > "$PS_SENTINEL"; return 0; }
 
 # Source backlog-yaml helpers
 source "$SCRIPT_DIR/../lib/backlog-yaml.sh" 2>/dev/null || true
+source "$SCRIPT_DIR/../lib/commit-retry-containment.sh"
 
 # Extract drift helpers and crash_recovery_scan from daemon
 eval "\$(awk '
   /^_write_drift_marker\(\)/{p=1; depth=0}
   /^_clear_drift_marker_if_clean\(\)/{p=1; depth=0}
+  /^_recovery_commit_story_phase_drift\(\)/{p=1; depth=0}
   /^crash_recovery_scan\(\)/{p=1; depth=0}
   p {
     print
@@ -1081,11 +1085,13 @@ _recovery_revert_refined() { return 0; }
 
 # Source backlog-yaml helpers (backlog_status, backlog_phase_status, backlog_in_progress_ids)
 source "$SCRIPT_DIR/../lib/backlog-yaml.sh" 2>/dev/null || true
+source "$SCRIPT_DIR/../lib/commit-retry-containment.sh"
 
 # Extract drift helpers, _recovery_reconcile_crash_drift, and crash_recovery_scan from daemon
 eval "\$(awk '
   /^_write_drift_marker\(\)/{p=1; depth=0}
   /^_clear_drift_marker_if_clean\(\)/{p=1; depth=0}
+  /^_recovery_commit_story_phase_drift\(\)/{p=1; depth=0}
   /^_recovery_reconcile_crash_drift\(\)/{p=1; depth=0}
   /^crash_recovery_scan\(\)/{p=1; depth=0}
   p {
@@ -1361,7 +1367,8 @@ SMPR_YAML="items:
 - id: $SMPR_STORY
   status: in_progress
   phase_status: planned
-  delivery_pipeline: 3phase"
+  delivery_pipeline: 3phase
+  started_at: \"2026-06-17T08:00:00Z\""
 setup_git_repo "$SMPR_DIR" "$SMPR_YAML"
 # Stale in_progress commit: timestamp set to 2020 so age > STALENESS_THRESHOLD=0
 GIT_COMMITTER_DATE="2020-01-01T00:00:00Z" GIT_AUTHOR_DATE="2020-01-01T00:00:00Z" \
@@ -1381,7 +1388,7 @@ cat > "$SMPR_HARNESS" <<SMPR_EOF
 #!/usr/bin/env bash
 set -uo pipefail
 export PATH="$SMPR_MOCK_GH_DIR:\$PATH"
-export MOCK_GH_RESPONSE='[{"number":42,"mergedAt":"2026-06-17T10:00:00Z","state":"MERGED"}]'
+export MOCK_GH_RESPONSE='[{"number":42,"mergedAt":"2026-06-17T10:00:00Z","state":"MERGED","createdAt":"2026-06-17T09:00:00Z"}]'
 
 PROJECT_DIR="$SMPR_DIR"
 BACKLOG_REL="$SMPR_BACKLOG_REL"
@@ -1411,9 +1418,12 @@ fetch_and_read_backlog() {
 }
 
 source "$SMPR_DAEMON_DIR/lib/backlog-yaml.sh"
+source "$SMPR_DAEMON_DIR/lib/commit-retry-containment.sh"
 _BACKLOG_YQ_AVAILABLE="no"
 
 eval "\$(awk '
+  /^_merged_pr_started_at\(\)/{p=1; depth=0}
+  /^_merged_pr_is_current_cycle\(\)/{p=1; depth=0}
   /^check_stale_in_progress\(\)/{p=1; depth=0}
   p {
     print
@@ -1516,6 +1526,7 @@ fetch_and_read_backlog() {
 }
 
 source "$QAOP_DAEMON_DIR/lib/backlog-yaml.sh"
+source "$QAOP_DAEMON_DIR/lib/commit-retry-containment.sh"
 _BACKLOG_YQ_AVAILABLE="no"
 
 eval "\$(awk '
@@ -1550,6 +1561,243 @@ if [[ -f "$QAOP_LOG" ]] && grep -qi "holding" "$QAOP_LOG" 2>/dev/null; then
 else
   fail "T-QAOP-2: 'holding' message not found — log: $(head -5 "$QAOP_LOG" 2>/dev/null | tr '\n' '|')"
 fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# T-COMMIT-POLICY-STALL
+# A fallback marker written after backlog persistence failed is an operator-owned
+# no-relaunch instruction. Recovery must observe it before any drift/death logic,
+# leave it in place, and never launch the story wrapper.
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== T-COMMIT-POLICY-STALL: durable marker inhibits recovery relaunch ==="
+
+CPS_DIR="$FIXTURE_DIR/cps-project"
+CPS_BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
+CPS_STORY="TST-CPS01"
+CPS_LOCK_DIR="$FIXTURE_DIR/cps-locks"
+CPS_LOG="$FIXTURE_DIR/cps.log"
+CPS_RELAUNCH_FLAG="$FIXTURE_DIR/cps-relaunched"
+CPS_MARKER="$CPS_LOCK_DIR/.commit-policy-stalled-${CPS_STORY}"
+CPS_DAEMON_DIR="$(dirname "$DAEMON")"
+mkdir -p "$CPS_LOCK_DIR"
+
+CPS_YAML="items:
+- id: $CPS_STORY
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase"
+setup_git_repo "$CPS_DIR" "$CPS_YAML"
+printf 'story_id=%s\noutcome=blocked:policy_base_ref_mismatch\n' \
+  "$CPS_STORY" > "$CPS_MARKER"
+
+CPS_HARNESS="$FIXTURE_DIR/cps-harness.sh"
+cat > "$CPS_HARNESS" <<CPS_EOF
+#!/usr/bin/env bash
+set -uo pipefail
+PROJECT_DIR="$CPS_DIR"
+BACKLOG_REL="$CPS_BACKLOG_REL"
+BACKLOG="\$PROJECT_DIR/\$BACKLOG_REL"
+BACKLOG_FILE="\$BACKLOG"
+LOCK_DIR="$CPS_LOCK_DIR"
+LOG_DIR="$CPS_LOCK_DIR/logs"
+LOG_FILE="$CPS_LOG"
+TARGET_BRANCH="main"
+SCHEDULER="$SCHEDULER"
+DRY_RUN=false
+
+mkdir -p "\$LOG_DIR" "\$LOCK_DIR"
+RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
+log() { echo "\$*" >> "\$LOG_FILE"; }
+is_locked() { return 1; }
+fetch_and_read_backlog() {
+  git -C "\$PROJECT_DIR" show "origin/main:\$BACKLOG_REL" 2>/dev/null || cat "\$BACKLOG"
+}
+_recovery_relaunch() { touch "$CPS_RELAUNCH_FLAG"; return 0; }
+
+source "$CPS_DAEMON_DIR/lib/backlog-yaml.sh"
+source "$CPS_DAEMON_DIR/lib/commit-retry-containment.sh"
+set +e
+eval "\$(awk '
+  /^_recovery_commit_story_phase_drift\(\)/{p=1; depth=0}
+  /^crash_recovery_scan\(\)/{p=1; depth=0}
+  p {
+    print
+    for (i=1; i<=length(\$0); i++) {
+      c = substr(\$0, i, 1)
+      if (c == "{") depth++
+      if (c == "}") depth--
+    }
+    if (p && depth == 0 && NR > 1) { p=0 }
+  }
+' "$DAEMON" 2>/dev/null)"
+
+crash_recovery_scan
+CPS_EOF
+chmod +x "$CPS_HARNESS"
+bash "$CPS_HARNESS" > /dev/null 2>&1 || true
+rm -f "$CPS_HARNESS"
+
+if [[ -f "$CPS_MARKER" && ! -f "$CPS_RELAUNCH_FLAG" ]]; then
+  pass "T-CPS-1: recovery preserves the durable marker and does not relaunch"
+else
+  fail "T-CPS-1: marker was cleared or wrapper was relaunched"
+fi
+
+if [[ -f "$CPS_LOG" ]] && grep -q 'durable commit-policy stall marker present' "$CPS_LOG"; then
+  pass "T-CPS-2: recovery records the operator-owned stall reason"
+else
+  fail "T-CPS-2: durable stall reason missing from recovery log"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# T-COMMIT-RETRY-THRESHOLD
+# Exercise the real recovery threshold branch. Origin publication is primary;
+# an atomic local marker is the fallback; if both fail, the retry state must
+# remain and the wrapper must never relaunch.
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== T-COMMIT-RETRY-THRESHOLD: durable threshold outcomes ==="
+
+run_commit_retry_threshold_fixture() {
+  local mode="$1" story="TST-CRT-${1}" root="$FIXTURE_DIR/crt-${1}"
+  local project="$root/project"
+  local remote="${project}_remote.git"
+  local worktree="$root/worktree" locks="$root/locks" log_file="$root/recovery.log"
+  local rel=".gaai/project/contexts/backlog/active.backlog.yaml"
+  local relaunch="$root/relaunched" harness="$root/harness.sh"
+  local fixture_scheduler="$SCHEDULER"
+  [[ "$mode" == none ]] && fixture_scheduler="$(command -v false)"
+  mkdir -p "$root" "$locks"
+  setup_git_repo "$project" "- id: $story
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase"
+  printf 'base\n' > "$project/app.txt"
+  git -C "$project" add app.txt
+  git -C "$project" commit -qm base-content
+  git -C "$project" push -q origin main
+  git clone -q "$remote" "$worktree"
+  git -C "$worktree" config user.email test@gaai.local
+  git -C "$worktree" config user.name 'GAAI Test'
+  git -C "$worktree" switch -qc "story/$story"
+  printf 'implementation\n' >> "$worktree/app.txt"
+  git -C "$worktree" commit -qam implementation -q
+
+  local prior_lock_dir="$LOCK_DIR"
+  LOCK_DIR="$locks"
+  source "$(dirname "$DAEMON")/lib/commit-retry-containment.sh"
+  _commit_retry_write_observation "$story" blocked:tests_failed
+  _commit_retry_observe "$story" "$worktree" origin/main >/dev/null
+  _commit_retry_write_observation "$story" blocked:tests_failed
+  _commit_retry_observe "$story" "$worktree" origin/main >/dev/null
+  _commit_retry_write_observation "$story" blocked:tests_failed
+  LOCK_DIR="$prior_lock_dir"
+
+  cat > "$harness" <<CRT_EOF
+#!/usr/bin/env bash
+set -uo pipefail
+PROJECT_DIR="$project"
+BACKLOG_REL="$rel"
+BACKLOG="\$PROJECT_DIR/\$BACKLOG_REL"
+BACKLOG_FILE="\$BACKLOG"
+LOCK_DIR="$locks"
+LOG_DIR="$locks/logs"
+LOG_FILE="$log_file"
+TARGET_BRANCH=main
+SCHEDULER="$fixture_scheduler"
+STAGING_LOCK="$locks/staging.lock"
+DRY_RUN=false
+COMMIT_PHASE_RETRY_THRESHOLD=3
+mkdir -p "\$LOG_DIR" "\$LOCK_DIR"
+RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
+log() { echo "\$*" >> "\$LOG_FILE"; }
+is_locked() { return 1; }
+gh() { return 1; }
+fetch_and_read_backlog() {
+  git -C "\$PROJECT_DIR" fetch origin main --quiet 2>/dev/null || true
+  git -C "\$PROJECT_DIR" show "origin/main:\$BACKLOG_REL" 2>/dev/null || cat "\$BACKLOG"
+}
+_recovery_resolve_worktree() { echo "$worktree"; }
+_recovery_relaunch() { touch "$relaunch"; return 0; }
+_clear_drift_marker_if_clean() { return 0; }
+_write_drift_marker() { return 0; }
+_recovery_set_status() { return 0; }
+_reconcile_merged_pr() { return 1; }
+_merged_pr_is_current_cycle() { return 1; }
+notify_escalation_inline() { printf '%s\n' "\$*" >> "\$LOG_FILE"; }
+with_staging_lock() {
+  if [[ "$mode" == origin ]]; then "\$@"; else return 1; fi
+}
+source "$(dirname "$DAEMON")/lib/backlog-yaml.sh"
+source "$(dirname "$DAEMON")/lib/commit-retry-containment.sh"
+if [[ "$mode" == none ]]; then
+  _commit_retry_write_stall_marker() { return 1; }
+fi
+set +e
+eval "\$(awk '
+  /^crash_recovery_scan\(\)/{p=1; depth=0}
+  p {
+    print
+    for (i=1; i<=length(\$0); i++) {
+      c = substr(\$0, i, 1)
+      if (c == "{") depth++
+      if (c == "}") depth--
+    }
+    if (p && depth == 0 && NR > 1) { p=0 }
+  }
+' "$DAEMON" 2>/dev/null)"
+crash_recovery_scan
+CRT_EOF
+  chmod +x "$harness"
+  bash "$harness" >/dev/null 2>&1 || true
+  # A second process proves the fail-closed state survives daemon restart even
+  # when scheduler mutation, origin publication, and marker creation all fail.
+  if [[ "$mode" == none ]]; then
+    bash "$harness" >/dev/null 2>&1 || true
+  fi
+
+  local remote_phase state marker remote_snapshot="$root/remote-backlog.yaml"
+  git -C "$project" show "origin/main:$rel" > "$remote_snapshot" 2>/dev/null || true
+  source "$(dirname "$DAEMON")/lib/backlog-yaml.sh"
+  remote_phase=$(backlog_phase_status "$story" "$remote_snapshot" 2>/dev/null || true)
+  state="$locks/.commit-deaths-${story}"
+  marker="$locks/.commit-retry-stalled-${story}"
+  case "$mode" in
+    origin)
+      if [[ "$remote_phase" == commit_stalled && ! -e "$state" \
+        && ! -e "$relaunch" ]]; then
+        pass "T-CRT-origin: threshold is exact-parent published to origin and never relaunched"
+      else
+        fail "T-CRT-origin: phase=$remote_phase state=$(test -e "$state" && echo yes || echo no) relaunch=$(test -e "$relaunch" && echo yes || echo no)"
+      fi
+      ;;
+    marker)
+      if [[ "$remote_phase" == qa_passed && -f "$marker" && ! -e "$state" \
+        && ! -e "$relaunch" ]] \
+        && grep -q '^outcome=blocked:tests_failed$' "$marker" \
+        && grep -q '^cycles=3$' "$marker"; then
+        pass "T-CRT-marker: failed origin publication leaves an exact durable outcome/cycle inhibit"
+      else
+        fail "T-CRT-marker: durable fallback marker contract failed"
+      fi
+      ;;
+    none)
+      if [[ "$remote_phase" == qa_passed && -f "$state" && ! -e "$relaunch" ]] \
+        && grep -q '^count=3$' "$state" \
+        && grep -q '^outcome=blocked:tests_failed$' "$state" \
+        && grep -q '^stall_pending=1$' "$state" \
+        && [[ "$(grep -c 'STALL_PERSISTENCE_FAILED' "$log_file")" -eq 2 ]]; then
+        pass "T-CRT-none: terminal retry state survives restart and cannot relaunch"
+      else
+        fail "T-CRT-none: total persistence failure did not remain closed across restart"
+      fi
+      ;;
+  esac
+}
+
+run_commit_retry_threshold_fixture origin
+run_commit_retry_threshold_fixture marker
+run_commit_retry_threshold_fixture none
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Summary

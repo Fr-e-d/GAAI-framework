@@ -7,8 +7,8 @@
 # harness's own dead inline-fallback branch).
 #
 # T1: no concurrent writer — origin lands status:done, success log line present (AC1, AC2)
-# T2: a conflicting concurrent writer — origin stays non-done, no success log line,
-#     RECONCILE_UNLANDED / marker present (AC1, AC3, AC5)
+# T2: a concurrent writer advances origin after the pinned snapshot — the
+#     exact-parent push fails without clobbering it, then a retry succeeds.
 #
 # Run: bash .gaai/core/scripts/tests/reconcile-origin-verify.test.sh
 
@@ -24,10 +24,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DAEMON="$SCRIPT_DIR/../delivery-daemon.sh"
 SCHEDULER="$SCRIPT_DIR/../backlog-scheduler.sh"
 CHORE_LIB="$SCRIPT_DIR/../lib/chore-commit.sh"
+BACKLOG_LIB="$SCRIPT_DIR/../lib/backlog-yaml.sh"
 
 FIXTURE_DIR="/tmp/gaai-reconcile-origin-verify-test-$$"
 mkdir -p "$FIXTURE_DIR/lib"
 cp "$CHORE_LIB" "$FIXTURE_DIR/lib/chore-commit.sh"
+cp "$BACKLOG_LIB" "$FIXTURE_DIR/lib/backlog-yaml.sh"
 
 cleanup() { rm -rf "$FIXTURE_DIR"; }
 trap cleanup EXIT
@@ -47,21 +49,25 @@ setup_committed_unpushed_repo() {
 
   local backlog_dir="$project_dir/.gaai/project/contexts/backlog"
   mkdir -p "$backlog_dir"
-  printf '%s\n' "- id: $sid
+  printf '%s\n' "items:
+- id: $sid
   status: in_progress
   phase_status: qa_passed
   pr_url: https://github.com/org/repo/pull/99
-  delivery_pipeline: 3phase" > "$backlog_dir/active.backlog.yaml"
+  delivery_pipeline: 3phase
+  started_at: \"2026-07-18T08:00:00Z\"" > "$backlog_dir/active.backlog.yaml"
   git -C "$project_dir" add .
   git -C "$project_dir" commit -m "initial" -q
   git -C "$project_dir" push -u origin staging -q
 
   # Local-only commit with the target reconciled values — never pushed.
-  printf '%s\n' "- id: $sid
+  printf '%s\n' "items:
+- id: $sid
   status: done
   phase_status: done
   pr_url: https://github.com/org/repo/pull/99
   delivery_pipeline: 3phase
+  started_at: \"2026-07-18T08:00:00Z\"
   completed_at: $merged_at" > "$backlog_dir/active.backlog.yaml"
   git -C "$project_dir" add .
   git -C "$project_dir" commit -m "chore($sid): done [pre-existing local-only flip]" -q
@@ -100,9 +106,10 @@ log() {
 
 with_staging_lock() { "\$@"; }
 
-# Extract _reconcile_merged_pr from delivery-daemon.sh (brace-depth aware)
+# Extract _reconcile_merged_pr + its current-cycle gate dependencies from
+# delivery-daemon.sh (brace-depth aware)
 eval "\$(awk '
-  /^_reconcile_merged_pr\(\)/{p=1; depth=0}
+  /^_merged_pr_started_at\(\)|^_merged_pr_is_current_cycle\(\)|^_reconcile_merged_pr\(\)/{p=1; depth=0}
   p {
     print
     for (i=1; i<=length(\$0); i++) {
@@ -134,7 +141,7 @@ setup_committed_unpushed_repo "$T1_DIR" "$T1_SID" "$T1_MERGED_AT"
 
 T1_HARNESS="$FIXTURE_DIR/t1-harness.sh"
 build_harness "$T1_HARNESS" "$T1_DIR" "$T1_LOCK" "$T1_LOG"
-printf '_reconcile_merged_pr "%s" "%s" "%s"\n' "$T1_SID" "$T1_MERGED_AT" "99" >> "$T1_HARNESS"
+printf '_reconcile_merged_pr "%s" "%s" "%s" "%s"\n' "$T1_SID" "$T1_MERGED_AT" "99" "2026-07-18T09:00:00Z" >> "$T1_HARNESS"
 chmod +x "$T1_HARNESS"
 bash "$T1_HARNESS" 2>/dev/null
 
@@ -154,10 +161,10 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
-# T2: committed-but-unpushed flip, CONFLICTING concurrent writer → fails loudly
+# T2: committed-but-unpushed flip, concurrent writer after snapshot → CAS + retry
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== T2: committed-but-unpushed flip, conflicting concurrent writer — no false success ==="
+echo "=== T2: concurrent writer after pinned snapshot — no clobber, later retry ==="
 
 T2_DIR="$FIXTURE_DIR/t2-project"
 T2_LOCK="$FIXTURE_DIR/t2-locks"
@@ -169,34 +176,42 @@ T2_SID="T2-STORY-02"
 T2_MERGED_AT="2026-07-18T10:00:00Z"
 setup_committed_unpushed_repo "$T2_DIR" "$T2_SID" "$T2_MERGED_AT"
 
-# Second clone pushes a conflicting edit to the SAME "status:" line on origin first.
+# Second clone prepares an independent audit file. A pre-push hook on the
+# reconciler publishes it only after reconciliation has captured its snapshot
+# and built its exact-parent commit, forcing the real compare-and-swap failure
+# without making the later retry semantically ineligible.
 T2_REMOTE="${T2_DIR}_remote.git"
 T2_CONFLICT_CLONE="$FIXTURE_DIR/t2-conflict-writer"
 git clone --quiet "$T2_REMOTE" "$T2_CONFLICT_CLONE" 2>/dev/null
 git -C "$T2_CONFLICT_CLONE" config user.email "conflict@gaai.local"
 git -C "$T2_CONFLICT_CLONE" config user.name "Conflict Writer"
 git -C "$T2_CONFLICT_CLONE" checkout -q staging 2>/dev/null || true
-sed -i.bak 's/status: in_progress/status: blocked/' \
-  "$T2_CONFLICT_CLONE/.gaai/project/contexts/backlog/active.backlog.yaml" 2>/dev/null \
-  || python3 -c "import sys; p='$T2_CONFLICT_CLONE/.gaai/project/contexts/backlog/active.backlog.yaml'; d=open(p).read().replace('status: in_progress','status: blocked'); open(p,'w').write(d)" 2>/dev/null || true
-rm -f "$T2_CONFLICT_CLONE/.gaai/project/contexts/backlog/active.backlog.yaml.bak" 2>/dev/null || true
+printf '%s\n' 'concurrent-writer-landed' > "$T2_CONFLICT_CLONE/.gaai/project/contexts/backlog/concurrent.audit"
 git -C "$T2_CONFLICT_CLONE" add .
-git -C "$T2_CONFLICT_CLONE" commit -q -m "conflict: concurrent same-line edit"
+git -C "$T2_CONFLICT_CLONE" commit -q -m "test: concurrent origin advance"
+
+T2_PRE_PUSH="$T2_DIR/.git/hooks/pre-push"
+cat > "$T2_PRE_PUSH" <<HOOK
+#!/usr/bin/env bash
+set -euo pipefail
 git -C "$T2_CONFLICT_CLONE" push -q origin staging
+HOOK
+chmod +x "$T2_PRE_PUSH"
 
 T2_HARNESS="$FIXTURE_DIR/t2-harness.sh"
 build_harness "$T2_HARNESS" "$T2_DIR" "$T2_LOCK" "$T2_LOG"
-printf '_reconcile_merged_pr "%s" "%s" "%s"\n' "$T2_SID" "$T2_MERGED_AT" "99" >> "$T2_HARNESS"
+printf '_reconcile_merged_pr "%s" "%s" "%s" "%s"\n' "$T2_SID" "$T2_MERGED_AT" "99" "2026-07-18T09:00:00Z" >> "$T2_HARNESS"
 chmod +x "$T2_HARNESS"
 bash "$T2_HARNESS" 2>/dev/null
 
+git -C "$T2_DIR" fetch -q origin staging
 T2_BACKLOG=$(git -C "$T2_DIR" show "origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml" 2>/dev/null || echo "")
 T2_STATUS=$(printf '%s\n' "$T2_BACKLOG" | grep "status:" | head -1 | awk '{print $2}' || echo "")
 
-if [[ "$T2_STATUS" != "done" ]]; then
-  pass "T2: origin/staging status NOT done ('$T2_STATUS') — no false landing over the conflicting writer (AC1)"
+if [[ "$T2_STATUS" == "in_progress" ]]; then
+  pass "T2: origin/staging stayed in_progress after the raced push (AC1)"
 else
-  fail "T2: origin/staging shows done — conflicting writer's edit was silently clobbered or a false success occurred"
+  fail "T2: expected in_progress after raced push, got '$T2_STATUS'"
 fi
 
 if grep -q "reconciled to status:done" "$T2_LOG" 2>/dev/null; then
@@ -209,6 +224,30 @@ if grep -q "RECONCILE_UNLANDED" "$T2_LOG" 2>/dev/null || [[ -f "$T2_LOCK/.reconc
   pass "T2: RECONCILE_UNLANDED surfaced via log line or marker file (AC3)"
 else
   fail "T2: no RECONCILE_UNLANDED signal — failure was swallowed silently"
+fi
+
+if grep -q "exact-parent push lost a race" "$T2_LOG" 2>/dev/null; then
+  pass "T2: exercised the exact-parent push-race failure branch"
+else
+  fail "T2: did not reach the exact-parent push-race failure branch"
+fi
+
+if [[ "$(git -C "$T2_DIR" show origin/staging:.gaai/project/contexts/backlog/concurrent.audit 2>/dev/null)" == "concurrent-writer-landed" ]]; then
+  pass "T2: concurrent writer state was preserved"
+else
+  fail "T2: concurrent writer state was lost"
+fi
+
+rm -f "$T2_PRE_PUSH"
+bash "$T2_HARNESS" 2>/dev/null
+git -C "$T2_DIR" fetch -q origin staging
+T2_RETRY_BACKLOG=$(git -C "$T2_DIR" show "origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml" 2>/dev/null || echo "")
+T2_RETRY_STATUS=$(printf '%s\n' "$T2_RETRY_BACKLOG" | grep "status:" | head -1 | awk '{print $2}' || echo "")
+if [[ "$T2_RETRY_STATUS" == "done" ]] \
+   && [[ "$(git -C "$T2_DIR" show origin/staging:.gaai/project/contexts/backlog/concurrent.audit 2>/dev/null)" == "concurrent-writer-landed" ]]; then
+  pass "T2: later retry reconciled done while retaining concurrent state"
+else
+  fail "T2: later retry did not reconcile cleanly"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
