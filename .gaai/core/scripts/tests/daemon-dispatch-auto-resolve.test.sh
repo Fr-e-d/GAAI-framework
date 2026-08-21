@@ -6,6 +6,7 @@
 #   T1 SUCCESS path — generated files + backlog auto-section resolved, push OK
 #   T2 ABORT path — hand-coded .ts conflict triggers ABORT + merge --abort
 #   T3 ZERO-CONFLICT path — empty conflict list stays numeric and resolves
+#   T4 accepted-but-nonzero push — remote observation wins over transport rc
 #
 # Run from repo root: bash .gaai/core/scripts/tests/daemon-dispatch-auto-resolve.test.sh
 # Exit 0 = all tests pass. Exit 1 = at least one failure.
@@ -21,10 +22,11 @@ fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 ROUTING_LOG="/tmp/gaai-auto-resolve-test.routing.jsonl"
+ADMISSION_LOG="/tmp/gaai-auto-resolve-test.admission.log"
 STORY_ID="E999S99"
 TRACE_ID="trace-test-001"
 
-cleanup() { rm -f "$ROUTING_LOG"; }
+cleanup() { rm -f "$ROUTING_LOG" "$ADMISSION_LOG"; }
 trap cleanup EXIT
 
 # Export env vars needed by daemon-dispatch.sh sourced functions
@@ -37,6 +39,16 @@ export SCHEDULER="$(which true)"  # stub scheduler — no-op
 # shellcheck disable=SC2034
 BACKLOG_FILE="/tmp/gaai-auto-resolve-test-backlog.yaml"
 source "$SCRIPT_DIR/../daemon-dispatch.sh" 2>/dev/null || true
+
+# This suite owns conflict mechanics, while the admission suite owns policy
+# execution. Bind the integration point to each fixture's real HEAD/base and
+# record it so no conflict-resolved push can bypass final admission.
+_admit_current_candidate() {
+  printf '%s|%s|%s\n' "$1" "$2" "$(git -C "$4" rev-parse HEAD)" >> "$ADMISSION_LOG"
+  GAAI_ADMITTED_SHA=$(git -C "$4" rev-parse HEAD)
+  GAAI_ADMITTED_BASE_SHA=$(git -C "$4" rev-parse origin/staging)
+  return 0
+}
 
 if ! type _auto_resolve_pr_conflicts &>/dev/null; then
   echo "SKIP: _auto_resolve_pr_conflicts not found (daemon-dispatch.sh may have changed)"
@@ -274,6 +286,7 @@ echo "=== T1: SUCCESS path (generated files + backlog auto-section) ==="
 
 FIXTURE_DIR="/tmp/gaai-auto-resolve-test-success"
 rm -f "$ROUTING_LOG"
+: > "$ADMISSION_LOG"
 setup_git_fixture "$FIXTURE_DIR" "success"
 
 WT_PATH="$FIXTURE_DIR/worktree"
@@ -292,6 +305,11 @@ if [[ "$result" -eq 0 ]]; then
   pass "T1: _auto_resolve_pr_conflicts returned 0 (SUCCESS)"
 else
   fail "T1: _auto_resolve_pr_conflicts returned $result, expected 0"
+fi
+if [[ $(grep -c "^final|${STORY_ID}|" "$ADMISSION_LOG" || true) -eq 1 ]]; then
+  pass "T1: conflict-resolved candidate receives one final admission before push"
+else
+  fail "T1: final admission call missing or duplicated"
 fi
 
 # Verify routing log has auto_merge_conflict_detected + auto_merge_resolved
@@ -341,6 +359,7 @@ echo "=== T2: ABORT path (hand-coded .ts conflict) ==="
 
 FIXTURE_DIR="/tmp/gaai-auto-resolve-test-abort"
 rm -f "$ROUTING_LOG"
+: > "$ADMISSION_LOG"
 setup_git_fixture "$FIXTURE_DIR" "abort"
 
 WT_PATH="$FIXTURE_DIR/worktree"
@@ -358,6 +377,11 @@ if [[ "$result" -eq 1 ]]; then
   pass "T2: _auto_resolve_pr_conflicts returned 1 (ABORT)"
 else
   fail "T2: _auto_resolve_pr_conflicts returned $result, expected 1"
+fi
+if [[ ! -s "$ADMISSION_LOG" ]]; then
+  pass "T2: aborted conflict reaches neither admission nor push"
+else
+  fail "T2: aborted conflict unexpectedly reached admission"
 fi
 
 # Verify routing log has auto_merge_aborted
@@ -400,6 +424,7 @@ echo "=== T3: ZERO-CONFLICT path (empty conflict list remains numeric) ==="
 
 FIXTURE_DIR="/tmp/gaai-auto-resolve-test-zero-conflict"
 rm -f "$ROUTING_LOG"
+: > "$ADMISSION_LOG"
 setup_zero_conflict_fixture "$FIXTURE_DIR"
 
 WT_PATH="$FIXTURE_DIR/worktree"
@@ -417,6 +442,11 @@ if [[ "$result" -eq 0 ]]; then
 else
   fail "T3: _auto_resolve_pr_conflicts returned $result, expected 0"
 fi
+if [[ $(grep -c "^final|${STORY_ID}|" "$ADMISSION_LOG" || true) -eq 1 ]]; then
+  pass "T3: zero-conflict merge receives one final admission before push"
+else
+  fail "T3: final admission call missing or duplicated"
+fi
 
 detected_line=$(grep "auto_merge_conflict_detected" "$ROUTING_LOG" | tail -1)
 if echo "$detected_line" | grep -q '"conflicting_files_count":0'; then
@@ -432,6 +462,38 @@ else
 fi
 
 export PATH="${PATH#"$STUB_DIR:"}"
+rm -rf "$FIXTURE_DIR"
+
+# ── T4: PUSH ACCEPTED DESPITE NONZERO EXIT ──────────────────────────────────
+
+echo ""
+echo "=== T4: accepted push with nonzero transport exit is reconciled ==="
+
+FIXTURE_DIR="/tmp/gaai-auto-resolve-test-accepted-nonzero"
+: > "$ADMISSION_LOG"
+setup_zero_conflict_fixture "$FIXTURE_DIR"
+WT_PATH="$FIXTURE_DIR/worktree"
+BRANCH="story/$STORY_ID"
+printf 'post-admission candidate\n' >> "$WT_PATH/story.txt"
+git -C "$WT_PATH" commit -qam 'candidate after prior remote head'
+T4_LOCAL_HEAD=$(git -C "$WT_PATH" rev-parse HEAD)
+
+# Reproduce a transport/hook reporting failure after the server accepted the
+# exact ref update. All non-push Git calls retain their real behavior.
+git() {
+  if [[ " $* " == *" push origin "* ]]; then
+    command git "$@" >/dev/null 2>&1
+    return 1
+  fi
+  command git "$@"
+}
+if _auto_resolve_push "$WT_PATH" "$BRANCH" "" "$STORY_ID" "$TRACE_ID" \
+    && [[ "$(command git -C "$WT_PATH" ls-remote --heads origin "refs/heads/${BRANCH}" | awk 'NR==1{print $1}')" == "$T4_LOCAL_HEAD" ]]; then
+  pass "T4: exact remote SHA reconciles an accepted push despite nonzero exit"
+else
+  fail "T4: accepted exact-SHA push was treated as unpublished"
+fi
+unset -f git
 rm -rf "$FIXTURE_DIR"
 
 # ── Summary ──────────────────────────────────────────────────────────────────

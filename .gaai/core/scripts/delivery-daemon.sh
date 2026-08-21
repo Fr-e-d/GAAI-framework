@@ -39,6 +39,9 @@ set -euo pipefail
 #   GAAI_POLL_INTERVAL=15            poll every 15s
 #   GAAI_MAX_CONCURRENT=2            allow 2 parallel deliveries
 #   GAAI_EXIT_WHEN_IDLE=5            auto-stop after N consecutive idle polls (0 = disabled)
+#   GAAI_COMMIT_PHASE_RETRY_THRESHOLD=3
+#                                    identical outcome/content cycles before operator stall;
+#                                    cost containment only, never a Story-quality verdict
 #   GAAI_TARGET_BRANCH=staging       target branch (default: staging)
 #   GAAI_DELIVERY_TIMEOUT=14400      hard kill timeout in seconds (default: 4h, last resort)
 #   GAAI_MAX_TURNS=200               max claude tool-call turns per delivery (primary safety)
@@ -138,6 +141,13 @@ TARGET_BRANCH="${GAAI_TARGET_BRANCH:-staging}"
 # this many consecutive polls. 0 = disabled (default ; daemon polls forever).
 # Set via --exit-when-idle [N] CLI flag or GAAI_EXIT_WHEN_IDLE env var.
 EXIT_WHEN_IDLE_THRESHOLD="${GAAI_EXIT_WHEN_IDLE:-0}"
+# Three identical observations allow two transient rechecks while bounding the
+# hosted-cost loop. Operators may tune containment; this is not a quality gate.
+COMMIT_PHASE_RETRY_THRESHOLD="${GAAI_COMMIT_PHASE_RETRY_THRESHOLD:-3}"
+if [[ ! "$COMMIT_PHASE_RETRY_THRESHOLD" =~ ^[1-9][0-9]*$ ]]; then
+  COMMIT_PHASE_RETRY_THRESHOLD=3
+fi
+(( COMMIT_PHASE_RETRY_THRESHOLD > 1000 )) && COMMIT_PHASE_RETRY_THRESHOLD=1000
 DELIVERY_TIMEOUT="${GAAI_DELIVERY_TIMEOUT:-14400}"   # 4h hard kill (last resort)
 MAX_TURNS="${GAAI_MAX_TURNS:-200}"                    # primary safety net
 CLAUDE_MODEL="${GAAI_CLAUDE_MODEL:-sonnet}"           # model (sonnet = cost-effective)
@@ -1183,22 +1193,25 @@ check_stale_in_progress() {
       # qa_passed awaits human merge — both cases must NOT be brute-force-failed.
       # gh is optional — skip guard if not installed (backward compat).
       if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
-        local _stale_json="" _stale_merged_at="" _stale_pr_state="" _stale_pr_number=""
-        _stale_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt,state --limit 1 2>/dev/null || echo "")
+        local _stale_json="" _stale_merged_at="" _stale_pr_state="" _stale_pr_number="" _stale_created_at=""
+        _stale_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt,state,createdAt --limit 1 2>/dev/null || echo "")
         if [[ -n "$_stale_json" ]]; then
-          read -r _stale_merged_at _stale_pr_state _stale_pr_number < <(
+          read -r _stale_merged_at _stale_pr_state _stale_pr_number _stale_created_at < <(
             printf '%s' "$_stale_json" | python3 -c "
 import json,sys
 try:
     d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
-    print((s.get('mergedAt') or '-'), (s.get('state') or '-'), (s.get('number') or '-'))
+    print((s.get('mergedAt') or '-'), (s.get('state') or '-'), (s.get('number') or '-'), (s.get('createdAt') or '-'))
 except Exception:
-    print('- - -')" 2>/dev/null || echo "- - -")
+    print('- - - -')" 2>/dev/null || echo "- - - -")
         fi
-        # Merged PR: reconcile to done instead of stale-failing (AC3a)
-        if [[ -n "$_stale_merged_at" && "$_stale_merged_at" != "-" ]]; then
+        # Merged PR: reconcile to done instead of stale-failing (AC3a), but only
+        # when the merge is current-cycle evidence (AC1/AC2) — otherwise fall
+        # through to the qa_passed/OPEN hold and the normal stale-fail below.
+        if [[ -n "$_stale_merged_at" && "$_stale_merged_at" != "-" ]] \
+           && _merged_pr_is_current_cycle "$sid" "$_stale_created_at" "$_stale_merged_at" "$_stale_pr_number"; then
           log "${GREEN}[STALE-CHECK] $sid : delivery PR #${_stale_pr_number} already merged ($_stale_merged_at) — reconciling to done instead of stale-failing${NC}"
-          if _reconcile_merged_pr "$sid" "$_stale_merged_at" "$_stale_pr_number"; then
+          if _reconcile_merged_pr "$sid" "$_stale_merged_at" "$_stale_pr_number" "$_stale_created_at"; then
             notify_escalation "$sid" "Auto-reconciled merged story (stale guard)" "Delivery PR was merged; status reconciled to done automatically"
             track_for_resolution "$sid" "done"
           fi
@@ -1290,6 +1303,87 @@ crash_recovery_scan() {
     _only_sid="${2:-}"
     shift 2 2>/dev/null || true
   fi
+
+  # Publish one non-terminal recovery phase without staging the live shared
+  # backlog file. Defining this scan-private helper here keeps extracted test
+  # harnesses behaviorally complete while avoiding a second public entrypoint.
+  # The locked child starts from one fresh origin snapshot, changes only the
+  # named Story, creates an exact-parent commit through a private index, and
+  # then advances daemon-home HEAD with --mixed so concurrent local writes
+  # remain in the working tree. Cross-Story hitchhiking is impossible even
+  # when another writer mutates BACKLOG between this call and commit creation.
+  _recovery_commit_story_phase_drift() {   # $1=sid $2=phase_status $3=context
+    local sid="$1" target_phase="$2" context="${3:-recovery}"
+    [[ "$sid" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+    case "$target_phase" in
+      not_started|planned|implemented|qa_failed|qa_passed|failed|escalated|qa_escalated|commit_stalled|worktree_recovery_failed) ;;
+      *) return 1 ;;
+    esac
+    case "$context" in
+      recovery-scan|crash-drift-reconcile) ;;
+      *) return 1 ;;
+    esac
+
+    local script_dir
+    script_dir=$(cd "$(dirname "$SCHEDULER")" && pwd)
+    local phase_script
+    phase_script=$(mktemp "$LOCK_DIR/.recovery-phase-XXXXXX.sh")
+    cat > "$phase_script" <<'PHASE_EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+PROJECT_DIR="$1"
+BACKLOG_REL="$2"
+TARGET_BRANCH="$3"
+SCHEDULER="$4"
+SCRIPT_DIR="$5"
+SID="$6"
+TARGET_PHASE="$7"
+CONTEXT="$8"
+cd "$PROJECT_DIR"
+source "$SCRIPT_DIR/lib/backlog-yaml.sh"
+
+snapshot= index_file=
+cleanup() { rm -f "${snapshot:-}" "${index_file:-}" 2>/dev/null || true; }
+trap cleanup EXIT
+
+git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || exit 1
+remote_sha=$(git rev-parse "origin/$TARGET_BRANCH" 2>/dev/null) || exit 1
+snapshot=$(mktemp)
+git show "${remote_sha}:$BACKLOG_REL" > "$snapshot" 2>/dev/null || exit 1
+
+remote_status=$(backlog_status "$SID" "$snapshot" 2>/dev/null || true)
+[[ "$remote_status" == "in_progress" ]] || exit 1
+remote_phase=$(backlog_phase_status "$SID" "$snapshot" 2>/dev/null || true)
+if [[ "$remote_phase" == "$TARGET_PHASE" ]]; then
+  git reset --mixed "$remote_sha" --quiet
+  exit 0
+fi
+
+"$SCHEDULER" --set-field "$SID" phase_status "$TARGET_PHASE" "$snapshot" >/dev/null
+index_file=$(mktemp)
+rm -f "$index_file"
+GIT_INDEX_FILE="$index_file" git read-tree "$remote_sha"
+backlog_blob=$(git hash-object -w -- "$snapshot")
+GIT_INDEX_FILE="$index_file" git update-index --add --cacheinfo 100644 "$backlog_blob" "$BACKLOG_REL"
+new_tree=$(GIT_INDEX_FILE="$index_file" git write-tree)
+commit_subject="chore($SID): phase_status=$TARGET_PHASE [$CONTEXT]"
+if [[ "$CONTEXT" == "recovery-scan" ]]; then
+  commit_subject="chore(daemon): commit isolated phase_status=$TARGET_PHASE [recovery-scan $SID]"
+fi
+new_commit=$(printf '%s\n' "$commit_subject" \
+  | git commit-tree "$new_tree" -p "$remote_sha")
+git push origin "$new_commit:refs/heads/$TARGET_BRANCH" --quiet 2>/dev/null || exit 1
+git reset --mixed "$new_commit" --quiet
+PHASE_EOF
+    chmod +x "$phase_script"
+    local rc=0
+    with_staging_lock bash "$phase_script" \
+      "$PROJECT_DIR" "$BACKLOG_REL" "$TARGET_BRANCH" "$SCHEDULER" "$script_dir" \
+      "$sid" "$target_phase" "$context" 2>>"${LOG_FILE:-/dev/null}" || rc=$?
+    rm -f "$phase_script" 2>/dev/null || true
+    return "$rc"
+  }
+
   local backlog_content
   backlog_content=$(fetch_and_read_backlog)
   [[ -z "$backlog_content" ]] && return 0
@@ -1338,6 +1432,25 @@ crash_recovery_scan() {
       continue
     fi
 
+    # A terminal commit-policy mismatch normally persists as phase_status
+    # commit_stalled. If that scheduler mutation failed, dispatch atomically
+    # published this fallback marker. It is an operator-owned inhibit: inspect
+    # and reconcile the policy, then remove the marker explicitly. Ordinary
+    # recovery scans must never clear it or re-launch the wrapper.
+    local _policy_stall_marker="$LOCK_DIR/.commit-policy-stalled-${sid}"
+    if [[ -f "$_policy_stall_marker" ]]; then
+      log "${YELLOW}[RECOVERY] $sid : durable commit-policy stall marker present — skipping relaunch; operator must reconcile and remove ${_policy_stall_marker}${NC}"
+      ((skipped++)) || true
+      continue
+    fi
+    local _retry_stall_marker
+    _retry_stall_marker=$(_commit_retry_stall_marker_path "$sid")
+    if [[ -f "$_retry_stall_marker" ]]; then
+      log "${YELLOW}[RECOVERY] $sid : durable commit-retry stall marker present — skipping relaunch; operator must inspect and remove ${_retry_stall_marker}${NC}"
+      ((skipped++)) || true
+      continue
+    fi
+
     # ── AC1: per-story working-tree drift check (in_progress targets only) ───────────
     # HEAD says in_progress; compare WT status/phase_status. Only checks stories that
     # are already in in_progress_pairs (HEAD status == in_progress). Benign edits on
@@ -1348,11 +1461,13 @@ crash_recovery_scan() {
       wt_ps=$(backlog_phase_status "$sid" "$BACKLOG" 2>/dev/null || true)
       if [[ -n "$wt_status" ]] && ( [[ "$wt_status" != "in_progress" ]] || [[ "$wt_ps" != "$ps" ]] ); then
         # Crash-drift signature: in_progress status unchanged, phase_status advanced,
-        # no live lock, daemon marker present. Reconcile instead of skip.
+        # no live lock, daemon marker present. Terminal phase_status:done is
+        # deliberately excluded: it must first pass the normal current-cycle
+        # PR check below and can never be published from a crash marker alone.
         local _hang_m="$LOCK_DIR/${sid}.agent-hang.marker"
         local _int_m="$LOCK_DIR/${sid}.interrupted"
         if [[ "$wt_status" == "in_progress" \
-           && -n "$wt_ps" && "$wt_ps" != "$ps" \
+           && -n "$wt_ps" && "$wt_ps" != "$ps" && "$wt_ps" != "done" \
            && ( -f "$_hang_m" || -f "$_int_m" ) ]] \
            && ! is_locked "$sid"; then
           log "${CYAN}[RECOVERY-CRASH-DRIFT] $sid : crash-drift signature detected — HEAD phase_status=${ps:-empty} WT=${wt_ps} — attempting auto-reconcile${NC}"
@@ -1380,22 +1495,26 @@ crash_recovery_scan() {
           # matches ONLY the delivery branch PR, never a Discovery/babysit PR (see the
           # matching note at the phase_status reconcile sites).
           if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
-            local _dr_json _dr_merged_at _dr_number
-            _dr_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt --limit 1 2>/dev/null || echo "")
+            local _dr_json _dr_merged_at _dr_number _dr_created_at
+            _dr_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt,createdAt --limit 1 2>/dev/null || echo "")
             _dr_merged_at=""
             _dr_number=""
+            _dr_created_at=""
             if [[ -n "$_dr_json" ]]; then
-              read -r _dr_merged_at _dr_number < <(printf '%s' "$_dr_json" | python3 -c "import json,sys
+              read -r _dr_merged_at _dr_number _dr_created_at < <(printf '%s' "$_dr_json" | python3 -c "import json,sys
 try:
     d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
-    print((s.get('mergedAt') or '-'), (s.get('number') or '-'))
+    print((s.get('mergedAt') or '-'), (s.get('number') or '-'), (s.get('createdAt') or '-'))
 except Exception:
-    print('- -')" 2>/dev/null || echo "- -")
+    print('- - -')" 2>/dev/null || echo "- - -")
             fi
-            if [[ -n "$_dr_merged_at" && "$_dr_merged_at" != "-" ]]; then
+            # AC2: gated on current-cycle provenance; gate failure falls through
+            # to the drift-skip path below (same shape as merged_at being empty).
+            if [[ -n "$_dr_merged_at" && "$_dr_merged_at" != "-" ]] \
+               && _merged_pr_is_current_cycle "$sid" "$_dr_created_at" "$_dr_merged_at" "$_dr_number"; then
               log "${GREEN}[RECOVERY] $sid : working-tree drift but delivery PR #${_dr_number} already merged (${_dr_merged_at}) — reconciling to done instead of skipping${NC}"
-              if _reconcile_merged_pr "$sid" "$_dr_merged_at" "$_dr_number"; then
-                rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+              if _reconcile_merged_pr "$sid" "$_dr_merged_at" "$_dr_number" "$_dr_created_at"; then
+                _commit_retry_clear "$sid"
                 _clear_drift_marker_if_clean
                 ((reconciled++)) || true
                 continue
@@ -1403,11 +1522,20 @@ except Exception:
               log "${YELLOW}[RECOVERY] $sid : merged-PR reconcile failed — falling through to drift-skip${NC}"
             fi
           fi
+          # Local terminal drift is never safe recovery evidence on its own. A
+          # valid current-cycle PR was given the opportunity to reconcile above;
+          # without that proof, committing status:done OR phase_status:done can
+          # reach the phase_status=done fallback and bypass the provenance gate.
+          if [[ "$wt_status" != "in_progress" || "$wt_ps" == "done" ]]; then
+            log "${YELLOW}[RECOVERY] $sid : refusing terminal working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) without accepted current-cycle PR evidence${NC}"
+            _write_drift_marker "scan" "unverified-terminal-drift-$sid"
+            drift_detected=1
+            continue
+          fi
           local _drift_rc=0
-          ( cd "$PROJECT_DIR" && _commit_accumulated_backlog_drift "$sid" "$BACKLOG_REL" "${TARGET_BRANCH:-staging}" "recovery-scan" ) \
-            || _drift_rc=$?
+          _recovery_commit_story_phase_drift "$sid" "$wt_ps" "recovery-scan" || _drift_rc=$?
           if [[ "$_drift_rc" -ne 0 ]]; then
-            log "${YELLOW}[RECOVERY] $sid : working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) — drift commit failed (rc=$_drift_rc), writing drift-marker${NC}"
+            log "${YELLOW}[RECOVERY] $sid : working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) — isolated phase commit failed (rc=$_drift_rc), writing drift-marker${NC}"
             _write_drift_marker "scan" "drift-$sid"
             drift_detected=1
             continue
@@ -1416,7 +1544,7 @@ except Exception:
             # its now-current phase_status instead of deferring another scan cycle
             # (was an unconditional continue that never reverted a dead not_started
             # story and never cleared the daemon-home drift).
-            log "${GREEN}[RECOVERY] $sid : committed accumulated backlog drift (HEAD=in_progress/${wt_ps:-empty}) — evaluating phase_status${NC}"
+            log "${GREEN}[RECOVERY] $sid : committed isolated phase drift (HEAD=in_progress/${wt_ps:-empty}) — evaluating phase_status${NC}"
             ps="$wt_ps"
             _clear_drift_marker_if_clean
             # no continue — fall through to phase_status classification below
@@ -1468,7 +1596,7 @@ except Exception:
     # ── Classify by phase_status ──────────────────────────────────────────
     case "$ps" in
       done)
-        rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+        _commit_retry_clear "$sid"
         log "${GREEN}[RECOVERY] $sid : phase_status=done — reconciling YAML status${NC}"
         if $DRY_RUN; then
           log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=done${NC}"
@@ -1484,7 +1612,7 @@ except Exception:
         fi
         ;;
       failed)
-        rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+        _commit_retry_clear "$sid"
         rm -f "$LOCK_DIR/.qa-spawn-deaths-${sid}" "$LOCK_DIR/.qa-spawn-deaths-${sid}.head" \
               "$LOCK_DIR/.qa-spawn-death-pending-${sid}" 2>/dev/null || true
         log "${YELLOW}[RECOVERY] $sid : phase_status=failed — reconciling YAML status${NC}"
@@ -1498,7 +1626,7 @@ except Exception:
         fi
         ;;
       escalated|qa_escalated)
-        rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+        _commit_retry_clear "$sid"
         rm -f "$LOCK_DIR/.qa-spawn-deaths-${sid}" "$LOCK_DIR/.qa-spawn-deaths-${sid}.head" \
               "$LOCK_DIR/.qa-spawn-death-pending-${sid}" 2>/dev/null || true
         log "${YELLOW}[RECOVERY] $sid : phase_status=$ps — reconciling YAML status escalated${NC}"
@@ -1530,21 +1658,25 @@ except Exception:
           # branch PR. A bare --search matches any PR whose title/body contains the story
           # id — including the Discovery PR that promoted the story to refined — which
           # falsely reconciled refined/in_progress stories to done (completed_at < started_at).
-          _rg_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt --limit 1 2>/dev/null || echo "")
+          _rg_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt,createdAt --limit 1 2>/dev/null || echo "")
           _rg_merged_at=""
           _rg_number=""
+          _rg_created_at=""
           if [[ -n "$_rg_json" ]]; then
-            read -r _rg_merged_at _rg_number < <(printf '%s' "$_rg_json" | python3 -c "import json,sys
+            read -r _rg_merged_at _rg_number _rg_created_at < <(printf '%s' "$_rg_json" | python3 -c "import json,sys
 try:
     d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
-    print((s.get('mergedAt') or '-'), (s.get('number') or '-'))
+    print((s.get('mergedAt') or '-'), (s.get('number') or '-'), (s.get('createdAt') or '-'))
 except Exception:
-    print('- -')" 2>/dev/null || echo "- -")
+    print('- - -')" 2>/dev/null || echo "- - -")
           fi
-          if [[ -n "$_rg_merged_at" && "$_rg_merged_at" != "-" ]]; then
+          # AC2: gated on current-cycle provenance; gate failure falls through
+          # to the bounded-retry guard below instead of re-launching or reverting.
+          if [[ -n "$_rg_merged_at" && "$_rg_merged_at" != "-" ]] \
+             && _merged_pr_is_current_cycle "$sid" "$_rg_created_at" "$_rg_merged_at" "$_rg_number"; then
             log "${GREEN}[RECOVERY] $sid : phase_status=qa_passed but PR #${_rg_number} already merged ($_rg_merged_at) — reconciling to done instead of re-launching${NC}"
-            if _reconcile_merged_pr "$sid" "$_rg_merged_at" "$_rg_number"; then
-              rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+            if _reconcile_merged_pr "$sid" "$_rg_merged_at" "$_rg_number" "$_rg_created_at"; then
+              _commit_retry_clear "$sid"
               ((reconciled++)) || true
             else
               ((skipped++)) || true
@@ -1552,38 +1684,64 @@ except Exception:
             continue
           fi
         fi
-        # Bounded-retry guard: count consecutive deaths where push did not succeed.
-        # Halts relaunch after threshold to prevent silent infinite retry loop.
-        _cd_file="$LOCK_DIR/.commit-deaths-${sid}"
-        _cd_head_file="${_cd_file}.head"
-        _cd_current=$(cat "$_cd_file" 2>/dev/null | tr -d '[:space:]' || echo 0)
-        _cd_current=$(( _cd_current > 1000 ? 1000 : _cd_current ))
-        _cd_head_now=$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null || echo "")
-        _cd_head_prev=$(cat "$_cd_head_file" 2>/dev/null | tr -d '[:space:]' || echo "")
-        if [[ -n "$_cd_head_now" && "$_cd_head_now" == "$_cd_head_prev" ]]; then
-          _cd_new=$(( _cd_current + 1 ))
-          _cd_new=$(( _cd_new > 1000 ? 1000 : _cd_new ))
-          printf '%s\n' "$_cd_new" > "${_cd_file}.tmp" && mv "${_cd_file}.tmp" "$_cd_file" 2>/dev/null || true
-        else
-          _cd_new=1
-          printf '%s\n' "$_cd_new" > "${_cd_file}.tmp" && mv "${_cd_file}.tmp" "$_cd_file" 2>/dev/null || true
-          printf '%s\n' "$_cd_head_now" > "${_cd_head_file}.tmp" && mv "${_cd_head_file}.tmp" "$_cd_head_file" 2>/dev/null || true
+        # Bounded-retry guard: progress is new non-bookkeeping candidate content
+        # or a different blocking outcome. Daemon-authored QA/backlog evidence may
+        # move HEAD, but cannot buy a fresh hosted retry by itself.
+        local _cd_observation _cd_new _cd_outcome _cd_progress
+        local _cd_threshold="${COMMIT_PHASE_RETRY_THRESHOLD:-3}"
+        if ! _cd_observation=$(_commit_retry_observe \
+          "$sid" "$worktree_path" "origin/${TARGET_BRANCH:-staging}" \
+          "$_cd_threshold"); then
+          log "${YELLOW}[RECOVERY] $sid : commit retry observation unavailable — skipping relaunch this scan${NC}"
+          ((skipped++)) || true
+          continue
         fi
-        if (( _cd_new >= 3 )); then
-          log "[$(date '+%Y-%m-%dT%H:%M:%SZ')] $sid COMMIT_PHASE_REPEATED_FAILURE deaths=${_cd_new} action=stall_set_commit_stalled"
+        IFS='|' read -r _cd_new _cd_outcome _cd_progress <<< "$_cd_observation"
+        if (( _cd_new >= _cd_threshold )); then
+          log "[$(date '+%Y-%m-%dT%H:%M:%SZ')] $sid COMMIT_PHASE_REPEATED_FAILURE cycles=${_cd_new} outcome=${_cd_outcome} action=stall_set_commit_stalled"
           if ! $DRY_RUN; then
-            "$SCHEDULER" --set-phase-status "$sid" commit_stalled "$BACKLOG" 2>/dev/null || true
+            local _cd_persistence="none" _cd_remote_snapshot="" _cd_remote_phase=""
+            # Keep daemon-home's live backlog aligned with the exact private-index
+            # commit below. Failure here is not authority: the remote transaction
+            # and fallback marker independently decide whether the stall is durable.
+            "$SCHEDULER" --set-phase-status \
+              "$sid" commit_stalled "$BACKLOG" >/dev/null 2>&1 || true
+            if _recovery_commit_story_phase_drift \
+              "$sid" commit_stalled recovery-scan; then
+              if _cd_remote_snapshot=$(mktemp \
+                "$LOCK_DIR/.commit-retry-remote-XXXXXX"); then
+                if git -C "$PROJECT_DIR" fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null \
+                  && git -C "$PROJECT_DIR" show \
+                    "origin/${TARGET_BRANCH}:${BACKLOG_REL}" > "$_cd_remote_snapshot" 2>/dev/null; then
+                  _cd_remote_phase=$(backlog_phase_status \
+                    "$sid" "$_cd_remote_snapshot" 2>/dev/null || true)
+                fi
+                rm -f "$_cd_remote_snapshot" 2>/dev/null || true
+              fi
+              [[ "$_cd_remote_phase" == "commit_stalled" ]] \
+                && _cd_persistence="origin"
+            fi
+            if [[ "$_cd_persistence" == "none" ]] \
+              && _commit_retry_write_stall_marker \
+                "$sid" "$_cd_outcome" "$_cd_new" "$_cd_threshold"; then
+              _cd_persistence="marker"
+            fi
             if declare -f notify_escalation_inline >/dev/null 2>&1; then
               notify_escalation_inline "$sid" "Commit-phase repeated failure — stalled" \
-                "Inspect worktree branch and push manually; then reset phase_status to qa_passed to retry"
+                "Outcome ${_cd_outcome} repeated for ${_cd_new} cycles (threshold=${_cd_threshold}, persistence=${_cd_persistence}). Inspect the worktree; if present remove $(_commit_retry_stall_marker_path "$sid"), then reset phase_status to qa_passed only after progress."
             fi
+            if [[ "$_cd_persistence" == "none" ]]; then
+              log "${RED}[RECOVERY] $sid : STALL_PERSISTENCE_FAILED — retry state preserved and relaunch inhibited; stop the daemon and repair persistence${NC}"
+              ((skipped++)) || true
+              continue
+            fi
+            _commit_retry_clear "$sid"
           else
             log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid commit_stalled${NC}"
           fi
-          rm -f "$_cd_file" "$_cd_head_file" 2>/dev/null || true
           ((skipped++)) || true
         else
-          log "${GREEN}[RECOVERY] $sid : phase_status=qa_passed deaths=${_cd_new} — re-launching wrapper${NC}"
+          log "${GREEN}[RECOVERY] $sid : phase_status=qa_passed cycles=${_cd_new}/${_cd_threshold} outcome=${_cd_outcome} progress=${_cd_progress} — re-launching wrapper${NC}"
           if $DRY_RUN; then
             log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
             ((resumed++)) || true
@@ -1595,7 +1753,7 @@ except Exception:
         fi
         ;;
       implemented|qa_failed)
-        rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+        _commit_retry_clear "$sid"
         # AC1/AC2: bounded QA spawn-death counter (only for phase_status=implemented)
         if [[ "$ps" == "implemented" ]]; then
           _qsd_pending="${LOCK_DIR}/.qa-spawn-death-pending-${sid}"
@@ -1683,21 +1841,25 @@ except Exception:
         if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
           # --head "story/$sid" (not --search "$sid"): see the matching note above —
           # avoid matching the Discovery/promotion PR (id in title) as a delivery PR.
-          _ns_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt --limit 1 2>/dev/null || echo "")
+          _ns_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt,createdAt --limit 1 2>/dev/null || echo "")
           _ns_merged_at=""
           _ns_number=""
+          _ns_created_at=""
           if [[ -n "$_ns_json" ]]; then
-            read -r _ns_merged_at _ns_number < <(printf '%s' "$_ns_json" | python3 -c "import json,sys
+            read -r _ns_merged_at _ns_number _ns_created_at < <(printf '%s' "$_ns_json" | python3 -c "import json,sys
 try:
     d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
-    print((s.get('mergedAt') or '-'), (s.get('number') or '-'))
+    print((s.get('mergedAt') or '-'), (s.get('number') or '-'), (s.get('createdAt') or '-'))
 except Exception:
-    print('- -')" 2>/dev/null || echo "- -")
+    print('- - -')" 2>/dev/null || echo "- - -")
           fi
-          if [[ -n "$_ns_merged_at" && "$_ns_merged_at" != "-" ]]; then
+          # AC2: gated on current-cycle provenance; gate failure falls through
+          # to the revert-refined path below instead of reconciling.
+          if [[ -n "$_ns_merged_at" && "$_ns_merged_at" != "-" ]] \
+             && _merged_pr_is_current_cycle "$sid" "$_ns_created_at" "$_ns_merged_at" "$_ns_number"; then
             log "${GREEN}[RECOVERY] $sid : phase_status=${ps:-empty} but PR #${_ns_number} already merged ($_ns_merged_at) — reconciling to done instead of reverting${NC}"
-            if _reconcile_merged_pr "$sid" "$_ns_merged_at" "$_ns_number"; then
-              rm -f "$LOCK_DIR/.commit-deaths-${sid}" "$LOCK_DIR/.commit-deaths-${sid}.head" 2>/dev/null || true
+            if _reconcile_merged_pr "$sid" "$_ns_merged_at" "$_ns_number" "$_ns_created_at"; then
+              _commit_retry_clear "$sid"
               ((reconciled++)) || true
             else
               ((skipped++)) || true
@@ -1788,48 +1950,10 @@ _recovery_reconcile_crash_drift() {
 
   log "${CYAN}[RECOVERY-CRASH-DRIFT] $sid : auto-reconciling — HEAD phase_status=${head_ps:-empty} → WT=${wt_ps}${NC}"
 
-  local _commit_subject="chore($sid): crash-drift-reconcile phase_status=$wt_ps [daemon]"
   local _ts
   _ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
-
-  local _script
-  _script=$(mktemp)
-  cat > "$_script" <<CDEOF
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$PROJECT_DIR"
-if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
-    git rebase --abort --quiet 2>/dev/null || true
-    exit 1
-  fi
-fi
-git add "$BACKLOG_REL" 2>/dev/null
-if git diff --cached --quiet; then
-  exit 0
-fi
-if ! git commit -m "$_commit_subject" --quiet -- "$BACKLOG_REL" 2>/dev/null; then
-  git reset HEAD -- "$BACKLOG_REL" 2>/dev/null || true
-  exit 1
-fi
-if ! git push origin "HEAD:$TARGET_BRANCH" --quiet 2>/dev/null; then
-  if git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null \
-    && git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null \
-    && git push origin "HEAD:$TARGET_BRANCH" --quiet 2>/dev/null; then
-    exit 0
-  fi
-  git rebase --abort 2>/dev/null || true
-  git reset --soft HEAD~1 2>/dev/null || true
-  git reset HEAD -- "$BACKLOG_REL" 2>/dev/null || true
-  git checkout HEAD -- "$BACKLOG_REL" 2>/dev/null || true
-  exit 1
-fi
-CDEOF
-  chmod +x "$_script"
   local _rc=0
-  with_staging_lock bash "$_script" 2>/dev/null || _rc=$?
-  rm -f "$_script"
+  _recovery_commit_story_phase_drift "$sid" "$wt_ps" "crash-drift-reconcile" || _rc=$?
 
   # AC4: append JSON audit record (non-fatal — audit write failure does not fail reconcile)
   local _hang_present=false _int_present=false
@@ -1837,6 +1961,7 @@ CDEOF
   [[ -f "$LOCK_DIR/${sid}.interrupted" ]] && _int_present=true
   local _outcome="committed"
   [[ "$_rc" -ne 0 ]] && _outcome="failed"
+  local _commit_subject="chore($sid): phase_status=$wt_ps [crash-drift-reconcile]"
   printf '{"event":"crash_drift_reconciled","ts":"%s","story_id":"%s","head_phase_status":"%s","wt_phase_status":"%s","hang_marker":%s,"interrupted_marker":%s,"outcome":"%s","commit_subject":"%s"}\n' \
     "$_ts" "$sid" "${head_ps:-}" "$wt_ps" "$_hang_present" "$_int_present" "$_outcome" "$_commit_subject" \
     >> "$CRASH_DRIFT_RECONCILE_AUDIT" 2>/dev/null || true
@@ -2426,21 +2551,23 @@ for line in content.splitlines():
 
     # Query GitHub API
     local gh_output
-    gh_output=$(gh pr view "$pr_num" --json mergedAt,state,baseRefName 2>/dev/null) || {
+    gh_output=$(gh pr view "$pr_num" --json mergedAt,state,baseRefName,createdAt 2>/dev/null) || {
       log "${YELLOW}[PR-WATCHER] $sid : gh pr view failed (rate limit or network) — skipping, will retry next cycle${NC}"
       continue
     }
 
     # Parse response (jq preferred, python3 fallback — mirrors daemon-monitor-top.sh pattern)
-    local merged_at state base_ref
+    local merged_at state base_ref created_at
     if command -v jq &>/dev/null; then
       merged_at=$(printf '%s' "$gh_output" | jq -r '.mergedAt // empty' 2>/dev/null || true)
       state=$(printf '%s' "$gh_output" | jq -r '.state // empty' 2>/dev/null || true)
       base_ref=$(printf '%s' "$gh_output" | jq -r '.baseRefName // empty' 2>/dev/null || true)
+      created_at=$(printf '%s' "$gh_output" | jq -r '.createdAt // empty' 2>/dev/null || true)
     else
       merged_at=$(printf '%s' "$gh_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('mergedAt') or '')" 2>/dev/null || true)
       state=$(printf '%s' "$gh_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('state',''))" 2>/dev/null || true)
       base_ref=$(printf '%s' "$gh_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('baseRefName',''))" 2>/dev/null || true)
+      created_at=$(printf '%s' "$gh_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('createdAt') or '')" 2>/dev/null || true)
     fi
 
     # AC1 MEDIUM-F5: only reconcile if PR targets staging branch
@@ -2462,12 +2589,156 @@ for line in content.splitlines():
       continue
     fi
 
-    # Merge detected: reconcile backlog + clean up
+    # Merge detected: reconcile backlog + clean up (AC2: gated on current-cycle
+    # provenance — this is the entry path that starts from a stored pr_url,
+    # which can point at a previous cycle's PR if the reset purge didn't clear it)
     if [[ -n "$merged_at" && "$base_ref" == "$effective_target" ]]; then
-      _reconcile_merged_pr "$sid" "$merged_at" "$pr_num"
+      if _merged_pr_is_current_cycle "$sid" "$created_at" "$merged_at" "$pr_num"; then
+        _reconcile_merged_pr "$sid" "$merged_at" "$pr_num" "$created_at"
+      fi
     fi
 
   done <<< "$story_pr_pairs"
+}
+
+# Reads the current delivery cycle's started_at instant for story <sid> from
+# origin's backlog. lib/backlog-yaml.sh's Python-fallback field reader only
+# matches status/phase_status/pr_status (alphanumeric-token values), not an
+# ISO-8601 timestamp, so this is intentionally inline rather than delegated —
+# mirrors the pr_url extractor above (same read shape, same block-scan idiom).
+_merged_pr_started_at() {   # $1=sid $2=optional pinned backlog snapshot → stdout: started_at or empty
+  local sid="$1" pinned_snapshot="${2:-}"
+  local tmp owns_tmp=false
+  if [[ -n "$pinned_snapshot" ]]; then
+    [[ -f "$pinned_snapshot" ]] || return 0
+    tmp="$pinned_snapshot"
+  else
+    tmp=$(mktemp)
+    owns_tmp=true
+    if ! git -C "$PROJECT_DIR" show "origin/${TARGET_BRANCH}:${BACKLOG_REL}" > "$tmp" 2>/dev/null; then
+      rm -f "$tmp" 2>/dev/null || true
+      return 0
+    fi
+  fi
+  python3 -c "
+import sys
+content = open('$tmp').read()
+sid = '${sid}'
+in_story = False
+for line in content.splitlines():
+    s = line.strip()
+    if s.startswith('- id:'):
+        in_story = s.split(':',1)[1].strip() == sid
+    elif in_story and s.startswith('started_at:'):
+        val = s.split(':',1)[1].strip().strip('\"').strip(\"'\")
+        if val:
+            print(val)
+        break
+" 2>/dev/null || true
+  $owns_tmp && rm -f "$tmp" 2>/dev/null || true
+}
+
+# Shared current-cycle provenance gate (AC1-AC3). A merged PR is authoritative
+# for an in_progress story's reconciliation only when GitHub created AND merged
+# it strictly after the current delivery cycle's started_at — a reused
+# story/<id> branch can retain an earlier cycle's PR, and branch identity alone
+# proves which story a PR names, not which cycle created it. Fail-closed: any
+# missing/invalid/non-later evidence refuses, never accepts.
+_merged_pr_is_current_cycle() {   # $1=sid $2=pr_created_at $3=pr_merged_at $4=pr_number $5=optional pinned backlog snapshot
+  local sid="$1" pr_created_at="$2" pr_merged_at="$3" pr_number="${4:-}" pinned_snapshot="${5:-}"
+  local started_at
+  started_at=$(_merged_pr_started_at "$sid" "$pinned_snapshot")
+
+  local reason
+  reason=$(python3 - "$started_at" "$pr_created_at" "$pr_merged_at" <<'PYEOF' 2>/dev/null || true
+import re
+import sys
+from datetime import datetime
+
+def missing(v):
+    return v is None or not v.strip() or v.strip() == '-'
+
+def parse(v):
+    if missing(v):
+        return None
+    v = v.strip()
+    # Require one unambiguous RFC-3339-style instant. datetime.fromisoformat
+    # otherwise accepts date-only/basic/naive forms and would let the daemon
+    # invent a timezone for evidence GitHub or the backlog did not provide.
+    match = re.fullmatch(
+        r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?'
+        r'(?P<zone>Z|(?P<sign>[+-])(?P<offset_hour>\d{2}):(?P<offset_minute>\d{2}))',
+        v,
+    )
+    if match is None:
+        return None
+    if match.group('zone') != 'Z':
+        offset_hour = int(match.group('offset_hour'))
+        offset_minute = int(match.group('offset_minute'))
+        # RFC 3339 numeric offsets are bounded clock fields. Its -00:00
+        # spelling means that the local offset is unknown, so it cannot serve
+        # as the unambiguous chronological evidence this gate requires.
+        if offset_hour > 23 or offset_minute > 59 or match.group('zone') == '-00:00':
+            return None
+    if v.endswith('Z'):
+        v = v[:-1] + '+00:00'
+    try:
+        dt = datetime.fromisoformat(v)
+    except Exception:
+        return None
+    return dt
+
+started_raw = sys.argv[1] if len(sys.argv) > 1 else ''
+created_raw = sys.argv[2] if len(sys.argv) > 2 else ''
+merged_raw = sys.argv[3] if len(sys.argv) > 3 else ''
+
+if missing(started_raw):
+    print('missing_started_at'); sys.exit(0)
+started = parse(started_raw)
+if started is None:
+    print('invalid_started_at'); sys.exit(0)
+
+if missing(created_raw):
+    print('missing_pr_created_at'); sys.exit(0)
+created = parse(created_raw)
+if created is None:
+    print('invalid_pr_created_at'); sys.exit(0)
+if created < started:
+    print('pr_before_cycle'); sys.exit(0)
+if created == started:
+    print('pr_not_after_cycle'); sys.exit(0)
+
+if missing(merged_raw):
+    print('missing_merged_at'); sys.exit(0)
+merged = parse(merged_raw)
+if merged is None:
+    print('invalid_merged_at'); sys.exit(0)
+if merged < started:
+    print('merge_before_cycle'); sys.exit(0)
+if merged == started:
+    print('merge_not_after_cycle'); sys.exit(0)
+
+print('ok')
+PYEOF
+)
+
+  case "$reason" in
+    ok)
+      return 0
+      ;;
+    missing_started_at|invalid_started_at|missing_pr_created_at|invalid_pr_created_at| \
+    pr_before_cycle|pr_not_after_cycle|missing_merged_at|invalid_merged_at| \
+    merge_before_cycle|merge_not_after_cycle)
+      ;;
+    *)
+      # Interpreter failure or unexpected output — fail-closed as the first
+      # applicable class when no valid cycle-start instant could be obtained.
+      reason="invalid_started_at"
+      ;;
+  esac
+
+  log "[CYCLE-GUARD] $sid : PR #${pr_number:-?} not current-cycle evidence (reason=$reason) started_at=${started_at:--} created_at=${pr_created_at:--} merged_at=${pr_merged_at:--} — no backlog mutation"
+  return 1
 }
 
 # Atomic reconciliation when a PR merge is detected for story <sid>.
@@ -2477,80 +2748,86 @@ _reconcile_merged_pr() {
   # a PR number — the number is cosmetic in the commit subject, never load-bearing.
   # (Was previously read from an ambient global that only 2 of 5 callers set, so the
   # pr-watcher/stale/drift paths crashed under `set -u` with "pr_number: unbound".)
-  local sid="$1" merged_at="$2" pr_number="${3:-}"
-
-  # AC1: pre-check reads from origin so an uncommitted local 'done' edit
-  # cannot mask a still-in_progress reconcile on origin (mirrors watcher read at ~2153).
-  local _pcheck_tmp _pcheck_status=""
-  _pcheck_tmp=$(mktemp)
-  if git -C "$PROJECT_DIR" show "origin/${TARGET_BRANCH}:${BACKLOG_REL}" > "$_pcheck_tmp" 2>/dev/null; then
-    _pcheck_status=$(backlog_status "$sid" "$_pcheck_tmp" 2>/dev/null || true)
-  fi
-  rm -f "$_pcheck_tmp" 2>/dev/null || true
-  if [[ "$_pcheck_status" == "done" ]]; then
-    log "${CYAN}[PR-WATCHER] $sid : already reconciled by concurrent path (origin confirms done), skipping${NC}"
-    return 0
-  fi
-
-  # Use chore-commit helper if available; otherwise fall back to inline scheduler
+  # pr_created_at ($4) is required for the current-cycle provenance gate below;
+  # a caller that omits it gets a refusal (missing_pr_created_at), never a
+  # weaker check — the empty default is the intended fail-closed failure mode.
+  local sid="$1" merged_at="$2" pr_number="${3:-}" pr_created_at="${4:-}"
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  local chore_lib="$script_dir/lib/chore-commit.sh"
-
   local reconcile_script
   reconcile_script=$(mktemp "$LOCK_DIR/.pr-watcher-reconcile-XXXXXX.sh")
 
-  if [[ -f "$chore_lib" ]]; then
-    # chore-commit helper available: use chore_commit_field
-    # Helper signature: chore_commit_field <story_id> <field> <new_value> <commit_subject>
-    # Requires env vars: LOCK_DIR, BACKLOG (= BACKLOG_FILE), TARGET_BRANCH — export below.
-    cat > "$reconcile_script" <<RECONCILE_EOF
+  # The authoritative gate and the landed mutation execute under the SAME
+  # staging lock. Function bodies are copied from the live daemon into the
+  # child script so the mutation boundary cannot drift to a weaker check.
+  cat > "$reconcile_script" <<RECONCILE_EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$PROJECT_DIR"
-export LOCK_DIR="$LOCK_DIR"
-export BACKLOG="$BACKLOG"
-export BACKLOG_FILE="$BACKLOG"
-export BACKLOG_REL="$BACKLOG_REL"
-export TARGET_BRANCH="$TARGET_BRANCH"
-export SCHEDULER="$SCHEDULER"
-source "$chore_lib"
-chore_commit_field "$sid" status done "chore($sid): done [pr-watcher: PR #$pr_number merged $merged_at]"
-chore_commit_field "$sid" phase_status done "chore($sid): phase_status=done [pr-watcher]"
-chore_commit_field "$sid" completed_at "$merged_at" "chore($sid): completed_at=$merged_at [pr-watcher]"
+PROJECT_DIR="$PROJECT_DIR"
+BACKLOG_REL="$BACKLOG_REL"
+TARGET_BRANCH="$TARGET_BRANCH"
+SCHEDULER="$SCHEDULER"
+LOG_FILE="${LOG_FILE:-/dev/null}"
+log() { printf '[%s] %s\n' "\$(date -u +%H:%M:%SZ)" "\$*" >> "\$LOG_FILE"; }
+source "$script_dir/lib/backlog-yaml.sh"
 RECONCILE_EOF
-  else
-    # chore-commit helper absent — inline fallback with mandatory working-tree drift guard
-    cat > "$reconcile_script" <<RECONCILE_EOF
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$PROJECT_DIR"
-if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  git reset --hard "origin/$TARGET_BRANCH" --quiet 2>/dev/null || true
+  declare -f _merged_pr_started_at >> "$reconcile_script"
+  declare -f _merged_pr_is_current_cycle >> "$reconcile_script"
+  cat >> "$reconcile_script" <<RECONCILE_EOF
+
+snapshot= index_file=
+cleanup() { rm -f "\${snapshot:-}" "\${index_file:-}" 2>/dev/null || true; }
+trap cleanup EXIT
+
+# Refresh while holding the staging lock, then bind every read and the commit
+# parent to the same remote SHA. A cross-device push makes the exact-parent
+# push fail; the next scan fetches and revalidates instead of rebasing an old
+# provenance verdict onto a new delivery cycle.
+git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || exit 1
+remote_sha=\$(git rev-parse "origin/$TARGET_BRANCH" 2>/dev/null) || exit 1
+snapshot=\$(mktemp)
+git show "\${remote_sha}:$BACKLOG_REL" > "\$snapshot" 2>/dev/null || exit 1
+
+remote_status=\$(backlog_status "$sid" "\$snapshot" 2>/dev/null || true)
+if [[ "\$remote_status" == "done" ]]; then
+  exit 0
 fi
-if ! git diff --quiet HEAD -- "$BACKLOG_REL" 2>/dev/null; then
-  echo "[PR-WATCHER] $sid : working-tree drift on $BACKLOG_REL — operator must resolve drift before watcher can reconcile, skipping this cycle" >&2
+if [[ "\$remote_status" != "in_progress" ]]; then
+  log "[PR-WATCHER] $sid : reconciliation refused because remote status is \${remote_status:-missing}, expected in_progress"
   exit 1
 fi
-"$SCHEDULER" --set-status "$sid" done "$BACKLOG" 2>/dev/null
-"$SCHEDULER" --set-phase-status "$sid" done "$BACKLOG" 2>/dev/null
-"$SCHEDULER" --set-field "$sid" completed_at "$merged_at" "$BACKLOG" 2>/dev/null
-git add "$BACKLOG_REL"
-git diff --cached --quiet || git commit -m "chore($sid): done [pr-watcher]" --quiet
-git push origin "HEAD:$TARGET_BRANCH" --quiet 2>&1
+
+_merged_pr_is_current_cycle "$sid" "$pr_created_at" "$merged_at" "$pr_number" "\$snapshot" || exit 1
+
+"$SCHEDULER" --set-field "$sid" status done "\$snapshot" >/dev/null
+"$SCHEDULER" --set-field "$sid" phase_status done "\$snapshot" >/dev/null
+"$SCHEDULER" --set-field "$sid" completed_at "$merged_at" "\$snapshot" >/dev/null
+
+index_file=\$(mktemp)
+rm -f "\$index_file"
+GIT_INDEX_FILE="\$index_file" git read-tree "\$remote_sha"
+backlog_blob=\$(git hash-object -w -- "\$snapshot")
+GIT_INDEX_FILE="\$index_file" git update-index --add --cacheinfo 100644 "\$backlog_blob" "$BACKLOG_REL"
+new_tree=\$(GIT_INDEX_FILE="\$index_file" git write-tree)
+new_commit=\$(printf '%s\n' "chore($sid): done [pr-watcher: PR #$pr_number merged $merged_at]" \
+  | git commit-tree "\$new_tree" -p "\$remote_sha")
+
+if ! git push origin "\$new_commit:refs/heads/$TARGET_BRANCH" --quiet 2>/dev/null; then
+  log "[PR-WATCHER] $sid : exact-parent push lost a race; no reconcile landed, next scan will fetch and revalidate"
+  exit 1
+fi
 RECONCILE_EOF
-  fi
 
   chmod +x "$reconcile_script"
   local rc=0
-  with_staging_lock bash "$reconcile_script" 2>/dev/null || rc=$?
+  with_staging_lock bash "$reconcile_script" 2>>"${LOG_FILE:-/dev/null}" || rc=$?
   rm -f "$reconcile_script" 2>/dev/null || true
 
   if [[ $rc -ne 0 ]]; then
     # AC3: distinct error class via a surviving channel (this daemon log line +
-    # marker file), independent of the reconcile script's own discarded stderr
-    # (invoked above with `2>/dev/null`) — rate-limited so a persistent failure
+    # marker file), independent of the reconcile script's stderr (also appended
+    # to the daemon log above) — rate-limited so a persistent failure
     # doesn't spam every ~35s cycle, but always fires on first occurrence
     # (mirrors the .reconcile-sweep.unmerged.${sid} marker pattern at ~2181).
     local _unlanded_marker="$LOCK_DIR/.reconcile-unlanded.${sid}"
@@ -2560,7 +2837,7 @@ RECONCILE_EOF
     [[ -f "$_unlanded_marker" ]] && _last_ts=$(cat "$_unlanded_marker" 2>/dev/null || echo 0)
     _quiet_for=$(( _now_ts - _last_ts ))
     if (( _quiet_for >= 3600 )); then
-      log "${RED}[PR-WATCHER] $sid : RECONCILE_UNLANDED — chore-commit failed to land backlog write on origin (rc=$rc), leaving in_progress, will retry next cycle (log throttled 1h)${NC}"
+      log "${RED}[PR-WATCHER] $sid : RECONCILE_UNLANDED — atomic reconcile failed to land backlog write on origin (rc=$rc), leaving in_progress, will retry next cycle (log throttled 1h)${NC}"
       echo "$_now_ts" > "$_unlanded_marker"
     fi
     return 1

@@ -17,9 +17,12 @@ fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DAEMON="$SCRIPT_DIR/../delivery-daemon.sh"
 SCHEDULER="$SCRIPT_DIR/../backlog-scheduler.sh"
+BACKLOG_LIB="$SCRIPT_DIR/../lib/backlog-yaml.sh"
 
 FIXTURE_DIR="/tmp/gaai-pr-watcher-test-$$"
 mkdir -p "$FIXTURE_DIR"
+mkdir -p "$FIXTURE_DIR/lib"
+cp "$BACKLOG_LIB" "$FIXTURE_DIR/lib/backlog-yaml.sh"
 
 cleanup() { rm -rf "$FIXTURE_DIR"; }
 trap cleanup EXIT
@@ -146,10 +149,12 @@ source "$SCRIPT_DIR/../lib/backlog-yaml.sh"
 # non-zero commands staying non-fatal, so restore the harness's own options.
 set +e
 
-# Extract the three new watcher functions from delivery-daemon.sh
+# Extract the watcher functions + current-cycle gate dependencies from delivery-daemon.sh
 eval "\$(awk '
   /^sweep_cleanup_pending\(\)/{p=1; depth=0}
   /^watch_pr_merge_status\(\)/{p=1; depth=0}
+  /^_merged_pr_started_at\(\)/{p=1; depth=0}
+  /^_merged_pr_is_current_cycle\(\)/{p=1; depth=0}
   /^_reconcile_merged_pr\(\)/{p=1; depth=0}
   p {
     print
@@ -223,11 +228,12 @@ T2_YAML="- id: $T2_SID
   status: in_progress
   phase_status: qa_passed
   pr_url: https://github.com/org/repo/pull/99
-  delivery_pipeline: 3phase"
+  delivery_pipeline: 3phase
+  started_at: \"2026-05-11T08:00:00Z\""
 
 setup_git_repo "$T2_DIR" "$T2_YAML"
 create_mock_gh "$T2_MOCK_GH"
-export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"staging"}'
+export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"staging","createdAt":"2026-05-11T09:00:00Z"}'
 export MOCK_GH_EXIT=0
 
 T2_HARNESS=$(mktemp "$FIXTURE_DIR/t2-XXXXXX.sh")
@@ -396,7 +402,7 @@ T5_YAML="- id: $T5_SID
 
 setup_git_repo "$T5_DIR" "$T5_YAML"
 create_mock_gh "$T5_MOCK_GH"
-export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"staging"}'
+export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"staging","createdAt":"2026-05-11T09:00:00Z"}'
 export MOCK_GH_EXIT=0
 
 T5_HARNESS=$(mktemp "$FIXTURE_DIR/t5-XXXXXX.sh")
@@ -452,7 +458,7 @@ T6_YAML="- id: $T6_SID
 
 setup_git_repo "$T6_DIR" "$T6_YAML"
 create_mock_gh "$T6_MOCK_GH"
-export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"staging"}'
+export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"staging","createdAt":"2026-05-11T09:00:00Z"}'
 export MOCK_GH_EXIT=0
 
 T6_HARNESS=$(mktemp "$FIXTURE_DIR/t6-XXXXXX.sh")
@@ -503,11 +509,12 @@ T7_YAML="- id: $T7_SID
   status: in_progress
   phase_status: qa_passed
   pr_url: https://github.com/org/repo/pull/707
-  delivery_pipeline: 3phase"
+  delivery_pipeline: 3phase
+  started_at: \"2026-05-11T08:00:00Z\""
 
 setup_git_repo "$T7_DIR" "$T7_YAML"
 create_mock_gh "$T7_MOCK_GH"
-export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"staging"}'
+export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"staging","createdAt":"2026-05-11T09:00:00Z"}'
 export MOCK_GH_EXIT=0
 
 # Create a non-worktree directory at the worktree path.

@@ -50,6 +50,8 @@ ROUTING_LOG="/tmp/gaai-daemon-state-machine.routing.jsonl"
 # Clean up on exit
 cleanup() {
   rm -f "$FIXTURE" "$ROUTING_LOG"
+  rm -f "${ADMISSION_CALL_LOG:-}"
+  rm -rf "${LOCAL_ADMISSION_FIXTURE:-}"
   rm -rf "${LOCK_DIR:-}"
 }
 trap cleanup EXIT
@@ -104,6 +106,26 @@ mkdir -p "$LOCK_DIR"
 
 # shellcheck disable=SC1090
 source "$DISPATCH_LIB"
+
+# Preserve the production boundaries for the real integration fixture at the
+# end. Older state-machine cases isolate other concerns and receive an explicit
+# PASS double whose call log proves placement and ordering.
+REAL_PRE_QA_DEF=$(declare -f _prepare_pre_qa_admission)
+REAL_ADMIT_DEF=$(declare -f _admit_current_candidate)
+ADMISSION_CALL_LOG="/tmp/gaai-daemon-state-machine.admission.$$.log"
+: > "$ADMISSION_CALL_LOG"
+_prepare_pre_qa_admission() {
+  printf 'pre_qa|%s\n' "$1" >> "$ADMISSION_CALL_LOG"
+  GAAI_ADMITTED_SHA=$(git -C "$3" rev-parse HEAD 2>/dev/null || printf '%040d' 1)
+  GAAI_ADMITTED_BASE_SHA=$(git -C "$3" rev-parse origin/staging 2>/dev/null || printf '%040d' 2)
+  return 0
+}
+_admit_current_candidate() {
+  printf '%s|%s\n' "$1" "$2" >> "$ADMISSION_CALL_LOG"
+  GAAI_ADMITTED_SHA=$(git -C "$4" rev-parse HEAD 2>/dev/null || printf '%040d' 1)
+  GAAI_ADMITTED_BASE_SHA=$(git -C "$4" rev-parse origin/staging 2>/dev/null || printf '%040d' 2)
+  return 0
+}
 
 # State-machine tests below exercise commit/PR behavior downstream of merge
 # authority. Bind those paths to an explicit hosted-pass tuple so the fixtures
@@ -210,7 +232,7 @@ chmod +x "$DISPATCH_SHIM_DIR/claude"
 
 # git shim for commit phase (T7c): intercept push → exit 0, delegate rest to real git
 DISPATCH_REAL_GIT_BIN="$(command -v git)"
-export DISPATCH_REAL_GIT_BIN
+export DISPATCH_REAL_GIT_BIN GAAI_DISPATCH_PUSH_SHA_FILE="$DISPATCH_FIXTURE_DIR/push-sha"
 cat > "$DISPATCH_SHIM_DIR/git" << 'DISPATCH_GIT_SHIM_EOF'
 #!/usr/bin/env bash
 _i=0; _args=("$@")
@@ -218,7 +240,17 @@ while [[ $_i -lt ${#_args[@]} ]]; do
   [[ "${_args[$_i]}" == "-C" ]] && { _i=$(( _i + 2 )); continue; }
   break
 done
-[[ "${_args[$_i]:-}" == "push" ]] && exit 0
+if [[ "${_args[$_i]:-}" == "push" ]]; then
+  for _arg in "${_args[@]}"; do
+    [[ "$_arg" == *:refs/heads/* ]] && printf '%s\t%s\n' "${_arg%%:*}" "${_arg#*:}" > "$GAAI_DISPATCH_PUSH_SHA_FILE"
+  done
+  exit 0
+fi
+if [[ "${_args[$_i]:-}" == "ls-remote" && -s "$GAAI_DISPATCH_PUSH_SHA_FILE" ]]; then
+  _last=$((${#_args[@]} - 1)); _wanted="${_args[$_last]}"
+  IFS=$'\t' read -r _sha _dest < "$GAAI_DISPATCH_PUSH_SHA_FILE"
+  [[ "$_wanted" == "$_dest" ]] && { printf '%s\t%s\n' "$_sha" "$_dest"; exit 0; }
+fi
 exec "$DISPATCH_REAL_GIT_BIN" "$@"
 DISPATCH_GIT_SHIM_EOF
 chmod +x "$DISPATCH_SHIM_DIR/git"
@@ -411,7 +443,14 @@ if [[ "${_t7_qa:-0}" -ge 1 && "${_t7_commit:-0}" -ge 1 ]]; then
 else
   fail "T7d: expected qa+commit records, got qa=${_t7_qa:-0} commit=${_t7_commit:-0}"
 fi
-unset _t7_qa _t7_commit
+_t7_story_id=$(awk '/^- id:/{print $3; exit}' "$FIXTURE")
+if awk -F'|' -v sid="$_t7_story_id" '$1=="pre_qa"&&$2==sid{pre=NR} $1=="final"&&$2==sid{fin=NR} END{exit !(pre&&fin&&pre<fin)}' "$ADMISSION_CALL_LOG" \
+    && [[ -s "$GAAI_DISPATCH_PUSH_SHA_FILE" ]]; then
+  pass "T7e: pre-QA admission precedes final admission and exact-SHA publication"
+else
+  fail "T7e: local admission ordering or exact-SHA push evidence missing"
+fi
+unset _t7_qa _t7_commit _t7_story_id
 
 # ── T8: dispatch on terminal state (done) returns 0 without crashing ──────
 echo "T8: dispatch on done state returns 0"
@@ -1392,6 +1431,46 @@ else
   fail "T29b: dispatch returned non-zero for qa_escalated — should be terminal"
 fi
 
+# ── T29c: complete AC4 rejection matrix blocks every QA spawn ─────────────
+echo "T29c: every typed local-admission rejection blocks semantic QA spend"
+QA_ADMISSION_SPEND_LOG="$QA_FIXTURE_DIR/admission-spend.log"
+PRE_QA_BEFORE_AC4_MATRIX=$(declare -f _prepare_pre_qa_admission)
+cat > "$QA_SHIM_DIR/claude" <<QA_ADMISSION_SHIM
+#!/usr/bin/env bash
+printf 'spawned\n' >> "$QA_ADMISSION_SPEND_LOG"
+exit 99
+QA_ADMISSION_SHIM
+chmod +x "$QA_SHIM_DIR/claude"
+_prepare_pre_qa_admission() {
+  _route_admission_block "$1" "$2" pre_qa "$_AC4_MATRIX_OUTCOME"
+  return 1
+}
+AC4_MATRIX=(
+  blocked:risk_inputs_missing
+  blocked:stale_evidence
+  blocked:policy_ambiguous
+  blocked:command_skipped
+  blocked:command_cancelled
+  blocked:command_timed_out
+  blocked:command_failed
+)
+for _matrix_outcome in "${AC4_MATRIX[@]}"; do
+  _AC4_MATRIX_OUTCOME="$_matrix_outcome"
+  : > "$QA_ADMISSION_SPEND_LOG"
+  "$SCHEDULER" --set-phase-status TST-QA-SPAWN-ERR implemented "$FIXTURE" 2>/dev/null || true
+  > "$ROUTING_LOG"
+  handle_qa_phase TST-QA-SPAWN-ERR "trace-${_matrix_outcome//[:_]/-}" >/dev/null 2>&1 || true
+  if [[ ! -s "$QA_ADMISSION_SPEND_LOG" ]] \
+      && grep -q "\"fallback_reason\":\"${_matrix_outcome}\"" "$ROUTING_LOG"; then
+    pass "T29c ${_matrix_outcome}: typed route emitted and no QA model spawned"
+  else
+    fail "T29c ${_matrix_outcome}: rejection reached model spend or lost its typed route"
+  fi
+done
+eval "$PRE_QA_BEFORE_AC4_MATRIX"
+unset _matrix_outcome _AC4_MATRIX_OUTCOME QA_ADMISSION_SPEND_LOG
+unset PRE_QA_BEFORE_AC4_MATRIX
+
 # Cleanup QA phase test fixtures
 export PATH="$QA_OLD_PATH"
 export PROJECT_DIR="$PROJECT_DIR_QA_ORIG"
@@ -1508,6 +1587,7 @@ mkdir -p "$COMMIT_SHIM_DIR"
 # git shim: intercepts 'push', delegates everything else to real git
 COMMIT_REAL_GIT="$(command -v git)"
 export COMMIT_REAL_GIT GAAI_SHIM_PUSH_FAIL GAAI_SHIM_GH_AUTH_FAIL GAAI_SHIM_GH_PR_EXISTS GAAI_SHIM_HEAD_IS_ANCESTOR GAAI_SHIM_GH_PR_MERGED
+export GAAI_COMMIT_PUSH_STATE_FILE="$COMMIT_FIXTURE_DIR/push-state"
 export GAAI_SHIM_AUTOMERGE_NULL GAAI_SHIM_AUTOMERGE_FAIL
 GAAI_SHIM_PUSH_FAIL=0
 GAAI_SHIM_GH_AUTH_FAIL=0
@@ -1535,7 +1615,15 @@ if [[ "$_subcmd" == "push" ]]; then
   if [[ "${GAAI_SHIM_PUSH_FAIL:-0}" == "1" ]]; then
     echo "error: remote push failed" >&2; exit 1
   fi
+  for _arg in "${_args[@]}"; do
+    [[ "$_arg" == *:refs/heads/* ]] && printf '%s\t%s\n' "${_arg%%:*}" "${_arg#*:}" > "$GAAI_COMMIT_PUSH_STATE_FILE"
+  done
   exit 0
+fi
+if [[ "$_subcmd" == "ls-remote" && -s "$GAAI_COMMIT_PUSH_STATE_FILE" ]]; then
+  _last=$((${#_args[@]} - 1)); _wanted="${_args[$_last]}"
+  IFS=$'\t' read -r _sha _dest < "$GAAI_COMMIT_PUSH_STATE_FILE"
+  [[ "$_wanted" == "$_dest" ]] && { printf '%s\t%s\n' "$_sha" "$_dest"; exit 0; }
 fi
 # Guard 1 shim: intercept merge-base --is-ancestor when flag is set
 if [[ "$_subcmd" == "merge-base" ]] && [[ "${GAAI_SHIM_HEAD_IS_ANCESTOR:-0}" == "1" ]]; then
@@ -3079,6 +3167,104 @@ else
   unset RUNBOOK_MISSING
 fi
 unset RUNBOOK_DOC
+
+# ── LOCAL-ADMISSION-REAL: actual seal/reconcile/execute at both boundaries ─
+echo "LOCAL-ADMISSION-REAL: real adapter seals distinct current receipts before remote publication"
+eval "$REAL_PRE_QA_DEF"
+eval "$REAL_ADMIT_DEF"
+LOCAL_ADMISSION_FIXTURE=$(mktemp -d /tmp/gaai-daemon-admission-real-XXXXXX)
+LAR_REPO="$LOCAL_ADMISSION_FIXTURE/repo"; LAR_REMOTE="$LOCAL_ADMISSION_FIXTURE/remote.git"
+mkdir -p "$LAR_REPO/.gaai/project/ci" "$LAR_REPO/src" "$LOCAL_ADMISSION_FIXTURE/locks"
+git init -q --bare "$LAR_REMOTE"; git init -q "$LAR_REPO"
+git -C "$LAR_REPO" config user.email test@example.com; git -C "$LAR_REPO" config user.name Test
+git -C "$LAR_REPO" checkout -q -b staging; git -C "$LAR_REPO" remote add origin "$LAR_REMOTE"
+printf '{"name":"admission-fixture"}\n' > "$LAR_REPO/package.json"
+cat > "$LAR_REPO/.gaai/project/ci/local-admission.json" <<POLICY_EOF
+{"schema_version":"1.0.0","policy_version":"test-1","repository":{"remote":"$LAR_REMOTE","base_ref":"staging"},"limits":{"max_policy_bytes":100000,"max_diff_bytes":100000,"max_changed_paths":20,"max_commands":5,"max_selectors":5,"max_identifier_bytes":80,"max_arguments_per_command":8,"max_argument_bytes":200},"commands":[{"id":"unit","argv":["node","-e","process.exit(0)"],"timeout_seconds":10,"output_limit_bytes":1024,"config_paths":["package.json"],"enabled":true}],"selectors":[{"id":"source","path_prefixes":["src"],"command_ids":["unit"]}],"exhaustive_command_ids":["unit"],"non_executable_prefixes":[".gaai/project/contexts/artefacts"],"broadening_prefixes":["package.json"],"dependency_inputs":["package.json"],"risk_input_policy":{"allowed_boolean_keys":["cross_cutting"],"exhaustive_when_true":["cross_cutting"]},"required_environment":[]}
+POLICY_EOF
+git -C "$LAR_REPO" add -A; git -C "$LAR_REPO" commit -q -m base; git -C "$LAR_REPO" push -q origin staging
+git -C "$LAR_REPO" checkout -q -b story/TST-LOCAL-ADMISSION
+printf '{"cross_cutting":false}\n' > "$LOCAL_ADMISSION_FIXTURE/risk.json"
+mkdir -p "$LAR_REPO/.gaai/project/contexts/artefacts/plans" \
+  "$LAR_REPO/.gaai/project/contexts/artefacts/impl-reports"
+printf 'plan\n' > "$LAR_REPO/.gaai/project/contexts/artefacts/plans/TST-LOCAL-ADMISSION.execution-plan.md"
+printf 'report\n' > "$LAR_REPO/.gaai/project/contexts/artefacts/impl-reports/TST-LOCAL-ADMISSION.impl-report.md"
+LAR_BASE_HEAD=$(git -C "$LAR_REPO" rev-parse HEAD)
+if LOCK_DIR="$LOCAL_ADMISSION_FIXTURE/locks" TARGET_BRANCH=staging \
+  GAAI_LOCAL_ADMISSION_POLICY_PATH=.gaai/project/ci/local-admission.json \
+  GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH="$LOCAL_ADMISSION_FIXTURE/risk.json" \
+  GAAI_LOCAL_ADMISSION_MAX_RECEIPT_BYTES=65536 \
+    _prepare_pre_qa_admission TST-LOCAL-ADMISSION trace-empty "$LAR_REPO"; then
+  LAR_EMPTY_RC=0
+else
+  LAR_EMPTY_RC=$?
+fi
+if [[ "$LAR_EMPTY_RC" -ne 0 && "$LOCAL_ADMISSION_OUTCOME" == blocked:empty_candidate_diff \
+      && "$(git -C "$LAR_REPO" rev-parse HEAD)" == "$LAR_BASE_HEAD" \
+      && ! -e "$LOCAL_ADMISSION_FIXTURE/locks/local-admission-receipts/.local-admission-TST-LOCAL-ADMISSION-pre_qa.json" ]]; then
+  pass "LOCAL-ADMISSION-REAL-a: control artefacts alone are an empty implementation and cannot reach QA"
+else
+  fail "LOCAL-ADMISSION-REAL-a: empty implementation was not rejected before QA"
+fi
+printf 'change\n' > "$LAR_REPO/src/change.txt"
+LOCK_DIR="$LOCAL_ADMISSION_FIXTURE/locks" TARGET_BRANCH=staging \
+GAAI_LOCAL_ADMISSION_POLICY_PATH=.gaai/project/ci/local-admission.json \
+GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH="$LOCAL_ADMISSION_FIXTURE/risk.json" \
+GAAI_LOCAL_ADMISSION_MAX_RECEIPT_BYTES=65536 \
+  _prepare_pre_qa_admission TST-LOCAL-ADMISSION trace-real "$LAR_REPO"
+LAR_PRE_RC=$?; LAR_PRE_RECEIPT="$GAAI_ADMISSION_RECEIPT"; LAR_PRE_SHA="$GAAI_ADMITTED_SHA"
+if [[ "$LAR_PRE_RC" -eq 0 && -s "$LAR_PRE_RECEIPT" ]] \
+    && git -C "$LAR_REPO" log -1 --format=%B | grep -q '^\[gaai-local-admission:pre_qa\]$' \
+    && node -e 'const r=require(process.argv[1]);process.exit(r.boundary==="pre_qa"&&r.outcome==="pass"&&!r.publication_admitted&&r.results.every(x=>x.outcome==="passed")?0:1)' "$LAR_PRE_RECEIPT"; then
+  pass "LOCAL-ADMISSION-REAL-b: implementation is sealed and real pre-QA commands PASS"
+else
+  fail "LOCAL-ADMISSION-REAL-b: real pre-QA boundary failed"
+fi
+mkdir -p "$LAR_REPO/.gaai/project/contexts/artefacts/qa-reports"
+printf 'qa evidence\n' > "$LAR_REPO/.gaai/project/contexts/artefacts/qa-reports/TST-LOCAL-ADMISSION.qa-report.md"
+git -C "$LAR_REPO" add -A; git -C "$LAR_REPO" commit -q -m 'final evidence'
+LOCK_DIR="$LOCAL_ADMISSION_FIXTURE/locks" TARGET_BRANCH=staging \
+GAAI_LOCAL_ADMISSION_POLICY_PATH=.gaai/project/ci/local-admission.json \
+GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH="$LOCAL_ADMISSION_FIXTURE/risk.json" \
+GAAI_LOCAL_ADMISSION_MAX_RECEIPT_BYTES=65536 \
+  _admit_current_candidate final TST-LOCAL-ADMISSION trace-real "$LAR_REPO"
+LAR_FINAL_RC=$?; LAR_FINAL_RECEIPT="$GAAI_ADMISSION_RECEIPT"
+if [[ "$LAR_FINAL_RC" -eq 0 && -s "$LAR_FINAL_RECEIPT" && "$LAR_FINAL_RECEIPT" != "$LAR_PRE_RECEIPT" \
+      && "$GAAI_ADMITTED_SHA" != "$LAR_PRE_SHA" ]] \
+    && node -e 'const r=require(process.argv[1]);process.exit(r.boundary==="final"&&r.outcome==="pass"&&r.publication_admitted?0:1)' "$LAR_FINAL_RECEIPT" \
+    && [[ -z "$(git -C "$LAR_REPO" ls-remote --heads origin refs/heads/story/TST-LOCAL-ADMISSION)" ]]; then
+  pass "LOCAL-ADMISSION-REAL-c: final receipt is distinct/current and no remote branch exists yet"
+else
+  fail "LOCAL-ADMISSION-REAL-c: final currentness/publication separation failed"
+fi
+
+# ── LOCAL-ADMISSION-AC4: every typed final rejection blocks remote calls ──
+echo "LOCAL-ADMISSION-AC4: complete rejection matrix blocks publication"
+AC4_REMOTE_LOG="$LOCAL_ADMISSION_FIXTURE/remote-calls.log"
+git() {
+  case " $* " in
+    *" push "*|*" ls-remote "*) printf '%s\n' "$*" >> "$AC4_REMOTE_LOG" ;;
+  esac
+  command git "$@"
+}
+_admit_current_candidate() {
+  _route_admission_block "$2" "$3" final "$_AC4_MATRIX_OUTCOME"
+  return 1
+}
+for _matrix_outcome in "${AC4_MATRIX[@]}"; do
+  _AC4_MATRIX_OUTCOME="$_matrix_outcome"
+  : > "$AC4_REMOTE_LOG"
+  if _auto_resolve_push /nonexistent "story/TST-LOCAL-ADMISSION" "" \
+      TST-LOCAL-ADMISSION "trace-${_matrix_outcome//[:_]/-}" >/dev/null 2>&1; then
+    fail "LOCAL-ADMISSION-AC4 ${_matrix_outcome}: rejected final admission returned success"
+  elif [[ ! -s "$AC4_REMOTE_LOG" ]]; then
+    pass "LOCAL-ADMISSION-AC4 ${_matrix_outcome}: no push or remote observation"
+  else
+    fail "LOCAL-ADMISSION-AC4 ${_matrix_outcome}: rejection reached a remote Git call"
+  fi
+done
+unset -f git
+unset _matrix_outcome _AC4_MATRIX_OUTCOME AC4_REMOTE_LOG AC4_MATRIX
 
 # ── Summary ───────────────────────────────────────────────────
 echo ""

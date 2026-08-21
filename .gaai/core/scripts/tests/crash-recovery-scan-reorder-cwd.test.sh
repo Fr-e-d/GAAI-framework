@@ -129,6 +129,7 @@ _recovery_revert_refined() { echo "REVERT_CALLED" >> "$FIXTURE_DIR/live-revert-c
 _commit_accumulated_backlog_drift() { echo "DRIFT_COMMIT_CALLED" >> "$FIXTURE_DIR/live-drift-called"; return 0; }
 
 source "$SCRIPT_DIR/../lib/backlog-yaml.sh" 2>/dev/null || true
+source "$SCRIPT_DIR/../lib/commit-retry-containment.sh"
 
 eval "\$(awk '
   /^_write_drift_marker\(\)/{p=1; depth=0}
@@ -295,6 +296,7 @@ fetch_and_read_backlog() {
 
 source "$SCRIPT_DIR/../lib/backlog-yaml.sh" 2>/dev/null || true
 source "$DAEMON_SCRIPT_DIR/lib/chore-commit.sh"
+source "$DAEMON_SCRIPT_DIR/lib/commit-retry-containment.sh"
 
 eval "\$(awk '
   /^_write_drift_marker\(\)/{p=1; depth=0}
