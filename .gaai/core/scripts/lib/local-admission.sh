@@ -46,9 +46,18 @@ _local_admission_reject_with_plan() {
     "$results_digest" "$binding_digest" "$outcome" "$limit" "$receipt_dir"
 }
 
+_local_admission_resolve() {
+  local resolver="$1" repo="$2" base_ref="$3" base_sha="$4" head_sha="$5"
+  local policy="$6" risk="$7" output="$8"
+  local args=(--repo "$repo" --base-ref "$base_ref" --base-sha "$base_sha"
+    --head-sha "$head_sha" --policy "$policy" --output "$output")
+  [[ -n "$risk" ]] && args+=(--risk-inputs "$risk")
+  node "$resolver" "${args[@]}"
+}
+
 _run_local_admission() {
   local boundary="$1" story="$2" repo="$3" base_ref="$4" receipt_dir="$5"
-  local lib_dir resolver executor policy risk limit scratch plan fresh verify results target_receipt seal_plan seal_binding
+  local lib_dir resolver executor policy risk limit result_limit result_bytes limits scratch plan fresh verify results target_receipt seal_plan seal_binding
   local base_sha head_sha binding_digest results_digest fresh_base fresh_head fresh_summary fresh_binding verify_summary verify_binding reason outcome
   LOCAL_ADMISSION_OUTCOME="blocked:unknown"; LOCAL_ADMISSION_RECEIPT_PATH=""
   case "$boundary" in pre_qa|final) ;; *) LOCAL_ADMISSION_OUTCOME="blocked:boundary_invalid"; return 1 ;; esac
@@ -63,16 +72,16 @@ _run_local_admission() {
     || { LOCAL_ADMISSION_OUTCOME="blocked:receipt_storage_unavailable"; return 1; }
   policy="${GAAI_LOCAL_ADMISSION_POLICY_PATH:-.gaai/project/ci/local-admission.json}"
   risk="${GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH:-}"
-  limit="${GAAI_LOCAL_ADMISSION_MAX_RECEIPT_BYTES:-}"
-  [[ -n "$risk" && -f "$risk" ]] \
+  [[ -z "$risk" || -f "$risk" ]] \
     || { LOCAL_ADMISSION_OUTCOME="blocked:risk_inputs_missing"; return 1; }
-  [[ "$limit" =~ ^[1-9][0-9]*$ ]] \
-    || { LOCAL_ADMISSION_OUTCOME="blocked:receipt_limit_invalid"; return 1; }
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/gaai-local-admission.XXXXXX") \
     || { LOCAL_ADMISSION_OUTCOME="blocked:temporary_storage_unavailable"; return 1; }
   chmod 700 "$scratch" 2>/dev/null || { LOCAL_ADMISSION_OUTCOME="blocked:temporary_storage_unavailable"; _local_admission_cleanup "$scratch"; return 1; }
   plan="$scratch/plan.json"; fresh="$scratch/fresh.json"; verify="$scratch/verify.json"; results="$scratch/results.json"
-  lib_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  # Node canonicalizes symlinked entrypoint paths before exposing import.meta.url.
+  # Resolve the shell-side path physically too, otherwise aliases such as macOS
+  # /var -> /private/var make the resolver/executor CLI guards silently skip main().
+  lib_dir=$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
   resolver="$lib_dir/local-admission-resolver.mjs"; executor="$lib_dir/local-admission-executor.mjs"
 
   if ! git -C "$repo" fetch origin "$base_ref" --quiet 2>/dev/null; then
@@ -81,15 +90,17 @@ _run_local_admission() {
   base_sha=$(git -C "$repo" rev-parse "origin/$base_ref" 2>/dev/null) \
     && head_sha=$(git -C "$repo" rev-parse HEAD 2>/dev/null) \
     || { LOCAL_ADMISSION_OUTCOME="blocked:candidate_unresolvable"; _local_admission_cleanup "$scratch"; return 1; }
-  node "$resolver" --repo "$repo" --base-ref "$base_ref" --base-sha "$base_sha" \
-    --head-sha "$head_sha" --policy "$policy" --risk-inputs "$risk" --output "$plan" >/dev/null 2>&1 || true
+  _local_admission_resolve "$resolver" "$repo" "$base_ref" "$base_sha" "$head_sha" \
+    "$policy" "$risk" "$plan" >/dev/null 2>&1 || true
   if [[ ! -s "$plan" ]] || [[ "$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.status||"")' "$plan" 2>/dev/null)" != resolved ]]; then
     reason=$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.reason||"resolver_failed")' "$plan" 2>/dev/null || echo resolver_failed)
     LOCAL_ADMISSION_OUTCOME="blocked:${reason}"
-    [[ -s "$plan" ]] && _local_admission_reject_with_plan "$executor" "$boundary" "$story" \
-      "$plan" "$results" "$LOCAL_ADMISSION_OUTCOME" "$limit" "$receipt_dir" || true
     _local_admission_cleanup "$scratch"; return 1
   fi
+  limits=$(node -e 'const p=require(process.argv[1]);console.log(`${p.limits?.max_receipt_bytes||""}\t${p.limits?.max_result_bytes||""}`)' "$plan" 2>/dev/null || true)
+  IFS=$'\t' read -r limit result_limit <<<"$limits"
+  [[ "$limit" =~ ^[1-9][0-9]*$ && "$result_limit" =~ ^[1-9][0-9]*$ ]] \
+    || { LOCAL_ADMISSION_OUTCOME="blocked:policy_limits_invalid"; _local_admission_cleanup "$scratch"; return 1; }
   binding_digest=$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.binding_digest)' "$plan")
   seal_plan="$plan"; seal_binding="$binding_digest"
   if ! results_digest=$(node "$executor" --mode execute --plan "$plan" --repo "$repo" --output "$results"); then
@@ -98,13 +109,20 @@ _run_local_admission() {
       "$LOCAL_ADMISSION_OUTCOME" "$limit" "$receipt_dir" || true
     _local_admission_cleanup "$scratch"; return 1
   fi
+  result_bytes=$(node -e 'const fs=require("fs");const s=fs.readFileSync(process.argv[1],"utf8").trimEnd();process.stdout.write(String(Buffer.byteLength(s)))' "$results" 2>/dev/null || true)
+  if [[ ! "$result_bytes" =~ ^[0-9]+$ || "$result_bytes" -gt "$result_limit" ]]; then
+    LOCAL_ADMISSION_OUTCOME="blocked:results_too_large"
+    _local_admission_seal "$executor" "$boundary" "$story" "$plan" "$results" \
+      "$results_digest" "$binding_digest" "$LOCAL_ADMISSION_OUTCOME" "$limit" "$receipt_dir" || true
+    _local_admission_cleanup "$scratch"; return 1
+  fi
   if ! git -C "$repo" fetch origin "$base_ref" --quiet 2>/dev/null; then
     outcome="blocked:base_fetch_failed"
   else
     fresh_base=$(git -C "$repo" rev-parse "origin/$base_ref" 2>/dev/null || true)
     fresh_head=$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)
-    fresh_summary=$(node "$resolver" --repo "$repo" --base-ref "$base_ref" --base-sha "$fresh_base" \
-      --head-sha "$fresh_head" --policy "$policy" --risk-inputs "$risk" --output "$fresh" 2>/dev/null || true)
+    fresh_summary=$(_local_admission_resolve "$resolver" "$repo" "$base_ref" "$fresh_base" "$fresh_head" \
+      "$policy" "$risk" "$fresh" 2>/dev/null || true)
     fresh_binding=$(node -e 'const s=JSON.parse(process.argv[1]||"{}");process.stdout.write(s.binding_digest||"")' "$fresh_summary" 2>/dev/null || true)
     if [[ ! -s "$fresh" || -z "$fresh_binding" || "$fresh_binding" != "$binding_digest" ]]; then
       outcome="blocked:stale_evidence"
@@ -119,8 +137,8 @@ _run_local_admission() {
   if git -C "$repo" fetch origin "$base_ref" --quiet 2>/dev/null; then
     fresh_base=$(git -C "$repo" rev-parse "origin/$base_ref" 2>/dev/null || true)
     fresh_head=$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)
-    verify_summary=$(node "$resolver" --repo "$repo" --base-ref "$base_ref" --base-sha "$fresh_base" \
-      --head-sha "$fresh_head" --policy "$policy" --risk-inputs "$risk" --output "$verify" 2>/dev/null || true)
+    verify_summary=$(_local_admission_resolve "$resolver" "$repo" "$base_ref" "$fresh_base" "$fresh_head" \
+      "$policy" "$risk" "$verify" 2>/dev/null || true)
     verify_binding=$(node -e 'const s=JSON.parse(process.argv[1]||"{}");process.stdout.write(s.binding_digest||"")' "$verify_summary" 2>/dev/null || true)
   fi
   if [[ -z "${verify_binding:-}" || "$verify_binding" != "$seal_binding" ]]; then

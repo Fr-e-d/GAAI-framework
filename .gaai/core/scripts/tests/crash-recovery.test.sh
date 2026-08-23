@@ -120,7 +120,7 @@ touch "$AC5_DAEMON_LOG"
 
 # Build a minimal test harness that sources the daemon functions and calls
 # crash_recovery_scan with our fixture paths.
-AC5_HARNESS=$(mktemp /tmp/ac5-harness-XXXXXX.sh)
+AC5_HARNESS=$(mktemp /tmp/ac5-harness-XXXXXX)
 cat > "$AC5_HARNESS" <<HARNESS
 #!/usr/bin/env bash
 set -uo pipefail
@@ -323,7 +323,7 @@ fi
 
 # Build a minimal script that invokes the drift check logic from pre_launch_mark_in_progress.
 # This directly tests the AC3 guard without needing the full daemon.
-AC6_TEST=$(mktemp /tmp/ac6-test-XXXXXX.sh)
+AC6_TEST=$(mktemp /tmp/ac6-test-XXXXXX)
 cat > "$AC6_TEST" <<'TESTSCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -411,7 +411,7 @@ git -C "$AC6B_DIR" config user.email "test@gaai.local"
 git -C "$AC6B_DIR" config user.name "GAAI Test"
 
 # No operator edits — working tree is clean
-AC6B_TEST=$(mktemp /tmp/ac6b-test-XXXXXX.sh)
+AC6B_TEST=$(mktemp /tmp/ac6b-test-XXXXXX)
 cat > "$AC6B_TEST" <<'TESTSCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -503,7 +503,7 @@ git -C "$AC4_DIR" config user.name "GAAI Test"
 
 # ── T12: single-field write succeeds on clean working tree ────────────────────
 echo "T12: chore_commit_field single-field write on clean WT"
-T12_HARNESS=$(mktemp /tmp/ac4-t12-XXXXXX.sh)
+T12_HARNESS=$(mktemp /tmp/ac4-t12-XXXXXX)
 cat > "$T12_HARNESS" <<SCRIPT
 #!/usr/bin/env bash
 BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
@@ -536,7 +536,7 @@ fi
 # ── T13: idempotency — same value → no new commit ─────────────────────────────
 echo "T13: chore_commit_field idempotency (same value)"
 T13_COUNT_BEFORE=$(git -C "$AC4_DIR" log --oneline | wc -l | tr -d ' ')
-T13_HARNESS=$(mktemp /tmp/ac4-t13-XXXXXX.sh)
+T13_HARNESS=$(mktemp /tmp/ac4-t13-XXXXXX)
 cat > "$T13_HARNESS" <<SCRIPT
 #!/usr/bin/env bash
 BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
@@ -577,7 +577,7 @@ with open('$AC4_DIR/$AC4_BACKLOG_REL', 'w') as f: f.write(content)
 if git -C "$AC4_DIR" diff --quiet HEAD -- "$AC4_BACKLOG_REL" 2>/dev/null; then
   fail "T14-precondition: expected dirty WT, found clean"
 else
-  T14_HARNESS=$(mktemp /tmp/ac4-t14-XXXXXX.sh)
+  T14_HARNESS=$(mktemp /tmp/ac4-t14-XXXXXX)
   cat > "$T14_HARNESS" <<SCRIPT
 #!/usr/bin/env bash
 BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
@@ -632,7 +632,7 @@ git -C "$AC4_DIR" checkout HEAD -- "$AC4_BACKLOG_REL" 2>/dev/null || true
 
 # ── T15: chore_commit_multi_field atomic multi-field write ────────────────────
 echo "T15: chore_commit_multi_field writes multiple fields in one commit"
-T15_HARNESS=$(mktemp /tmp/ac4-t15-XXXXXX.sh)
+T15_HARNESS=$(mktemp /tmp/ac4-t15-XXXXXX)
 cat > "$T15_HARNESS" <<SCRIPT
 #!/usr/bin/env bash
 BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
@@ -690,8 +690,8 @@ setup_git_repo "$AC4B_DIR" "$AC4B_HEAD_YAML"
 git -C "$AC4B_DIR" config user.email "test@gaai.local"
 git -C "$AC4B_DIR" config user.name "GAAI Test"
 
-T16_HARNESS_A=$(mktemp /tmp/ac4-t16a-XXXXXX.sh)
-T16_HARNESS_B=$(mktemp /tmp/ac4-t16b-XXXXXX.sh)
+T16_HARNESS_A=$(mktemp /tmp/ac4-t16a-XXXXXX)
+T16_HARNESS_B=$(mktemp /tmp/ac4-t16b-XXXXXX)
 for _hf in "$T16_HARNESS_A" "$T16_HARNESS_B"; do
   _sid="$AC4B_STORY_A"; [[ "$_hf" == "$T16_HARNESS_B" ]] && _sid="$AC4B_STORY_B"
   cat > "$_hf" <<SCRIPT
@@ -752,7 +752,7 @@ fi
 echo "T17: Option A fallback writes warning flag when flock/yq unavailable"
 T17_LOCK_DIR="$FIXTURE_DIR/ac4-t17-locks"
 mkdir -p "$T17_LOCK_DIR"
-T17_HARNESS=$(mktemp /tmp/ac4-t17-XXXXXX.sh)
+T17_HARNESS=$(mktemp /tmp/ac4-t17-XXXXXX)
 cat > "$T17_HARNESS" <<SCRIPT
 #!/usr/bin/env bash
 BACKLOG_FILE="$AC4_DIR/$AC4_BACKLOG_REL"
@@ -810,7 +810,7 @@ setup_git_repo "$PS_DIR" "$PS_HEAD_YAML"
 # Create a dead-PID lock file (PID 99999 does not exist on any real system)
 echo "99999" > "$PS_LOCK_DIR/${PS_STORY}.lock"
 
-PS_HARNESS=$(mktemp /tmp/periodic-scan-harness-XXXXXX.sh)
+PS_HARNESS=$(mktemp /tmp/periodic-scan-harness-XXXXXX)
 cat > "$PS_HARNESS" <<HARNESS
 #!/usr/bin/env bash
 set -uo pipefail
@@ -1008,7 +1008,7 @@ touch "$CD_LOCK_DIR/${CD_STORY}.agent-hang.marker"
 
 # No lock file — simulates dead wrapper (crash_recovery_scan should see ! is_locked)
 
-CD_HARNESS=$(mktemp /tmp/crash-drift-harness-XXXXXX.sh)
+CD_HARNESS=$(mktemp /tmp/crash-drift-harness-XXXXXX)
 cat > "$CD_HARNESS" <<HARNESS
 #!/usr/bin/env bash
 set -uo pipefail

@@ -905,7 +905,7 @@ fi
 echo "T16: impl-spawn-stub.mjs — real runImpl routing with _setSpawnFn (primary path)"
 IMPL_STUB_REPORT="$IMPL_FIXTURE_DIR/stub-direct-report.md"
 rm -f "$IMPL_STUB_REPORT"
-STUB_PROMPT_FILE=$(mktemp /tmp/gaai-test-prompt-XXXXXX.md)
+STUB_PROMPT_FILE=$(mktemp /tmp/gaai-test-prompt-XXXXXX)
 printf '=== STORY: TST-IMPL-01 ===\nTest story content.\n=== EXECUTION PLAN ===\nStep 1.\n' > "$STUB_PROMPT_FILE"
 
 STUB_RESULT=$(
@@ -1012,7 +1012,7 @@ fi
 # ── T20: primary routing confirmed via impl-spawn-stub ──
 echo "T20: primary routing — impl-spawn-stub with primary tag outputs success"
 make_impl_node_shim_success
-STUB_PROMPT_FILE_T20=$(mktemp /tmp/gaai-test-prompt-XXXXXX.md)
+STUB_PROMPT_FILE_T20=$(mktemp /tmp/gaai-test-prompt-XXXXXX)
 printf '=== STORY: TST-IMPL-01 ===\nTest.\n=== EXECUTION PLAN ===\nStep 1.\n' > "$STUB_PROMPT_FILE_T20"
 STUB_REPORT_T20="$IMPL_FIXTURE_DIR/t20-report.md"
 
@@ -1447,8 +1447,24 @@ _prepare_pre_qa_admission() {
 }
 AC4_MATRIX=(
   blocked:risk_inputs_missing
+  blocked:risk_input_unresolved
   blocked:stale_evidence
+  blocked:candidate_stale
+  blocked:candidate_unsealed
+  blocked:candidate_path_unsafe
+  blocked:policy_missing
+  blocked:policy_malformed
+  blocked:policy_unsafe
   blocked:policy_ambiguous
+  blocked:repository_mismatch
+  blocked:configuration_unresolved
+  blocked:configuration_unsafe
+  blocked:command_unresolved
+  blocked:environment_fact_missing
+  blocked:empty_executable_selection
+  blocked:unknown_surface
+  blocked:unknown_executable_surface
+  blocked:adapter_semantic_mismatch
   blocked:command_skipped
   blocked:command_cancelled
   blocked:command_timed_out
@@ -3180,7 +3196,7 @@ git -C "$LAR_REPO" config user.email test@example.com; git -C "$LAR_REPO" config
 git -C "$LAR_REPO" checkout -q -b staging; git -C "$LAR_REPO" remote add origin "$LAR_REMOTE"
 printf '{"name":"admission-fixture"}\n' > "$LAR_REPO/package.json"
 cat > "$LAR_REPO/.gaai/project/ci/local-admission.json" <<POLICY_EOF
-{"schema_version":"1.0.0","policy_version":"test-1","repository":{"remote":"$LAR_REMOTE","base_ref":"staging"},"limits":{"max_policy_bytes":100000,"max_diff_bytes":100000,"max_changed_paths":20,"max_commands":5,"max_selectors":5,"max_identifier_bytes":80,"max_arguments_per_command":8,"max_argument_bytes":200},"commands":[{"id":"unit","argv":["node","-e","process.exit(0)"],"timeout_seconds":10,"output_limit_bytes":1024,"config_paths":["package.json"],"enabled":true}],"selectors":[{"id":"source","path_prefixes":["src"],"command_ids":["unit"]}],"exhaustive_command_ids":["unit"],"non_executable_prefixes":[".gaai/project/contexts/artefacts"],"broadening_prefixes":["package.json"],"dependency_inputs":["package.json"],"risk_input_policy":{"allowed_boolean_keys":["cross_cutting"],"exhaustive_when_true":["cross_cutting"]},"required_environment":[]}
+{"schema_version":"1.0.0","policy_version":"test-1","repository":{"project_id":"fixture/project","remote":"$LAR_REMOTE","base_ref":"staging"},"limits":{"max_policy_bytes":100000,"max_diff_bytes":100000,"max_changed_paths":20,"max_commands":5,"max_selectors":5,"max_identifier_bytes":80,"max_arguments_per_command":8,"max_argument_bytes":200,"max_receipt_bytes":65536,"max_result_bytes":32768},"commands":[{"id":"unit","argv":["node","-e","process.exit(0)"],"timeout_seconds":10,"output_limit_bytes":1024,"config_paths":["package.json"]}],"selectors":[{"id":"source","path_prefixes":["src"],"exact_paths":[],"command_ids":["unit"]}],"exhaustive_command_ids":["unit"],"non_executable_prefixes":[".gaai/project/contexts/artefacts"],"broadening_prefixes":["package.json"],"broadening_patterns":["tsconfig*.json"],"dependency_inputs":["package.json"],"risk_input_policy":{"keys":["cross_cutting","dependency_changed"],"exhaustive_when_true":["cross_cutting","dependency_changed"]},"required_environment":["node_version","platform","arch","path_digest"],"executable_suffixes":[".js",".mjs",".sh",".json"],"executable_names":["Dockerfile","Makefile"]}
 POLICY_EOF
 git -C "$LAR_REPO" add -A; git -C "$LAR_REPO" commit -q -m base; git -C "$LAR_REPO" push -q origin staging
 git -C "$LAR_REPO" checkout -q -b story/TST-LOCAL-ADMISSION
@@ -3192,8 +3208,6 @@ printf 'report\n' > "$LAR_REPO/.gaai/project/contexts/artefacts/impl-reports/TST
 LAR_BASE_HEAD=$(git -C "$LAR_REPO" rev-parse HEAD)
 if LOCK_DIR="$LOCAL_ADMISSION_FIXTURE/locks" TARGET_BRANCH=staging \
   GAAI_LOCAL_ADMISSION_POLICY_PATH=.gaai/project/ci/local-admission.json \
-  GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH="$LOCAL_ADMISSION_FIXTURE/risk.json" \
-  GAAI_LOCAL_ADMISSION_MAX_RECEIPT_BYTES=65536 \
     _prepare_pre_qa_admission TST-LOCAL-ADMISSION trace-empty "$LAR_REPO"; then
   LAR_EMPTY_RC=0
 else
@@ -3209,8 +3223,6 @@ fi
 printf 'change\n' > "$LAR_REPO/src/change.txt"
 LOCK_DIR="$LOCAL_ADMISSION_FIXTURE/locks" TARGET_BRANCH=staging \
 GAAI_LOCAL_ADMISSION_POLICY_PATH=.gaai/project/ci/local-admission.json \
-GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH="$LOCAL_ADMISSION_FIXTURE/risk.json" \
-GAAI_LOCAL_ADMISSION_MAX_RECEIPT_BYTES=65536 \
   _prepare_pre_qa_admission TST-LOCAL-ADMISSION trace-real "$LAR_REPO"
 LAR_PRE_RC=$?; LAR_PRE_RECEIPT="$GAAI_ADMISSION_RECEIPT"; LAR_PRE_SHA="$GAAI_ADMITTED_SHA"
 if [[ "$LAR_PRE_RC" -eq 0 && -s "$LAR_PRE_RECEIPT" ]] \
@@ -3225,8 +3237,6 @@ printf 'qa evidence\n' > "$LAR_REPO/.gaai/project/contexts/artefacts/qa-reports/
 git -C "$LAR_REPO" add -A; git -C "$LAR_REPO" commit -q -m 'final evidence'
 LOCK_DIR="$LOCAL_ADMISSION_FIXTURE/locks" TARGET_BRANCH=staging \
 GAAI_LOCAL_ADMISSION_POLICY_PATH=.gaai/project/ci/local-admission.json \
-GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH="$LOCAL_ADMISSION_FIXTURE/risk.json" \
-GAAI_LOCAL_ADMISSION_MAX_RECEIPT_BYTES=65536 \
   _admit_current_candidate final TST-LOCAL-ADMISSION trace-real "$LAR_REPO"
 LAR_FINAL_RC=$?; LAR_FINAL_RECEIPT="$GAAI_ADMISSION_RECEIPT"
 if [[ "$LAR_FINAL_RC" -eq 0 && -s "$LAR_FINAL_RECEIPT" && "$LAR_FINAL_RECEIPT" != "$LAR_PRE_RECEIPT" \

@@ -112,7 +112,7 @@ mkdir -p "$T1_LOCKS" "$T1_LOGS" "$T1_GAAI_PROJ/contexts/artefacts/incidents"
 setup_git_repo "$T1_PROJ" "$T1_YAML"
 
 T1_BACKLOG="$T1_PROJ/.gaai/project/contexts/backlog/active.backlog.yaml"
-T1_HARNESS=$(mktemp /tmp/gaai-t1-harness-XXXXXX.sh)
+T1_HARNESS=$(mktemp /tmp/gaai-t1-harness-XXXXXX)
 build_base_harness "$T1_HARNESS" "$T1_PROJ" "$T1_LOCKS" "$T1_LOGS" "$T1_GAAI_PROJ" "$T1_BACKLOG"
 cat >> "$T1_HARNESS" <<T1APPEND
 
@@ -220,7 +220,7 @@ git -C "$T2_PROJ" push -q origin "story/${T2_SID}"
 git -C "$T2_PROJ" checkout -q main
 
 T2_BACKLOG="$T2_PROJ/.gaai/project/contexts/backlog/active.backlog.yaml"
-T2_HARNESS=$(mktemp /tmp/gaai-t2-harness-XXXXXX.sh)
+T2_HARNESS=$(mktemp /tmp/gaai-t2-harness-XXXXXX)
 build_base_harness "$T2_HARNESS" "$T2_PROJ" "$T2_LOCKS" "$T2_LOGS" "$T2_GAAI_PROJ" "$T2_BACKLOG"
 cat >> "$T2_HARNESS" <<T2APPEND
 # _recover_worktree_safe_base intentionally NOT defined — test escalation path
@@ -316,7 +316,7 @@ touch "$T3_LOGS/${T3_SID}.deploy.log"
 setup_git_repo "$T3_PROJ" "$T3_YAML"
 
 T3_BACKLOG="$T3_PROJ/.gaai/project/contexts/backlog/active.backlog.yaml"
-T3_HARNESS=$(mktemp /tmp/gaai-t3-harness-XXXXXX.sh)
+T3_HARNESS=$(mktemp /tmp/gaai-t3-harness-XXXXXX)
 build_base_harness "$T3_HARNESS" "$T3_PROJ" "$T3_LOCKS" "$T3_LOGS" "$T3_GAAI_PROJ" "$T3_BACKLOG"
 cat >> "$T3_HARNESS" <<T3APPEND
 
@@ -396,7 +396,7 @@ mkdir -p "$T4_LOCKS" "$T4_LOGS" "$T4_GAAI_PROJ/contexts/artefacts/incidents"
 setup_git_repo "$T4_PROJ" "$T4_YAML"
 
 T4_BACKLOG="$T4_PROJ/.gaai/project/contexts/backlog/active.backlog.yaml"
-T4_HARNESS=$(mktemp /tmp/gaai-t4-harness-XXXXXX.sh)
+T4_HARNESS=$(mktemp /tmp/gaai-t4-harness-XXXXXX)
 build_base_harness "$T4_HARNESS" "$T4_PROJ" "$T4_LOCKS" "$T4_LOGS" "$T4_GAAI_PROJ" "$T4_BACKLOG"
 cat >> "$T4_HARNESS" <<T4APPEND
 
@@ -486,7 +486,7 @@ setup_git_repo "$T5_PROJ" "$T5_YAML"
 touch "$T5_LOCKS/${T5_SID}.orphan-classified"
 
 T5_BACKLOG="$T5_PROJ/.gaai/project/contexts/backlog/active.backlog.yaml"
-T5_HARNESS=$(mktemp /tmp/gaai-t5-harness-XXXXXX.sh)
+T5_HARNESS=$(mktemp /tmp/gaai-t5-harness-XXXXXX)
 build_base_harness "$T5_HARNESS" "$T5_PROJ" "$T5_LOCKS" "$T5_LOGS" "$T5_GAAI_PROJ" "$T5_BACKLOG"
 cat >> "$T5_HARNESS" <<T5APPEND
 

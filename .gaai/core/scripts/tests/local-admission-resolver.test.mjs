@@ -2,15 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveLocalAdmission } from '../lib/local-admission-resolver.mjs';
 
 const RESOLVER = fileURLToPath(new URL('../lib/local-admission-resolver.mjs', import.meta.url));
 const REMOTE = 'https://example.invalid/portable/project.git';
 const POLICY_PATH = 'policy/local-admission.json';
-const RISK = { cross_cutting: false, security_sensitive: false };
+const RISK = { cross_cutting: false, dependency_changed: false };
+const ENVIRONMENT = { node_version: 'fixture-node', platform: 'fixture-platform',
+  arch: 'fixture-arch', path_digest: 'fixture-path' };
 
 function git(repo, ...args) {
   const result = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
@@ -21,24 +23,28 @@ function git(repo, ...args) {
 function policy() {
   return {
     schema_version: '1.0.0', policy_version: 'fixture-v1',
-    repository: { remote: REMOTE, base_ref: 'staging' },
+    repository: { project_id: 'fixture/project', remote: REMOTE, base_ref: 'staging' },
     limits: { max_policy_bytes: 65536, max_diff_bytes: 65536, max_changed_paths: 32,
       max_commands: 4, max_selectors: 4, max_identifier_bytes: 64,
-      max_arguments_per_command: 8, max_argument_bytes: 256 },
+      max_arguments_per_command: 8, max_argument_bytes: 256,
+      max_receipt_bytes: 65536, max_result_bytes: 32768 },
     commands: [
-      { id: 'unit', argv: ['node', '--test', 'tests/unit.test.mjs'], timeout_seconds: 60,
-        output_limit_bytes: 8192, config_paths: ['config/tool.json'], enabled: true },
+      { id: 'unit', argv: ['node', '--test', 'tests/unit.test.mjs', '{base_sha}', '{head_sha}'], timeout_seconds: 60,
+        output_limit_bytes: 8192, config_paths: ['config/tool.json'] },
       { id: 'contract', argv: ['node', '--test', 'tests/contract.test.mjs'], timeout_seconds: 60,
-        output_limit_bytes: 8192, config_paths: [], enabled: true }
+        output_limit_bytes: 8192, config_paths: [] }
     ],
     selectors: [
-      { id: 'source', path_prefixes: ['src'], command_ids: ['unit'] },
-      { id: 'config', path_prefixes: ['config'], command_ids: ['unit'] }
+      { id: 'source', path_prefixes: ['src'], exact_paths: [], command_ids: ['unit'] },
+      { id: 'config', path_prefixes: ['config'], exact_paths: [], command_ids: ['unit'] }
     ],
     exhaustive_command_ids: ['unit', 'contract'], non_executable_prefixes: ['docs'],
-    broadening_prefixes: ['policy', 'package.json'], dependency_inputs: ['pnpm-lock.yaml'],
-    risk_input_policy: { allowed_boolean_keys: ['cross_cutting', 'security_sensitive'],
-      exhaustive_when_true: ['cross_cutting', 'security_sensitive'] }, required_environment: ['CI']
+    broadening_prefixes: ['policy', 'package.json'], broadening_patterns: ['tsconfig*.json'],
+    dependency_inputs: ['pnpm-lock.yaml'],
+    risk_input_policy: { keys: ['cross_cutting', 'dependency_changed'],
+      exhaustive_when_true: ['cross_cutting', 'dependency_changed'] },
+    required_environment: Object.keys(ENVIRONMENT), executable_suffixes: ['.js', '.mjs', '.sh', '.json'],
+    executable_names: ['Dockerfile', 'Makefile']
   };
 }
 
@@ -71,13 +77,13 @@ async function fixture(t, { alterPolicy, candidate } = {}) {
   return { repo, baseSha, headSha: git(repo, 'rev-parse', 'HEAD') };
 }
 
-function resolve(fx, riskInputs = RISK, environment = { CI: '1' }) {
+function resolve(fx, riskInputs, environment = ENVIRONMENT) {
   return resolveLocalAdmission({ ...fx, baseRef: 'staging', policyPath: POLICY_PATH,
     riskInputs, environment });
 }
 
-function cliArgs(fx, riskPath, output) {
-  return [RESOLVER, '--repo', fx.repo, '--base-ref', 'staging', '--base-sha', fx.baseSha,
+function cliArgs(fx, riskPath, output, resolver = RESOLVER) {
+  return [resolver, '--repo', fx.repo, '--base-ref', 'staging', '--base-sha', fx.baseSha,
     '--head-sha', fx.headSha, '--policy', POLICY_PATH, '--risk-inputs', riskPath, '--output', output];
 }
 
@@ -113,7 +119,7 @@ test('dependency and governed risk changes broaden deterministically to exhausti
     dependencyResult.binding.normalized_diff_digest);
   const risk = await fixture(t);
   const ordinary = resolve(risk);
-  const elevated = resolve(risk, { ...RISK, security_sensitive: true });
+  const elevated = resolve(risk, { ...RISK, cross_cutting: true });
   assert.deepEqual(elevated.summary.selected_command_ids, ['unit', 'contract']);
   assert.notEqual(ordinary.binding.risk_digest, elevated.binding.risk_digest);
 });
@@ -132,20 +138,20 @@ test('risk input shape is complete, closed and boolean', async t => {
   assert.equal(resolve(fx, { ...RISK, cross_cutting: 'false' }).reason, 'risk_input_unresolved');
 });
 
-test('malformed, ambiguous and skipped base policies fail closed', async t => {
+test('malformed, ambiguous and extra base policy fields fail closed', async t => {
   const malformed = await fixture(t, { alterPolicy: value => { delete value.selectors; } });
   assert.equal(resolve(malformed).reason, 'policy_malformed');
   const ambiguous = await fixture(t, { alterPolicy: value => value.commands.push({ ...value.commands[0] }) });
   assert.equal(resolve(ambiguous).reason, 'policy_ambiguous');
-  const skipped = await fixture(t, { alterPolicy: value => { value.commands[0].enabled = false; } });
-  assert.equal(resolve(skipped).reason, 'command_skipped');
+  const extra = await fixture(t, { alterPolicy: value => { value.commands[0].enabled = false; } });
+  assert.equal(resolve(extra).reason, 'policy_malformed');
 });
 
 test('configuration and required environment values invalidate the binding', async t => {
   const ordinary = await fixture(t);
   const fx = await fixture(t, { candidate: repo => put(repo, 'config/tool.json', '{"mode":"other"}\n') });
-  const first = resolve(fx, RISK, { CI: 'one' });
-  const second = resolve(fx, RISK, { CI: 'two' });
+  const first = resolve(fx, RISK, { ...ENVIRONMENT, platform: 'one' });
+  const second = resolve(fx, RISK, { ...ENVIRONMENT, platform: 'two' });
   assert.equal(first.status, 'resolved');
   assert.notEqual(resolve(ordinary).binding.command_digests[0].configuration_digest,
     first.binding.command_digests[0].configuration_digest);
@@ -168,8 +174,8 @@ test('selector and command descriptor values independently invalidate their dige
 
 test('executor choice is neutral unless a project explicitly governs it', async t => {
   const fx = await fixture(t);
-  const claude = resolve(fx, RISK, { CI: '1', GAAI_DAEMON_EXECUTOR: 'claude' });
-  const codex = resolve(fx, RISK, { CI: '1', GAAI_DAEMON_EXECUTOR: 'codex' });
+  const claude = resolve(fx, RISK, { ...ENVIRONMENT, GAAI_DAEMON_EXECUTOR: 'claude' });
+  const codex = resolve(fx, RISK, { ...ENVIRONMENT, GAAI_DAEMON_EXECUTOR: 'codex' });
   assert.equal(claude.binding_digest, codex.binding_digest);
 });
 
@@ -179,6 +185,9 @@ test('internal argv stays fixed and bounded while the observable summary is priv
   const result = resolve(fx);
   assert.equal(result.status, 'resolved');
   assert.equal(result.selected_commands[0].argv.at(-1), injection);
+  assert.equal(result.selected_commands[0].argv.at(-3), fx.baseSha);
+  assert.equal(result.selected_commands[0].argv.at(-2), fx.headSha);
+  assert.deepEqual(result.limits, { max_receipt_bytes: 65536, max_result_bytes: 32768 });
   assert.doesNotMatch(JSON.stringify(result.summary), /argv|printf secret|tests\/unit/);
   const oversized = await fixture(t, { alterPolicy: value => {
     value.commands[0].argv.push('x'.repeat(value.limits.max_argument_bytes + 1));
@@ -221,8 +230,8 @@ test('symlink and gitlink-like configuration modes fail closed before content bi
   const first = resolve(fx);
   await writeFile(external, '{"mode":"second"}\n');
   const second = resolve(fx);
-  assert.equal(first.reason, 'configuration_unsafe');
-  assert.equal(second.reason, 'configuration_unsafe');
+  assert.equal(first.reason, 'candidate_path_unsafe');
+  assert.equal(second.reason, 'candidate_path_unsafe');
   const gitlink = await fixture(t, { candidate: async repo => {
     const nested = join(repo, 'config/tool.json');
     await rm(nested);
@@ -233,7 +242,7 @@ test('symlink and gitlink-like configuration modes fail closed before content bi
     await put(nested, 'README.md', '# Nested\n');
     git(nested, 'add', '-A'); git(nested, 'commit', '-q', '-m', 'nested');
   } });
-  assert.equal(resolve(gitlink).reason, 'configuration_unsafe');
+  assert.equal(resolve(gitlink).reason, 'candidate_path_unsafe');
 });
 
 test('CLI writes the internal plan privately and emits only its bounded summary', async t => {
@@ -243,7 +252,7 @@ test('CLI writes the internal plan privately and emits only its bounded summary'
   t.after(() => Promise.all([rm(riskPath, { force: true }), rm(output, { force: true })]));
   await writeFile(riskPath, JSON.stringify(RISK));
   const args = cliArgs(fx, riskPath, output);
-  const run = spawnSync(process.execPath, args, { encoding: 'utf8', env: { ...process.env, CI: '1' } });
+  const run = spawnSync(process.execPath, args, { encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
   assert.equal(JSON.parse(run.stdout).outcome, 'resolved');
   assert.doesNotMatch(run.stdout, /argv|tests\/unit/);
@@ -254,6 +263,33 @@ test('CLI writes the internal plan privately and emits only its bounded summary'
     assert.equal(rejected.status, 2);
     assert.match(rejected.stderr, /input_invalid/);
   }
+});
+
+test('CLI executes through a symlink-aliased entrypoint path', async t => {
+  const fx = await fixture(t);
+  const root = await mkdtemp(join(tmpdir(), 'gaai-resolver-alias-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const riskPath = join(root, 'risk.json');
+  const output = join(root, 'plan.json');
+  const alias = join(root, 'lib-alias');
+  await writeFile(riskPath, JSON.stringify(RISK));
+  await symlink(dirname(RESOLVER), alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const run = spawnSync(process.execPath,
+    cliArgs(fx, riskPath, output, join(alias, 'local-admission-resolver.mjs')),
+    { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(JSON.parse(run.stdout).outcome, 'resolved');
+  assert.equal(JSON.parse(await readFile(output, 'utf8')).status, 'resolved');
+});
+
+test('indirect import ignores an unresolvable process entrypoint without disclosure', () => {
+  const source = `await import(${JSON.stringify(pathToFileURL(RESOLVER).href)});`;
+  const run = spawnSync(process.execPath, ['--input-type=module', '-'], {
+    encoding: 'utf8', input: source
+  });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout, '');
+  assert.equal(run.stderr, '');
 });
 
 test('CLI refuses existing or symlink plan outputs without disclosure or clobbering', async t => {
@@ -271,7 +307,7 @@ test('CLI refuses existing or symlink plan outputs without disclosure or clobber
   await symlink(target, link);
   for (const output of [existing, link]) {
     const run = spawnSync(process.execPath, cliArgs(fx, riskPath, output),
-      { encoding: 'utf8', env: { ...process.env, CI: '1' } });
+      { encoding: 'utf8' });
     assert.equal(run.status, 2);
     assert.match(run.stderr, /resolver_error/);
   }

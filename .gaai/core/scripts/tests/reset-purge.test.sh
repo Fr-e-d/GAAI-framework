@@ -77,7 +77,7 @@ echo "=== reset-purge: AC5 — _recovery_revert_refined clears all stale state =
 echo ""
 
 # ── harness ────────────────────────────────────────────────────────────────────
-HARNESS=$(mktemp /tmp/gaai-rp-harness-XXXXXX.sh)
+HARNESS=$(mktemp /tmp/gaai-rp-harness-XXXXXX)
 cat > "$HARNESS" <<HARNESS_EOF
 #!/usr/bin/env bash
 set -uo pipefail

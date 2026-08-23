@@ -132,7 +132,7 @@ setup_git_repo "$T1_DIR" "$T1_YAML"
 git -C "$T1_DIR" branch "story/$T1_SID" -q
 git -C "$T1_DIR" worktree add "$T1_WT_PATH" "story/$T1_SID" -q
 
-T1_HARNESS=$(mktemp "$FIXTURE_DIR/t1-XXXXXX.sh")
+T1_HARNESS=$(mktemp "$FIXTURE_DIR/t1-XXXXXX")
 build_harness "$T1_HARNESS" "$T1_DIR" "$T1_LOCK" "$T1_LOG" \
   "export GAAI_WORKTREES_BASE=\"$T1_WT_BASE\""
 printf 'reconcile_done_merged_worktrees\necho "EXIT:$?"\n' >> "$T1_HARNESS"
@@ -172,7 +172,7 @@ echo ""
 echo "=== T1b: idempotence — repeat sweep after removal ==="
 
 rm -f "$T1_LOG" 2>/dev/null; touch "$T1_LOG"
-T1B_HARNESS=$(mktemp "$FIXTURE_DIR/t1b-XXXXXX.sh")
+T1B_HARNESS=$(mktemp "$FIXTURE_DIR/t1b-XXXXXX")
 build_harness "$T1B_HARNESS" "$T1_DIR" "$T1_LOCK" "$T1_LOG" \
   "export GAAI_WORKTREES_BASE=\"$T1_WT_BASE\""
 printf 'reconcile_done_merged_worktrees\necho "EXIT:$?"\n' >> "$T1B_HARNESS"
@@ -222,7 +222,7 @@ git -C "$T2_DIR" worktree add "$T2_WT_PATH" "story/$T2_SID" -q
 # Add an untracked file to make the worktree dirty.
 echo "operator note" > "$T2_WT_PATH/untracked-delivery-note.txt"
 
-T2_HARNESS=$(mktemp "$FIXTURE_DIR/t2-XXXXXX.sh")
+T2_HARNESS=$(mktemp "$FIXTURE_DIR/t2-XXXXXX")
 build_harness "$T2_HARNESS" "$T2_DIR" "$T2_LOCK" "$T2_LOG" \
   "export GAAI_WORKTREES_BASE=\"$T2_WT_BASE\""
 printf 'reconcile_done_merged_worktrees\necho "EXIT:$?"\n' >> "$T2_HARNESS"
@@ -283,7 +283,7 @@ setup_git_repo "$T3_DIR" "$T3_YAML"
 git -C "$T3_DIR" branch "story/$T3_SID" -q
 git -C "$T3_DIR" worktree add "$T3_WT_PATH" "story/$T3_SID" -q
 
-T3_HARNESS=$(mktemp "$FIXTURE_DIR/t3-XXXXXX.sh")
+T3_HARNESS=$(mktemp "$FIXTURE_DIR/t3-XXXXXX")
 build_harness "$T3_HARNESS" "$T3_DIR" "$T3_LOCK" "$T3_LOG" \
   "export GAAI_WORKTREES_BASE=\"$T3_WT_BASE\""
 printf 'reconcile_done_merged_worktrees\necho "EXIT:$?"\n' >> "$T3_HARNESS"
@@ -340,7 +340,7 @@ git -C "$T4_WT_PATH" commit -m "impl work" -q
 git -C "$T4_DIR" push origin "story/$T4_SID" -q 2>/dev/null || true
 # origin/staging does NOT include story/$T4_SID's extra commit → unmerged.
 
-T4_HARNESS=$(mktemp "$FIXTURE_DIR/t4-XXXXXX.sh")
+T4_HARNESS=$(mktemp "$FIXTURE_DIR/t4-XXXXXX")
 build_harness "$T4_HARNESS" "$T4_DIR" "$T4_LOCK" "$T4_LOG" \
   "export GAAI_WORKTREES_BASE=\"$T4_WT_BASE\""
 printf 'reconcile_done_merged_worktrees\necho "EXIT:$?"\n' >> "$T4_HARNESS"
@@ -385,7 +385,7 @@ echo "=== T5: AC5 compliance — no policy change, no PR merge, exits 0 ==="
 # Sweep should be a no-op and must not touch any policy variable.
 T5_LOG="$FIXTURE_DIR/t5.log"
 touch "$T5_LOG"
-T5_HARNESS=$(mktemp "$FIXTURE_DIR/t5-XXXXXX.sh")
+T5_HARNESS=$(mktemp "$FIXTURE_DIR/t5-XXXXXX")
 build_harness "$T5_HARNESS" "$T1_DIR" "$T1_LOCK" "$T5_LOG" \
   "GAAI_AUTO_MERGE_POLICY=\"\${GAAI_AUTO_MERGE_POLICY:-staging_only}\"
    export GAAI_WORKTREES_BASE=\"$T1_WT_BASE\""

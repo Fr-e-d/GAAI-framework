@@ -30,17 +30,21 @@ node - "$REMOTE" > "$REPO/$POLICY_REL" <<'NODE'
 const remote = process.argv[2];
 process.stdout.write(`${JSON.stringify({
   schema_version:'1.0.0', policy_version:'fixture-v1',
-  repository:{remote,base_ref:'staging'},
+  repository:{project_id:'fixture/project',remote,base_ref:'staging'},
   limits:{max_policy_bytes:65536,max_diff_bytes:65536,max_changed_paths:32,max_commands:4,
-    max_selectors:4,max_identifier_bytes:64,max_arguments_per_command:8,max_argument_bytes:256},
+    max_selectors:4,max_identifier_bytes:64,max_arguments_per_command:8,max_argument_bytes:256,
+    max_receipt_bytes:65536,max_result_bytes:32768},
   commands:[{id:'unit',argv:['bash','checks/unit.sh','; touch /tmp/gaai-admission-pwned'],
-    timeout_seconds:5,output_limit_bytes:8,config_paths:['checks/unit.sh'],enabled:true}],
-  selectors:[{id:'source',path_prefixes:['src'],command_ids:['unit']},
-    {id:'checks',path_prefixes:['checks'],command_ids:['unit']}],
+    timeout_seconds:5,output_limit_bytes:8,config_paths:['checks/unit.sh']}],
+  selectors:[{id:'source',path_prefixes:['src'],exact_paths:[],command_ids:['unit']},
+    {id:'checks',path_prefixes:['checks'],exact_paths:[],command_ids:['unit']}],
   exhaustive_command_ids:['unit'],non_executable_prefixes:['docs'],
-  broadening_prefixes:['policy','package.json'],dependency_inputs:['pnpm-lock.yaml'],
-  risk_input_policy:{allowed_boolean_keys:['cross_cutting'],exhaustive_when_true:['cross_cutting']},
-  required_environment:['GAAI_TEST_PLATFORM']
+  broadening_prefixes:['policy','package.json'],broadening_patterns:['tsconfig*.json'],
+  dependency_inputs:['pnpm-lock.yaml'],
+  risk_input_policy:{keys:['cross_cutting','dependency_changed'],
+    exhaustive_when_true:['cross_cutting','dependency_changed']},
+  required_environment:['node_version','platform','arch','path_digest'],
+  executable_suffixes:['.sh','.js','.mjs','.json'],executable_names:['Dockerfile','Makefile']
 }, null, 2)}\n`);
 NODE
 git -C "$REPO" add -A; git -C "$REPO" commit -qm base
@@ -49,11 +53,8 @@ BASE_SHA="$(git -C "$REPO" rev-parse origin/staging)"
 git -C "$REPO" switch -qc story/test
 printf 'export const value = 2;\n' > "$REPO/src/value.mjs"
 git -C "$REPO" add -A; git -C "$REPO" commit -qm candidate
-printf '{"cross_cutting":false}\n' > "$RISK"
-export GAAI_TEST_PLATFORM=fixture
 export GAAI_LOCAL_ADMISSION_POLICY_PATH="$POLICY_REL"
-export GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH="$RISK"
-export GAAI_LOCAL_ADMISSION_MAX_RECEIPT_BYTES=65536
+unset GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH GAAI_LOCAL_ADMISSION_MAX_RECEIPT_BYTES
 
 rm -f /tmp/gaai-admission-pwned
 if _run_local_admission pre_qa TST-LA "$REPO" staging "$RECEIPTS" >/dev/null; then
@@ -64,6 +65,21 @@ if _run_local_admission pre_qa TST-LA "$REPO" staging "$RECEIPTS" >/dev/null; th
     pass 'pre-QA PASS executes injection-shaped argv without shell and stores no output'
   else fail 'pre-QA privacy or argv execution contract'; fi
 else fail "pre-QA expected PASS, got $LOCAL_ADMISSION_OUTCOME"; fi
+
+SCRIPT_ALIAS="$ROOT/scripts-alias"
+ALIAS_RECEIPT="$RECEIPTS/.local-admission-TST-ALIAS-pre_qa.json"
+ln -s "$SCRIPT_DIR" "$SCRIPT_ALIAS"
+if (
+  # Source through a non-canonical path to reproduce macOS /var -> /private/var
+  # snapshots and generic symlinked worktree roots.
+  source "$SCRIPT_ALIAS/lib/local-admission.sh"
+  _run_local_admission pre_qa TST-ALIAS "$REPO" staging "$RECEIPTS" >/dev/null
+) && [[ -s "$ALIAS_RECEIPT" \
+  && "$(node -e 'const r=require(process.argv[1]);process.stdout.write(r.outcome)' "$ALIAS_RECEIPT")" == pass ]]; then
+  pass 'symlink-aliased framework paths execute the resolver and executor entrypoints'
+else
+  fail 'symlink-aliased framework path skipped a local-admission entrypoint'
+fi
 
 if _run_local_admission final TST-LA "$REPO" staging "$RECEIPTS" >/dev/null; then
   FINAL="$LOCAL_ADMISSION_RECEIPT_PATH"
@@ -95,12 +111,12 @@ NODE
 else fail "final expected PASS, got $LOCAL_ADMISSION_OUTCOME"; fi
 
 SAVED_FINAL="$FINAL"
-unset GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH
+export GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH="$ROOT/missing-risk.json"
 if ! _run_local_admission final TST-LA "$REPO" staging "$RECEIPTS" >/dev/null \
   && [[ "$LOCAL_ADMISSION_OUTCOME" == blocked:risk_inputs_missing && ! -e "$SAVED_FINAL" ]]; then
-  pass 'an early failure removes any prior PASS receipt for that boundary'
+  pass 'an invalid optional risk path removes any prior PASS receipt for that boundary'
 else fail 'stale final receipt survived an early failure'; fi
-export GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH="$RISK"
+unset GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH
 
 GAAI_DAEMON_EXECUTOR=claude _run_local_admission pre_qa TST-C "$REPO" staging "$RECEIPTS" >/dev/null
 C_BINDING="$(node -e 'const r=require(process.argv[1]);process.stdout.write(r.binding_digest)' "$LOCAL_ADMISSION_RECEIPT_PATH")"
@@ -134,13 +150,12 @@ unset GAAI_ADVANCE_REPO
 
 git -C "$REPO" switch -q staging; git -C "$REPO" reset -q --hard origin/staging
 git -C "$REPO" switch -qC story/unresolved
-mkdir -p "$REPO/unknown"; printf 'unknown\n' > "$REPO/unknown/surface.txt"
+mkdir -p "$REPO/unknown"; printf 'export {};\n' > "$REPO/unknown/surface.mjs"
 git -C "$REPO" add -A; git -C "$REPO" commit -qm unresolved-surface
 if ! _run_local_admission pre_qa TST-RESOLVE "$REPO" staging "$RECEIPTS" >/dev/null \
   && [[ "$LOCAL_ADMISSION_OUTCOME" == blocked:unknown_executable_surface \
-    && -s "$LOCAL_ADMISSION_RECEIPT_PATH" \
-    && "$(node -e 'const r=require(process.argv[1]);process.stdout.write(String(r.publication_admitted))' "$LOCAL_ADMISSION_RECEIPT_PATH")" == false ]]; then
-  pass 'resolver rejection emits a bounded non-publication receipt'
+    && -z "$LOCAL_ADMISSION_RECEIPT_PATH" ]]; then
+  pass 'resolver rejection is typed and executes no command'
 else fail "resolver-rejection outcome=$LOCAL_ADMISSION_OUTCOME"; fi
 
 git -C "$REPO" switch -q staging; git -C "$REPO" reset -q --hard origin/staging
@@ -176,16 +191,25 @@ if ! _run_local_admission final TST-LATE "$REPO" staging "$RECEIPTS" >/dev/null 
   pass 'post-seal re-resolution removes evidence changed by an escaped late helper'
 else fail "late-mutation outcome=$LOCAL_ADMISSION_OUTCOME"; fi
 rm -f "$REPO/src/late.txt"
-git -C "$REPO" reset -q --hard origin/staging; git -C "$REPO" switch -qC story/size
+git -C "$REPO" switch -q staging; git -C "$REPO" reset -q --hard origin/staging
+node - "$REPO/$POLICY_REL" <<'NODE'
+const fs = require('node:fs');
+const path = process.argv[2];
+const policy = JSON.parse(fs.readFileSync(path, 'utf8'));
+policy.limits.max_result_bytes = 1;
+fs.writeFileSync(path, `${JSON.stringify(policy, null, 2)}\n`);
+NODE
+git -C "$REPO" add "$POLICY_REL"; git -C "$REPO" commit -qm tight-result-bound
+git -C "$REPO" push -q origin staging; git -C "$REPO" fetch -q origin staging
+git -C "$REPO" switch -qC story/size
 printf 'export const value = 3;\n' > "$REPO/src/value.mjs"
 git -C "$REPO" add -A; git -C "$REPO" commit -qm size-candidate
 
-GAAI_LOCAL_ADMISSION_MAX_RECEIPT_BYTES=32
 if ! _run_local_admission final TST-SIZE "$REPO" staging "$RECEIPTS" >/dev/null \
-  && [[ "$LOCAL_ADMISSION_OUTCOME" == blocked:receipt_too_large && -z "$LOCAL_ADMISSION_RECEIPT_PATH" ]]; then
-  pass 'post-digest receipt size overflow is non-authorizing'
-else fail "receipt size outcome=$LOCAL_ADMISSION_OUTCOME"; fi
-export GAAI_LOCAL_ADMISSION_MAX_RECEIPT_BYTES=65536
+  && [[ "$LOCAL_ADMISSION_OUTCOME" == blocked:results_too_large \
+    && "$(node -e 'const r=require(process.argv[1]);process.stdout.write(String(r.publication_admitted))' "$LOCAL_ADMISSION_RECEIPT_PATH")" == false ]]; then
+  pass 'base-held result size overflow is durably non-authorizing'
+else fail "result size outcome=$LOCAL_ADMISSION_OUTCOME"; fi
 
 node --input-type=module - "$EXECUTOR" "$ROOT" <<'NODE'
 import { writeFile, readFile } from 'node:fs/promises';
@@ -193,16 +217,26 @@ const { executeCommand } = await import(process.argv[2]);
 const root = process.argv[3];
 const pidFile = `${root}/child.pid`;
 const strayFile = `${root}/stray.pid`;
+// SIGKILL delivery and orphan reaping are asynchronous under load. Poll only to
+// distinguish that OS scheduling window from a process group that remains live.
+const gone = async pid => {
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    try { process.kill(pid, 0); } catch { return true; }
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  return false;
+};
 const normal = await executeCommand({ id:'normal', argv:['bash','-c',`sleep 30 >/dev/null 2>&1 & echo $! > '${strayFile}'`],
   timeout_seconds:5,output_limit_bytes:8,descriptor_digest:'d',configuration_digest:'c' }, { cwd:root });
 if (normal.outcome !== 'passed') process.exit(4);
 const stray = Number((await readFile(strayFile, 'utf8')).trim());
-try { process.kill(stray, 0); process.exit(5); } catch {}
+if (!await gone(stray)) process.exit(5);
 const timed = await executeCommand({ id:'timeout', argv:['bash','-c',`sleep 30 & echo $! > '${pidFile}'; wait`],
   timeout_seconds:1,output_limit_bytes:8,descriptor_digest:'d',configuration_digest:'c' }, { cwd:root });
 if (timed.outcome !== 'timed_out') process.exit(1);
 const pid = Number((await readFile(pidFile, 'utf8')).trim());
-try { process.kill(pid, 0); process.exit(2); } catch {}
+if (!await gone(pid)) process.exit(2);
 const controller = new AbortController();
 setTimeout(() => controller.abort(), 50);
 const cancelled = await executeCommand({ id:'cancel',argv:['sleep','30'],timeout_seconds:5,
@@ -211,12 +245,6 @@ if (cancelled.outcome !== 'cancelled') process.exit(3);
 NODE
 [[ $? -eq 0 ]] && pass 'normal completion and timeout kill the process group; cancellation stays distinct' \
   || fail 'timeout/cancellation executor contract'
-
-unset GAAI_LOCAL_ADMISSION_RISK_INPUTS_PATH
-if ! _run_local_admission pre_qa TST-NORISK "$REPO" staging "$RECEIPTS" >/dev/null \
-  && [[ "$LOCAL_ADMISSION_OUTCOME" == blocked:risk_inputs_missing ]]; then
-  pass 'missing risk input fails before execution'
-else fail "missing-risk outcome=$LOCAL_ADMISSION_OUTCOME"; fi
 
 printf '\nResults: %s passed, %s failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

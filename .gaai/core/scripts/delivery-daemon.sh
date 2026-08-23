@@ -1327,7 +1327,10 @@ crash_recovery_scan() {
     local script_dir
     script_dir=$(cd "$(dirname "$SCHEDULER")" && pwd)
     local phase_script
-    phase_script=$(mktemp "$LOCK_DIR/.recovery-phase-XXXXXX.sh")
+    phase_script=$(mktemp "$LOCK_DIR/.recovery-phase-XXXXXX" 2>/dev/null) || {
+      log "${RED}[RECOVERY] temporary script creation failed${NC}"
+      return 1
+    }
     cat > "$phase_script" <<'PHASE_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -2273,7 +2276,10 @@ sweep_cleanup_pending() {
   [[ -f "$marker" ]] || return 0
 
   local tmp_remaining
-  tmp_remaining=$(mktemp "$LOCK_DIR/.cleanup-pending-tmp-XXXXXX.audit")
+  tmp_remaining=$(mktemp "$LOCK_DIR/.cleanup-pending-tmp-XXXXXX" 2>/dev/null) || {
+    log "${RED}[PR-WATCHER] cleanup audit temporary file creation failed${NC}"
+    return 1
+  }
   local cleaned=0 kept=0
 
   while IFS='|' read -r ts sid marker_type; do
@@ -2755,7 +2761,10 @@ _reconcile_merged_pr() {
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local reconcile_script
-  reconcile_script=$(mktemp "$LOCK_DIR/.pr-watcher-reconcile-XXXXXX.sh")
+  reconcile_script=$(mktemp "$LOCK_DIR/.pr-watcher-reconcile-XXXXXX" 2>/dev/null) || {
+    log "${RED}[PR-WATCHER] reconciliation temporary script creation failed${NC}"
+    return 1
+  }
 
   # The authoritative gate and the landed mutation execute under the SAME
   # staging lock. Function bodies are copied from the live daemon into the
