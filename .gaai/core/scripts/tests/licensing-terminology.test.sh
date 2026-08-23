@@ -7,7 +7,8 @@
 #
 # Controlled set (exhaustive): the public repository's root README.md,
 # docs/contributing/fork-and-own.md, and tracked LICENSE blob. Those files
-# live in digipulse-engineering/GAAI-framework, NOT in this monorepo — see PUBLIC_ROOT
+# live in the public framework repository, NOT in an integration repository
+# that carries other product surfaces alongside it — see PUBLIC_ROOT
 # resolution below. Expanding the controlled set requires a validated
 # governance change, not an implicit glob.
 #
@@ -17,9 +18,10 @@
 # (this monorepo has no docs/contributing/) is a distinct, legitimate
 # "not applicable" state, never a violation — see public_layout_present().
 #
-# Run (bare, inside gaai-platform): bash .gaai/core/scripts/tests/licensing-terminology.test.sh
+# Run (bare, inside a repository that is not the public release surface):
+#   bash .gaai/core/scripts/tests/licensing-terminology.test.sh
 # Run (against the real public repo):
-#   GAAI_LICENSING_ROOT=/path/to/GAAI-framework bash .../licensing-terminology.test.sh
+#   GAAI_LICENSING_ROOT=/path/to/public-repo-checkout bash .../licensing-terminology.test.sh
 # Exit 0 = all pass.
 
 set -uo pipefail
@@ -29,11 +31,12 @@ fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Four '..' from .gaai/core/scripts/tests/ resolves to the repository root.
-# In the synced public repo this is digipulse-engineering/GAAI-framework's own root
-# (correct target). In gaai-platform it resolves to this monorepo's own
-# root (deliberate — public_layout_present() turns that into a pass-through
-# "not applicable" result instead of a false failure or a silently-skipped
-# check). GAAI_LICENSING_ROOT overrides for a specific checkout.
+# In the synced public repo this is the public framework repository's own
+# root (correct target). In an integration repository it resolves to that
+# repository's own root (deliberate — public_layout_present() turns that
+# into a pass-through "not applicable" result instead of a false failure or
+# a silently-skipped check). GAAI_LICENSING_ROOT overrides for a specific
+# checkout.
 PUBLIC_ROOT="${GAAI_LICENSING_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
 
 declare -a TMP_DIRS=()
@@ -93,8 +96,8 @@ CONSUMED_ALLOWLIST=""
 # public_layout_present <root>
 # True iff $root looks like a checkout of the public GAAI-framework release
 # surface (has docs/contributing/, README.md, LICENSE). False for any other
-# repo shape (e.g. gaai-platform's own root) — that is a legitimate
-# "not applicable" state, never a violation.
+# repo shape (e.g. an integration repository's own root) — that is a
+# legitimate "not applicable" state, never a violation.
 public_layout_present() {
   local root="$1"
   [[ -d "$root/docs/contributing" && -f "$root/README.md" && -f "$root/LICENSE" ]]

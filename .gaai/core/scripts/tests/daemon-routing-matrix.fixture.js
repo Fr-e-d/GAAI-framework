@@ -50,7 +50,6 @@ const ROUTING_VARS = [
   'GAAI_IMPL_MODEL_FALLBACK',
   'GAAI_CLAUDE_PROXY_BASE_URL',
   'ANTHROPIC_BASE_URL',
-  'GAAI_NESTED_KEEP_MCP',
 ];
 
 // ---------------------------------------------------------------------------

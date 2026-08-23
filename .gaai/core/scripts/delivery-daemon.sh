@@ -50,12 +50,19 @@ set -euo pipefail
 #   GAAI_STALENESS_THRESHOLD=15000   seconds before orphan in_progress is stale (default: timeout+10min)
 #   GAAI_SKIP_PERMISSIONS=true       force --dangerously-skip-permissions
 #   GAAI_SKIP_PERMISSIONS=false      force interactive mode (even on VPS)
-#   GAAI_DAEMON_WEBHOOK_SECRET=<hex> HMAC-SHA256 secret for signing outgoing webhook POSTs.
-#                                    Generate: openssl rand -hex 32
-#                                    Provision in cloud: PUT /api/v1/workspaces/:id/webhook-secrets/gaai-daemon
-#                                      Body: {"secret":"<hex>"}  Auth: Bearer token (workspace owner)
-#                                    When unset, webhooks are sent unsigned and cloud endpoint returns 401.
-#                                    See E101S07b FAQ for full provisioning walkthrough.
+#   GAAI_NOTIFICATION_WEBHOOK=<url>  Optional operator-supplied endpoint that receives
+#                                    escalation/resolution notifications. Unset = notifications
+#                                    off; no default destination is shipped.
+#   GAAI_DAEMON_WEBHOOK_SECRET=<hex> Optional operator-supplied HMAC-SHA256 secret for signing
+#                                    outgoing webhook POSTs. Generate: openssl rand -hex 32
+#                                    The receiver configures the same secret and verifies the
+#                                    request via the X-Hub-Signature-256: sha256=<hex> header
+#                                    over the raw request body, comparing in constant time
+#                                    (e.g. crypto.timingSafeEqual, never a plain ==).
+#                                    When unset, POSTs are sent unsigned; acceptance of an
+#                                    unsigned request is the receiver's own policy.
+#                                    Notifications are advisory only — they are never phase,
+#                                    acceptance, merge or retry authority.
 #
 # Session env (DEC-75 §6 — injected into every spawned claude -p subprocess):
 #   GAAI_WORKSPACE_ID=<uuid>         workspace UUIDv4; if unset at daemon start, read from
@@ -222,6 +229,20 @@ source "$SCRIPT_DIR/lib/chore-commit.sh"
 [[ -z "${_STUCK_CLASSIFIER_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/stuck-classifier.sh" && _STUCK_CLASSIFIER_SH_SOURCED=1
 # shellcheck source=lib/home-branch-guard.sh
 [[ -z "${_GAAI_HOME_BRANCH_GUARD_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/home-branch-guard.sh" && _GAAI_HOME_BRANCH_GUARD_SH_SOURCED=1
+# daemon-start.sh sources lib/daemon-home.sh too, but that is a separate process —
+# shell functions do not cross a process boundary, so _per_cycle_home_branch_check
+# (below) needs its own load here. The helper owns its own idempotent source guard.
+# Fail closed before any poll/coordination/spawn, instead of a repeated
+# "command not found" once _per_cycle_home_branch_check hits branch drift.
+# shellcheck source=lib/daemon-home.sh
+if [[ -r "$SCRIPT_DIR/lib/daemon-home.sh" ]]; then
+  source "$SCRIPT_DIR/lib/daemon-home.sh"
+fi
+if ! declare -F _gaai_provision_daemon_home >/dev/null 2>&1; then
+  echo "ERROR: daemon-home provisioner unavailable in this process" >&2
+  echo "Expected lib/daemon-home.sh to define _gaai_provision_daemon_home — check it exists and is readable" >&2
+  exit 1
+fi
 NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
 WEBHOOK_SECRET="${GAAI_DAEMON_WEBHOOK_SECRET:-}"
 
@@ -330,7 +351,7 @@ notify_escalation() {
     if [[ -n "$WEBHOOK_SECRET" ]]; then
       hmac_hex="$(compute_webhook_hmac "$json" "$WEBHOOK_SECRET")"
     else
-      log "${YELLOW}[NOTIFY] GAAI_DAEMON_WEBHOOK_SECRET unset — webhook will be rejected by cloud${NC}"
+      log "${YELLOW}[NOTIFY] GAAI_DAEMON_WEBHOOK_SECRET unset — sending webhook unsigned${NC}"
     fi
     local -a hmac_args=()
     [[ -n "$hmac_hex" ]] && hmac_args=(-H "X-Hub-Signature-256: sha256=$hmac_hex" -H "X-Webhook-Source: gaai-daemon")
@@ -379,7 +400,7 @@ notify_resolution() {
     if [[ -n "$WEBHOOK_SECRET" ]]; then
       hmac_hex="$(compute_webhook_hmac "$json" "$WEBHOOK_SECRET")"
     else
-      log "${YELLOW}[NOTIFY] GAAI_DAEMON_WEBHOOK_SECRET unset — webhook will be rejected by cloud${NC}"
+      log "${YELLOW}[NOTIFY] GAAI_DAEMON_WEBHOOK_SECRET unset — sending webhook unsigned${NC}"
     fi
     local -a hmac_args=()
     [[ -n "$hmac_hex" ]] && hmac_args=(-H "X-Hub-Signature-256: sha256=$hmac_hex" -H "X-Webhook-Source: gaai-daemon")

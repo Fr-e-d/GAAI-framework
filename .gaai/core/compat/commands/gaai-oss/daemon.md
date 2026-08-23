@@ -27,7 +27,6 @@ Launch or inspect the GAAI OSS Delivery Daemon.
 | `GAAI_IMPL_BASE_URL` | _(absent)_ | **Secondary Impl provider intent.** URL of an Anthropic-compatible provider for the Implementation phase. Separate from `GAAI_CLAUDE_PROXY_BASE_URL`: this expresses *which provider* to use, not *how the subprocess connects*. In direct mode (no proxy), maps to `ANTHROPIC_BASE_URL` for Impl only. In proxy mode, forwarded alongside the proxy so the gateway can route upstream. |
 | `GAAI_IMPL_AUTH_TOKEN` | _(absent)_ | Auth token for the secondary Impl provider. Required together with `GAAI_IMPL_BASE_URL` and `GAAI_IMPL_MODEL` to activate direct secondary routing. |
 | `GAAI_IMPL_MODEL` | _(absent)_ | Model ID for the secondary Impl provider (e.g. `glm-4.6`). |
-| `GAAI_NESTED_KEEP_MCP` | `0` | Set to `1` to suppress `--strict-mcp-config` injection when a proxy is active. Required for GAAI Cloud variants that need MCP connectivity preserved through the proxy. |
 
 ### Transport vs. provider intent
 
@@ -37,6 +36,8 @@ Launch or inspect the GAAI OSS Delivery Daemon.
 - `GAAI_IMPL_*` expresses **secondary Impl provider intent** — which provider and model should handle the Implementation phase. In proxy mode this intent is forwarded to the gateway so it can route upstream; it does not replace the proxy as the connection endpoint.
 
 Setting both variables is valid and expected when using a local GAAI-LLM-Gateway or any Anthropic-compatible proxy alongside a secondary implementation provider.
+
+When any proxy transport is active, the nested Claude Code subprocess automatically receives `--strict-mcp-config` to avoid a rejected MCP discovery payload on non-Anthropic shims. This is a function of transport only and has no opt-out.
 
 ## Instructions for Claude Code
 

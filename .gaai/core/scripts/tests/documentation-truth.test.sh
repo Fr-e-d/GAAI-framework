@@ -19,6 +19,16 @@
 # case block that parses to zero executors is a hard failure, never treated
 # as empty/no-drift.
 #
+# Also covers two additional fail-closed contracts (E1126S04 AC1/AC3/AC6):
+#  - check_skills_index_integrity: every `path:` entry in skills-index.yaml
+#    resolves on disk, every on-disk SKILL.md is indexed, and `total:`
+#    matches both counts. Catches a dangling entry left behind by a deleted
+#    skill (the failure mode a pure-mtime regeneration check misses).
+#  - check_local_status_contract: a given status-command doc never reads a
+#    `.gaai/local/` cache or names subscription/plan/tier/billing state or a
+#    connection status, and does positively assert filesystem-only, no
+#    network operation.
+#
 # Run: bash .gaai/core/scripts/tests/documentation-truth.test.sh
 # Exit 0 = all pass.
 
@@ -155,6 +165,105 @@ check_skill_totals() {
       bad=1
     fi
   done < <(grep -noE '[0-9]+[[:space:]]+skills?' "$file")
+  [[ $bad -eq 0 ]]
+}
+
+# check_skills_index_integrity <core_dir>
+# Asserts the skills index at $core_dir/skills/skills-index.yaml exists,
+# every `path:` entry resolves to a real file (resolved against
+# $core_dir/..), every on-disk SKILL.md under $core_dir/skills is present
+# as a `path:` entry, and `total:` equals both counts. Absence of the index
+# is a hard failure, never treated as no-drift.
+check_skills_index_integrity() {
+  local core_dir="$1"
+  local index="$core_dir/skills/skills-index.yaml" parent base bad=0
+  if [[ ! -f "$index" ]]; then
+    echo "check_skills_index_integrity: index file not found: $index"
+    return 1
+  fi
+  parent="$core_dir/.."
+  base="$(basename "$core_dir")"
+
+  local -a paths=()
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    paths+=("$p")
+  done < <(grep -oE '^[[:space:]]*path:[[:space:]]*.+$' "$index" | sed -E 's/^[[:space:]]*path:[[:space:]]*//')
+
+  local p
+  for p in "${paths[@]}"; do
+    if [[ ! -f "$parent/$p" ]]; then
+      echo "check_skills_index_integrity: dangling index entry — path does not resolve on disk: $p"
+      bad=1
+    fi
+  done
+
+  local -a on_disk=()
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    on_disk+=("$f")
+  done < <(cd "$parent" && find "$base/skills" -name 'SKILL.md' 2>/dev/null | sort)
+
+  local f found
+  for f in "${on_disk[@]}"; do
+    found=0
+    for p in "${paths[@]}"; do
+      [[ "$p" == "$f" ]] && { found=1; break; }
+    done
+    if [[ $found -eq 0 ]]; then
+      echo "check_skills_index_integrity: on-disk skill missing from index: $f"
+      bad=1
+    fi
+  done
+
+  local total_field entry_count="${#paths[@]}" disk_count="${#on_disk[@]}"
+  total_field="$(grep -m1 -oE '^total:[[:space:]]*[0-9]+' "$index" | grep -oE '[0-9]+')"
+  if [[ -z "$total_field" ]]; then
+    echo "check_skills_index_integrity: no total: field found in $index"
+    bad=1
+  elif [[ "$total_field" != "$entry_count" || "$total_field" != "$disk_count" ]]; then
+    echo "check_skills_index_integrity: total field ($total_field) does not match entry count ($entry_count) or on-disk count ($disk_count)"
+    bad=1
+  fi
+
+  [[ $bad -eq 0 ]]
+}
+
+# check_local_status_contract <file>
+# Asserts $file exists, never references a `.gaai/local/` cache path, a
+# `*-state.json` cache read, subscription/plan/tier/billing vocabulary, or
+# a connection-status report ("not connected"), and DOES positively assert
+# both `filesystem` and `no network`. Missing file is a hard failure.
+check_local_status_contract() {
+  local file="$1" bad=0
+  if [[ ! -f "$file" ]]; then
+    echo "check_local_status_contract: file not found: $file"
+    return 1
+  fi
+  if grep -qiE '\.gaai/local/' "$file"; then
+    echo "check_local_status_contract: $file references a local cache path (.gaai/local/)"
+    bad=1
+  fi
+  if grep -qiE '[a-z0-9_-]+-state\.json' "$file"; then
+    echo "check_local_status_contract: $file references a *-state.json cache read"
+    bad=1
+  fi
+  if grep -qiE '\b(subscription|billing|tier|plan)\b' "$file"; then
+    echo "check_local_status_contract: $file uses subscription/plan/tier/billing vocabulary"
+    bad=1
+  fi
+  if grep -qiE 'not connected' "$file"; then
+    echo "check_local_status_contract: $file reports a connection status"
+    bad=1
+  fi
+  if ! grep -qi 'filesystem' "$file"; then
+    echo "check_local_status_contract: $file is missing the positive local-only 'filesystem' assertion"
+    bad=1
+  fi
+  if ! grep -qi 'no network' "$file"; then
+    echo "check_local_status_contract: $file is missing the positive local-only 'no network' assertion"
+    bad=1
+  fi
   [[ $bad -eq 0 ]]
 }
 
@@ -428,6 +537,202 @@ scenario_missing_skills_dir() {
 }
 
 # ---------------------------------------------------------------------------
+# E — check_skills_index_integrity fixtures (AC1/AC6): dangling entry,
+# inverse drift (on-disk skill absent from index), total mismatch, missing
+# index file, and a consistent false-positive guard. Deliberately generic —
+# no hard-coded skill name/ID appears here (AC5).
+# ---------------------------------------------------------------------------
+
+scenario_skills_index_integrity_fixtures() {
+  local tmp core_dir out
+
+  # E1: dangling path entry
+  tmp="$(new_sandbox)"
+  core_dir="$tmp/core"
+  mkdir -p "$core_dir/skills/cross/demo-skill"
+  : > "$core_dir/skills/cross/demo-skill/SKILL.md"
+  cat > "$core_dir/skills/skills-index.yaml" <<'EOF'
+generated_at: {date}
+total: 2
+
+cross:
+  - id: SKILL-DEMO-001
+    name: demo-skill
+    path: core/skills/cross/demo-skill/SKILL.md
+  - id: SKILL-GHOST-001
+    name: ghost-skill
+    path: core/skills/cross/ghost-skill/SKILL.md
+EOF
+  if out="$(check_skills_index_integrity "$core_dir" 2>&1)"; then
+    fail "E1: expected dangling index entry to FAIL, but check passed"
+  else
+    if echo "$out" | grep -q "ghost-skill"; then
+      pass "E1: dangling index entry correctly flagged, naming the entry"
+    else
+      fail "E1: dangling entry detected but reason did not name it: $out"
+    fi
+  fi
+
+  # E2: on-disk skill missing from index (inverse drift)
+  tmp="$(new_sandbox)"
+  core_dir="$tmp/core"
+  mkdir -p "$core_dir/skills/cross/demo-skill" "$core_dir/skills/cross/orphan-skill"
+  : > "$core_dir/skills/cross/demo-skill/SKILL.md"
+  : > "$core_dir/skills/cross/orphan-skill/SKILL.md"
+  cat > "$core_dir/skills/skills-index.yaml" <<'EOF'
+generated_at: {date}
+total: 1
+
+cross:
+  - id: SKILL-DEMO-001
+    name: demo-skill
+    path: core/skills/cross/demo-skill/SKILL.md
+EOF
+  if out="$(check_skills_index_integrity "$core_dir" 2>&1)"; then
+    fail "E2: expected on-disk skill missing from index to FAIL, but check passed"
+  else
+    if echo "$out" | grep -q "orphan-skill"; then
+      pass "E2: on-disk skill missing from index correctly flagged (inverse drift)"
+    else
+      fail "E2: missing-from-index detected but reason did not name it: $out"
+    fi
+  fi
+
+  # E3: total field mismatch
+  tmp="$(new_sandbox)"
+  core_dir="$tmp/core"
+  mkdir -p "$core_dir/skills/cross/demo-skill"
+  : > "$core_dir/skills/cross/demo-skill/SKILL.md"
+  cat > "$core_dir/skills/skills-index.yaml" <<'EOF'
+generated_at: {date}
+total: 5
+
+cross:
+  - id: SKILL-DEMO-001
+    name: demo-skill
+    path: core/skills/cross/demo-skill/SKILL.md
+EOF
+  if check_skills_index_integrity "$core_dir" >/tmp/sii_out_$$ 2>&1; then
+    fail "E3: expected total field mismatch to FAIL"
+  else
+    pass "E3: total field mismatch correctly flagged"
+  fi
+  rm -f /tmp/sii_out_$$
+
+  # E4: missing index file fails loud (not silently treated as no-drift)
+  tmp="$(new_sandbox)"
+  core_dir="$tmp/core"
+  mkdir -p "$core_dir/skills"
+  if out="$(check_skills_index_integrity "$core_dir" 2>&1)"; then
+    fail "E4: expected missing index file to FAIL loud"
+  else
+    if echo "$out" | grep -q "index file not found"; then
+      pass "E4: missing index file fails loud with an explicit reason"
+    else
+      fail "E4: missing-index failure reason not as expected: $out"
+    fi
+  fi
+
+  # E5: consistent index + skill tree (false-positive guard)
+  tmp="$(new_sandbox)"
+  core_dir="$tmp/core"
+  mkdir -p "$core_dir/skills/cross/demo-skill" "$core_dir/skills/discovery/other-skill"
+  : > "$core_dir/skills/cross/demo-skill/SKILL.md"
+  : > "$core_dir/skills/discovery/other-skill/SKILL.md"
+  cat > "$core_dir/skills/skills-index.yaml" <<'EOF'
+generated_at: {date}
+total: 2
+
+cross:
+  - id: SKILL-DEMO-001
+    name: demo-skill
+    path: core/skills/cross/demo-skill/SKILL.md
+discovery:
+  - id: SKILL-OTHER-001
+    name: other-skill
+    path: core/skills/discovery/other-skill/SKILL.md
+EOF
+  if check_skills_index_integrity "$core_dir"; then
+    pass "E5: consistent index + skill tree passes (false-positive guard)"
+  else
+    fail "E5: consistent index + skill tree unexpectedly failed"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# F — check_local_status_contract fixtures (AC3/AC6). F1 is a
+# shape-equivalent synthetic defect, not a verbatim copy of any real
+# pre-fix text — pasting the real pre-fix wording would reintroduce a
+# hosted product name into this Story's own files, which AC5 forbids.
+# ---------------------------------------------------------------------------
+
+scenario_local_status_contract_fixtures() {
+  local tmp fixture
+
+  # F1: shape-equivalent defect fixture (local cache path + plan vocabulary)
+  tmp="$(new_sandbox)"
+  fixture="$tmp/status-with-remote-state.md"
+  cat > "$fixture" <<'EOF'
+Run `cat .gaai/local/account-state.json 2>/dev/null` to read the cached state.
+Display: <Example Service>: Pro plan — Active
+EOF
+  if check_local_status_contract "$fixture" >/tmp/lsc_out_$$ 2>&1; then
+    fail "F1: expected local-cache-and-plan-shaped defect fixture to FAIL"
+  else
+    pass "F1: local-cache-and-plan-shaped defect fixture correctly flagged"
+  fi
+  rm -f /tmp/lsc_out_$$
+
+  # F2: missing the positive local-only assertion
+  tmp="$(new_sandbox)"
+  fixture="$tmp/status-no-assertion.md"
+  cat > "$fixture" <<'EOF'
+Reads the active backlog and memory files under the project directory.
+EOF
+  if check_local_status_contract "$fixture" >/tmp/lsc_out2_$$ 2>&1; then
+    fail "F2: expected fixture missing the local-only assertion to FAIL"
+  else
+    pass "F2: fixture missing the local-only positive assertion correctly flagged"
+  fi
+  rm -f /tmp/lsc_out2_$$
+
+  # F3: compliant fixture (false-positive guard)
+  tmp="$(new_sandbox)"
+  fixture="$tmp/status-compliant.md"
+  cat > "$fixture" <<'EOF'
+This command reports only state read from the filesystem under the project
+directory. It makes no network call and reads no cached external state.
+EOF
+  if check_local_status_contract "$fixture"; then
+    pass "F3: compliant local-only fixture passes (false-positive guard)"
+  else
+    fail "F3: compliant local-only fixture unexpectedly failed"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# C2 — Real-file scan for the two new contracts: proves this Story's own
+# edits are correct AND guards every future edit to these files.
+# ---------------------------------------------------------------------------
+
+scenario_real_index_and_status_scan() {
+  local out
+
+  if out="$(check_skills_index_integrity "$REAL_CORE" 2>&1)"; then
+    pass "C2: real skills-index.yaml is consistent with the on-disk skill tree"
+  else
+    fail "C2: $out"
+  fi
+
+  local status_file="$REAL_CORE/compat/commands/gaai-status.md"
+  if out="$(check_local_status_contract "$status_file" 2>&1)"; then
+    pass "C2: real gaai-status.md satisfies the local-only status contract"
+  else
+    fail "C2: $out"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 echo "GAAI documentation-truth.test.sh — hermetic drift test"
 echo "========================================================"
 echo ""
@@ -457,6 +762,15 @@ scenario_mangled_case_block
 echo ""
 echo "=== D3: missing skills/ directory fails loud ==="
 scenario_missing_skills_dir
+echo ""
+echo "=== E: skills-index integrity fixtures ==="
+scenario_skills_index_integrity_fixtures
+echo ""
+echo "=== F: local-only status contract fixtures ==="
+scenario_local_status_contract_fixtures
+echo ""
+echo "=== C2: real-file scan — skills-index integrity + local-only status ==="
+scenario_real_index_and_status_scan
 
 echo ""
 echo "========================================================"

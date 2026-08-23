@@ -22,7 +22,7 @@ outputs:
 
 # Memory Reconcile
 
-> **Why this skill exists:** The OSS (file-based) GAAI runtime has no server-side enforcement. Drift between memory files and the decisions they reference accumulates silently between sessions. `memory-ingest` populates memory from validated outputs but does not cross-check existing entries for staleness or contradiction. `memory-reconcile` is the OSS counterpart of the Cloud `ReconciliationWorkflow` — it fills this gap by scanning existing memory for drift that `memory-ingest` misses. In Cloud, reconciliation is a server-side scheduled workflow. In OSS, the Discovery Agent triggers it manually (or via cron) by invoking this skill.
+> **Why this skill exists:** The file-based GAAI runtime has no server-side enforcement. Drift between memory files and the decisions they reference accumulates silently between sessions. `memory-ingest` populates memory from validated outputs but does not cross-check existing entries for staleness or contradiction. `memory-reconcile` fills this gap by scanning existing memory for drift that `memory-ingest` misses. The Discovery Agent triggers it manually (or via cron) by invoking this skill.
 >
 > **Client-side LLM** (per the active "LLM stays client-side" DEC in your registry, if present): This skill executes locally in the OSS layer. No data leaves the local filesystem.
 >
@@ -151,7 +151,7 @@ Example:
 
 | File | code_path | Commits since updated_at | Days stale |
 |---|---|---|---|
-| architecture/<binding-audit>.md | workers/<worker-dir>/<config-file> | 3 | 2 |
+| architecture/<binding-audit>.md | src/<module>/<config-file> | 3 | 2 |
 
 If the code-path freshness check was skipped (git unavailable), this section contains only the skip note: "Code-path freshness check skipped: git not available."
 
@@ -162,7 +162,7 @@ Example:
 
 | File | Source | Reference | Commits since updated_at | Days stale |
 |---|---|---|---|---|
-| api/docs/overview/what-is-gaai-cloud.md | proximity | api/src/ | 12 | 8 |
+| docs/overview/architecture.md | proximity | src/ | 12 | 8 |
 | README.md | depends_on | src/index.ts | 3 | 2 |
 
 If no documentation files were discovered, this section contains: "No documentation or README files found in project."
@@ -187,6 +187,6 @@ This skill MUST NOT:
 - Trigger `memory-ingest` directly.
 - Delete or archive memory files.
 - Auto-correct superseded references without human review.
-- Run server-side — this skill is OSS, client-side only. The Cloud counterpart is the server-side reconciliation workflow.
+- Run server-side — this skill is client-side only.
 
 **Identify drift. Never resolve it unilaterally. Discovery is the sole actor authorized to action the report.**

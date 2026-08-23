@@ -252,6 +252,10 @@ function buildChildEnv() {
   delete env.ANTHROPIC_API_KEY;
   delete env.CLAUDE_API_KEY;
 
+  // Retired GAAI Cloud execution metadata must never reach the child process
+  delete env.GAAI_WORKSPACE_ID;
+  delete env.GAAI_ORG_ID;
+
   return env;
 }
 
@@ -270,6 +274,10 @@ function buildPrimaryChildEnv() {
 
   // Required: bypass nested Claude Code detection
   env.CLAUDECODE = '';
+
+  // Retired GAAI Cloud execution metadata must never reach the child process
+  delete env.GAAI_WORKSPACE_ID;
+  delete env.GAAI_ORG_ID;
 
   // When a daemon-scoped Claude proxy is configured, the primary subprocess must
   // also route through the proxy so there is no silent wrong-upstream routing.
@@ -306,13 +314,9 @@ function buildSpawnArgs(prompt, extraArgs, model = 'opus', includeFallbackModel 
   // call. --strict-mcp-config limits MCP discovery to the explicit --mcp-config
   // and avoids the rejected init payload. No-op when targeting anthropic.com.
   //
-  // Mode contract:
-  //   OSS daemon (this default) — Impl operates on local backlog files, no MCP
-  //     required, so --strict-mcp-config without --mcp-config = no MCP servers,
-  //     which is the desired state.
-  //   GAAI-Cloud variant — Impl needs MCP to talk to the Workspace DO. Cloud
-  //     callers MUST set GAAI_NESTED_KEEP_MCP=1 to opt out of the strict flag
-  //     and preserve the inherited MCP discovery.
+  // --strict-mcp-config is a function of transport only: any non-Anthropic
+  // base URL injects it, unconditionally, with no opt-out. There is exactly
+  // one provider-neutral contract here.
   // Check both ANTHROPIC_BASE_URL (already set in parent) and GAAI_CLAUDE_PROXY_BASE_URL
   // (set by operator, not yet propagated to ANTHROPIC_BASE_URL in parent process).
   // Without this fallback, --strict-mcp-config would not be injected when the operator
@@ -322,8 +326,7 @@ function buildSpawnArgs(prompt, extraArgs, model = 'opus', includeFallbackModel 
   const isNonAnthropicShim = Boolean(
     _effectiveBaseUrl && !_effectiveBaseUrl.includes('anthropic.com')
   );
-  const keepMcp = process.env.GAAI_NESTED_KEEP_MCP === '1';
-  const injectStrictMcp = isNonAnthropicShim && !keepMcp;
+  const injectStrictMcp = isNonAnthropicShim;
   return [
     '-p', prompt,
     '--no-session-persistence',
@@ -670,6 +673,11 @@ export function reconcileHandles({ reap = false } = {}) {
     try { record = JSON.parse(readFileSync(path, 'utf8')); }
     catch { out.unreadable.push(path); continue; }
 
+    // A handle written by an older build may still carry retired GAAI Cloud
+    // execution metadata; never surface it from reconciliation.
+    delete record.workspace_id;
+    delete record.org_id;
+
     if (!_isAlive(record.pid)) {
       out.stale.push(record);
       try { unlinkSync(path); } catch { /* already gone */ }
@@ -730,11 +738,10 @@ function spawnCore(prompt, implReportPath, extraArgs, globalTimeoutMs, heartbeat
   // What this run belongs to. A handle that cannot name its own story forces
   // consumers to infer identity from the worktree path, which is a string-shape
   // guess rather than a fact. Explicit context wins; the daemon exports the same
-  // values into the child env, which covers callers that pass nothing.
+  // story id into the child env, which covers callers that pass nothing.
   const identity = {
-    story_id:     context.storyId     || process.env.GAAI_STORY_ID     || null,
-    workspace_id: context.workspaceId || process.env.GAAI_WORKSPACE_ID || null,
-    phase:        context.phase       || 'impl',
+    story_id: context.storyId || process.env.GAAI_STORY_ID || null,
+    phase:    context.phase   || 'impl',
   };
 
   // Log spawn start — never log token values

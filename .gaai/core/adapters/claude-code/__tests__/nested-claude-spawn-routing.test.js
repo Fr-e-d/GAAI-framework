@@ -12,9 +12,10 @@
 import { describe, test, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { writeFileSync, mkdtempSync } from 'node:fs';
-import { join } from 'node:path';
+import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 import {
   _setSpawnFn,
@@ -77,8 +78,13 @@ const ROUTING_VARS = [
   'GAAI_IMPL_MODEL_FALLBACK',
   'GAAI_CLAUDE_PROXY_BASE_URL',
   'ANTHROPIC_BASE_URL',
-  'GAAI_NESTED_KEEP_MCP',
 ];
+
+// Retired GAAI Cloud execution metadata — injected only as hostile input in
+// the regression tests below, never as live routing-contract state. Kept
+// separate from ROUTING_VARS so a leaked value cannot masquerade as routing
+// state in an unrelated test.
+const RETIRED_VARS = ['GAAI_NESTED_KEEP_MCP', 'GAAI_WORKSPACE_ID', 'GAAI_ORG_ID'];
 
 function setProxyEnv() { process.env.GAAI_CLAUDE_PROXY_BASE_URL = PROXY_URL; }
 
@@ -92,11 +98,16 @@ function clearRoutingEnv() {
   for (const k of ROUTING_VARS) delete process.env[k];
 }
 
+function clearRetiredEnv() {
+  for (const k of RETIRED_VARS) delete process.env[k];
+}
+
 // ---------------------------------------------------------------------------
 // Suite state
 // ---------------------------------------------------------------------------
 
 let savedRoutingVars = {};
+let savedRetiredVars = {};
 let savedPath;
 let fakeBinDir;
 let tmpLog;
@@ -112,6 +123,10 @@ before(() => {
   // contaminate assertions.
   for (const k of ROUTING_VARS) {
     savedRoutingVars[k] = process.env[k];
+    delete process.env[k];
+  }
+  for (const k of RETIRED_VARS) {
+    savedRetiredVars[k] = process.env[k];
     delete process.env[k];
   }
 
@@ -138,14 +153,22 @@ after(() => {
       delete process.env[k];
     }
   }
+  for (const k of RETIRED_VARS) {
+    if (savedRetiredVars[k] !== undefined) {
+      process.env[k] = savedRetiredVars[k];
+    } else {
+      delete process.env[k];
+    }
+  }
 });
 
 // Ensure each test starts with a clean routing env (prevents inter-test leakage)
-beforeEach(() => clearRoutingEnv());
+beforeEach(() => { clearRoutingEnv(); clearRetiredEnv(); });
 
 afterEach(() => {
   _resetSpawnFn();
   clearRoutingEnv();
+  clearRetiredEnv();
 });
 
 // ---------------------------------------------------------------------------
@@ -437,13 +460,157 @@ describe('buildSpawnArgs — isNonAnthropicShim (--strict-mcp-config injection)'
       '--strict-mcp-config must NOT be injected when no proxy is configured');
   });
 
-  test('GAAI_NESTED_KEEP_MCP=1 overrides strict flag even in proxy mode', async () => {
+  test('retired GAAI_NESTED_KEEP_MCP=1 has no effect — strict flag still injected in proxy mode', async () => {
     setProxyEnv();
     process.env.GAAI_NESTED_KEEP_MCP = '1';
     const calls = setupSpawnCapture();
     await runImplPrimary();
-    assert.ok(!calls[0].args.includes('--strict-mcp-config'),
-      '--strict-mcp-config must NOT be injected when GAAI_NESTED_KEEP_MCP=1 (Cloud MCP opt-out)');
+    assert.ok(calls[0].args.includes('--strict-mcp-config'),
+      '--strict-mcp-config has no opt-out; the retired GAAI_NESTED_KEEP_MCP variable must not suppress it');
+  });
+
+  test('retired GAAI_NESTED_KEEP_MCP with any value has no effect', async () => {
+    setProxyEnv();
+    for (const value of ['0', '', 'true', 'yes']) {
+      process.env.GAAI_NESTED_KEEP_MCP = value;
+      const calls = setupSpawnCapture();
+      await runImplPrimary();
+      assert.ok(calls[0].args.includes('--strict-mcp-config'),
+        `--strict-mcp-config must still be injected when GAAI_NESTED_KEEP_MCP=${JSON.stringify(value)}`);
+      _resetSpawnFn();
+    }
+  });
+
+});
+
+// ===========================================================================
+// AC3/AC6 — retired GAAI_WORKSPACE_ID / GAAI_ORG_ID: no reach into spawn
+// argv, child env or the normalized result shape (QA cycle-1 F1 fix — the
+// handle-artefact assertions in nested-claude-spawn.test.js proved this
+// indirectly; AC3/AC6 name argv/env/result explicitly, so this suite proves
+// those channels directly against the capture harness already in this file)
+// ===========================================================================
+
+const KNOWN_RESULT_FIELDS = new Set([
+  'trace_id', 'success', 'exit_code', 'error_reason', 'impl_report_path',
+  'model_actual', 'duration_ms', 'model_requested', 'model_fallback_triggered',
+  'provider_base_url', 'telemetry', 'session_id', 'terminal_receipt',
+  'observation_window_expired', 'log_emit_failed',
+]);
+
+describe('retired GAAI_WORKSPACE_ID / GAAI_ORG_ID — no reach into argv, env or result', () => {
+
+  test('injected workspace/org values do not appear in spawn argv; MCP access not broadened', async () => {
+    process.env.GAAI_WORKSPACE_ID = 'ws-example';
+    process.env.GAAI_ORG_ID = 'org-example';
+    const calls = setupSpawnCapture();
+    await runImplPrimary();
+    const argvJoined = calls[0].args.join(' ');
+    assert.ok(!argvJoined.includes('ws-example'),
+      'spawn argv must not contain the injected GAAI_WORKSPACE_ID value');
+    assert.ok(!argvJoined.includes('org-example'),
+      'spawn argv must not contain the injected GAAI_ORG_ID value');
+    assert.ok(!calls[0].args.includes('--mcp-config'),
+      'injected workspace/org identity must not broaden MCP access via an explicit --mcp-config flag');
+  });
+
+  test('injected workspace/org values are scrubbed from the child environment (primary path)', async () => {
+    process.env.GAAI_WORKSPACE_ID = 'ws-example';
+    process.env.GAAI_ORG_ID = 'org-example';
+    const calls = setupSpawnCapture();
+    await runImplPrimary();
+    assert.equal(calls[0].env.GAAI_WORKSPACE_ID, undefined,
+      'GAAI_WORKSPACE_ID must be scrubbed from the child environment');
+    assert.equal(calls[0].env.GAAI_ORG_ID, undefined,
+      'GAAI_ORG_ID must be scrubbed from the child environment');
+  });
+
+  test('injected workspace/org values are scrubbed on the secondary→primary fallback spawn too', async () => {
+    process.env.GAAI_WORKSPACE_ID = 'ws-example';
+    process.env.GAAI_ORG_ID = 'org-example';
+    setImplEnv();
+
+    const calls = setupSpawnCapture({
+      perCallFn: (idx) => {
+        if (idx === 0) return createMockChild({ exitCode: 1, stderrData: '401 Unauthorized' });
+        return createMockChild({ exitCode: 0, stdoutData: '## QA\nPASSED.' });
+      },
+    });
+
+    await runImplSecondary();
+
+    assert.ok(calls.length >= 2, 'fallback must occur (secondary + primary)');
+    for (const call of calls) {
+      assert.equal(call.env.GAAI_WORKSPACE_ID, undefined,
+        'GAAI_WORKSPACE_ID must be scrubbed on every spawn path, including the primary fallback');
+      assert.equal(call.env.GAAI_ORG_ID, undefined,
+        'GAAI_ORG_ID must be scrubbed on every spawn path, including the primary fallback');
+      const argvJoined = call.args.join(' ');
+      assert.ok(!argvJoined.includes('ws-example') && !argvJoined.includes('org-example'),
+        'neither injected value may appear in argv on any spawn in the fallback chain');
+    }
+  });
+
+  test('injected workspace/org values add no field to the normalized SpawnResult', async () => {
+    process.env.GAAI_WORKSPACE_ID = 'ws-example';
+    process.env.GAAI_ORG_ID = 'org-example';
+    setupSpawnCapture();
+    const result = await runImplPrimary();
+    for (const key of Object.keys(result)) {
+      assert.ok(KNOWN_RESULT_FIELDS.has(key),
+        `SpawnResult must not gain a new field from injected workspace/org env; unexpected key: ${key}`);
+    }
+    assert.ok(!('workspace_id' in result), 'SpawnResult must not carry workspace_id');
+    assert.ok(!('org_id' in result), 'SpawnResult must not carry org_id');
+  });
+
+  test('injected workspace/org values add no field or value to the routing record', async () => {
+    process.env.GAAI_WORKSPACE_ID = 'ws-routing-record-example';
+    process.env.GAAI_ORG_ID = 'org-routing-record-example';
+    setupSpawnCapture();
+    await runImplPrimary();
+
+    const logContents = readFileSync(tmpLog, 'utf8');
+    assert.ok(!logContents.includes('ws-routing-record-example'),
+      'routing log must not contain the injected GAAI_WORKSPACE_ID value');
+    assert.ok(!logContents.includes('org-routing-record-example'),
+      'routing log must not contain the injected GAAI_ORG_ID value');
+
+    const records = logContents
+      .trim()
+      .split('\n')
+      .filter((line) => line.trim().startsWith('{'))
+      .map((line) => JSON.parse(line));
+    const record = records[records.length - 1];
+    assert.ok(record, 'runImpl must append a structured routing record');
+    assert.ok(!('workspace_id' in record), 'routing record must not carry workspace_id');
+    assert.ok(!('org_id' in record), 'routing record must not carry org_id');
+  });
+
+});
+
+// ===========================================================================
+// Source scans — retired GAAI Cloud execution metadata must not reappear
+// ===========================================================================
+
+const __dirnameHere = dirname(fileURLToPath(import.meta.url));
+const ADAPTER_SRC_PATH = join(__dirnameHere, '..', 'nested-claude-spawn.js');
+const DAEMON_DOC_PATH  = join(__dirnameHere, '..', '..', '..', 'compat', 'commands', 'gaai-oss', 'daemon.md');
+
+describe('source scans — no retired Cloud execution metadata', () => {
+
+  test('nested-claude-spawn.js source contains no GAAI_NESTED_KEEP_MCP', () => {
+    const src = readFileSync(ADAPTER_SRC_PATH, 'utf8');
+    assert.ok(!src.includes('GAAI_NESTED_KEEP_MCP'),
+      'nested-claude-spawn.js must not reference the retired GAAI_NESTED_KEEP_MCP variable');
+  });
+
+  test('daemon.md documents no retired variable and no GAAI Cloud exception', () => {
+    const doc = readFileSync(DAEMON_DOC_PATH, 'utf8');
+    assert.ok(!doc.includes('GAAI_NESTED_KEEP_MCP'),
+      'daemon.md must not document the retired GAAI_NESTED_KEEP_MCP variable');
+    assert.ok(!/gaai cloud/i.test(doc),
+      'daemon.md must not name a GAAI Cloud exception, connector or workspace input');
   });
 
 });
