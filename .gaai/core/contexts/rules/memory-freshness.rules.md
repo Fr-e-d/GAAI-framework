@@ -31,7 +31,7 @@ fields at the time of ingest:
 
 ```yaml
 depends_on:
-  code_paths: ["workers/<worker-dir>/<source-tree>/"]  # git-trackable paths
+  code_paths: ["src/<module>/"]  # git-trackable paths
   decisions: [<DEC-id>, <DEC-id>]                        # DEC IDs referenced in content
   epics: [<EID>, <EID>]                                  # epics whose completion may invalidate content
 refresh_tier: 1  # 1=post-epic-hook, 2=read-time-check, 3=cadence, 4=stable
@@ -44,8 +44,8 @@ refresh_tier: 1  # 1=post-epic-hook, 2=read-time-check, 3=cadence, 4=stable
 - **Glob patterns are NOT supported** — too fragile across renames; use explicit paths only
 - An empty list (`[]`) is a valid declaration — it means "no code dependency identified"
 - Examples:
-  - `"workers/<worker-dir>/<source-tree>/"` — directory watch
-  - `"workers/<worker-dir>/<source-tree>/<service>.ts"` — file watch
+  - `"src/<module>/"` — directory watch
+  - `"src/<module>/<file>.ts"` — file watch
   - `[]` — no code dependency (or not yet identified)
 
 ### 1.2 `depends_on.decisions`
@@ -179,19 +179,17 @@ New files must declare it at ingest time (governed by the `memory-ingest` skill)
 
 ---
 
-## 5. Cloud Forward-Compatibility
+## 5. Portable Dependency Semantics
 
-The `depends_on` schema is designed to map to GAAI Cloud knowledge graph edges:
+The `depends_on` fields are plain, self-describing metadata, not a runtime
+dependency on any external system: `code_paths` is a source-path edge,
+`decisions` is a decision edge, and `epics` is a human-readable, informational
+epic edge. Any downstream indexer or graph — local tooling, a future
+integration, or a third-party consumer — can read and consume these edges
+directly from frontmatter without further translation.
 
-| Local field | Cloud graph concept |
-|-------------|---------------------|
-| `depends_on.code_paths` | Source edges — links a memory node to code-path nodes in the graph |
-| `depends_on.decisions` | DEC dependency edges — links a memory node to decision nodes |
-| `depends_on.epics` | Epic context edges — human-readable, informational in graph |
-
-This mapping is informational for the OSS layer. Cloud enforcement is an
-out-of-scope concern for the local staleness check; Cloud graph enforcement
-is a separate track.
+The local staleness check defined in this document depends on none of these
+edges being enforced anywhere else; it is fully self-contained.
 
 ---
 

@@ -2,8 +2,8 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md — core framework skills only
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-07-06
-total: 62
+generated_at: 2026-08-22
+total: 61
 
 discovery:
   - id: SKILL-CREATE-PRD-001
@@ -175,7 +175,7 @@ cross:
   - id: SKILL-ABORT-SAFE-HANDLER-001
     name: abort-safe-handler
     source: core
-    description: "Orchestrator-level Stage 4 entry gate for /gaai:bootstrap. Presents a pre-loop "Skip Q&A entirely" option, delegates to qa-loop-ui when the user proceeds, and returns a unified abort_safe_result with telemetry on every path. Guarantees no partial state on skip or abort."
+    description: "Orchestrator-level Stage 4 entry gate for /gaai:bootstrap. Presents a pre-loop 'Skip Q&A entirely' option, delegates to qa-loop-ui when the user proceeds, and returns a unified abort_safe_result with telemetry on every path. Guarantees no partial state on skip or abort."
     category: cross
     track: cross-cutting
     tags: []
@@ -217,15 +217,6 @@ cross:
     tags: []
     updated_at: 2026-04-29
     path: core/skills/cross/bootstrap-llm-synthesis/SKILL.md
-  - id: SKILL-BOOTSTRAP-MEMORY-INGEST-CLOUD-001
-    name: bootstrap-memory-ingest-cloud
-    source: core
-    description: "Write structured memory entries to the Cloud workspace via gaai_memory.store MCP tool with source='bootstrap'. Loops over entries from bootstrap-llm-synthesis, calls the tool per entry, collects success/fail counts. Used as Stage 5 of the /gaai:bootstrap pipeline (Cloud path only)."
-    category: cross
-    track: cross-cutting
-    tags: []
-    updated_at: 2026-05-01
-    path: core/skills/cross/bootstrap-memory-ingest-cloud/SKILL.md
   - id: SKILL-CRS-018
     name: build-agents-index
     source: core

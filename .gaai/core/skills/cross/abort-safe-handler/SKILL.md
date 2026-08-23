@@ -1,6 +1,6 @@
 ---
 name: abort-safe-handler
-description: Orchestrator-level Stage 4 entry gate for /gaai:bootstrap. Presents a pre-loop "Skip Q&A entirely" option, delegates to qa-loop-ui when the user proceeds, and returns a unified abort_safe_result with telemetry on every path. Guarantees no partial state on skip or abort.
+description: Orchestrator-level Stage 4 entry gate for /gaai:bootstrap. Presents a pre-loop 'Skip Q&A entirely' option, delegates to qa-loop-ui when the user proceeds, and returns a unified abort_safe_result with telemetry on every path. Guarantees no partial state on skip or abort.
 license: ELv2
 compatibility: Works in any interactive AI coding agent context (Claude Code, Cursor) where inline Q&A is supported
 metadata:

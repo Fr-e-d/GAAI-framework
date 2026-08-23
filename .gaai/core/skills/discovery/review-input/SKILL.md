@@ -96,7 +96,7 @@ Inspect the input for references to :
 - Files in `memory/architecture/`, `memory/strategy/`, `patterns/`
 - `base.rules.md`, `orchestration.rules.md`, agent definitions
 - Backlog stories with scope / AC / wedge / pricing / ICP impact
-- Source code paths in `gaai-cloud/`, `gaai-oss/`, `workers/`
+- Source code paths under `src/`, `packages/`, `services/`
 - User-facing copy (landing, emails, docs publics)
 
 If no target identified → input is purely conversational (no mutation candidate).
@@ -388,8 +388,7 @@ These metrics inform the **decision-gate at V1+8 weeks** (per OT-15 + §3.4 chif
 
 ## Reference Artefacts (deferred, do not invoke unless decision-gate triggered)
 
-- `.gaai/project/contexts/artefacts/research/anti-girouette-guardrail/README.md` — design context + decision-gate criteria
-- `.gaai/project/contexts/artefacts/research/anti-girouette-guardrail/enforcement-prompts-deferred.md` — Prompt A (OSS hooks/skills/sub-agents enforcement design), Prompt B (Cloud hard gates + drift detector + soft-gate-as-instruction injection design), Veracity Sub-Agent prompt (isolated verification agent design)
+Deferred enforcement-design research, if any, lives under the project's own `contexts/artefacts/research/` and is not invoked unless the decision gate above triggers.
 
 These are NOT part of V1 scope. They are research preserved against the case where empirical data at V1+8w justifies escalation.
 

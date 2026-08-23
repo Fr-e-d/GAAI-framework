@@ -15,6 +15,7 @@ import { EventEmitter } from 'node:events';
 import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, mkdtempSync, statSync, chmodSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 import {
   spawnNestedClaude,
@@ -1206,13 +1207,17 @@ describe('nested-claude-spawn — handle identity', () => {
     clearEnv();
     delete process.env.GAAI_STORY_ID;
     delete process.env.GAAI_WORKSPACE_ID;
+    delete process.env.GAAI_ORG_ID;
   });
 
-  test('the in-flight handle names its story, workspace, phase and command', async () => {
+  test('the in-flight handle names its story and phase, never a workspace/org identity', async () => {
     setValidEnv();
     const handleDir = useTmpHandleDir();
     process.env.GAAI_STORY_ID     = 'EXAMPLE-STORY';
+    // Ambient injection: even if these leak from the parent environment, the
+    // handle must not carry or disclose them.
     process.env.GAAI_WORKSPACE_ID = 'ws-example';
+    process.env.GAAI_ORG_ID       = 'org-example';
 
     _setSpawnFn(() => createMockChild({ exitCode: 0, stdoutData: '## Implementation\n', delay: 400 }));
 
@@ -1229,7 +1234,8 @@ describe('nested-claude-spawn — handle identity', () => {
     const rec = JSON.parse(raw);
 
     assert.equal(rec.story_id, 'EXAMPLE-STORY');
-    assert.equal(rec.workspace_id, 'ws-example');
+    assert.equal(rec.workspace_id, undefined, 'workspace_id must never be recorded');
+    assert.equal(rec.org_id, undefined, 'org_id must never be recorded');
     assert.equal(rec.phase, 'impl');
     assert.equal(typeof rec.command?.bin, 'string');
     assert.ok(rec.started_at, 'started_at recorded');
@@ -1238,6 +1244,10 @@ describe('nested-claude-spawn — handle identity', () => {
     // The argv carries the prompt. A handle file is not a place for prompt content.
     assert.equal(raw.includes('a-prompt-that-must-not-be-recorded'), false,
       'the prompt must never be persisted into the handle');
+    assert.equal(raw.includes('ws-example'), false,
+      'the injected workspace id must never reach the handle bytes');
+    assert.equal(raw.includes('org-example'), false,
+      'the injected org id must never reach the handle bytes');
 
     await pending;
     assert.deepEqual(readdirSync(handleDir).filter(f => f.endsWith('.json')), [],
@@ -1259,6 +1269,36 @@ describe('nested-claude-spawn — handle identity', () => {
     assert.equal(report.live.length, 1);
     assert.equal(report.live[0].story_id, 'EXAMPLE-STORY',
       'story identity survives reconciliation without path inference');
+  });
+
+  test('reconcile scrubs retired workspace/org identity from a legacy on-disk handle', () => {
+    const handleDir = useTmpHandleDir();
+    writeFileSync(join(handleDir, 'legacy.json'), JSON.stringify({
+      trace_id: 'legacy',
+      pid: process.pid,
+      story_id: 'EXAMPLE-STORY',
+      workspace_id: 'ws-example',
+      org_id: 'org-example',
+      cwd: '/tmp/some-unrelated-path',
+      started_at: new Date().toISOString(),
+      state: 'running',
+    }), 'utf8');
+
+    const report = reconcileHandles();
+    assert.equal(report.live.length, 1);
+    assert.equal(report.live[0].story_id, 'EXAMPLE-STORY');
+    assert.equal(report.live[0].workspace_id, undefined,
+      'a handle written by an older build must be scrubbed of workspace_id on reconcile');
+    assert.equal(report.live[0].org_id, undefined,
+      'a handle written by an older build must be scrubbed of org_id on reconcile');
+  });
+
+  test('adapter source never serializes workspace/org identity', () => {
+    const srcPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'nested-claude-spawn.js');
+    const src = readFileSync(srcPath, 'utf8');
+    assert.ok(!src.includes('workspace_id:'), 'must not serialize workspace_id as an object field');
+    assert.ok(!src.includes('org_id:'), 'must not serialize org_id as an object field');
+    assert.ok(!src.includes('context.workspaceId'), 'must not read context.workspaceId');
   });
 
 });
