@@ -89,7 +89,7 @@ L_WT_YAML="items:
 printf '%s\n' "$L_WT_YAML" > "$L_DIR/$L_BACKLOG_REL"
 echo "12345" > "$L_LOCK_DIR/${L_STORY}.lock"
 
-L_HARNESS=$(mktemp /tmp/rc-reorder-live-harness-XXXXXX.sh)
+L_HARNESS=$(mktemp /tmp/rc-reorder-live-harness-XXXXXX)
 cat > "$L_HARNESS" <<HARNESS
 #!/usr/bin/env bash
 set -uo pipefail
@@ -239,7 +239,7 @@ fi
 # No lock file for this sid (dead wrapper). No .interrupted / .agent-hang.marker
 # (rules out graceful-stop and crash-drift-signature branches, isolating the
 # generic drift-commit path this story fixes).
-CWD_HARNESS=$(mktemp /tmp/rc-reorder-cwd-harness-XXXXXX.sh)
+CWD_HARNESS=$(mktemp /tmp/rc-reorder-cwd-harness-XXXXXX)
 cat > "$CWD_HARNESS" <<HARNESS
 #!/usr/bin/env bash
 set -uo pipefail
@@ -395,7 +395,7 @@ setup_git_repo "$R_DIR" "$R_HEAD_YAML"
 run_revert() {
   local reset_phase="$1" reason="$2"
   local h
-  h=$(mktemp /tmp/rc-reorder-retry-harness-XXXXXX.sh)
+  h=$(mktemp /tmp/rc-reorder-retry-harness-XXXXXX)
   cat > "$h" <<HARNESS
 #!/usr/bin/env bash
 set -uo pipefail

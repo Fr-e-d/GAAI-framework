@@ -194,7 +194,7 @@ create_mock_gh "$T1_MOCK_GH"
 export MOCK_GH_RESPONSE='{"mergedAt":null,"state":"OPEN","baseRefName":"staging"}'
 export MOCK_GH_EXIT=0
 
-T1_HARNESS=$(mktemp "$FIXTURE_DIR/t1-XXXXXX.sh")
+T1_HARNESS=$(mktemp "$FIXTURE_DIR/t1-XXXXXX")
 build_harness "$T1_HARNESS" "$T1_DIR" "$T1_LOCK" "$T1_LOG" "$T1_MOCK_GH"
 printf 'watch_pr_merge_status\n' >> "$T1_HARNESS"
 chmod +x "$T1_HARNESS"
@@ -236,7 +236,7 @@ create_mock_gh "$T2_MOCK_GH"
 export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"staging","createdAt":"2026-05-11T09:00:00Z"}'
 export MOCK_GH_EXIT=0
 
-T2_HARNESS=$(mktemp "$FIXTURE_DIR/t2-XXXXXX.sh")
+T2_HARNESS=$(mktemp "$FIXTURE_DIR/t2-XXXXXX")
 build_harness "$T2_HARNESS" "$T2_DIR" "$T2_LOCK" "$T2_LOG" "$T2_MOCK_GH"
 printf 'watch_pr_merge_status\n' >> "$T2_HARNESS"
 chmod +x "$T2_HARNESS"
@@ -291,7 +291,7 @@ create_mock_gh "$T3_MOCK_GH"
 export MOCK_GH_RESPONSE='{"mergedAt":null,"state":"CLOSED","baseRefName":"staging"}'
 export MOCK_GH_EXIT=0
 
-T3_HARNESS=$(mktemp "$FIXTURE_DIR/t3-XXXXXX.sh")
+T3_HARNESS=$(mktemp "$FIXTURE_DIR/t3-XXXXXX")
 build_harness "$T3_HARNESS" "$T3_DIR" "$T3_LOCK" "$T3_LOG" "$T3_MOCK_GH"
 printf 'watch_pr_merge_status\n' >> "$T3_HARNESS"
 chmod +x "$T3_HARNESS"
@@ -357,7 +357,7 @@ create_mock_gh "$T4_MOCK_GH"
 export MOCK_GH_RESPONSE='rate limit exceeded'
 export MOCK_GH_EXIT=1
 
-T4_HARNESS=$(mktemp "$FIXTURE_DIR/t4-XXXXXX.sh")
+T4_HARNESS=$(mktemp "$FIXTURE_DIR/t4-XXXXXX")
 build_harness "$T4_HARNESS" "$T4_DIR" "$T4_LOCK" "$T4_LOG" "$T4_MOCK_GH"
 printf 'watch_pr_merge_status\necho "EXIT:$?"\n' >> "$T4_HARNESS"
 chmod +x "$T4_HARNESS"
@@ -405,7 +405,7 @@ create_mock_gh "$T5_MOCK_GH"
 export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"staging","createdAt":"2026-05-11T09:00:00Z"}'
 export MOCK_GH_EXIT=0
 
-T5_HARNESS=$(mktemp "$FIXTURE_DIR/t5-XXXXXX.sh")
+T5_HARNESS=$(mktemp "$FIXTURE_DIR/t5-XXXXXX")
 build_harness "$T5_HARNESS" "$T5_DIR" "$T5_LOCK" "$T5_LOG" "$T5_MOCK_GH" "export GAAI_PR_WATCHER_DISABLED=1"
 printf 'watch_pr_merge_status\n' >> "$T5_HARNESS"
 chmod +x "$T5_HARNESS"
@@ -422,7 +422,7 @@ fi
 
 # The disabled log message is emitted by the daemon startup code, not the function itself.
 # The function just returns 0 immediately. Verify the function returns 0 cleanly:
-T5_HARNESS2=$(mktemp "$FIXTURE_DIR/t5b-XXXXXX.sh")
+T5_HARNESS2=$(mktemp "$FIXTURE_DIR/t5b-XXXXXX")
 build_harness "$T5_HARNESS2" "$T5_DIR" "$T5_LOCK" "$T5_LOG" "$T5_MOCK_GH" "export GAAI_PR_WATCHER_DISABLED=1"
 printf 'watch_pr_merge_status\necho "EXIT:$?"\n' >> "$T5_HARNESS2"
 chmod +x "$T5_HARNESS2"
@@ -461,7 +461,7 @@ create_mock_gh "$T6_MOCK_GH"
 export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"staging","createdAt":"2026-05-11T09:00:00Z"}'
 export MOCK_GH_EXIT=0
 
-T6_HARNESS=$(mktemp "$FIXTURE_DIR/t6-XXXXXX.sh")
+T6_HARNESS=$(mktemp "$FIXTURE_DIR/t6-XXXXXX")
 build_harness "$T6_HARNESS" "$T6_DIR" "$T6_LOCK" "$T6_LOG" "$T6_MOCK_GH"
 printf 'watch_pr_merge_status\necho "EXIT:$?"\n' >> "$T6_HARNESS"
 chmod +x "$T6_HARNESS"
@@ -525,7 +525,7 @@ T7_WORKTREE_PATH="$T7_WT_BASE/${T7_SID}-workspace"
 mkdir -p "$T7_WORKTREE_PATH"
 
 # Set GAAI_WORKTREES_BASE so _reconcile_merged_pr resolves the same path
-T7_HARNESS=$(mktemp "$FIXTURE_DIR/t7-XXXXXX.sh")
+T7_HARNESS=$(mktemp "$FIXTURE_DIR/t7-XXXXXX")
 build_harness "$T7_HARNESS" "$T7_DIR" "$T7_LOCK" "$T7_LOG" "$T7_MOCK_GH" \
   "export GAAI_WORKTREES_BASE=\"$T7_WT_BASE\""
 printf 'watch_pr_merge_status\n' >> "$T7_HARNESS"
@@ -556,7 +556,7 @@ fi
 rm -rf "$T7_WORKTREE_PATH" 2>/dev/null || true
 
 # Run sweep_cleanup_pending
-T7_SWEEP=$(mktemp "$FIXTURE_DIR/t7-sweep-XXXXXX.sh")
+T7_SWEEP=$(mktemp "$FIXTURE_DIR/t7-sweep-XXXXXX")
 build_harness "$T7_SWEEP" "$T7_DIR" "$T7_LOCK" "$T7_LOG" "$T7_MOCK_GH" \
   "export GAAI_WORKTREES_BASE=\"$T7_WT_BASE\""
 printf 'sweep_cleanup_pending\n' >> "$T7_SWEEP"
@@ -602,7 +602,7 @@ create_mock_gh "$T8_MOCK_GH"
 export MOCK_GH_RESPONSE='{"mergedAt":"2026-05-11T10:00:00Z","state":"MERGED","baseRefName":"feature-branch"}'
 export MOCK_GH_EXIT=0
 
-T8_HARNESS=$(mktemp "$FIXTURE_DIR/t8-XXXXXX.sh")
+T8_HARNESS=$(mktemp "$FIXTURE_DIR/t8-XXXXXX")
 build_harness "$T8_HARNESS" "$T8_DIR" "$T8_LOCK" "$T8_LOG" "$T8_MOCK_GH"
 printf 'watch_pr_merge_status\n' >> "$T8_HARNESS"
 chmod +x "$T8_HARNESS"

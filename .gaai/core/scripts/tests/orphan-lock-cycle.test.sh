@@ -200,7 +200,7 @@ T1_LIVE_PID=$!
 
 echo "$T1_LIVE_PID" > "$T1_LOCK_DIR/$T1_STORY.lock"
 
-T1_HARNESS=$(mktemp /tmp/t1-harness-XXXXXX.sh)
+T1_HARNESS=$(mktemp /tmp/t1-harness-XXXXXX)
 build_harness "$T1_HARNESS" "$T1_DIR" "$T1_LOCK_DIR" "$T1_LOG"
 
 # Append the test call to the harness
@@ -263,7 +263,7 @@ sleep 0.2  # ensure process is reaped
 
 echo "$T2_DEAD_PID" > "$T2_LOCK_DIR/$T2_STORY.lock"
 
-T2_HARNESS=$(mktemp /tmp/t2-harness-XXXXXX.sh)
+T2_HARNESS=$(mktemp /tmp/t2-harness-XXXXXX)
 build_harness "$T2_HARNESS" "$T2_DIR" "$T2_LOCK_DIR" "$T2_LOG"
 
 # Append the test call
@@ -348,7 +348,7 @@ sleep 0.2
 
 echo "$T3_DEAD_PID" > "$T3_LOCK_DIR/$T3_STORY.lock"
 
-T3_HARNESS=$(mktemp /tmp/t3-harness-XXXXXX.sh)
+T3_HARNESS=$(mktemp /tmp/t3-harness-XXXXXX)
 build_harness "$T3_HARNESS" "$T3_DIR" "$T3_LOCK_DIR" "$T3_LOG"
 
 cat >> "$T3_HARNESS" <<'T3CALL'
