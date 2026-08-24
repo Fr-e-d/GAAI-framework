@@ -142,6 +142,7 @@ cat > "$REPO/.gaai/project/ci/premerge-authority.json" <<'JSON'
     ".gaai/core/scripts/daemon-start.sh",
     ".gaai/core/scripts/delivery-daemon.sh",
     ".gaai/core/scripts/daemon-dispatch.sh",
+    ".gaai/core/scripts/lib/backlog-journal.sh",
     ".gaai/core/scripts/lib/backlog-yaml.sh",
     ".gaai/core/scripts/lib/chore-commit.sh",
     ".gaai/core/scripts/lib/commit-retry-containment.sh",
@@ -165,6 +166,7 @@ printf 'start\n' > "$REPO/.gaai/core/scripts/daemon-start.sh"
 printf 'entry\n' > "$REPO/.gaai/core/scripts/delivery-daemon.sh"
 printf 'controller\n' > "$REPO/.gaai/core/scripts/lib/test-gate.sh"
 printf 'merge\n' > "$REPO/.gaai/core/scripts/daemon-dispatch.sh"
+printf 'journal\n' > "$REPO/.gaai/core/scripts/lib/backlog-journal.sh"
 printf 'yaml\n' > "$REPO/.gaai/core/scripts/lib/backlog-yaml.sh"
 printf 'commit\n' > "$REPO/.gaai/core/scripts/lib/chore-commit.sh"
 printf 'containment\n' > "$REPO/.gaai/core/scripts/lib/commit-retry-containment.sh"
@@ -271,6 +273,14 @@ done < <(_test_gate_required_controller_paths)
 [[ "$POLICY_CLOSURE_OK" == "true" ]] \
   && pass "project policy covers the controller execution/source closure" \
   || fail "project policy omits a required controller execution/source path"
+
+JOURNAL_POLICY_PATH=".gaai/core/scripts/lib/backlog-journal.sh"
+if jq -e --arg path "$JOURNAL_POLICY_PATH" \
+    '.covered_paths | index($path) != null' "$POLICY_UNDER_TEST" >/dev/null; then
+  pass "project policy registers the journal policy as a human-only trust surface"
+else
+  fail "project policy omits the journal policy trust surface"
+fi
 
 # Mechanical drift guard: resolve every statically named shell source in the
 # protected entry points/libraries by basename and require it in the runtime
@@ -531,6 +541,28 @@ make_trust_head() {
     add) printf 'added\n' > "$REPO/future-protected.txt" ;;
     delete) rm "$REPO/protected-delete.txt" ;;
     rename) git -C "$REPO" mv protected-rename.txt renamed-protected.txt ;;
+    journal-change)
+      printf 'changed journal policy\n' > "$REPO/.gaai/core/scripts/lib/backlog-journal.sh"
+      ;;
+    journal-delete)
+      rm "$REPO/.gaai/core/scripts/lib/backlog-journal.sh"
+      ;;
+    journal-rename)
+      git -C "$REPO" mv .gaai/core/scripts/lib/backlog-journal.sh \
+        .gaai/core/scripts/lib/backlog-journal-renamed.sh
+      ;;
+    journal-replace)
+      rm "$REPO/.gaai/core/scripts/lib/backlog-journal.sh"
+      ln -s ../../../../safe.txt "$REPO/.gaai/core/scripts/lib/backlog-journal.sh"
+      ;;
+    journal-deregister)
+      jq --arg path '.gaai/core/scripts/lib/backlog-journal.sh' \
+        'del(.covered_paths[] | select(. == $path))' \
+        "$REPO/.gaai/project/ci/premerge-authority.json" \
+        >"$SANDBOX/deregistered-journal-policy.json"
+      mv "$SANDBOX/deregistered-journal-policy.json" \
+        "$REPO/.gaai/project/ci/premerge-authority.json"
+      ;;
     policy)
       printf '{"candidate":"malformed"}\n' > "$REPO/.gaai/project/ci/premerge-authority.json"
       ;;
@@ -544,6 +576,13 @@ for kind in add delete rename policy; do
   TRUST_HEAD=$(make_trust_head "$kind")
   reset_nominal "$TRUST_HEAD"
   expect_outcome "trust-path $kind" human_required:trust_surface_changed "$TRUST_HEAD"
+done
+
+for kind in journal-change journal-delete journal-rename journal-replace journal-deregister; do
+  TRUST_HEAD=$(make_trust_head "$kind")
+  reset_nominal "$TRUST_HEAD"
+  expect_outcome "$kind cannot self-authorize" \
+    human_required:trust_surface_changed "$TRUST_HEAD"
 done
 
 TRUST_HEAD=$(git -C "$REPO" rev-parse story/trust-add)

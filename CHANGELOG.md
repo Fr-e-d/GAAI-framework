@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+-: emit bounded policy-validated lifecycle journal records
 - fix: make delivery daemon mktemp templates portable
 
 ## [2.50.0] - 2026-08-21
