@@ -35,6 +35,13 @@ set -euo pipefail
 #                   bracket-delimited values are interpreted as
 #                   sequences, and other strings are auto-quoted.
 #                   Requires file path (not --stdin).
+#   --journal-set <id> <field> <value>  Mint or validate a run token,
+#                   durably emit one policy-authorized lifecycle record,
+#                   then apply the record's canonical typed value only for
+#                   the unique emitted outcome. For blocked_reason, literal
+#                   null means YAML null and json:<JSON-string> means text.
+#                   Replay remains pending evidence.
+#                   Requires file path (not --stdin).
 #   --stdin         Read YAML from stdin instead of file
 #
 # Inputs:
@@ -50,6 +57,9 @@ set -euo pipefail
 #   1 — usage error
 #   2 — file not found
 #   3 — python3 not available
+#   4 — journal library unavailable
+#   5 — journal policy rejected or evidence is ambiguous
+#   6 — exact replay is pending and non-authorizing
 ############################################################
 
 MODE="next"
@@ -60,6 +70,10 @@ SET_STATUS_VAL=""
 SET_FIELD_ID=""
 SET_FIELD_NAME=""
 SET_FIELD_VAL=""
+SET_FIELD_FORCE_STRING="false"
+JOURNAL_ID=""
+JOURNAL_FIELD=""
+JOURNAL_VAL=""
 SET_PHASE_STATUS_ID=""
 SET_PHASE_STATUS_VAL=""
 SET_PIPELINE_ID=""
@@ -93,6 +107,18 @@ while [[ $# -gt 0 ]]; do
       if [[ -z "$SET_FIELD_ID" || -z "$SET_FIELD_NAME" ]]; then
         >&2 echo "Error: --set-field requires <id> <field> <value>"
         >&2 echo "Usage: $0 --set-field <id> <field> <value> <backlog-active-yaml>"
+        exit 1
+      fi
+      shift 4
+      ;;
+    --journal-set)
+      MODE="journal-set"
+      JOURNAL_ID="${2:-}"
+      JOURNAL_FIELD="${3:-}"
+      JOURNAL_VAL="${4:-}"
+      if [[ -z "$JOURNAL_ID" || -z "$JOURNAL_FIELD" || -z "$JOURNAL_VAL" ]]; then
+        >&2 echo "Error: --journal-set requires <id> <field> <value>"
+        >&2 echo "Usage: $0 --journal-set <id> <field> <value> <backlog-active-yaml>"
         exit 1
       fi
       shift 4
@@ -136,7 +162,7 @@ while [[ $# -gt 0 ]]; do
     --stdin)      FROM_STDIN=true;   shift ;;
     -*)
       >&2 echo "Unknown option: $1"
-      >&2 echo "Usage: $0 [--next|--list|--ready-ids|--graph|--conflicts|--set-status <id> <status>|--set-field <id> <field> <value>|--set-phase-status <id> <phase_status_value>|--set-pipeline <id> <legacy|3phase>|--reset <id> [--clear-retry-count]] [--stdin] [<backlog-active-yaml>]"
+      >&2 echo "Usage: $0 [--next|--list|--ready-ids|--graph|--conflicts|--set-status <id> <status>|--set-field <id> <field> <value>|--journal-set <id> <field> <value>|--set-phase-status <id> <phase_status_value>|--set-pipeline <id> <legacy|3phase>|--reset <id> [--clear-retry-count]] [--stdin] [<backlog-active-yaml>]"
       exit 1
       ;;
     *)
@@ -148,6 +174,7 @@ done
 
 # ── Validate inputs ──────────────────────────────────────────
 if [[ "$MODE" == "set-status" || "$MODE" == "set-field" || \
+      "$MODE" == "journal-set" || \
       "$MODE" == "set-phase-status" || "$MODE" == "set-pipeline" || \
       "$MODE" == "reset" ]]; then
   # These modes always operate on a file (not stdin)
@@ -479,12 +506,91 @@ print(f'{target_id} reset: status->refined, phase_status->not_started, started_a
   exit $?
 fi
 
+# ── journal-set mode: durable emission is required before mutation ──────────
+if [[ "$MODE" == "journal-set" ]]; then
+  _JOURNAL_LIB_DIR=""
+  if ! _JOURNAL_LIB_DIR=$(cd -P "$(dirname "${BASH_SOURCE[0]}")/lib" 2>/dev/null && pwd -P); then
+    >&2 echo "Error: journal library unavailable"
+    exit 4
+  fi
+  _JOURNAL_LIB="$_JOURNAL_LIB_DIR/backlog-journal.sh"
+  if [[ ! -r "$_JOURNAL_LIB" ]] || ! source "$_JOURNAL_LIB"; then
+    >&2 echo "Error: journal library unavailable"
+    exit 4
+  fi
+
+  _JOURNAL_WRITER="${GAAI_BACKLOG_JOURNAL_WRITER_CONTEXT:-backlog-scheduler.journal-set}"
+  _JOURNAL_TOKEN="${GAAI_BACKLOG_JOURNAL_RUN_TOKEN:-}"
+  if [[ -z "$_JOURNAL_TOKEN" ]]; then
+    if ! backlog_journal_begin_run "$BACKLOG_FILE" "$_JOURNAL_WRITER"; then
+      >&2 echo "Error: ${BACKLOG_JOURNAL_OUTCOME:-rejected}:${BACKLOG_JOURNAL_REASON:-policy_invalid}"
+      exit 5
+    fi
+    _JOURNAL_TOKEN="$BACKLOG_JOURNAL_RUN_TOKEN"
+  fi
+
+  _JOURNAL_RC=0
+  backlog_journal_emit "$BACKLOG_FILE" "$JOURNAL_ID" "$JOURNAL_FIELD" "$JOURNAL_VAL" \
+    "$_JOURNAL_WRITER" "$_JOURNAL_TOKEN" || _JOURNAL_RC=$?
+  if [[ "$_JOURNAL_RC" -eq 10 && "$BACKLOG_JOURNAL_OUTCOME" == "pending:replay" ]]; then
+    >&2 echo "Error: pending:replay"
+    exit 6
+  fi
+  if [[ "$_JOURNAL_RC" -ne 0 || "$BACKLOG_JOURNAL_OUTCOME" != "emitted" ]]; then
+    >&2 echo "Error: ${BACKLOG_JOURNAL_OUTCOME:-rejected}:${BACKLOG_JOURNAL_REASON:-policy_invalid}"
+    exit 5
+  fi
+
+  _JOURNAL_MUTATION=""
+  if ! _JOURNAL_MUTATION=$(python3 - "$BACKLOG_JOURNAL_RECORD_PATH" \
+      "$JOURNAL_ID" "$JOURNAL_FIELD" <<'PY'
+import json
+import sys
+
+path, story_id, field = sys.argv[1:4]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        record = json.load(handle)["record"]
+    if record.get("story_id") != story_id or record.get("field") != field:
+        raise ValueError
+    value = record["new_value"]
+    if value is None:
+        print("null\tnull")
+    elif isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError
+    else:
+        marker = "string" if isinstance(value, str) else "integer"
+        print(f"{marker}\t{value}")
+except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+    raise SystemExit(1)
+PY
+  ); then
+    >&2 echo "Error: emitted journal record is unreadable"
+    exit 5
+  fi
+  _JOURNAL_VALUE_TYPE=""
+  _JOURNAL_CANONICAL_VALUE=""
+  IFS=$'\t' read -r _JOURNAL_VALUE_TYPE _JOURNAL_CANONICAL_VALUE <<< "$_JOURNAL_MUTATION"
+  if [[ -z "$_JOURNAL_VALUE_TYPE" || -z "$_JOURNAL_CANONICAL_VALUE" ]]; then
+    >&2 echo "Error: emitted journal record is malformed"
+    exit 5
+  fi
+
+  MODE="set-field"
+  SET_FIELD_ID="$JOURNAL_ID"
+  SET_FIELD_NAME="$JOURNAL_FIELD"
+  SET_FIELD_VAL="$_JOURNAL_CANONICAL_VALUE"
+  if [[ "$JOURNAL_FIELD" == "blocked_reason" && "$_JOURNAL_VALUE_TYPE" == "string" ]]; then
+    SET_FIELD_FORCE_STRING="true"
+  fi
+fi
+
 # ── set-field mode: set any field on a backlog item ──────────
 if [[ "$MODE" == "set-field" ]]; then
   python3 -c "
 import sys, re
 
-file_path, target_id, field_name, field_value = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+file_path, target_id, field_name, field_value, force_string = sys.argv[1:6]
 
 with open(file_path, 'r') as f:
     lines = f.readlines()
@@ -542,20 +648,29 @@ except ValueError as exc:
     print(f'Error: unsafe --set-field flow sequence: {exc}', file=sys.stderr)
     sys.exit(1)
 
-try:
-    float(field_value)
-    formatted = field_value
-except ValueError:
-    if field_value in ('null', 'true', 'false', '[]'):
+def quoted_string(value):
+    return '\"' + value.replace('\\\\', '\\\\\\\\').replace('\"', '\\\\\"') + '\"'
+
+if force_string == 'true':
+    # Journal mode passes the durable record's canonical type explicitly.
+    # Direct --set-field calls keep their historical formatting behavior.
+    formatted = quoted_string(field_value)
+    flow_sequence = None
+else:
+    try:
+        float(field_value)
         formatted = field_value
-    elif re.match(r'^[a-z][a-z0-9_]*$', field_value):
-        # Simple snake_case identifier — safe as bare YAML scalar.
-        # Examples: in_progress, refined, qa_passed, done, merged, primary.
-        formatted = field_value
-    else:
-        # Anything else (timestamps with ':', URLs, free-text, mixed case,
-        # leading non-alpha) — escape inner double quotes and wrap.
-        formatted = '\"' + field_value.replace('\\\\', '\\\\\\\\').replace('\"', '\\\\\"') + '\"'
+    except ValueError:
+        if field_value in ('null', 'true', 'false', '[]'):
+            formatted = field_value
+        elif re.match(r'^[a-z][a-z0-9_]*$', field_value):
+            # Simple snake_case identifier — safe as bare YAML scalar.
+            # Examples: in_progress, refined, qa_passed, done, merged, primary.
+            formatted = field_value
+        else:
+            # Anything else (timestamps with ':', URLs, free-text, mixed case,
+            # leading non-alpha) — escape inner double quotes and wrap.
+            formatted = quoted_string(field_value)
 
 if flow_sequence is not None:
     formatted = flow_sequence
@@ -640,7 +755,7 @@ with open(file_path, 'w') as f:
     f.writelines(lines)
 
 print(f'{target_id}.{field_name} = {formatted}')
-" "$BACKLOG_FILE" "$SET_FIELD_ID" "$SET_FIELD_NAME" "$SET_FIELD_VAL"
+" "$BACKLOG_FILE" "$SET_FIELD_ID" "$SET_FIELD_NAME" "$SET_FIELD_VAL" "$SET_FIELD_FORCE_STRING"
   exit $?
 fi
 

@@ -12,6 +12,9 @@
 #   SCHEDULER     — path to backlog-scheduler.sh (used by Option A fallback only)
 
 _CHORE_HELPER_AVAILABLE=0
+CHORE_JOURNAL_OUTCOME=""
+CHORE_JOURNAL_REASON=""
+CHORE_JOURNAL_COMMIT=""
 # DISABLED — yq -i rewrites entire YAML file with normalized formatting
 # (quotes, key order, trailing whitespace), defeating both line-count AND block-scope
 # drift checks. Forces fallback to Option A (scheduler --set-field) which preserves
@@ -22,6 +25,205 @@ _CHORE_HELPER_AVAILABLE=0
 #   && yq --version 2>/dev/null | grep -q 'v4\.'; then
 #   _CHORE_HELPER_AVAILABLE=1
 # fi
+
+# Project all currently eligible lifecycle records from a fresh remote backlog
+# object and publish a private-index commit through an explicit expected-old
+# lease. The caller owns the shared staging lock; caller cutover is separate.
+# Returns 0 for applied or clean no-op, 8 for retained pending/conflicted/invalid
+# evidence with no independently applicable record, and 1 for closed failures.
+chore_commit_project_journal() {
+  local context="${1:-journal-projection}"
+  local repo backlog_file backlog_rel target_branch journal_lib journal_root attempt_dir applied_attempt_dir
+  local path_binding finalize_attempt counts counts_manifest
+  local scratch snapshot projected manifest index_file base_sha base_blob result_blob base_tree new_tree candidate
+  local applied waiting conflicted invalid attempt_path remote_sha before_head before_status push_rc=0
+  CHORE_JOURNAL_OUTCOME=""; CHORE_JOURNAL_REASON=""; CHORE_JOURNAL_COMMIT=""
+  case "$context" in
+    journal-projection|daemon|dispatch|recovery|post-delivery-hook|pr-watcher) ;;
+    *) CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="context_invalid"; return 1 ;;
+  esac
+  repo=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="input_invalid"; return 1; }
+  backlog_file="${BACKLOG_FILE:-}"; backlog_rel="${BACKLOG_REL:-}"
+  target_branch="${TARGET_BRANCH:-staging}"
+  [[ -f "$backlog_file" && -n "$backlog_rel" && "$target_branch" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$ ]] || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="input_invalid"; return 1; }
+  # Bind the Git path to the supplied backlog file itself. A second tracked
+  # path with the same blob must never widen a journal record's authority.
+  if ! path_binding=$(python3 - "$repo" "$backlog_file" "$backlog_rel" <<'PY'
+import os, stat, sys, tempfile
+
+repo_input, backlog_input, supplied_rel = sys.argv[1:4]
+
+def normalize_temp_alias(path):
+    path = os.path.abspath(path)
+    temp_input = os.path.abspath(os.environ.get("TMPDIR", tempfile.gettempdir()))
+    temp_root = os.path.realpath(temp_input)
+    try:
+        if os.path.commonpath([temp_input, path]) == temp_input:
+            return os.path.join(temp_root, os.path.relpath(path, temp_input))
+    except ValueError:
+        pass
+    return path
+
+try:
+    repo = normalize_temp_alias(repo_input)
+    backlog = normalize_temp_alias(backlog_input)
+    if os.path.realpath(repo) != repo or os.path.realpath(backlog) != backlog:
+        raise ValueError
+    mode = os.stat(backlog, follow_symlinks=False).st_mode
+    if not stat.S_ISREG(mode) or os.path.commonpath([repo, backlog]) != repo:
+        raise ValueError
+    derived_rel = os.path.relpath(backlog, repo)
+    if (os.path.isabs(supplied_rel) or os.path.normpath(supplied_rel) != supplied_rel
+            or supplied_rel in {"", ".", ".."} or supplied_rel.startswith("../")
+            or derived_rel != supplied_rel):
+        raise ValueError
+    print(f"{backlog}\t{derived_rel}")
+except (OSError, ValueError):
+    raise SystemExit(1)
+PY
+  ); then
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="backlog_path_invalid"; return 1
+  fi
+  IFS=$'\t' read -r backlog_file backlog_rel <<< "$path_binding"
+  journal_lib="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/backlog-journal.sh"
+  [[ -r "$journal_lib" ]] || { CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="journal_unavailable"; return 1; }
+  # shellcheck source=lib/backlog-journal.sh
+  source "$journal_lib"
+  local backlog_dir
+  backlog_dir=$(cd -P "$(dirname "$backlog_file")" && pwd -P) || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="backlog_path_invalid"; return 1; }
+  journal_root="${GAAI_BACKLOG_JOURNAL_DIR:-$backlog_dir/.delivery-locks/journal}"
+  attempt_dir="$journal_root/projections"; applied_attempt_dir="$journal_root/applied-projections"
+  backlog_journal_prepare_projection_storage "$journal_root" || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="attempt_storage_unavailable"; return 1; }
+  before_head=$(git rev-parse HEAD 2>/dev/null) || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="ambient_state_unavailable"; return 1; }
+  before_status=$(git status --porcelain=v1 2>/dev/null) || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="ambient_state_unavailable"; return 1; }
+  scratch=$(mktemp -d "${TMPDIR:-/tmp}/gaai-backlog-projection.XXXXXX") || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="scratch_unavailable"; return 1; }
+  snapshot="$scratch/base.yaml"; projected="$scratch/projected.yaml"; manifest="$scratch/manifest.json"
+  index_file="$scratch/index"; rm -f "$index_file"
+  cleanup_projection() { rm -rf "$scratch" 2>/dev/null || true; }
+
+  if ! git fetch origin "$target_branch" --quiet 2>/dev/null; then
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="base_fetch_failed"; cleanup_projection; return 1
+  fi
+  base_sha=$(git rev-parse "origin/$target_branch" 2>/dev/null) || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="base_unresolvable"; cleanup_projection; return 1; }
+
+  # Recover only attempts whose exact candidate is now proven in target history.
+  local prior
+  for prior in "$attempt_dir"/*.json; do
+    [[ -f "$prior" && ! -L "$prior" ]] || continue
+    if GAAI_BACKLOG_JOURNAL_DIR="$journal_root" \
+        backlog_journal_finalize_projection "$prior" "$repo" "$backlog_rel" "$base_sha" >/dev/null 2>&1; then
+      backlog_journal_archive_projection "$prior" "$applied_attempt_dir" \
+        || { CHORE_JOURNAL_OUTCOME="retained"; CHORE_JOURNAL_REASON="archive_failed"; cleanup_projection; return 1; }
+    fi
+  done
+
+  git show "${base_sha}:${backlog_rel}" > "$snapshot" 2>/dev/null || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="base_blob_missing"; cleanup_projection; return 1; }
+  if ! GAAI_BACKLOG_JOURNAL_DIR="$journal_root" \
+      backlog_journal_prepare_projection "$snapshot" "$base_sha" "$backlog_rel" "$projected" "$manifest"; then
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="projection_invalid"; cleanup_projection; return 1
+  fi
+  counts_manifest="$manifest"
+  case "${GAAI_BACKLOG_PROJECTION_FAULT:-}" in
+    counts_missing_manifest) counts_manifest="$manifest.missing" ;;
+    counts_malformed_manifest) counts_manifest="$projected" ;;
+  esac
+  if ! counts=$(python3 - "$counts_manifest" 2>/dev/null <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    counts = json.load(handle)["counts"]
+print(counts["applied"], counts["waiting"], counts["conflicted"], counts["invalid"])
+PY
+  ); then
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="projection_invalid"; cleanup_projection; return 1
+  fi
+  read -r applied waiting conflicted invalid <<< "$counts"
+  [[ "$applied" =~ ^[0-9]+$ && "$waiting" =~ ^[0-9]+$ && "$conflicted" =~ ^[0-9]+$ \
+      && "$invalid" =~ ^[0-9]+$ ]] || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="projection_invalid"; cleanup_projection; return 1; }
+  if [[ "$applied" == "0" ]]; then
+    if [[ "$waiting" == "0" && "$conflicted" == "0" && "$invalid" == "0" ]]; then
+      CHORE_JOURNAL_OUTCOME="noop"; CHORE_JOURNAL_REASON="none"; cleanup_projection; return 0
+    fi
+    CHORE_JOURNAL_OUTCOME="pending"; CHORE_JOURNAL_REASON="no_eligible_record"; cleanup_projection; return 8
+  fi
+  [[ "${GAAI_BACKLOG_PROJECTION_FAULT:-}" != commit_failure ]] || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="commit_failed"; cleanup_projection; return 1; }
+  result_blob=$(git hash-object -w -- "$projected" 2>/dev/null) || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="commit_failed"; cleanup_projection; return 1; }
+  GIT_INDEX_FILE="$index_file" git read-tree "$base_sha" 2>/dev/null || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="commit_failed"; cleanup_projection; return 1; }
+  GIT_INDEX_FILE="$index_file" git update-index --add --cacheinfo 100644 "$result_blob" "$backlog_rel" 2>/dev/null || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="commit_failed"; cleanup_projection; return 1; }
+  new_tree=$(GIT_INDEX_FILE="$index_file" git write-tree 2>/dev/null) || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="commit_failed"; cleanup_projection; return 1; }
+  candidate=$(printf '%s\n' "chore(framework): project lifecycle journal [$context]" \
+    | git commit-tree "$new_tree" -p "$base_sha" 2>/dev/null) || {
+      CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="commit_failed"; cleanup_projection; return 1; }
+  [[ "$(git rev-parse "${candidate}^" 2>/dev/null)" == "$base_sha" ]] || {
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="commit_failed"; cleanup_projection; return 1; }
+  attempt_path="$attempt_dir/${candidate}.json"
+  local seal_manifest="$manifest"
+  case "${GAAI_BACKLOG_PROJECTION_FAULT:-}" in
+    seal_missing_manifest) seal_manifest="$manifest.missing" ;;
+    seal_malformed_manifest) seal_manifest="$projected" ;;
+  esac
+  if ! GAAI_BACKLOG_JOURNAL_DIR="$journal_root" backlog_journal_seal_projection \
+      "$seal_manifest" "$result_blob" "$candidate" "$new_tree" "$attempt_path"; then
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="seal_failed"; cleanup_projection; return 1
+  fi
+  if [[ "${GAAI_BACKLOG_PROJECTION_FAULT:-}" == before_push ]]; then
+    CHORE_JOURNAL_OUTCOME="retained"; CHORE_JOURNAL_REASON="push_not_attempted"; cleanup_projection; return 1
+  fi
+  if git push origin "$candidate:refs/heads/$target_branch" \
+      --force-with-lease="refs/heads/$target_branch:$base_sha" --quiet 2>/dev/null; then
+    push_rc=0
+  else
+    push_rc=$?
+  fi
+  # Transport failure can still mean accepted; observe before classifying it.
+  git fetch origin "$target_branch" --quiet 2>/dev/null || true
+  remote_sha=$(git rev-parse "origin/$target_branch" 2>/dev/null || true)
+  if [[ "${GAAI_BACKLOG_PROJECTION_FAULT:-}" == verification_failure ]]; then remote_sha=""; fi
+  if [[ -z "$remote_sha" || "$remote_sha" != "$candidate" ]]; then
+    CHORE_JOURNAL_OUTCOME="retained"
+    if [[ $push_rc -ne 0 ]]; then CHORE_JOURNAL_REASON="lease_rejected"; else CHORE_JOURNAL_REASON="verification_failed"; fi
+    cleanup_projection; return 1
+  fi
+  if [[ "${GAAI_BACKLOG_PROJECTION_FAULT:-}" == after_push ]]; then
+    CHORE_JOURNAL_OUTCOME="retained"; CHORE_JOURNAL_REASON="interrupted_after_push"; cleanup_projection; return 1
+  fi
+  finalize_attempt="$attempt_path"
+  case "${GAAI_BACKLOG_PROJECTION_FAULT:-}" in
+    finalize_missing_attempt) finalize_attempt="$attempt_path.missing" ;;
+    finalize_malformed_attempt) finalize_attempt="$manifest" ;;
+  esac
+  if [[ "${GAAI_BACKLOG_PROJECTION_FAULT:-}" == finalize_failure ]] \
+     || ! GAAI_BACKLOG_JOURNAL_DIR="$journal_root" \
+        backlog_journal_finalize_projection "$finalize_attempt" "$repo" "$backlog_rel" "$remote_sha"; then
+    CHORE_JOURNAL_OUTCOME="retained"; CHORE_JOURNAL_REASON="finalization_failed"; cleanup_projection; return 1
+  fi
+  if [[ "${GAAI_BACKLOG_PROJECTION_FAULT:-}" == archive_failure ]]; then
+    CHORE_JOURNAL_OUTCOME="retained"; CHORE_JOURNAL_REASON="archive_interrupted"; cleanup_projection; return 1
+  fi
+  backlog_journal_archive_projection "$attempt_path" "$applied_attempt_dir" \
+    || { CHORE_JOURNAL_OUTCOME="retained"; CHORE_JOURNAL_REASON="archive_failed"; cleanup_projection; return 1; }
+  if [[ "$(git rev-parse HEAD 2>/dev/null)" != "$before_head" \
+      || "$(git status --porcelain=v1 2>/dev/null)" != "$before_status" ]]; then
+    CHORE_JOURNAL_OUTCOME="rejected"; CHORE_JOURNAL_REASON="ambient_worktree_changed"; cleanup_projection; return 1
+  fi
+  CHORE_JOURNAL_OUTCOME="applied"; CHORE_JOURNAL_REASON="none"; CHORE_JOURNAL_COMMIT="$candidate"
+  cleanup_projection
+  return 0
+}
 
 # _commit_accumulated_backlog_drift <story_id> <backlog_rel> <target_branch> <context>
 # Commits any uncommitted backlog diff and pushes with push-race rebase+retry.
