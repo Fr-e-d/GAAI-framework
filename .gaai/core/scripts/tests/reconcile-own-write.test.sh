@@ -11,6 +11,8 @@
 # T5: push-race double-fail — retry push ALSO fails (2nd concurrent commit lands
 #     between rebase and retry) → rc=7, local drift commit discarded, origin
 #     unchanged, no false "committed accumulated backlog drift" success framing
+# T6: journal-projection boundary census — projector is available, retains the shared
+#     staging-lock contract and has no ambient stage/rebase/reset/checkout path
 #
 # Run: bash .gaai/core/scripts/tests/reconcile-own-write.test.sh
 # Exit 0 = all pass.
@@ -315,6 +317,44 @@ if grep -q "push-race re-sync" "$T5_STDERR" 2>/dev/null; then
   pass "T5: push-race discard logged"
 else
   fail "T5: push-race discard NOT logged"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# T6: journal-projection boundary census — additive, no premature caller cutover
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== T6: journal projector boundary census ==="
+
+if declare -F chore_commit_project_journal >/dev/null; then
+  pass "T6: journal projector is exported for the separate caller cutover"
+else
+  fail "T6: journal projector is unavailable"
+fi
+
+T6_BODY="$(declare -f chore_commit_project_journal 2>/dev/null || true)"
+if printf '%s\n' "$T6_BODY" | grep -Fq -- '--force-with-lease="refs/heads/$target_branch:$base_sha"'; then
+  pass "T6: publisher uses a literal expected-old-SHA lease"
+else
+  fail "T6: exact expected-old-SHA lease is missing"
+fi
+
+if printf '%s\n' "$T6_BODY" | grep -Eq 'git (add|commit |rebase|reset|checkout)'; then
+  fail "T6: projector contains an ambient stage/rebase/reset/checkout path"
+else
+  pass "T6: projector has no ambient stage/rebase/reset/checkout path"
+fi
+
+if grep -q 'STAGING_LOCK="$LOCK_DIR/.staging.lock"' "$SCRIPTS/delivery-daemon.sh" \
+    && grep -q '^with_staging_lock()' "$SCRIPTS/delivery-daemon.sh"; then
+  pass "T6: daemon serialization remains the one shared .staging.lock domain"
+else
+  fail "T6: shared staging serialization domain is missing"
+fi
+
+if grep -q '_commit_accumulated_backlog_drift' "$SCRIPTS/daemon-dispatch.sh"; then
+  pass "T6: caller cutover remains deferred"
+else
+  fail "T6: legacy caller disappeared before the separate cutover"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
