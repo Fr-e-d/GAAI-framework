@@ -51,6 +51,7 @@ ROUTING_LOG="/tmp/gaai-daemon-state-machine.routing.jsonl"
 cleanup() {
   rm -f "$FIXTURE" "$ROUTING_LOG"
   rm -f "${ADMISSION_CALL_LOG:-}"
+  rm -f "${JOURNAL_CALL_LOG:-}"
   rm -rf "${LOCAL_ADMISSION_FIXTURE:-}"
   rm -rf "${LOCK_DIR:-}"
 }
@@ -69,6 +70,9 @@ cat > "$FIXTURE" << 'YAML_EOF'
 - id: TST-3PHASE-BOGUS
   status: refined
   phase_status: bogus_invalid_state
+  delivery_pipeline: 3phase
+- id: TST-PHASE-MISSING
+  status: refined
   delivery_pipeline: 3phase
 - id: TST-QA-PASS
   status: in_progress
@@ -106,6 +110,28 @@ mkdir -p "$LOCK_DIR"
 
 # shellcheck disable=SC1090
 source "$DISPATCH_LIB"
+
+# Most historical state-machine cases isolate routing/phase behavior from the
+# persistence substrate. The dedicated caller-cutover integration suite
+# exercises the real boundary; this state-machine suite uses deterministic
+# doubles and verifies their dispatch placement.
+JOURNAL_CALL_LOG="/tmp/gaai-daemon-state-machine.journal.$$.log"
+: > "$JOURNAL_CALL_LOG"
+_journal_persist_lifecycle() {
+  local story_id="$1" writer="$2" field value
+  shift 2
+  printf '%s|%s' "$story_id" "$writer" >> "$JOURNAL_CALL_LOG"
+  if [[ "${GAAI_TEST_JOURNAL_BLOCK:-0}" == "1" ]]; then
+    printf '|blocked\n' >> "$JOURNAL_CALL_LOG"
+    return 1
+  fi
+  while (( $# >= 2 )); do
+    field="$1"; value="$2"; shift 2
+    printf '|%s' "$field" >> "$JOURNAL_CALL_LOG"
+    "$SCHEDULER" --set-field "$story_id" "$field" "$value" "$BACKLOG_FILE" >/dev/null
+  done
+  printf '\n' >> "$JOURNAL_CALL_LOG"
+}
 
 # Preserve the production boundaries for the real integration fixture at the
 # end. Older state-machine cases isolate other concerns and receive an explicit
@@ -335,6 +361,7 @@ export DISPATCH_REAL_NODE IMPL_SPAWN_STUB_PATH
 cat > "$DISPATCH_SHIM_DIR/node" << 'NODE_SHIM_EOF'
 #!/usr/bin/env bash
 if [[ "$1" == *nested-claude-spawn.js* ]]; then
+  [[ -z "${GAAI_TEST_MODEL_CALL_LOG:-}" ]] || printf '%s\n' "$*" >> "$GAAI_TEST_MODEL_CALL_LOG"
   exec "$DISPATCH_REAL_NODE" "$IMPL_SPAWN_STUB_PATH" "${@:2}" --stub-success true
 fi
 exec "$DISPATCH_REAL_NODE" "$@"
@@ -370,6 +397,46 @@ else
     git -C "$DISPATCH_PROJECT_DIR" worktree remove -f "$dispatch_worktree" >/dev/null 2>&1 || rm -rf "$dispatch_worktree"
   done
 fi
+
+# ── S14-PHASE-BLOCK: retained persistence blocks the next phase model ─────
+echo "S14-PHASE-BLOCK: pending lifecycle projection blocks model dispatch"
+S14_MODEL_CALL_LOG="/tmp/gaai-daemon-state-machine.model.$$.log"
+: > "$S14_MODEL_CALL_LOG"
+export GAAI_TEST_MODEL_CALL_LOG="$S14_MODEL_CALL_LOG"
+mkdir -p "$LOCK_DIR/.journal-runs"
+touch "$LOCK_DIR/.journal-runs/dispatch.impl.TST-3PHASE-PLANNED.state"
+_journal_resume_pending_lifecycle() { return 1; }
+S14_PHASE_BEFORE=$(get_phase_status "TST-3PHASE-PLANNED")
+if dispatch_3phase_story "TST-3PHASE-PLANNED" "test-trace-s14-block" >/dev/null 2>&1; then
+  fail "S14-PHASE-BLOCK-a: blocked projection returned success"
+elif [[ -s "$S14_MODEL_CALL_LOG" ]]; then
+  fail "S14-PHASE-BLOCK-b: blocked projection reached the phase model"
+elif [[ "$(get_phase_status TST-3PHASE-PLANNED)" != "$S14_PHASE_BEFORE" ]]; then
+  fail "S14-PHASE-BLOCK-c: blocked projection changed phase state"
+else
+  pass "S14-PHASE-BLOCK: no model or phase transition before durable persistence"
+fi
+S14_EMPTY_STATE="$LOCK_DIR/.journal-runs/dispatch.impl.TST-3PHASE-PLANNED.state"
+S14_EMPTY_HANDLER_LOG="/tmp/gaai-daemon-state-machine.empty-handler.$$.log"
+S14_REAL_IMPL_HANDLER=$(declare -f handle_impl_phase)
+_journal_resume_pending_lifecycle() {
+  rm -f "$S14_EMPTY_STATE"
+  return 2
+}
+handle_impl_phase() {
+  printf '%s\n' "$1" > "$S14_EMPTY_HANDLER_LOG"
+  return 0
+}
+if dispatch_3phase_story "TST-3PHASE-PLANNED" "test-trace-empty-state" >/dev/null 2>&1 \
+    && [[ "$(cat "$S14_EMPTY_HANDLER_LOG" 2>/dev/null || true)" == TST-3PHASE-PLANNED ]]; then
+  pass "S14-PHASE-BLOCK: retired empty state continues current phase dispatch"
+else
+  fail "S14-PHASE-BLOCK: empty state retirement blocked the current phase"
+fi
+eval "$S14_REAL_IMPL_HANDLER"
+_journal_resume_pending_lifecycle() { return 2; }
+rm -f "$S14_EMPTY_STATE" "$S14_EMPTY_HANDLER_LOG" "$S14_MODEL_CALL_LOG"
+unset GAAI_TEST_MODEL_CALL_LOG S14_MODEL_CALL_LOG S14_PHASE_BEFORE
 
 # ── T5: dispatch planned → implemented ───────────────────────
 echo "T5: dispatch planned → implemented (TST-3PHASE-PLANNED)"
@@ -416,6 +483,44 @@ else
     fail "T6c: routing.jsonl missing error record — content: $(cat "$ROUTING_LOG" 2>/dev/null | head -3)"
   fi
 fi
+
+echo "T6c: pre-journal compatibility states fail closed for operator reset"
+for legacy_phase in commit_failed worktree_recovery_failed; do
+  "$SCHEDULER" --set-field TST-3PHASE-BOGUS phase_status "$legacy_phase" "$FIXTURE" >/dev/null
+  T6C_LOG="/tmp/gaai-daemon-state-machine.legacy.$$.log"
+  if dispatch_3phase_story TST-3PHASE-BOGUS "test-trace-${legacy_phase}" >"$T6C_LOG" 2>&1; then
+    fail "T6c: legacy ${legacy_phase} entered an implicit commit retry"
+  elif grep -q "requires operator reset to qa_passed" "$T6C_LOG" \
+      && [[ "$(get_phase_status TST-3PHASE-BOGUS)" == "$legacy_phase" ]]; then
+    pass "T6c: legacy ${legacy_phase} remains unchanged and requires explicit reset"
+  else
+    fail "T6c: legacy ${legacy_phase} did not fail closed with stable evidence"
+  fi
+  rm -f "$T6C_LOG"
+done
+"$SCHEDULER" --set-field TST-3PHASE-BOGUS phase_status bogus_invalid_state "$FIXTURE" >/dev/null
+unset legacy_phase T6C_LOG
+
+echo "T6d: plan-block evidence cannot invent a phase edge from an absent field"
+T6D_WORKTREES_BASE="/tmp/gaai-daemon-state-machine.plan-block.$$"
+T6D_OLD_WORKTREES_BASE="${GAAI_WORKTREES_BASE:-}"
+mkdir -p "$T6D_WORKTREES_BASE/TST-PHASE-MISSING-workspace/.gaai/project/contexts/artefacts/plans"
+touch "$T6D_WORKTREES_BASE/TST-PHASE-MISSING-workspace/.gaai/project/contexts/artefacts/plans/TST-PHASE-MISSING.plan-blocked.md"
+T6D_JOURNAL_LINES_BEFORE=$(wc -l < "$JOURNAL_CALL_LOG" | tr -d ' ')
+GAAI_WORKTREES_BASE="$T6D_WORKTREES_BASE"
+export GAAI_WORKTREES_BASE
+_reconcile_yaml_status_on_exit TST-PHASE-MISSING >/dev/null 2>&1
+T6D_JOURNAL_LINES_AFTER=$(wc -l < "$JOURNAL_CALL_LOG" | tr -d ' ')
+if [[ "$T6D_JOURNAL_LINES_AFTER" == "$T6D_JOURNAL_LINES_BEFORE" \
+    && -z "$(get_phase_status TST-PHASE-MISSING)" ]]; then
+  pass "T6d: absent phase remains fail-closed without a fabricated transition"
+else
+  fail "T6d: absent phase produced a lifecycle journal mutation"
+fi
+GAAI_WORKTREES_BASE="$T6D_OLD_WORKTREES_BASE"
+export GAAI_WORKTREES_BASE
+rm -rf "$T6D_WORKTREES_BASE"
+unset T6D_WORKTREES_BASE T6D_OLD_WORKTREES_BASE T6D_JOURNAL_LINES_BEFORE T6D_JOURNAL_LINES_AFTER
 
 # ── T7: full progression planned → implemented → qa_passed → done
 echo "T7: full 3-phase stub progression (E134S01, continuing from planned per T4)"

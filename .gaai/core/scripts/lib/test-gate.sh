@@ -582,6 +582,7 @@ _test_gate_required_controller_paths() {
     ".gaai/core/scripts/daemon-start.sh" \
     ".gaai/core/scripts/delivery-daemon.sh" \
     ".gaai/core/scripts/daemon-dispatch.sh" \
+    ".gaai/core/scripts/lib/backlog-journal.sh" \
     ".gaai/core/scripts/lib/backlog-yaml.sh" \
     ".gaai/core/scripts/lib/chore-commit.sh" \
     ".gaai/core/scripts/lib/commit-retry-containment.sh" \
