@@ -19,19 +19,29 @@
 #   Input: JSON via stdin (hook_event_name, session_id, transcript_path).
 #
 # Outputs:
-#   Updates delivery metadata fields in active.backlog.yaml + commits + pushes
-#   to staging. Exits 0 always (non-blocking — metadata is best-effort).
+#   Projects delivery metadata through the lifecycle journal. A persistence
+#   failure is blocking and leaves recoverable private evidence.
 #
 # Exit codes:
-#   0 — always (errors are logged to stderr, never block the session)
+#   0 — no delivery or exact metadata projection verified
+#   1 — metadata persistence failed closed
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -uo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 BACKLOG="$PROJECT_DIR/.gaai/project/contexts/backlog/active.backlog.yaml"
+BACKLOG_FILE="$BACKLOG"
+BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
 SCHEDULER="$PROJECT_DIR/.gaai/core/scripts/backlog-scheduler.sh"
 TARGET_BRANCH="staging"
+LOCK_DIR="$(dirname "$BACKLOG")/.delivery-locks"
+STAGING_LOCK="$LOCK_DIR/.staging.lock"
+mkdir -p "$LOCK_DIR" 2>/dev/null || exit 1
+# shellcheck source=lib/chore-commit.sh
+source "$PROJECT_DIR/.gaai/core/scripts/lib/chore-commit.sh"
+# shellcheck source=daemon-dispatch.sh
+source "$PROJECT_DIR/.gaai/core/scripts/daemon-dispatch.sh"
 
 # ── 1. Read hook input ────────────────────────────────────────────────────────
 input=$(cat 2>/dev/null) || { exit 0; }
@@ -48,7 +58,14 @@ except:
 # ── 2. Find story ID from recent git log ──────────────────────────────────────
 cd "$PROJECT_DIR" || exit 0
 
-git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>/dev/null || true
+READ_BACKLOG=$(mktemp "$LOCK_DIR/.stop-hook-source-XXXXXX" 2>/dev/null) || exit 1
+cleanup() { rm -f "$READ_BACKLOG" 2>/dev/null || true; }
+trap cleanup EXIT
+if ! git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null \
+    || ! git show "origin/${TARGET_BRANCH}:${BACKLOG_REL}" > "$READ_BACKLOG" 2>/dev/null; then
+  echo "[post-delivery-hook] lifecycle source unavailable — metadata persistence blocked" >&2
+  exit 1
+fi
 
 # Search last 2 hours (not a fixed commit count) to avoid missing stories
 # when many commits land between delivery completion and session Stop.
@@ -65,7 +82,7 @@ fi
 field_is_set() {
   local field="$1"
   local val
-  val=$(grep -A 20 "id: $story_id" "$BACKLOG" 2>/dev/null \
+  val=$(grep -A 20 "id: $story_id" "$READ_BACKLOG" 2>/dev/null \
     | grep -E "^\s+${field}:" \
     | head -1 \
     | sed "s/.*${field}: *//" \
@@ -75,6 +92,14 @@ field_is_set() {
 
 # Track whether any field was updated
 fields_updated=0
+journal_fields=()
+
+queue_field() {
+  local field="$1" value="$2"
+  journal_fields+=("$field" "$value")
+  fields_updated=1
+  echo "[post-delivery-hook] queued field=$field" >&2
+}
 
 # ── 3. cost_usd — read from delivery log (type:result → total_cost_usd) ───────
 # Source: stream-json output produced by the delivery agent. The type:result
@@ -111,10 +136,7 @@ PYEOF
   fi
 
   if [[ -n "$cost" && "$cost" != "0" ]]; then
-    "$SCHEDULER" --set-field "$story_id" cost_usd "$cost" "$BACKLOG" 2>/dev/null && {
-      fields_updated=1
-      echo "[post-delivery-hook] cost_usd=$cost" >&2
-    }
+    queue_field cost_usd "$cost"
   fi
 fi
 
@@ -122,10 +144,10 @@ fi
 if ! field_is_set "started_at"; then
   started=$(git log --all --format='%aI' --grep="chore(${story_id}): in_progress" -1 2>/dev/null) || started=""
   if [[ -n "$started" ]]; then
-    "$SCHEDULER" --set-field "$story_id" started_at "$started" "$BACKLOG" 2>/dev/null && {
-      fields_updated=1
-      echo "[post-delivery-hook] started_at=$started" >&2
-    }
+    started=$(python3 -c 'import datetime,sys; print(datetime.datetime.fromisoformat(sys.argv[1]).astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$started" 2>/dev/null) || started=""
+  fi
+  if [[ -n "$started" ]]; then
+    queue_field started_at "$started"
   fi
 fi
 
@@ -133,10 +155,10 @@ fi
 if ! field_is_set "completed_at"; then
   completed=$(git log --all --format='%aI' --grep="chore(${story_id}): done" -1 2>/dev/null) || completed=""
   if [[ -n "$completed" ]]; then
-    "$SCHEDULER" --set-field "$story_id" completed_at "$completed" "$BACKLOG" 2>/dev/null && {
-      fields_updated=1
-      echo "[post-delivery-hook] completed_at=$completed" >&2
-    }
+    completed=$(python3 -c 'import datetime,sys; print(datetime.datetime.fromisoformat(sys.argv[1]).astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$completed" 2>/dev/null) || completed=""
+  fi
+  if [[ -n "$completed" ]]; then
+    queue_field completed_at "$completed"
   fi
 fi
 
@@ -154,26 +176,25 @@ if ! field_is_set "pr_url" || ! field_is_set "pr_number" || ! field_is_set "pr_s
       pr_state=$(echo "$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); s=d[0]; print('merged' if s.get('mergedAt') else s.get('state','open').lower())" 2>/dev/null) || pr_state=""
 
       if [[ -n "$pr_url" ]] && ! field_is_set "pr_url"; then
-        "$SCHEDULER" --set-field "$story_id" pr_url "$pr_url" "$BACKLOG" 2>/dev/null && {
-          fields_updated=1
-          echo "[post-delivery-hook] pr_url=$pr_url" >&2
-        }
+        queue_field pr_url "$pr_url"
       fi
 
       if [[ -n "$pr_number" ]] && ! field_is_set "pr_number"; then
-        "$SCHEDULER" --set-field "$story_id" pr_number "$pr_number" "$BACKLOG" 2>/dev/null && {
-          fields_updated=1
-          echo "[post-delivery-hook] pr_number=$pr_number" >&2
-        }
+        queue_field pr_number "$pr_number"
       fi
 
       if [[ -n "$pr_state" ]] && ! field_is_set "pr_status"; then
-        "$SCHEDULER" --set-field "$story_id" pr_status "$pr_state" "$BACKLOG" 2>/dev/null && {
-          fields_updated=1
-          echo "[post-delivery-hook] pr_status=$pr_state" >&2
-        }
+        queue_field pr_status "$pr_state"
       fi
     fi
+  fi
+fi
+
+if [[ "$fields_updated" -eq 1 ]]; then
+  if ! GAAI_LIFECYCLE_CALLER_ASSET=.gaai/core/scripts/post-delivery-hook.sh \
+      _journal_persist_lifecycle "$story_id" post-delivery-hook "${journal_fields[@]}"; then
+    echo "[post-delivery-hook] metadata projection failed — later hook side effects blocked" >&2
+    exit 1
   fi
 fi
 
@@ -241,16 +262,10 @@ MARKER
   } || echo "[post-delivery-hook] Warning: could not write freshness marker for $story_id" >&2
 fi
 
-# ── 8. Commit + push if any field was updated or freshness marker was written ─
-if [[ "$fields_updated" -eq 1 || -n "$freshness_marker" ]]; then
-  (
-    git add "$BACKLOG" 2>/dev/null || exit 1
-    [[ -n "$freshness_marker" ]] && git add "$freshness_marker" 2>/dev/null || true
-    git diff --cached --quiet 2>/dev/null && exit 0  # No actual change
-    git commit -m "chore($story_id): delivery-metadata [stop-hook]" --quiet 2>/dev/null || exit 1
-    git push origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-    echo "[post-delivery-hook] delivery metadata committed for $story_id" >&2
-  ) || echo "[post-delivery-hook] Warning: could not commit metadata for $story_id" >&2
-fi
+# The freshness marker is deliberately local Discovery input. Lifecycle
+# metadata was already projected and verified above; this hook never stages or
+# publishes an ambient backlog snapshot.
+[[ -n "$freshness_marker" ]] \
+  && echo "[post-delivery-hook] local freshness evidence retained for $story_id" >&2
 
 exit 0
