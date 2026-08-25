@@ -221,6 +221,20 @@ _run_triage_for_story()        { return 0; }
 _emit_commit_routing_record()  { printf '%s|%s|%s|%s|%s|%s|%s\n' "$@" >>"$ROUTING_CAPTURE"; }
 _auto_resolve_pr_conflicts()   { [[ "${GAAI_TEST_AUTO_RESOLVE_SUCCESS:-false}" == "true" ]]; }
 
+# These PR-state cases exercise behavior downstream of lifecycle persistence.
+# Reflect journal-authorized fields into the hermetic backlog without giving
+# production a scheduler fallback. The dedicated S14 suites cover the real
+# journal/projector boundary and this double still propagates fixture failures.
+_journal_persist_lifecycle() {
+  local story_id="$1" _writer="$2" field value
+  shift 2
+  while (( $# >= 2 )); do
+    field="$1"; value="$2"; shift 2
+    "$SCHEDULER" --set-field "$story_id" "$field" "$value" "$BACKLOG_FILE" >/dev/null \
+      || return 1
+  done
+}
+
 # These legacy PR-state tests exercise behavior downstream of merge authority.
 # Supply an explicit hosted-pass tuple; no local or absent evidence is allowed
 # to authorize their merge assertions. The dedicated controller suite covers
@@ -706,7 +720,8 @@ REAL_SCHEDULER="$SCRIPTS/backlog-scheduler.sh"
 export REAL_SCHEDULER
 cat > "$STUB_BIN/failing-commit-stall-scheduler" <<'SCHEDULER_EOF'
 #!/usr/bin/env bash
-if [[ "${1:-}" == "--set-phase-status" && "${3:-}" == "commit_stalled" ]]; then
+if [[ "${1:-}" == "--set-phase-status" && "${3:-}" == "commit_stalled" ]] \
+    || [[ "${1:-}" == "--set-field" && "${3:-}" == "phase_status" && "${4:-}" == "commit_stalled" ]]; then
   exit 70
 fi
 exec "$REAL_SCHEDULER" "$@"
@@ -772,6 +787,48 @@ else
   fail "T13: expected two admissions, exact updated remote head and one PR (rc=$T13_RC calls=$GAAI_TEST_ADMISSION_CALLS)"
 fi
 unset GAAI_TEST_MOVE_BASE_AFTER_ADMISSION GAAI_TEST_ADMISSION_CALLS GAAI_TEST_AUTHORITY_OUTCOME
+
+# ────────────────────────────────────────────────────────────────────────────
+# T14/T15: local preparation failures remain retryable. The journal policy has
+# no legacy commit_failed/worktree_recovery_failed transition, so S14 must not
+# collapse these pre-publication failures into terminal `failed`.
+# ────────────────────────────────────────────────────────────────────────────
+echo "--- T14: dependency preparation failure remains retryable ---"
+SID14="TST-PCS14"
+setup_story "$SID14"
+write_backlog "$SID14"
+_ensure_worktree_deps_fresh() { return 1; }
+: > "$GH_CALL_LOG"
+set +e
+handle_commit_phase "$SID14" "trace-t14"
+T14_RC=$?
+set -e
+T14_PHASE=$(grep -A 10 "id: ${SID14}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T14_RC" -ne 0 && "$T14_PHASE" == qa_passed ]] \
+    && ! grep -qE 'gh pr create|gh api --method PUT .*pulls/[0-9]+/merge' "$GH_CALL_LOG"; then
+  pass "T14: dependency failure preserves qa_passed and publishes nothing"
+else
+  fail "T14: dependency failure changed retry class or reached publication"
+fi
+
+echo "--- T15: worktree integrity failure remains retryable ---"
+SID15="TST-PCS15"
+setup_story "$SID15"
+write_backlog "$SID15"
+_ensure_worktree_deps_fresh() { return 0; }
+_check_worktree_integrity() { return 2; }
+: > "$GH_CALL_LOG"
+set +e
+handle_commit_phase "$SID15" "trace-t15"
+T15_RC=$?
+set -e
+T15_PHASE=$(grep -A 10 "id: ${SID15}" "$BACKLOG_FILE" | grep "phase_status:" | head -1 | awk '{print $2}')
+if [[ "$T15_RC" -ne 0 && "$T15_PHASE" == qa_passed ]] \
+    && ! grep -qE 'gh pr create|gh api --method PUT .*pulls/[0-9]+/merge' "$GH_CALL_LOG"; then
+  pass "T15: integrity failure preserves qa_passed and publishes nothing"
+else
+  fail "T15: integrity failure changed retry class or reached publication"
+fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
