@@ -21,6 +21,840 @@ _GAAI_DISPATCH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 # shellcheck source=lib/commit-retry-containment.sh
 source "${_GAAI_DISPATCH_LIB_DIR}/commit-retry-containment.sh"
 
+# ── Durable lifecycle persistence boundary ───────────────────────────────
+#
+# Every daemon-owned lifecycle transition goes through this boundary.  It
+# binds one private run identity to the owning writer/Story until every record
+# from that transition is proven in the current remote projection.  The local
+# backlog is refreshed from that verified projection only after exact record
+# finalization; it is never publication authority.
+_lifecycle_resolve_process_pid() {
+  local result_name="$1" resolved_pid="${BASHPID:-}" probe="" probe_child=""
+  if [[ ! "$resolved_pid" =~ ^[1-9][0-9]*$ ]]; then
+    # Bash 3.2 keeps $$ equal to the parent inside `( )`.  Ask a directly
+    # backgrounded child for its PPID so the mkdir fallback records the actual
+    # lock-holder process and a later restart can distinguish a dead owner.
+    probe=$(mktemp "${LOCK_DIR:?}/.lifecycle-lock-pid.XXXXXX") || return 1
+    sh -c 'printf "%s\n" "$PPID" >"$1"' _ "$probe" &
+    probe_child=$!
+    wait "$probe_child" 2>/dev/null || true
+    IFS= read -r resolved_pid < "$probe" || resolved_pid=""
+    rm -f "$probe" 2>/dev/null || true
+  fi
+  [[ "$resolved_pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  kill -0 "$resolved_pid" 2>/dev/null || return 1
+  printf -v "$result_name" '%s' "$resolved_pid"
+}
+
+_lifecycle_prepare_flock_path() {
+  local lock_path="$1"
+  python3 - "$lock_path" <<'PY'
+import errno
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+flags = os.O_RDONLY | os.O_CREAT | os.O_EXCL
+flags |= getattr(os, "O_NOFOLLOW", 0)
+try:
+    fd = os.open(path, flags, 0o600)
+except OSError as exc:
+    if exc.errno != errno.EEXIST:
+        raise SystemExit(1)
+else:
+    os.close(fd)
+
+try:
+    current = os.lstat(path)
+except OSError:
+    raise SystemExit(1)
+if not stat.S_ISREG(current.st_mode) or current.st_uid != os.geteuid():
+    raise SystemExit(1)
+PY
+}
+
+_lifecycle_flock_fd_matches_path() {
+  local lock_path="$1" lock_fd="$2"
+  python3 - "$lock_path" "$lock_fd" <<'PY'
+import os
+import stat
+import sys
+
+try:
+    path_stat = os.lstat(sys.argv[1])
+    fd_stat = os.fstat(int(sys.argv[2]))
+except (OSError, ValueError):
+    raise SystemExit(1)
+if (not stat.S_ISREG(path_stat.st_mode)
+        or not stat.S_ISREG(fd_stat.st_mode)
+        or path_stat.st_uid != os.geteuid()
+        or (path_stat.st_dev, path_stat.st_ino) != (fd_stat.st_dev, fd_stat.st_ino)):
+    raise SystemExit(1)
+PY
+}
+
+_lifecycle_create_owner_marker() {
+  local marker_path="$1" owner_pid="$2"
+  python3 - "$marker_path" "$owner_pid" <<'PY'
+import os
+import sys
+
+flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+flags |= getattr(os, "O_NOFOLLOW", 0)
+try:
+    fd = os.open(sys.argv[1], flags, 0o600)
+    os.write(fd, (sys.argv[2] + "\n").encode("ascii"))
+    os.close(fd)
+except OSError:
+    raise SystemExit(1)
+PY
+}
+
+_lifecycle_owner_marker_matches() {
+  local marker_path="$1" owner_pid="$2"
+  python3 - "$marker_path" "$owner_pid" <<'PY'
+import os
+import stat
+import sys
+
+try:
+    current = os.lstat(sys.argv[1])
+    with open(sys.argv[1], "r", encoding="ascii") as handle:
+        recorded = handle.read().strip()
+except OSError:
+    raise SystemExit(1)
+if (not stat.S_ISREG(current.st_mode)
+        or current.st_uid != os.geteuid()
+        or current.st_mode & 0o077
+        or recorded != sys.argv[2]):
+    raise SystemExit(1)
+PY
+}
+
+_lifecycle_lock_fd() {
+  local lock_fd="$1" timeout_sec="$2"
+  python3 - "$lock_fd" "$timeout_sec" <<'PY'
+import fcntl
+import os
+import sys
+import time
+
+try:
+    fd = int(sys.argv[1])
+    timeout = int(sys.argv[2])
+except (ValueError, IndexError):
+    raise SystemExit(1)
+deadline = time.monotonic() + timeout
+while True:
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        raise SystemExit(0)
+    except BlockingIOError:
+        if time.monotonic() >= deadline:
+            raise SystemExit(1)
+        time.sleep(0.05)
+    except OSError:
+        raise SystemExit(1)
+PY
+}
+
+_lifecycle_with_staging_lock() {
+  local timeout_sec="${GAAI_STAGING_LOCK_TIMEOUT_SEC:-60}" rc=0
+  local lock_path="${STAGING_LOCK:-${LOCK_DIR:?}/.staging.lock}"
+  [[ "$timeout_sec" =~ ^[1-9][0-9]*$ ]] || timeout_sec=60
+  mkdir -p "${LOCK_DIR:?}" 2>/dev/null || return 1
+  # Use one path-independent kernel primitive on every supported host. Python
+  # calls flock(2) on the inherited descriptor, so this interoperates with
+  # legacy `flock` callers even when their PATH differs. The `.d` sentinel is
+  # acquired as well, excluding legacy mkdir callers. New owners install a
+  # relative symlink there; a legacy directory is never guessed stale. Every
+  # acquire/reclaim and release keeps fd 198 open and inherited by filesystem
+  # children, so a killed shell cannot leave an old unlink racing a successor.
+  local process_lock="${lock_path}.d"
+  local lock_parent="${lock_path%/*}" lock_name="${lock_path##*/}.d"
+  local owner_prefix="${lock_path##*/}.d.owner." owner_pid="" owner_name=""
+  local owner_path="" observed_target="" observed_suffix=""
+  local started_at="$SECONDS" elapsed=0 remaining=0 acquired=false
+  _lifecycle_resolve_process_pid owner_pid || return 1
+
+  while [[ "$acquired" != true ]]; do
+    elapsed=$(( SECONDS - started_at ))
+    (( elapsed < timeout_sec )) || return 1
+    remaining=$(( timeout_sec - elapsed ))
+    _lifecycle_prepare_flock_path "$lock_path" || return 1
+    exec 198< "$lock_path" || return 1
+    _lifecycle_flock_fd_matches_path "$lock_path" 198 || {
+      exec 198>&-
+      return 1
+    }
+    if ! _lifecycle_lock_fd 198 "$remaining"; then
+      exec 198>&-
+      return 1
+    fi
+    if ! _lifecycle_flock_fd_matches_path "$lock_path" 198; then
+      exec 198>&-
+      return 1
+    fi
+
+    if [[ -L "$process_lock" ]]; then
+      observed_target=$(readlink "$process_lock" 2>/dev/null) || {
+        exec 198>&-
+        return 1
+      }
+      observed_suffix="${observed_target#"$owner_prefix"}"
+      if [[ "$observed_target" == "$owner_prefix"* \
+          && "$observed_suffix" =~ ^([1-9][0-9]*)\.([0-9]+)\.([0-9]+)$ ]]; then
+        owner_path="$lock_parent/$observed_target"
+        if ! _lifecycle_owner_marker_matches "$owner_path" "${BASH_REMATCH[1]}"; then
+          exec 198>&-
+          return 1
+        fi
+        # Acquiring the kernel guard proves the former owner and every child
+        # that inherited its critical-section fd are gone.  Remove only that
+        # exact validated stale representation before attempting our own.
+        rm -f "$process_lock" 2>/dev/null || {
+          exec 198>&-
+          return 1
+        }
+        rm -f "$owner_path" 2>/dev/null || {
+          exec 198>&-
+          return 1
+        }
+      else
+        exec 198>&-
+        return 1
+      fi
+    elif [[ -d "$process_lock" ]]; then
+      # Pre-S15 mkdir owner: it does not participate in the kernel guard, so
+      # age/PID inference would be unsafe.  Wait only for its own release.
+      exec 198>&-
+      sleep 1
+      continue
+    elif [[ -e "$process_lock" ]]; then
+      exec 198>&-
+      return 1
+    fi
+
+    owner_name="${lock_name}.owner.${owner_pid}.${RANDOM}.${SECONDS}"
+    owner_path="$lock_parent/$owner_name"
+    if ! _lifecycle_create_owner_marker "$owner_path" "$owner_pid"; then
+      exec 198>&-
+      return 1
+    fi
+    if ln -s "$owner_name" "$process_lock" 2>/dev/null; then
+      acquired=true
+      break
+    fi
+    if ! rm -f "$owner_path" 2>/dev/null; then
+      exec 198>&-
+      return 1
+    fi
+    exec 198>&-
+    sleep 1
+  done
+
+  observed_target=$(readlink "$process_lock" 2>/dev/null) || observed_target=""
+  if [[ "$observed_target" != "$owner_name" ]] \
+      || ! _lifecycle_owner_marker_matches "$owner_path" "$owner_pid"; then
+    exec 198>&-
+    return 1
+  fi
+  "$@" || rc=$?
+  observed_target=$(readlink "$process_lock" 2>/dev/null) || observed_target=""
+  if [[ "$observed_target" == "$owner_name" ]] \
+      && _lifecycle_owner_marker_matches "$owner_path" "$owner_pid"; then
+    if rm -f "$process_lock" 2>/dev/null; then
+      rm -f "$owner_path" 2>/dev/null || rc=1
+    else
+      rc=1
+    fi
+  else
+    rc=1
+  fi
+  exec 198>&-
+  return "$rc"
+}
+
+_lifecycle_assert_base_held_assets() {
+  local remote_sha="$1" asset_root project_root rel local_path local_blob remote_blob
+  asset_root=$(cd "${_GAAI_DISPATCH_LIB_DIR}/../../../.." 2>/dev/null && pwd -P) || return 1
+  project_root=$(cd "${PROJECT_DIR:?}" 2>/dev/null && pwd -P) || return 1
+  [[ "$asset_root" == "$project_root" ]] || return 1
+
+  local assets=(
+    .gaai/core/scripts/daemon-dispatch.sh
+    .gaai/core/scripts/lib/backlog-journal.sh
+    .gaai/core/scripts/lib/chore-commit.sh
+  )
+  if [[ -n "${GAAI_LIFECYCLE_CALLER_ASSET:-}" ]]; then
+    [[ "$GAAI_LIFECYCLE_CALLER_ASSET" == ".gaai/core/scripts/post-delivery-hook.sh" ]] || return 1
+    assets+=("$GAAI_LIFECYCLE_CALLER_ASSET")
+  fi
+
+  for rel in "${assets[@]}"; do
+    local_path="$project_root/$rel"
+    python3 - "$local_path" <<'PY' || return 1
+import os, stat, sys
+try:
+    mode = os.lstat(sys.argv[1]).st_mode
+    if not stat.S_ISREG(mode):
+        raise ValueError
+except (OSError, ValueError):
+    raise SystemExit(1)
+PY
+    local_blob=$(git -C "$project_root" hash-object -- "$local_path" 2>/dev/null) || return 1
+    remote_blob=$(git -C "$project_root" rev-parse "${remote_sha}:${rel}" 2>/dev/null) || return 1
+    [[ "$local_blob" == "$remote_blob" ]] || return 1
+  done
+}
+
+_lifecycle_record_matches() {
+  local record_path="$1" story_id="$2" field="$3" writer="$4" token="$5"
+  local expected="$6" digest="$7"
+  python3 - "$record_path" "$story_id" "$field" "$writer" "$token" \
+    "$expected" "$digest" <<'PY'
+import decimal, json, os, stat, sys
+
+path, story, field, writer, token, raw, digest = sys.argv[1:]
+try:
+    mode = os.lstat(path).st_mode
+    if not stat.S_ISREG(mode) or mode & 0o077:
+        raise ValueError
+    with open(path, encoding="utf-8") as handle:
+        wrapper = json.load(handle)
+    record = wrapper["record"]
+    if (wrapper.get("digest") != digest or record.get("story_id") != story
+            or record.get("field") != field or record.get("writer_context") != writer
+            or record.get("run_token") != token):
+        raise ValueError
+    if raw == "null":
+        expected = None
+    elif field == "pr_number":
+        expected = int(raw)
+    elif field == "cost_usd":
+        expected = format(decimal.Decimal(raw), "f")
+        if "." in expected:
+            expected = expected.rstrip("0").rstrip(".")
+    elif field == "blocked_reason":
+        if not raw.startswith("json:"):
+            raise ValueError
+        expected = json.loads(raw[5:])
+    else:
+        expected = raw
+    if record.get("new_value") != expected:
+        raise ValueError
+except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, decimal.InvalidOperation):
+    raise SystemExit(1)
+PY
+}
+
+_lifecycle_snapshot_matches() {
+  local snapshot="$1" story_id="$2"
+  shift 2
+  python3 - "$snapshot" "$story_id" "$@" <<'PY'
+import decimal, sys
+try:
+    import yaml
+except ImportError:
+    raise SystemExit(1)
+
+path, story, *pairs = sys.argv[1:]
+if len(pairs) == 0 or len(pairs) % 2:
+    raise SystemExit(1)
+try:
+    with open(path, encoding="utf-8") as handle:
+        document = yaml.safe_load(handle)
+    matches = [item for item in document.get("items", [])
+               if isinstance(item, dict) and str(item.get("id")) == story]
+    if len(matches) != 1:
+        raise ValueError
+    item = matches[0]
+    for field, raw in zip(pairs[::2], pairs[1::2]):
+        if raw == "null":
+            expected = None
+        elif field == "pr_number":
+            expected = int(raw)
+        elif field == "cost_usd":
+            expected = format(decimal.Decimal(raw), "f")
+            if "." in expected:
+                expected = expected.rstrip("0").rstrip(".")
+            actual = str(item.get(field)) if item.get(field) is not None else None
+            if actual != expected:
+                raise ValueError
+            continue
+        elif field == "blocked_reason":
+            import json
+            if not raw.startswith("json:"):
+                raise ValueError
+            expected = json.loads(raw[5:])
+        else:
+            expected = raw
+        if item.get(field) != expected:
+            raise ValueError
+except (OSError, ValueError, TypeError, decimal.InvalidOperation):
+    raise SystemExit(1)
+PY
+}
+
+_lifecycle_write_run_state() {
+  local state_path="$1" operation="$2"
+  shift 2
+  python3 - "$state_path" "$operation" "$@" <<'PY'
+import os
+import secrets
+import stat
+import sys
+
+path, operation, *values = sys.argv[1:]
+parent = os.path.dirname(path)
+name = os.path.basename(path)
+dir_fd = None
+source_fd = None
+tmp_fd = None
+tmp_name = None
+try:
+    parent_stat = os.lstat(parent)
+    if (not stat.S_ISDIR(parent_stat.st_mode)
+            or parent_stat.st_uid != os.geteuid()
+            or parent_stat.st_mode & 0o077):
+        raise ValueError
+    dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    dir_fd = os.open(parent, dir_flags)
+    opened_parent = os.fstat(dir_fd)
+    if ((opened_parent.st_dev, opened_parent.st_ino)
+            != (parent_stat.st_dev, parent_stat.st_ino)):
+        raise ValueError
+
+    if operation == "create" and len(values) == 2:
+        payload = (values[0] + "\t" + values[1] + "\n").encode("ascii")
+        source_stat = None
+    elif operation == "append" and len(values) == 3:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        source_fd = os.open(name, flags, dir_fd=dir_fd)
+        source_stat = os.fstat(source_fd)
+        path_stat = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        if (not stat.S_ISREG(source_stat.st_mode)
+                or source_stat.st_uid != os.geteuid()
+                or source_stat.st_mode & 0o077
+                or (source_stat.st_dev, source_stat.st_ino)
+                    != (path_stat.st_dev, path_stat.st_ino)):
+            raise ValueError
+        chunks = []
+        while True:
+            chunk = os.read(source_fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        payload = b"".join(chunks)
+        payload += ("\t".join(values) + "\n").encode("ascii")
+    elif operation == "remove" and not values:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        source_fd = os.open(name, flags, dir_fd=dir_fd)
+        source_stat = os.fstat(source_fd)
+        path_stat = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        if (not stat.S_ISREG(source_stat.st_mode)
+                or source_stat.st_uid != os.geteuid()
+                or source_stat.st_mode & 0o077
+                or (source_stat.st_dev, source_stat.st_ino)
+                    != (path_stat.st_dev, path_stat.st_ino)):
+            raise ValueError
+        os.unlink(name, dir_fd=dir_fd)
+        os.fsync(dir_fd)
+        raise SystemExit(0)
+    else:
+        raise ValueError
+
+    while True:
+        tmp_name = "." + name + "." + secrets.token_hex(16) + ".tmp"
+        try:
+            tmp_flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | getattr(os, "O_NOFOLLOW", 0))
+            tmp_fd = os.open(tmp_name, tmp_flags, 0o600, dir_fd=dir_fd)
+            break
+        except FileExistsError:
+            continue
+    os.fchmod(tmp_fd, 0o600)
+    view = memoryview(payload)
+    while view:
+        written = os.write(tmp_fd, view)
+        if written <= 0:
+            raise OSError
+        view = view[written:]
+    os.fsync(tmp_fd)
+    os.close(tmp_fd)
+    tmp_fd = None
+
+    if operation == "create":
+        # Hard-link installation is an atomic no-replace operation. An object
+        # that appeared at the destination is rejected, never followed.
+        os.link(tmp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd,
+                follow_symlinks=False)
+        os.unlink(tmp_name, dir_fd=dir_fd)
+        tmp_name = None
+    else:
+        current = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        if ((current.st_dev, current.st_ino)
+                != (source_stat.st_dev, source_stat.st_ino)):
+            raise ValueError
+        # The temporary inode was written through its exclusive descriptor;
+        # replace changes the directory entry and never follows its target.
+        os.replace(tmp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        tmp_name = None
+    os.fsync(dir_fd)
+except (OSError, ValueError, UnicodeError):
+    raise SystemExit(1)
+finally:
+    if source_fd is not None:
+        os.close(source_fd)
+    if tmp_fd is not None:
+        os.close(tmp_fd)
+    if tmp_name is not None and dir_fd is not None:
+        try:
+            os.unlink(tmp_name, dir_fd=dir_fd)
+        except OSError:
+            pass
+    if dir_fd is not None:
+        os.close(dir_fd)
+PY
+}
+
+_journal_persist_lifecycle_locked() {
+  local story_id="$1" writer="$2"
+  shift 2
+  local args=("$@") n="${#args[@]}" projector_context="" target_branch="${TARGET_BRANCH:-staging}"
+  [[ "$story_id" =~ ^[A-Za-z][A-Za-z0-9._-]{0,63}$ ]] || return 1
+  [[ "$writer" =~ ^[a-z][a-z0-9]*([._-][a-z0-9]+){0,7}$ ]] || return 1
+  (( n >= 2 && n % 2 == 0 )) || return 1
+  case "$writer" in
+    dispatch.*) projector_context=dispatch ;;
+    post-delivery-hook) projector_context=post-delivery-hook ;;
+    *) return 1 ;;
+  esac
+  declare -F chore_commit_project_journal >/dev/null 2>&1 || {
+    echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=rejected reason=projector_unavailable" >&2
+    return 1
+  }
+  [[ -r "${_GAAI_DISPATCH_LIB_DIR}/backlog-journal.sh" ]] || return 1
+  # shellcheck source=lib/backlog-journal.sh
+  source "${_GAAI_DISPATCH_LIB_DIR}/backlog-journal.sh"
+
+  local run_dir="$LOCK_DIR/.journal-runs" state_file="$LOCK_DIR/.journal-runs/${writer}.${story_id}.state"
+  ( umask 077; mkdir -p "$run_dir" ) 2>/dev/null || return 1
+  python3 - "$run_dir" <<'PY' || return 1
+import os, stat, sys
+try:
+    mode = os.lstat(sys.argv[1]).st_mode
+    if not stat.S_ISDIR(mode) or mode & 0o077:
+        raise ValueError
+except (OSError, ValueError):
+    raise SystemExit(1)
+PY
+
+  local snapshot tmp_snapshot projection_log="" remote_sha token source_sha
+  snapshot=$(mktemp "$LOCK_DIR/.lifecycle-snapshot-XXXXXX" 2>/dev/null) || return 1
+  tmp_snapshot=$(mktemp "$LOCK_DIR/.lifecycle-reflect-XXXXXX" 2>/dev/null) || {
+    rm -f "$snapshot"; return 1; }
+  _lifecycle_cleanup() { rm -f "$snapshot" "$tmp_snapshot" "${projection_log:-}" 2>/dev/null || true; }
+
+  if ! git -C "$PROJECT_DIR" fetch origin "$target_branch" --quiet 2>/dev/null \
+      || ! remote_sha=$(git -C "$PROJECT_DIR" rev-parse "origin/$target_branch" 2>/dev/null) \
+      || [[ ! "$remote_sha" =~ ^[0-9a-f]{40}$ ]] \
+      || [[ -n "${GAAI_LIFECYCLE_EXPECTED_SOURCE_SHA:-}" \
+            && "$remote_sha" != "$GAAI_LIFECYCLE_EXPECTED_SOURCE_SHA" ]] \
+      || ! git -C "$PROJECT_DIR" show "${remote_sha}:${BACKLOG_REL}" > "$snapshot" 2>/dev/null; then
+    echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=rejected reason=source_unavailable" >&2
+    _lifecycle_cleanup
+    return 1
+  fi
+  if ! _lifecycle_assert_base_held_assets "$remote_sha"; then
+    echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=rejected reason=asset_untrusted" >&2
+    _lifecycle_cleanup
+    return 1
+  fi
+  chmod 644 "$snapshot" 2>/dev/null || { _lifecycle_cleanup; return 1; }
+  cp "$snapshot" "$tmp_snapshot" 2>/dev/null || { _lifecycle_cleanup; return 1; }
+  chmod 644 "$tmp_snapshot" 2>/dev/null || { _lifecycle_cleanup; return 1; }
+  mv "$tmp_snapshot" "$BACKLOG_FILE" 2>/dev/null || { _lifecycle_cleanup; return 1; }
+
+  # A prior verified attempt may have completed before its caller retired the
+  # private run-state file.  With no such file, an already-current projection
+  # is an idempotent no-op; never emit a forbidden self-transition merely to
+  # manufacture fresh evidence.
+  if [[ ! -f "$state_file" ]] \
+      && _lifecycle_snapshot_matches "$snapshot" "$story_id" "${args[@]}"; then
+    echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=noop reason=already_current" >&2
+    _lifecycle_cleanup
+    return 0
+  fi
+
+  if [[ -e "$state_file" || -L "$state_file" ]]; then
+    if ! python3 - "$state_file" <<'PY'
+import os, stat, sys
+try:
+    mode = os.lstat(sys.argv[1]).st_mode
+    if not stat.S_ISREG(mode) or mode & 0o077:
+        raise ValueError
+except (OSError, ValueError):
+    raise SystemExit(1)
+PY
+    then
+      echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=rejected reason=run_state_invalid" >&2
+      _lifecycle_cleanup
+      return 1
+    fi
+    IFS=$'\t' read -r token source_sha < "$state_file" || true
+  else
+    token=""; source_sha=""
+  fi
+  if [[ -z "$token" ]]; then
+    if ! backlog_journal_begin_run "$BACKLOG_FILE" "$writer"; then
+      echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=rejected reason=${BACKLOG_JOURNAL_REASON:-run_registration_failed}" >&2
+      _lifecycle_cleanup
+      return 1
+    fi
+    token="$BACKLOG_JOURNAL_RUN_TOKEN"; source_sha="$remote_sha"
+    _lifecycle_write_run_state "$state_file" create "$token" "$source_sha" || {
+      _lifecycle_cleanup; return 1; }
+  fi
+  if [[ ! "$token" =~ ^[0-9a-f]{64}$ || ! "$source_sha" =~ ^[0-9a-f]{40}$ ]] \
+      || ! git -C "$PROJECT_DIR" merge-base --is-ancestor "$source_sha" "$remote_sha" 2>/dev/null; then
+    echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=rejected reason=run_state_invalid" >&2
+    _lifecycle_cleanup
+    return 1
+  fi
+
+  local writer_key field value basename digest record_path applied_path existing line rc i
+  writer_key=$(python3 - "$writer" <<'PY'
+import hashlib, sys
+print(hashlib.sha256(sys.argv[1].encode("ascii")).hexdigest())
+PY
+  ) || { _lifecycle_cleanup; return 1; }
+  local journal_root="${GAAI_BACKLOG_JOURNAL_DIR:-$(dirname "$BACKLOG_FILE")/.delivery-locks/journal}"
+
+  i=0
+  while (( i < n )); do
+    field="${args[$i]}"; value="${args[$(( i + 1 ))]}"; i=$(( i + 2 ))
+    line=$(awk -F '\t' -v wanted="$field" 'NR > 1 && $1 == wanted { print; exit }' "$state_file" 2>/dev/null || true)
+    if [[ -n "$line" ]]; then
+      IFS=$'\t' read -r existing basename digest <<< "$line"
+      record_path="$journal_root/writers/$writer_key/records/$basename"
+      applied_path="$journal_root/writers/$writer_key/applied/$basename"
+      [[ -f "$record_path" ]] || record_path="$applied_path"
+      if [[ ! -f "$record_path" ]] \
+          || ! _lifecycle_record_matches "$record_path" "$story_id" "$field" "$writer" "$token" "$value" "$digest"; then
+        echo "[LIFECYCLE-JOURNAL] story=$story_id field=$field writer=$writer outcome=rejected reason=run_record_invalid" >&2
+        _lifecycle_cleanup
+        return 1
+      fi
+      continue
+    fi
+
+    rc=0
+    GAAI_BACKLOG_JOURNAL_SOURCE_REF="$source_sha" \
+      backlog_journal_emit "$BACKLOG_FILE" "$story_id" "$field" "$value" "$writer" "$token" || rc=$?
+    if [[ "$rc" -ne 0 && "$rc" -ne 10 ]]; then
+      echo "[LIFECYCLE-JOURNAL] story=$story_id field=$field writer=$writer outcome=rejected reason=${BACKLOG_JOURNAL_REASON:-emit_failed}" >&2
+      _lifecycle_cleanup
+      return 1
+    fi
+    record_path="$BACKLOG_JOURNAL_RECORD_PATH"; digest="$BACKLOG_JOURNAL_RECORD_DIGEST"
+    basename=$(basename "$record_path")
+    [[ "$basename" =~ ^[0-9]{20}-[0-9a-f]{16}\.json$ && "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+      _lifecycle_cleanup; return 1; }
+    if ! _lifecycle_write_run_state "$state_file" append "$field" "$basename" "$digest"; then
+      _lifecycle_cleanup
+      return 1
+    fi
+  done
+
+  rc=0
+  projection_log=$(mktemp "$LOCK_DIR/.lifecycle-projector-XXXXXX" 2>/dev/null) || {
+    _lifecycle_cleanup; return 1; }
+  local caller_pwd="$PWD"
+  cd "$PROJECT_DIR" 2>/dev/null || { _lifecycle_cleanup; return 1; }
+  chore_commit_project_journal "$projector_context" 2>"$projection_log" || rc=$?
+  cd "$caller_pwd" 2>/dev/null || { _lifecycle_cleanup; return 1; }
+  cat "$projection_log" >&2
+  if [[ "$rc" -ne 0 ]]; then
+    local caller_outcome="rejected" projection_conflicted="0"
+    projection_conflicted=$(sed -nE 's/.*outcome=prepared.*conflicted=([0-9]+).*/\1/p' "$projection_log" | tail -1)
+    projection_conflicted="${projection_conflicted:-0}"
+    case "${CHORE_JOURNAL_OUTCOME:-rejected}" in
+      retained) caller_outcome=retryable ;;
+      pending)
+        if [[ "$projection_conflicted" =~ ^[1-9][0-9]*$ ]]; then
+          caller_outcome=conflicted
+        else
+          caller_outcome=pending
+        fi
+        ;;
+    esac
+    echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=$caller_outcome reason=${CHORE_JOURNAL_REASON:-projection_failed}" >&2
+    _lifecycle_cleanup
+    return 1
+  fi
+
+  while IFS=$'\t' read -r field basename digest; do
+    [[ "$field" == "$token" ]] && continue
+    applied_path="$journal_root/writers/$writer_key/applied/$basename"
+    value=""
+    i=0
+    while (( i < n )); do
+      [[ "${args[$i]}" == "$field" ]] && { value="${args[$(( i + 1 ))]}"; break; }
+      i=$(( i + 2 ))
+    done
+    [[ -n "$value" ]] || { _lifecycle_cleanup; return 1; }
+    if [[ ! -f "$applied_path" ]] \
+        || ! _lifecycle_record_matches "$applied_path" "$story_id" "$field" "$writer" "$token" "$value" "$digest"; then
+      local unfinalized_outcome="pending" projection_conflicted="0"
+      projection_conflicted=$(sed -nE 's/.*outcome=prepared.*conflicted=([0-9]+).*/\1/p' "$projection_log" | tail -1)
+      [[ "${projection_conflicted:-0}" =~ ^[1-9][0-9]*$ ]] && unfinalized_outcome=conflicted
+      echo "[LIFECYCLE-JOURNAL] story=$story_id field=$field writer=$writer outcome=$unfinalized_outcome reason=record_not_finalized" >&2
+      _lifecycle_cleanup
+      return 1
+    fi
+  done < "$state_file"
+
+  if ! git -C "$PROJECT_DIR" fetch origin "$target_branch" --quiet 2>/dev/null \
+      || ! remote_sha=$(git -C "$PROJECT_DIR" rev-parse "origin/$target_branch" 2>/dev/null) \
+      || ! git -C "$PROJECT_DIR" show "${remote_sha}:${BACKLOG_REL}" > "$snapshot" 2>/dev/null \
+      || ! _lifecycle_snapshot_matches "$snapshot" "$story_id" "${args[@]}"; then
+    echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=rejected reason=remote_verification_failed" >&2
+    _lifecycle_cleanup
+    return 1
+  fi
+  chmod 644 "$snapshot" 2>/dev/null || { _lifecycle_cleanup; return 1; }
+  mv "$snapshot" "$BACKLOG_FILE" 2>/dev/null || { _lifecycle_cleanup; return 1; }
+  _lifecycle_write_run_state "$state_file" remove || { _lifecycle_cleanup; return 1; }
+  echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=applied reason=none" >&2
+  _lifecycle_cleanup
+  return 0
+}
+
+_journal_persist_lifecycle() {
+  _lifecycle_with_staging_lock _journal_persist_lifecycle_locked "$@"
+}
+
+_lifecycle_retire_empty_run_state_locked() {
+  local state_file="$1"
+  if [[ ! -e "$state_file" ]]; then
+    [[ -L "$state_file" ]] && return 1
+    return 0
+  fi
+  python3 - "$state_file" <<'PY' || return 1
+import os, stat, sys
+try:
+    mode = os.lstat(sys.argv[1]).st_mode
+    if not stat.S_ISREG(mode) or mode & 0o077:
+        raise ValueError
+except (OSError, ValueError):
+    raise SystemExit(1)
+PY
+  # Recheck under the shared staging lock. A concurrent owner that appended a
+  # record wins; only a header-only state can be retired as an empty attempt.
+  if ! awk 'NR > 1 && NF { found=1 } END { exit found ? 1 : 0 }' "$state_file"; then
+    return 2
+  fi
+  _lifecycle_write_run_state "$state_file" remove
+}
+
+# Resume an interrupted dispatch-owned transition before another phase model is
+# allowed to run.  The desired values come only from the exact journal records
+# already bound into the private run-state file; model output and the ambient
+# backlog are never consulted.  Return 2 when there is nothing to resume.
+_journal_resume_pending_lifecycle() {
+  local story_id="$1" writer="$2"
+  local state_file="${LOCK_DIR:?}/.journal-runs/${writer}.${story_id}.state"
+  if [[ ! -e "$state_file" ]]; then
+    [[ -L "$state_file" ]] || return 2
+  fi
+  python3 - "$state_file" <<'PY' || return 1
+import os, stat, sys
+try:
+    mode = os.lstat(sys.argv[1]).st_mode
+    if not stat.S_ISREG(mode) or mode & 0o077:
+        raise ValueError
+except (OSError, ValueError):
+    raise SystemExit(1)
+PY
+
+  local token source_sha writer_key journal_root field basename digest record_path value
+  IFS=$'\t' read -r token source_sha < "$state_file" || return 1
+  [[ "$token" =~ ^[0-9a-f]{64}$ && "$source_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  writer_key=$(python3 - "$writer" <<'PY'
+import hashlib, sys
+print(hashlib.sha256(sys.argv[1].encode("ascii")).hexdigest())
+PY
+  ) || return 1
+  journal_root="${GAAI_BACKLOG_JOURNAL_DIR:-$(dirname "$BACKLOG_FILE")/.delivery-locks/journal}"
+  local args=()
+  while IFS=$'\t' read -r field basename digest; do
+    [[ -n "$field" ]] || continue
+    [[ "$basename" =~ ^[0-9]{20}-[0-9a-f]{16}\.json$ && "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    record_path="$journal_root/writers/$writer_key/records/$basename"
+    [[ -f "$record_path" ]] || record_path="$journal_root/writers/$writer_key/applied/$basename"
+    python3 - "$record_path" <<'PY' || return 1
+import os, stat, sys
+try:
+    mode = os.lstat(sys.argv[1]).st_mode
+    if not stat.S_ISREG(mode) or mode & 0o077:
+        raise ValueError
+except (OSError, ValueError):
+    raise SystemExit(1)
+PY
+    value=$(python3 - "$record_path" "$field" <<'PY'
+import json, sys
+
+path, expected_field = sys.argv[1:]
+try:
+    with open(path, encoding="utf-8") as handle:
+        record = json.load(handle)["record"]
+    if record.get("field") != expected_field:
+        raise ValueError
+    value = record.get("new_value")
+    if expected_field == "blocked_reason":
+        if not isinstance(value, str):
+            raise ValueError
+        wire = "json:" + json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    elif value is None:
+        wire = "null"
+    elif expected_field == "pr_number":
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError
+        wire = str(value)
+    elif expected_field == "cost_usd":
+        if not isinstance(value, str):
+            raise ValueError
+        wire = value
+    elif isinstance(value, str):
+        wire = value
+    else:
+        raise ValueError
+    sys.stdout.write(wire)
+except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+    raise SystemExit(1)
+PY
+    ) || return 1
+    _lifecycle_record_matches "$record_path" "$story_id" "$field" "$writer" \
+      "$token" "$value" "$digest" || return 1
+    args+=("$field" "$value")
+  done < <(tail -n +2 "$state_file")
+  if (( ${#args[@]} < 2 )); then
+    local retire_rc=0
+    _lifecycle_with_staging_lock _lifecycle_retire_empty_run_state_locked "$state_file" \
+      || retire_rc=$?
+    if [[ "$retire_rc" -eq 0 ]]; then
+      echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=noop reason=empty_run_state" >&2
+      return 2
+    fi
+    return 1
+  fi
+
+  echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=retryable reason=pending_run" >&2
+  _journal_persist_lifecycle "$story_id" "$writer" "${args[@]}"
+}
+
 # ── Per-phase wall-clock timeouts (OSS-7) ────────────────────────────────
 # Bound the lifetime of each phase to detect hangs that loop-breaker (which
 # only fires on identical consecutive errors) cannot catch — silent network
@@ -260,10 +1094,9 @@ _commit_policy_stall_marker_path() {
   printf '%s/.commit-policy-stalled-%s\n' "$(_marker_dir)" "$story_id"
 }
 
-# Fallback durability for a terminal commit-policy mismatch. The backlog phase
-# remains the primary state, but a scheduler mutation can fail during a push
-# race or repository outage. Recovery reads this atomically-published marker
-# before any relaunch decision and never clears it during an ordinary scan.
+# Local inhibit evidence for a terminal commit-policy mismatch whose journal
+# projection is still pending. It never authorizes a lifecycle transition;
+# recovery only uses it to prevent another model or publication attempt.
 _write_commit_policy_stall_marker() {
   local story_id="$1" outcome="$2" marker tmp marker_dir
   marker=$(_commit_policy_stall_marker_path "$story_id")
@@ -403,7 +1236,7 @@ _assert_prompt_context_resolved() {
     else
       _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_CONTEXT_UNRESOLVED" "0"
     fi
-    "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+    _journal_persist_lifecycle "$story_id" "dispatch.${phase}" phase_status failed || return 1
     return 1
   fi
   return 0
@@ -1013,12 +1846,15 @@ _route_admission_block() {
   fi
   if _admission_retryable "$outcome"; then
     local route="${LOCK_DIR}/.qa-route-${story_id}" tmp="${LOCK_DIR}/.qa-route-${story_id}.tmp.$$"
+    local retry_phase_status="qa_failed"
+    [[ "$phase" == commit ]] && retry_phase_status="implemented"
+    _journal_persist_lifecycle "$story_id" "dispatch.${phase}" \
+      phase_status "$retry_phase_status" || return 1
     mkdir -p "$LOCK_DIR" 2>/dev/null || true
     printf 'impl\n' > "$tmp" 2>/dev/null && mv "$tmp" "$route" 2>/dev/null || rm -f "$tmp" 2>/dev/null
-    "$SCHEDULER" --set-phase-status "$story_id" qa_failed "$BACKLOG_FILE" 2>/dev/null || true
   else
     local terminal="commit_stalled"; [[ "$boundary" == pre_qa ]] && terminal="qa_escalated"
-    "$SCHEDULER" --set-phase-status "$story_id" "$terminal" "$BACKLOG_FILE" 2>/dev/null || true
+    _journal_persist_lifecycle "$story_id" "dispatch.${phase}" phase_status "$terminal" || return 1
     declare -F notify_escalation_inline >/dev/null 2>&1 && \
       notify_escalation_inline "$story_id" "$outcome" "Local ${boundary} admission requires operator attention before any downstream spend"
   fi
@@ -1340,7 +2176,7 @@ handle_plan_phase() {
   # AC5: Refuse spawn if GAAI Cloud configured but workspace_id is missing.
   if _has_gaai_mcp_server && [[ -z "${GAAI_WORKSPACE_ID:-}" ]]; then
     echo "[ERROR] workspace_scope required for autonomous spawn: Story ${story_id} missing workspace_id in backlog. Set GAAI_WORKSPACE_ID or add workspace_id to the story entry." >&2
-    "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+    _journal_persist_lifecycle "$story_id" dispatch.plan phase_status failed || return 1
     _emit_plan_routing_record "$story_id" "$trace_id" "error" "WORKSPACE_SCOPE_MISSING" "0"
     return 1
   fi
@@ -1668,8 +2504,8 @@ Justify each marker in one line. Err toward REVISE over KEEP when uncertain.'
   fi
 
   # ── Advance phase_status: not_started → planned (AC4) ────────────────────
-  if ! "$SCHEDULER" --set-phase-status "$story_id" planned "$BACKLOG_FILE" 2>/dev/null; then
-    echo "[ERROR] ${story_id} handle_plan_phase: --set-phase-status planned failed"
+  if ! _journal_persist_lifecycle "$story_id" dispatch.plan phase_status planned; then
+    echo "[ERROR] ${story_id} handle_plan_phase: durable phase_status=planned failed"
     _emit_plan_routing_record "$story_id" "$trace_id" "error" "SCHEDULER_FAILURE" "$duration_ms"
     return 1
   fi
@@ -1710,7 +2546,7 @@ handle_impl_phase() {
   # ── Inline MCP workspace scope for autonomous spawn ──────────────────────
   if _has_gaai_mcp_server && [[ -z "${GAAI_WORKSPACE_ID:-}" ]]; then
     echo "[ERROR] workspace_scope required for autonomous spawn: Story ${story_id} missing workspace_id in backlog. Set GAAI_WORKSPACE_ID or add workspace_id to the story entry." >&2
-    "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+    _journal_persist_lifecycle "$story_id" dispatch.impl phase_status failed || return 1
     return 1
   fi
   local _impl_oauth _impl_mcp_json _impl_mcp_extra=()
@@ -1980,8 +2816,8 @@ handle_impl_phase() {
       fi
     fi
 
-    if ! "$SCHEDULER" --set-phase-status "$story_id" implemented "$BACKLOG_FILE" 2>/dev/null; then
-      echo "[ERROR] ${story_id} handle_impl_phase: --set-phase-status implemented failed"
+    if ! _journal_persist_lifecycle "$story_id" dispatch.impl phase_status implemented; then
+      echo "[ERROR] ${story_id} handle_impl_phase: durable phase_status=implemented failed"
       _emit_routing_record "$story_id" "$trace_id" "impl" "error" "SCHEDULER_FAILURE"
       return 1
     fi
@@ -2111,8 +2947,8 @@ if d is not None:
         return 1
       fi
     fi
-    if ! "$SCHEDULER" --set-phase-status "$story_id" implemented "$BACKLOG_FILE" 2>/dev/null; then
-      echo "[ERROR] ${story_id} handle_impl_phase: --set-phase-status implemented failed"
+    if ! _journal_persist_lifecycle "$story_id" dispatch.impl phase_status implemented; then
+      echo "[ERROR] ${story_id} handle_impl_phase: durable phase_status=implemented failed"
       return 1
     fi
     # Worktree-scope audit (advisory)
@@ -2258,7 +3094,7 @@ handle_qa_phase() {
   # ── Inline MCP workspace scope for autonomous spawn ──────────────────────
   if _has_gaai_mcp_server && [[ -z "${GAAI_WORKSPACE_ID:-}" ]]; then
     echo "[ERROR] workspace_scope required for autonomous spawn: Story ${story_id} missing workspace_id in backlog. Set GAAI_WORKSPACE_ID or add workspace_id to the story entry." >&2
-    "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+    _journal_persist_lifecycle "$story_id" dispatch.qa phase_status failed || return 1
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "WORKSPACE_SCOPE_MISSING" "0"
     return 1
   fi
@@ -2449,7 +3285,7 @@ handle_qa_phase() {
       echo "[ERROR] ${story_id} restore the routing substrate, drop the pin, or set GAAI_MODEL_ROUTING=0 to forfeit the guarantee explicitly"
       _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_PIN_UNVERIFIABLE" "0"
       rm -f "$prompt_file" "$expected_surfaces_path" 2>/dev/null || true
-      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      _journal_persist_lifecycle "$story_id" dispatch.qa phase_status failed || return 1
       return 1
     fi
     if ! gaai_pin_is_independent "$story_id" QA_PLAN "$_qa_model"; then
@@ -2457,7 +3293,7 @@ handle_qa_phase() {
       echo "[ERROR] ${story_id} to run QA on a contributor anyway, set GAAI_MODEL_ROUTING=0 — which forfeits the guarantee explicitly instead of quietly"
       _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_PIN_NOT_INDEPENDENT" "0"
       rm -f "$prompt_file" "$expected_surfaces_path" 2>/dev/null || true
-      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      _journal_persist_lifecycle "$story_id" dispatch.qa phase_status failed || return 1
       return 1
     fi
     echo "[WARN] ${story_id} qa: GAAI_QA_MODEL=${_qa_model} pins the evaluator; independence verified, candidate ordering skipped"
@@ -2498,7 +3334,7 @@ handle_qa_phase() {
         PROVENANCE|CAPABILITY_FLOOR|CONFIG)
           # Structural: no amount of waiting produces an independent evaluator.
           # Hand it to a human instead of looping.
-          "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+          _journal_persist_lifecycle "$story_id" dispatch.qa phase_status failed || return 1
           ;;
         *)
           # Availability only (quota/outage). The backoff window expires on its
@@ -2619,15 +3455,15 @@ handle_qa_phase() {
     # — same fail-closed contract as before this Story.
     echo "[ERROR] ${story_id} handle_qa_phase: qa-verdict.json missing or empty at $qa_verdict_path [class=QA_HANDOFF_INVALID] (the JSON handoff did not drive routing this cycle)"
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_HANDOFF_INVALID" "$duration_ms"
-    if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
-      echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_HANDOFF_INVALID"
+    if ! _journal_persist_lifecycle "$story_id" dispatch.qa phase_status failed; then
+      echo "[ERROR] ${story_id} handle_qa_phase: durable failure transition failed after QA_HANDOFF_INVALID"
     fi
     return 1
   elif [[ "$_resolve_rc" -ne 0 ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: qa-verdict.json failed validation [class=QA_HANDOFF_INVALID]: ${_resolve_out}"
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_HANDOFF_INVALID" "$duration_ms"
-    if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
-      echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_HANDOFF_INVALID"
+    if ! _journal_persist_lifecycle "$story_id" dispatch.qa phase_status failed; then
+      echo "[ERROR] ${story_id} handle_qa_phase: durable failure transition failed after QA_HANDOFF_INVALID"
     fi
     return 1
   fi
@@ -2647,8 +3483,8 @@ handle_qa_phase() {
     echo "[ERROR] ${story_id} handle_qa_phase: verdict marker absent in qa-report [class=QA_VERDICT_PARSE_ERROR]"
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_VERDICT_PARSE_ERROR" "$duration_ms"
     # NO retry — immediate failed per AC5(c)
-    if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
-      echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_VERDICT_PARSE_ERROR"
+    if ! _journal_persist_lifecycle "$story_id" dispatch.qa phase_status failed; then
+      echo "[ERROR] ${story_id} handle_qa_phase: durable failure transition failed after QA_VERDICT_PARSE_ERROR"
     fi
     return 1
   fi
@@ -2659,8 +3495,8 @@ handle_qa_phase() {
   if [[ -n "$qa_aggregate" && "$qa_aggregate" != "$verdict" ]]; then
     echo "[ERROR] ${story_id} handle_qa_phase: Markdown verdict '${verdict}' disagrees with JSON verdict '${qa_aggregate}' [class=QA_HANDOFF_INVALID]"
     _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_HANDOFF_INVALID" "$duration_ms"
-    if ! "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null; then
-      echo "[ERROR] ${story_id} handle_qa_phase: scheduler failed to mark story failed after QA_HANDOFF_INVALID (markdown/json disagreement)"
+    if ! _journal_persist_lifecycle "$story_id" dispatch.qa phase_status failed; then
+      echo "[ERROR] ${story_id} handle_qa_phase: durable failure transition failed after QA_HANDOFF_INVALID (markdown/json disagreement)"
     fi
     return 1
   fi
@@ -2671,8 +3507,8 @@ handle_qa_phase() {
   case "$qa_aggregate" in
     PASS)
       # AC5(d): scheduler failure → return 1 without phase advance, daemon retries
-      if ! "$SCHEDULER" --set-phase-status "$story_id" qa_passed "$BACKLOG_FILE" 2>/dev/null; then
-        echo "[ERROR] ${story_id} handle_qa_phase: --set-phase-status qa_passed failed [class=QA_SCHEDULER_FAILURE]"
+      if ! _journal_persist_lifecycle "$story_id" dispatch.qa phase_status qa_passed; then
+        echo "[ERROR] ${story_id} handle_qa_phase: durable phase_status=qa_passed failed [class=QA_SCHEDULER_FAILURE]"
         _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SCHEDULER_FAILURE" "$duration_ms"
         return 1
       fi
@@ -2691,8 +3527,8 @@ handle_qa_phase() {
       ;;
     FAIL)
       echo "[ERROR] ${story_id} handle_qa_phase: QA verdict=FAIL route=${qa_route} [class=QA_VERDICT:FAIL] — ${qa_validator_out}"
-      if ! "$SCHEDULER" --set-phase-status "$story_id" qa_failed "$BACKLOG_FILE" 2>/dev/null; then
-        echo "[ERROR] ${story_id} handle_qa_phase: --set-phase-status qa_failed failed [class=QA_SCHEDULER_FAILURE]"
+      if ! _journal_persist_lifecycle "$story_id" dispatch.qa phase_status qa_failed; then
+        echo "[ERROR] ${story_id} handle_qa_phase: durable phase_status=qa_failed failed [class=QA_SCHEDULER_FAILURE]"
         _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SCHEDULER_FAILURE" "$duration_ms"
         return 1
       fi
@@ -2715,8 +3551,8 @@ handle_qa_phase() {
       ;;
     ESCALATE)
       echo "[ERROR] ${story_id} handle_qa_phase: QA verdict=ESCALATE [class=QA_VERDICT:ESCALATE]"
-      if ! "$SCHEDULER" --set-phase-status "$story_id" qa_escalated "$BACKLOG_FILE" 2>/dev/null; then
-        echo "[ERROR] ${story_id} handle_qa_phase: --set-phase-status qa_escalated failed [class=QA_SCHEDULER_FAILURE]"
+      if ! _journal_persist_lifecycle "$story_id" dispatch.qa phase_status qa_escalated; then
+        echo "[ERROR] ${story_id} handle_qa_phase: durable phase_status=qa_escalated failed [class=QA_SCHEDULER_FAILURE]"
         _emit_qa_routing_record "$story_id" "$trace_id" "error" "QA_SCHEDULER_FAILURE" "$duration_ms"
         return 1
       fi
@@ -3539,7 +4375,9 @@ handle_commit_phase() {
   # ── Ensure worktree deps are fresh before git push ──────────────
   # Pre-push typecheck hook requires node_modules; guard here before any git push.
   if ! _ensure_worktree_deps_fresh "$story_id" "$worktree_path"; then
-    "$SCHEDULER" --set-field "$story_id" phase_status commit_failed "$BACKLOG_FILE" 2>/dev/null || true
+    # Preserve the existing retryable commit classification.  The journal
+    # policy intentionally has no commit_failed lifecycle state, so leave the
+    # durable qa_passed state unchanged and let the next scan retry COMMIT.
     _emit_commit_routing_record "$story_id" "$trace_id" "error" "pnpm_install_failed" "0" "" "false"
     if declare -F notify_escalation_inline >/dev/null 2>&1; then
       notify_escalation_inline "$story_id" \
@@ -3681,7 +4519,9 @@ ${qa_snippet}"
         local _rtype="unrecoverable"
         [[ "$_wt_pp_rc" -eq 1 ]] && _rtype="conflicts"
         echo "[ERROR] ${story_id} handle_commit_phase: worktree recovery failed (${_rtype}) — aborting push [class=WORKTREE_CORRUPTION]"
-        "$SCHEDULER" --set-phase-status "$story_id" worktree_recovery_failed "$BACKLOG_FILE" 2>/dev/null || true
+        # Recovery failure remains retryable from qa_passed; do not collapse it
+        # into the terminal failed state merely because legacy intermediate
+        # markers are outside the durable lifecycle mutation policy.
         if declare -F notify_escalation_inline >/dev/null 2>&1; then
           notify_escalation_inline "$story_id" "worktree_corruption_${_rtype}" \
             "Inspect worktree at ${worktree_path}; manual cherry-pick may be required"
@@ -3796,8 +4636,8 @@ ${qa_snippet}"
       MERGED)
         # AC3: PR already merged (including squash-merge, which Guard 1 misses)
         echo "[INFO] ${story_id} handle_commit_phase: selected PR ($pr_url) is MERGED — reconciling to done without merge"
-        "$SCHEDULER" --set-phase-status "$story_id" done "$BACKLOG_FILE" 2>/dev/null || true
-        "$SCHEDULER" --set-status "$story_id" done "$BACKLOG_FILE" 2>/dev/null || true
+        _journal_persist_lifecycle "$story_id" dispatch.commit \
+          pr_status merged phase_status done status done || return 1
         _emit_commit_routing_record "$story_id" "$trace_id" "daemon-bash" "null" "0" "$pr_url" "false"
         return 0
         ;;
@@ -3837,7 +4677,7 @@ ${qa_snippet}"
         local _stderr_tail="${pr_output: -200}"
         echo "[ERROR] ${story_id} handle_commit_phase: GH auth missing — run 'gh auth login' or set GH_TOKEN. detail: ${_stderr_tail} [class=GH_AUTH_MISSING]"
         _emit_commit_routing_record "$story_id" "$trace_id" "error" "GH_AUTH_MISSING" "0" "" "false"
-        "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+        _journal_persist_lifecycle "$story_id" dispatch.commit phase_status failed || return 1
         return 1
       fi
 
@@ -3869,30 +4709,11 @@ ${qa_snippet}"
   if [[ -n "$pr_url" ]]; then
     local pr_number
     pr_number=$(gh pr view "$pr_url" --json number --jq .number 2>/dev/null || true)
-    local _pr_commit_rc=0
-    if declare -f chore_commit_multi_field >/dev/null 2>&1 && [[ -n "$pr_number" ]]; then
-      chore_commit_multi_field "$story_id" pr_url "$pr_url" pr_number "$pr_number" \
-        "chore($story_id): pr_url=$pr_url pr_number=$pr_number [commit-phase]" \
-        || _pr_commit_rc=$?
-    elif declare -f chore_commit_field >/dev/null 2>&1; then
-      chore_commit_field "$story_id" pr_url "$pr_url" \
-        "chore($story_id): pr_url=$pr_url [commit-phase]" \
-        || _pr_commit_rc=$?
-      if [[ "$_pr_commit_rc" -eq 0 && -n "$pr_number" ]]; then
-        chore_commit_field "$story_id" pr_number "$pr_number" \
-          "chore($story_id): pr_number=$pr_number [commit-phase]" \
-          || _pr_commit_rc=$?
-      fi
+    if [[ -n "$pr_number" ]]; then
+      _journal_persist_lifecycle "$story_id" dispatch.commit \
+        pr_url "$pr_url" pr_number "$pr_number" || return 1
     else
-      _pr_commit_rc=127
-    fi
-    if [[ "$_pr_commit_rc" -ne 0 ]]; then
-      # Best-effort fallback : write to the worktree YAML so cross-cycle
-      # resumption (if the wrapper retries this phase) still sees the PR
-      # metadata. Branch lifetime is short post-merge ; this is mostly defensive.
-      echo "[WARN] ${story_id} handle_commit_phase: chore_commit_field(pr_url/pr_number) failed (rc=${_pr_commit_rc}) — falling back to worktree-only set-field; PR watcher may not track this story"
-      "$SCHEDULER" --set-field "$story_id" pr_url "$pr_url" "$BACKLOG_FILE" 2>/dev/null || true
-      [[ -n "$pr_number" ]] && "$SCHEDULER" --set-field "$story_id" pr_number "$pr_number" "$BACKLOG_FILE" 2>/dev/null || true
+      _journal_persist_lifecycle "$story_id" dispatch.commit pr_url "$pr_url" || return 1
     fi
   fi
 
@@ -3925,7 +4746,7 @@ ${qa_snippet}"
     echo "[ERROR] ${story_id} handle_commit_phase: ${TEST_GATE_OUTCOME} cannot be resolved by retry; stalling for the operator [class=TEST_GATE_POLICY_MISMATCH]"
     local stall_persistence_mode="none" stall_marker
     stall_marker=$(_commit_policy_stall_marker_path "$story_id")
-    if "$SCHEDULER" --set-phase-status "$story_id" commit_stalled "$BACKLOG_FILE" 2>/dev/null; then
+    if _journal_persist_lifecycle "$story_id" dispatch.commit phase_status commit_stalled; then
       stall_persistence_mode="backlog"
     elif _write_commit_policy_stall_marker "$story_id" "$TEST_GATE_OUTCOME"; then
       stall_persistence_mode="marker"
@@ -3968,7 +4789,7 @@ ${qa_snippet}"
     merge_exit=$?
     if [[ "$merge_exit" -eq 2 ]]; then
       echo "[ERROR] ${story_id} handle_commit_phase: PR head moved during merge; refusing authorization [class=TEST_GATE_BLOCKED]"
-      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      _journal_persist_lifecycle "$story_id" dispatch.commit phase_status failed || return 1
       if declare -F notify_escalation_inline >/dev/null 2>&1; then
         notify_escalation_inline "$story_id" "test_gate_head_moved" \
           "PR head no longer matches tested commit ${pushed_head_sha} for ${pr_url}"
@@ -3977,12 +4798,12 @@ ${qa_snippet}"
       return 1
     elif [[ "$merge_exit" -eq 3 ]]; then
       echo "[ERROR] ${story_id} handle_commit_phase: blocked:stale_base during final merge recheck [class=TEST_GATE_BLOCKED]"
-      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      _journal_persist_lifecycle "$story_id" dispatch.commit phase_status failed || return 1
       _emit_commit_routing_record "$story_id" "$trace_id" "error" "blocked:stale_base" "0" "$pr_url" "false"
       return 1
     elif [[ "$merge_exit" -eq 4 ]]; then
       echo "[ERROR] ${story_id} handle_commit_phase: ${MERGE_EXACT_OUTCOME} during final merge recheck [class=TEST_GATE_BLOCKED]"
-      "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+      _journal_persist_lifecycle "$story_id" dispatch.commit phase_status failed || return 1
       _emit_commit_routing_record "$story_id" "$trace_id" "error" "$MERGE_EXACT_OUTCOME" "0" "$pr_url" "false"
       return 1
     fi
@@ -4039,7 +4860,7 @@ ${qa_snippet}"
             merge_exit=0  # fall through to post-merge path below
           elif [[ "$resolve_merge_exit" -eq 2 ]]; then
             echo "[ERROR] ${story_id} handle_commit_phase: PR head moved after conflict resolution [class=TEST_GATE_BLOCKED]"
-            "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+            _journal_persist_lifecycle "$story_id" dispatch.commit phase_status failed || return 1
             if declare -F notify_escalation_inline >/dev/null 2>&1; then
               notify_escalation_inline "$story_id" "test_gate_head_moved" \
                 "PR head no longer matches re-tested commit ${pushed_head_sha} for ${pr_url}"
@@ -4048,18 +4869,18 @@ ${qa_snippet}"
             return 1
           elif [[ "$resolve_merge_exit" -eq 3 || "$resolve_merge_exit" -eq 4 ]]; then
             echo "[ERROR] ${story_id} handle_commit_phase: resolved head failed final live tuple recheck: ${MERGE_EXACT_OUTCOME} [class=TEST_GATE_BLOCKED]"
-            "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+            _journal_persist_lifecycle "$story_id" dispatch.commit phase_status failed || return 1
             _emit_commit_routing_record "$story_id" "$trace_id" "error" "$MERGE_EXACT_OUTCOME" "0" "$pr_url" "false"
             return 1
           else
             echo "[ERROR] ${story_id} handle_commit_phase: exact-head merge failed after resolve [class=AUTO_MERGE_FAILED]"
             _emit_commit_routing_record "$story_id" "$trace_id" "error" "AUTO_MERGE_FAILED" "0" "$pr_url" "false"
-            "$SCHEDULER" --set-phase-status "$story_id" escalated "$BACKLOG_FILE" 2>/dev/null || true
+            _journal_persist_lifecycle "$story_id" dispatch.commit phase_status escalated || return 1
             return 1
           fi
         else
           # auto-resolve aborted or exhausted: escalate (NOT failed)
-          "$SCHEDULER" --set-phase-status "$story_id" escalated "$BACKLOG_FILE" 2>/dev/null || true
+          _journal_persist_lifecycle "$story_id" dispatch.commit phase_status escalated || return 1
           return 1
         fi
       fi
@@ -4067,32 +4888,20 @@ ${qa_snippet}"
         # Non-conflict failure (network, rate-limit, branch protection).
         echo "[ERROR] ${story_id} handle_commit_phase: exact-head merge failed [class=AUTO_MERGE_FAILED]"
         _emit_commit_routing_record "$story_id" "$trace_id" "error" "AUTO_MERGE_FAILED" "0" "$pr_url" "false"
-        "$SCHEDULER" --set-phase-status "$story_id" escalated "$BACKLOG_FILE" 2>/dev/null || true
+        _journal_persist_lifecycle "$story_id" dispatch.commit phase_status escalated || return 1
         return 1
       fi
     fi
   fi
 
-  # ── Persist pr_status (AC3) ───────────────────────────────────────────────
+  # ── Persist terminal metadata and lifecycle as one journal batch ─────────
   local pr_status_val
   [[ "$auto_merge_applied" == "true" ]] && pr_status_val="merged" || pr_status_val="pending_review"
-  "$SCHEDULER" --set-field "$story_id" pr_status "$pr_status_val" "$BACKLOG_FILE" 2>/dev/null || true
-
-  # ── Audit gate: advance phase_status qa_passed → done ────────────────────
-  if ! "$SCHEDULER" --set-phase-status "$story_id" done "$BACKLOG_FILE" 2>/dev/null; then
-    echo "[ERROR] ${story_id} handle_commit_phase: --set-phase-status done failed [class=SCHEDULER_FAILURE]"
+  if ! _journal_persist_lifecycle "$story_id" dispatch.commit \
+      pr_status "$pr_status_val" phase_status done status done; then
+    echo "[ERROR] ${story_id} handle_commit_phase: durable terminal projection failed [class=SCHEDULER_FAILURE]"
     _emit_commit_routing_record "$story_id" "$trace_id" "error" "SCHEDULER_FAILURE" "0" "$pr_url" "$auto_merge_applied"
     return 1
-  fi
-
-  # ── Honest top-level status: phase_status:done MUST coincide with status:done.
-  # Without this, the story stays status:in_progress in the YAML even though the
-  # 3-phase pipeline is terminal — daemon-staleness then misclassifies it as a
-  # stuck delivery on the next cycle. Soft-fail (|| true) because the
-  # phase_status flip already constitutes the audit gate; if status flip fails,
-  # the post-delivery hook can still reconcile.
-  if ! "$SCHEDULER" --set-status "$story_id" done "$BACKLOG_FILE" 2>/dev/null; then
-    echo "[WARN] ${story_id} handle_commit_phase: --set-status done failed (phase_status already done; reconcile via post-delivery hook)"
   fi
 
   # ── Post-delivery autonomous triage (AC2, AC3, AC4, AC5) ─────────────────
@@ -4154,6 +4963,26 @@ dispatch_3phase_story() {
     return 1
   fi
 
+  # A crash can leave the prior transition emitted but not yet verified.  Retry
+  # that exact run before currentness checks or phase handlers; on success the
+  # wrapper loop re-enters against the newly reflected remote state.  This
+  # prevents duplicate model spend while persistence is unavailable.
+  local _pending_writer _pending_rc
+  for _pending_writer in dispatch.plan dispatch.impl dispatch.qa dispatch.commit dispatch.reconcile; do
+    if [[ ! -e "$LOCK_DIR/.journal-runs/${_pending_writer}.${story_id}.state" ]]; then
+      [[ -L "$LOCK_DIR/.journal-runs/${_pending_writer}.${story_id}.state" ]] || continue
+    fi
+    _pending_rc=0
+    _journal_resume_pending_lifecycle "$story_id" "$_pending_writer" || _pending_rc=$?
+    if [[ $_pending_rc -eq 2 ]]; then
+      continue
+    elif [[ $_pending_rc -ne 0 ]]; then
+      echo "[ERROR] ${story_id} dispatch: pending lifecycle projection remains blocked writer=${_pending_writer}"
+      return 1
+    fi
+    return 0
+  done
+
   # ── DEC-200 D7 / E1096S02 AC2 currentness gate ────────────────────────────
   # The one choke point both the live wrapper loop and every cross-cycle
   # relaunch (crash_recovery_scan -> launch_3phase_in_tmux -> wrapper's own
@@ -4171,11 +5000,11 @@ dispatch_3phase_story() {
     _cur_sidecar="${_cur_wt}/.gaai/project/contexts/artefacts/qa-reports/${story_id}.qa-verdict.json"
     if [[ ! -s "$_cur_sidecar" ]]; then
       echo "[$(date '+%H:%M:%S')] ${story_id} dispatch: phase_status=${ps} lacks two-axis sidecar — currentness rerun (DEC-200 D7)"
-      if "$SCHEDULER" --set-phase-status "$story_id" implemented "$BACKLOG_FILE" 2>/dev/null; then
+      if _journal_persist_lifecycle "$story_id" dispatch.qa phase_status implemented; then
         _emit_routing_record "$story_id" "$trace_id" "qa" "rerun" "QA_CURRENTNESS_RERUN" 2>/dev/null || true
         ps="implemented"
       else
-        echo "[ERROR] ${story_id} dispatch: scheduler --set-phase-status implemented failed during currentness rerun"
+        echo "[ERROR] ${story_id} dispatch: durable phase_status=implemented projection failed during currentness rerun"
         return 1
       fi
     fi
@@ -4262,10 +5091,10 @@ dispatch_3phase_story() {
       fi
       if (( _qa_counter_count >= _qa_counter_max )); then
         echo "[$(date '+%H:%M:%S')] ${story_id} dispatch: QA ${_qa_route} cap reached (${_qa_counter_count}/${_qa_counter_max}) — escalating qa_failed -> qa_escalated"
-        if "$SCHEDULER" --set-phase-status "$story_id" qa_escalated "$BACKLOG_FILE" 2>/dev/null; then
+        if _journal_persist_lifecycle "$story_id" dispatch.qa phase_status qa_escalated; then
           _emit_routing_record "$story_id" "$trace_id" "qa" "error" "$_qa_exhaust_reason" 2>/dev/null || true
         else
-          echo "[ERROR] ${story_id} dispatch: scheduler --set-phase-status qa_escalated failed"
+          echo "[ERROR] ${story_id} dispatch: durable phase_status=qa_escalated projection failed"
         fi
         # Wire the escalation to the existing notification machinery (terminal bell +
         # macOS osascript + webhook+HMAC). Helper is best-effort, never blocks.
@@ -4315,26 +5144,28 @@ dispatch_3phase_story() {
       # (not_started, full fresh replan) or IMPL (planned, unchanged from
       # before this Story). The re-spawned phase picks up the qa-report via
       # GAAI_QA_REPORT_PATH (read by daemon-prompt-construct.sh).
-      if ! "$SCHEDULER" --set-phase-status "$story_id" "$_qa_rewind_phase" "$BACKLOG_FILE" 2>/dev/null; then
-        echo "[ERROR] ${story_id} dispatch: scheduler --set-phase-status ${_qa_rewind_phase} failed during retry"
+      if ! _journal_persist_lifecycle "$story_id" dispatch.qa phase_status "$_qa_rewind_phase"; then
+        echo "[ERROR] ${story_id} dispatch: durable phase_status=${_qa_rewind_phase} projection failed during retry"
         unset GAAI_QA_REPORT_PATH GAAI_QA_INJECT_PHASE
         return 1
       fi
       echo "[$(date '+%H:%M:%S')] ${story_id} dispatch: QA FAIL route=${_qa_route} — cycle ${_qa_counter_count}/${_qa_counter_max} (re-spawn will pick up qa-report context: ${GAAI_QA_REPORT_PATH})"
       return 0
       ;;
-    commit_failed)
-      _write_active_marker "$story_id" "commit"
-      handle_commit_phase "$story_id" "$trace_id"
-      local _commit_rc=$?
-      _remove_active_marker "$story_id" "commit"
-      [[ $_commit_rc -ne 0 ]] && return 1
+    commit_failed|worktree_recovery_failed)
+      # These pre-journal compatibility values are not valid old states for a
+      # journal edge. Fail closed instead of entering an implicit retry loop;
+      # the operator must reset the row to qa_passed before cutover resumes.
+      echo "[ERROR] ${story_id} dispatch: legacy phase_status=${ps} requires operator reset to qa_passed"
+      _emit_routing_record "$story_id" "$trace_id" "commit" "error" \
+        "legacy_phase_status_requires_reset:${ps}"
+      return 1
       ;;
     done|failed|escalated|qa_escalated|commit_stalled)
       return 0
       ;;
     *)
-      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated commit_failed commit_stalled done failed escalated worktree_recovery_failed[intermediate]"
+      echo "[ERROR] ${story_id} dispatch_3phase_story: invalid phase_status='${ps}' — known values: not_started planned implemented qa_passed qa_failed qa_escalated commit_failed worktree_recovery_failed commit_stalled done failed escalated"
       _emit_routing_record "$story_id" "$trace_id" "plan" "error" "invalid_phase_status:${ps}"
       return 1
       ;;
@@ -4414,7 +5245,7 @@ _reconcile_yaml_status_on_exit() {
     echo "[WRAPPER-RECONCILE] $story_id : warning — could not create reconcile-in-progress marker (touch failed) — proceeding without race protection"
   fi
 
-  local phase_status target_status current_status
+  local phase_status target_status
 
   phase_status=$(get_phase_status "$story_id" 2>/dev/null)
 
@@ -4429,7 +5260,7 @@ _reconcile_yaml_status_on_exit() {
   # no new state semantics introduced. Operator inspects {id}.plan-blocked.md
   # (preserved in artefacts) to drive decomposition before re-refining.
   #
-  # Stale-marker guard: only fire when phase_status is unset / not_started
+  # Stale-marker guard: only fire when phase_status is not_started
   # AND no canonical execution-plan.md exists. A successful PLAN would have
   # produced execution-plan.md and advanced phase_status to "planned"; if
   # either is present, plan-blocked.md is from a prior attempt and stale.
@@ -4448,7 +5279,7 @@ _reconcile_yaml_status_on_exit() {
   _exec_plan_path="${_worktree_path}/.gaai/project/contexts/artefacts/plans/${story_id}.execution-plan.md"
 
   if [[ -n "$_worktree_path" && -f "$_plan_blocked_path" \
-        && ( -z "$phase_status" || "$phase_status" == "not_started" ) \
+        && "$phase_status" == "not_started" \
         && ! -f "$_exec_plan_path" ]]; then
     target_status="failed"
     phase_status="plan-blocked"  # for the final log line only
@@ -4465,8 +5296,9 @@ _reconcile_yaml_status_on_exit() {
         rm -f "$_rip_marker" 2>/dev/null || true
         return 0
         ;;
-      commit_failed)
-        # No-op: commit-phase retry path — story stays in_progress
+      commit_failed|worktree_recovery_failed)
+        # No-op: compatibility commit-phase retry states remain in_progress.
+        rm -f "$_rip_marker" 2>/dev/null || true
         return 0
         ;;
       *)
@@ -4477,88 +5309,16 @@ _reconcile_yaml_status_on_exit() {
     esac
   fi
 
-  # Derive paths from exported env (no new exports needed)
-  local backlog_rel staging_lock drift_marker
-  backlog_rel="${BACKLOG_FILE#${PROJECT_DIR}/}"
-  staging_lock="${LOCK_DIR}/.staging.lock"
-  drift_marker="${LOCK_DIR}/.drift-detected.audit"
-
-  # Idempotent guard: read current top-level status
-  current_status=$(awk -v id="$story_id" '
-    $0 == "- id: " id { found=1; next }
-    found && /^- id:/ { exit }
-    found && /^[[:space:]]+status:/ {
-      gsub(/^[[:space:]]+status:[[:space:]]*/, "")
-      gsub(/[[:space:]]+#.*$/, "")
-      gsub(/[[:space:]]*$/, "")
-      gsub(/^"|"$/, "")
-      print; exit
-    }
-  ' "$BACKLOG_FILE" 2>/dev/null)
-
-  if [[ "$current_status" == "$target_status" ]]; then
-    echo "[WRAPPER-RECONCILE] $story_id : status already $target_status — no-op"
-    rm -f "$_rip_marker" 2>/dev/null || true
-    return 0
-  fi
-
-  cd "$PROJECT_DIR" || return 0
-
-  # Sync with remote (mirrors _recovery_set_status pattern)
-  if ! git pull origin "${TARGET_BRANCH:-staging}" --ff-only --quiet 2>/dev/null; then
-    git fetch origin "${TARGET_BRANCH:-staging}" --quiet 2>/dev/null || true
-    git reset --hard "origin/${TARGET_BRANCH:-staging}" --quiet 2>/dev/null || true
-  fi
-
-  # AC1/AC3: commit accumulated drift (same model as chore-commit pre-mark sweep).
-  # Write drift-marker only on genuine commit/rebase failure (rc=6), not on every diff.
-  if ! git diff --quiet HEAD -- "$backlog_rel" 2>/dev/null; then
-    local _drift_rc=0
-    _commit_accumulated_backlog_drift "$story_id" "$backlog_rel" "${TARGET_BRANCH:-staging}" "wrapper-reconcile" \
-      || _drift_rc=$?
-    if [[ "$_drift_rc" -ne 0 ]]; then
-      echo "[WRAPPER-RECONCILE] $story_id : drift commit failed (rc=$_drift_rc) — writing drift-marker, daemon will retry"
-      printf '%s|commit|wrapper-reconcile-drift-%s\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" "$story_id" \
-        > "$drift_marker" 2>/dev/null || true
-      rm -f "$_rip_marker" 2>/dev/null || true
-      return 0
+  if [[ "$phase_status" == "plan-blocked" ]]; then
+    if ! _journal_persist_lifecycle "$story_id" dispatch.plan \
+        phase_status failed status failed; then
+      echo "[WRAPPER-RECONCILE] $story_id : durable plan-blocked reconciliation failed — evidence retained"
+      return 1
     fi
-    echo "[WRAPPER-RECONCILE] $story_id : committed accumulated backlog drift — continuing reconcile"
+  elif ! _journal_persist_lifecycle "$story_id" dispatch.reconcile status "$target_status"; then
+    echo "[WRAPPER-RECONCILE] $story_id : durable status reconciliation failed — evidence retained"
+    return 1
   fi
-
-  # Update YAML status field
-  if ! "$SCHEDULER" --set-status "$story_id" "$target_status" "$BACKLOG_FILE" 2>/dev/null; then
-    echo "[WRAPPER-RECONCILE] $story_id : scheduler --set-status failed — daemon will reconcile"
-    rm -f "$_rip_marker" 2>/dev/null || true
-    return 0
-  fi
-
-  git add "$backlog_rel"
-
-  # Idempotent: skip if nothing staged
-  if git diff --cached --quiet 2>/dev/null; then
-    rm -f "$_rip_marker" 2>/dev/null || true
-    return 0
-  fi
-
-  # Commit (with flock on Linux; direct on macOS where flock is unavailable)
-  local commit_rc=0
-  if command -v flock &>/dev/null; then
-    flock "$staging_lock" git commit -m "chore($story_id): $target_status [wrapper-reconcile]" --quiet 2>/dev/null \
-      || commit_rc=$?
-  else
-    git commit -m "chore($story_id): $target_status [wrapper-reconcile]" --quiet 2>/dev/null \
-      || commit_rc=$?
-  fi
-
-  if [[ $commit_rc -ne 0 ]]; then
-    echo "[WRAPPER-RECONCILE] $story_id : commit failed (rc=$commit_rc) — daemon will reconcile"
-    rm -f "$_rip_marker" 2>/dev/null || true
-    return 0
-  fi
-
-  git push origin "HEAD:${TARGET_BRANCH:-staging}" --quiet 2>/dev/null || true
   echo "[WRAPPER-RECONCILE] $story_id : reconciled status=$target_status from phase_status=$phase_status"
 
   # Cleanup QA retry counter on terminal transitions — escalated already

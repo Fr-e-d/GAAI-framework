@@ -11,8 +11,8 @@
 # T5: push-race double-fail — retry push ALSO fails (2nd concurrent commit lands
 #     between rebase and retry) → rc=7, local drift commit discarded, origin
 #     unchanged, no false "committed accumulated backlog drift" success framing
-# T6: journal-projection boundary census — projector is available, retains the shared
-#     staging-lock contract and has no ambient stage/rebase/reset/checkout path
+# T6: first-stage caller cutover census — projector and shared staging lock remain
+#     authoritative, while dispatch and stop-hook reject legacy backlog publication
 #
 # Run: bash .gaai/core/scripts/tests/reconcile-own-write.test.sh
 # Exit 0 = all pass.
@@ -320,7 +320,7 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
-# T6: journal-projection boundary census — additive, no premature caller cutover
+# T6: first-stage journal-projection caller cutover census
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "=== T6: journal projector boundary census ==="
@@ -351,10 +351,37 @@ else
   fail "T6: shared staging serialization domain is missing"
 fi
 
-if grep -q '_commit_accumulated_backlog_drift' "$SCRIPTS/daemon-dispatch.sh"; then
-  pass "T6: caller cutover remains deferred"
+T6_STAGE_ONE_SURFACES=(
+  "$SCRIPTS/daemon-dispatch.sh"
+  "$SCRIPTS/post-delivery-hook.sh"
+)
+
+T6_STAGE_ONE_MISSING=0
+for surface in "${T6_STAGE_ONE_SURFACES[@]}"; do
+  if grep -q '_journal_persist_lifecycle' "$surface"; then
+    pass "T6: $(basename "$surface") uses the journal persistence boundary"
+  else
+    fail "T6: $(basename "$surface") does not use the journal persistence boundary"
+    T6_STAGE_ONE_MISSING=1
+  fi
+done
+
+if grep -Eq '_commit_accumulated_backlog_drift|chore_commit_(field|multi_field)' "${T6_STAGE_ONE_SURFACES[@]}"; then
+  fail "T6: a stage-one caller still invokes a legacy whole-backlog publisher"
 else
-  fail "T6: legacy caller disappeared before the separate cutover"
+  pass "T6: no stage-one caller invokes a legacy whole-backlog publisher"
+fi
+
+if grep -Eq 'git (add|commit |rebase|push).*active\.backlog\.yaml|git pull origin' "${T6_STAGE_ONE_SURFACES[@]}"; then
+  fail "T6: a stage-one caller still publishes ambient backlog state"
+else
+  pass "T6: no stage-one caller publishes ambient backlog state"
+fi
+
+if grep -Eq 'SCHEDULER[^\n]*--(set|journal)' "${T6_STAGE_ONE_SURFACES[@]}"; then
+  fail "T6: a stage-one caller still invokes the lifecycle scheduler directly"
+else
+  pass "T6: no stage-one caller invokes the lifecycle scheduler directly"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
