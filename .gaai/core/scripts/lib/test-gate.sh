@@ -278,6 +278,169 @@ _test_gate_parse_junit_failures() {
   return 0
 }
 
+# Creates one collision-safe identity file from inside the live unit worker.
+# The path is carried in a shell variable; the process identity itself is never
+# captured through command substitution (which would insert another process).
+_test_gate_private_tempfile_is_safe() {
+  local path="$1" permissions inspect_rc
+  [[ -f "$path" && ! -L "$path" && -O "$path" ]] || return 1
+  permissions=$(LC_ALL=C ls -ld "$path" 2>/dev/null)
+  inspect_rc=$?
+  [[ "$inspect_rc" -eq 0 ]] || return "$inspect_rc"
+  permissions="${permissions%% *}"
+  [[ "${permissions:0:1}" == "-" && "${permissions:4:6}" == "------" ]]
+}
+
+_test_gate_worker_identity_tempfile() {
+  local old_umask create_rc restore_rc=0
+  old_umask=$(umask) || return $?
+  umask 077
+  _TEST_GATE_WORKER_IDENTITY_PATH=$(mktemp "${TMPDIR:-/tmp}/gaai-test-gate-worker.XXXXXX")
+  create_rc=$?
+  umask "$old_umask" || restore_rc=$?
+  [[ "$create_rc" -ne 0 ]] && return "$create_rc"
+  [[ "$restore_rc" -ne 0 ]] && return "$restore_rc"
+  _test_gate_private_tempfile_is_safe "$_TEST_GATE_WORKER_IDENTITY_PATH"
+}
+
+# This /bin/sh must remain a direct child of the live unit worker. Its PPID is
+# therefore the exact process that renice must target so later children inherit
+# the reduced scheduling priority on every supported Bash version.
+_test_gate_worker_identity_write() {
+  /bin/sh -c 'printf "%s\n" "$PPID"' > "$1"
+}
+
+_test_gate_worker_identity_read() {
+  local identity_path="$1" line="" line_count=0
+  _TEST_GATE_WORKER_PID=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_count=$((line_count + 1))
+    [[ "$line_count" -eq 1 ]] || return 1
+    _TEST_GATE_WORKER_PID="$line"
+    line=""
+  done < "$identity_path"
+  [[ "$line_count" -eq 1 ]]
+}
+
+_test_gate_worker_identity_cleanup() {
+  rm -f "$1"
+}
+
+_test_gate_worker_infra_write() {
+  local state="$1"
+  [[ -n "${_TEST_GATE_INFRA_MARKER_PATH:-}" ]] || return 1
+  printf '%s\n' "$state" > "$_TEST_GATE_INFRA_MARKER_PATH"
+}
+
+# Emits only a closed, provider-neutral reason. When a prior operation already
+# failed, its status remains authoritative even if best-effort cleanup also
+# fails; when cleanup is the first failure, its own status is preserved.
+_test_gate_worker_setup_failure() {
+  local reason="$1" failure_rc="$2" identity_path="${3:-}" cleanup_rc=0
+  if [[ -n "$identity_path" ]]; then
+    _test_gate_worker_identity_cleanup "$identity_path" >/dev/null 2>&1
+    cleanup_rc=$?
+    if [[ "$cleanup_rc" -ne 0 ]]; then
+      echo "[TEST-GATE] unit setup failed: identity temporary-file cleanup" >&2
+      [[ "$failure_rc" -ne 0 ]] || failure_rc="$cleanup_rc"
+    fi
+  fi
+  [[ "$failure_rc" =~ ^[0-9]+$ && "$failure_rc" -gt 0 && "$failure_rc" -le 255 ]] \
+    || failure_rc=1
+  if ! _test_gate_worker_infra_write "infra:${failure_rc}"; then
+    echo "[TEST-GATE] unit setup failed: infrastructure result channel" >&2
+  fi
+  echo "[TEST-GATE] unit setup failed: ${reason}" >&2
+  return "$failure_rc"
+}
+
+_test_gate_prepare_worker_identity() {
+  local setup_rc
+  _TEST_GATE_WORKER_IDENTITY_PATH=""
+  _TEST_GATE_WORKER_PID=""
+
+  _test_gate_worker_identity_tempfile
+  setup_rc=$?
+  if [[ "$setup_rc" -ne 0 ]]; then
+    _test_gate_worker_setup_failure "identity temporary-file creation" "$setup_rc" \
+      "${_TEST_GATE_WORKER_IDENTITY_PATH:-}"
+    return $?
+  fi
+  if [[ -z "$_TEST_GATE_WORKER_IDENTITY_PATH" || ! -f "$_TEST_GATE_WORKER_IDENTITY_PATH" ]]; then
+    _test_gate_worker_setup_failure "identity temporary-file creation" 1 \
+      "$_TEST_GATE_WORKER_IDENTITY_PATH"
+    return $?
+  fi
+
+  _test_gate_worker_identity_write "$_TEST_GATE_WORKER_IDENTITY_PATH"
+  setup_rc=$?
+  if [[ "$setup_rc" -ne 0 ]]; then
+    _test_gate_worker_setup_failure "worker identity write" "$setup_rc" \
+      "$_TEST_GATE_WORKER_IDENTITY_PATH"
+    return $?
+  fi
+
+  _test_gate_worker_identity_read "$_TEST_GATE_WORKER_IDENTITY_PATH"
+  setup_rc=$?
+  if [[ "$setup_rc" -ne 0 ]]; then
+    _test_gate_worker_setup_failure "worker identity read" "$setup_rc" \
+      "$_TEST_GATE_WORKER_IDENTITY_PATH"
+    return $?
+  fi
+  if [[ ! "$_TEST_GATE_WORKER_PID" =~ ^[1-9][0-9]*$ ]]; then
+    _test_gate_worker_setup_failure "worker identity validation" 1 \
+      "$_TEST_GATE_WORKER_IDENTITY_PATH"
+    return $?
+  fi
+
+  _test_gate_worker_identity_cleanup "$_TEST_GATE_WORKER_IDENTITY_PATH"
+  setup_rc=$?
+  if [[ "$setup_rc" -ne 0 ]]; then
+    _test_gate_worker_setup_failure "identity temporary-file cleanup" "$setup_rc" \
+      "$_TEST_GATE_WORKER_IDENTITY_PATH"
+    return $?
+  fi
+  _TEST_GATE_WORKER_IDENTITY_PATH=""
+  return 0
+}
+
+_test_gate_unit_infra_marker_create() {
+  local old_umask create_rc restore_rc=0
+  old_umask=$(umask) || return $?
+  umask 077
+  _TEST_GATE_INFRA_MARKER_PATH=$(mktemp "${TMPDIR:-/tmp}/gaai-test-gate-infra.XXXXXX")
+  create_rc=$?
+  umask "$old_umask" || restore_rc=$?
+  [[ "$create_rc" -ne 0 ]] && return "$create_rc"
+  if [[ "$restore_rc" -ne 0 ]]; then
+    rm -f "$_TEST_GATE_INFRA_MARKER_PATH" >/dev/null 2>&1 || true
+    return "$restore_rc"
+  fi
+  _test_gate_private_tempfile_is_safe "$_TEST_GATE_INFRA_MARKER_PATH"
+  create_rc=$?
+  if [[ "$create_rc" -ne 0 ]]; then
+    rm -f "$_TEST_GATE_INFRA_MARKER_PATH" >/dev/null 2>&1 || true
+    return "$create_rc"
+  fi
+  return 0
+}
+
+_test_gate_unit_infra_marker_read() {
+  local marker_path="$1" line="" line_count=0
+  _TEST_GATE_INFRA_MARKER_STATE=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_count=$((line_count + 1))
+    [[ "$line_count" -eq 1 ]] || return 1
+    _TEST_GATE_INFRA_MARKER_STATE="$line"
+    line=""
+  done < "$marker_path"
+  [[ "$line_count" -eq 1 ]]
+}
+
+_test_gate_unit_infra_marker_cleanup() {
+  rm -f "$1"
+}
+
 # ── Run every resolved unit, collect failed labels ──────────────────────────
 # Args: worktree_path, units (newline list of `<type>|<label>|<cmd>`).
 # Prints one failed label per line to stdout — this IS the differential
@@ -286,7 +449,9 @@ _test_gate_parse_junit_failures() {
 _test_gate_run_units() {
   local worktree_path="$1" units="$2"
   local -a failed=()
-  local type label cmd exit_code
+  local type label cmd exit_code sink_rc effective_exit unit_infra_rc infrastructure_rc=0
+  local infra_marker marker_rc marker_failure_rc cleanup_rc raw_infra_rc
+  local -a pipeline_status=()
 
   while IFS='|' read -r type label cmd; do
     [[ -z "$type" ]] && continue
@@ -295,34 +460,106 @@ _test_gate_run_units() {
     # hang-detector threshold, and `out=$(... 2>&1)` produces zero output
     # until the command exits — indistinguishable from a real hang on the
     # log-mtime signal the detector watches. PIPESTATUS[0] preserves the
-    # actual command's exit code (not tee's).
+    # actual command's exit code (not the streaming sink's).
     echo "[TEST-GATE] unit=${label} type=${type} starting" >&2
     # Deprioritise: this can spawn several workerd-backed vitest workers at
     # 100%+ CPU each, run twice per commit-phase attempt (HEAD + baseline),
     # with up to MAX_CONCURRENT deliveries in parallel — background test
     # execution otherwise competes evenly with the operator's foreground work
-    # for CPU scheduling. Renice THIS subshell before spawning the test
-    # process so its children inherit the lowered niceness — must target
-    # $BASHPID, not $$: inside `( ... )`, $$ still resolves to the PARENT
-    # shell's PID (bash never rebinds it for subshells), so `renice -p $$`
-    # relabels a process that already forked this subshell before the call
-    # ran and has no effect on anything forked from here. Verified: children
-    # spawned after `renice -p $$` stayed at nice 0; after `renice -p
-    # $BASHPID` they correctly inherit 15. macOS/Linux still grant idle CPU
-    # when nothing else needs it, so total suite wall-clock is not
-    # meaningfully affected — only scheduling priority under contention
-    # changes.
+    # for CPU scheduling. A direct /bin/sh child records this live worker's PID
+    # through a collision-safe temporary file before renice runs; unlike $$,
+    # that identity is rebound to this subshell and is available in Bash 3.2.
+    # Every identity/file/scheduling failure stops the unit before its command.
+    # macOS/Linux still grant idle CPU when nothing else needs it, so total
+    # suite wall-clock is not meaningfully affected — only scheduling priority
+    # under contention changes.
     local _tg_to_cmd
     _tg_to_cmd=$(declare -F _resolve_timeout_cmd >/dev/null 2>&1 && _resolve_timeout_cmd || true)
-    (renice -n 15 -p $BASHPID >/dev/null 2>&1
-     cd "$worktree_path" || exit
-     if [[ -n "$_tg_to_cmd" ]]; then
-       $_tg_to_cmd "${GAAI_TEST_UNIT_TIMEOUT_SEC:-2400}" bash -c "$cmd"
-     else
-       eval "$cmd"
-     fi) 2>&1 | tee -a /dev/stderr >/dev/null
-    exit_code=${PIPESTATUS[0]}
-    echo "[TEST-GATE] unit=${label} type=${type} exit=${exit_code}" >&2
+    unit_infra_rc=0
+    exit_code=0
+    infra_marker=""
+    _TEST_GATE_INFRA_MARKER_PATH=""
+    _test_gate_unit_infra_marker_create
+    marker_rc=$?
+    if [[ "$marker_rc" -ne 0 ]]; then
+      [[ "$marker_rc" =~ ^[0-9]+$ && "$marker_rc" -gt 0 && "$marker_rc" -le 255 ]] \
+        || marker_rc=1
+      unit_infra_rc="$marker_rc"
+      exit_code="$marker_rc"
+      echo "[TEST-GATE] unit setup failed: infrastructure result channel" >&2
+    else
+      infra_marker="$_TEST_GATE_INFRA_MARKER_PATH"
+      (_test_gate_prepare_worker_identity || exit $?
+       renice -n 15 -p "$_TEST_GATE_WORKER_PID" >/dev/null 2>&1
+       setup_rc=$?
+       if [[ "$setup_rc" -ne 0 ]]; then
+         _test_gate_worker_setup_failure "worker scheduling" "$setup_rc" ""
+         exit $?
+       fi
+       cd "$worktree_path"
+       setup_rc=$?
+       if [[ "$setup_rc" -ne 0 ]]; then
+         _test_gate_worker_setup_failure "unit working directory" "$setup_rc" ""
+         exit $?
+       fi
+       _test_gate_worker_infra_write "ok"
+       setup_rc=$?
+       if [[ "$setup_rc" -ne 0 ]]; then
+         _test_gate_worker_setup_failure "infrastructure result channel" "$setup_rc" ""
+         exit $?
+       fi
+       if [[ -n "$_tg_to_cmd" ]]; then
+         $_tg_to_cmd "${GAAI_TEST_UNIT_TIMEOUT_SEC:-2400}" bash -c "$cmd"
+       else
+         eval "$cmd"
+       fi) 2>&1 | command cat >&2
+      pipeline_status=("${PIPESTATUS[@]}")
+      exit_code="${pipeline_status[0]}"
+      sink_rc="${pipeline_status[1]}"
+      marker_failure_rc="$exit_code"
+      [[ "$marker_failure_rc" =~ ^[0-9]+$ && "$marker_failure_rc" -gt 0 \
+            && "$marker_failure_rc" -le 255 ]] || marker_failure_rc=1
+
+      if _test_gate_unit_infra_marker_read "$infra_marker"; then
+        case "$_TEST_GATE_INFRA_MARKER_STATE" in
+          ok) ;;
+          infra:*)
+            raw_infra_rc="${_TEST_GATE_INFRA_MARKER_STATE#infra:}"
+            if [[ "$raw_infra_rc" =~ ^[0-9]+$ \
+                  && "$raw_infra_rc" -gt 0 && "$raw_infra_rc" -le 255 ]]; then
+              unit_infra_rc="$raw_infra_rc"
+            else
+              unit_infra_rc="$marker_failure_rc"
+            fi
+            ;;
+          *) unit_infra_rc="$marker_failure_rc" ;;
+        esac
+      else
+        unit_infra_rc="$marker_failure_rc"
+      fi
+
+      if [[ "$sink_rc" -ne 0 ]]; then
+        echo "[TEST-GATE] unit setup failed: diagnostic streaming channel" >&2
+        [[ "$unit_infra_rc" -ne 0 ]] || unit_infra_rc="$sink_rc"
+      fi
+
+      _test_gate_unit_infra_marker_cleanup "$infra_marker"
+      cleanup_rc=$?
+      if [[ "$cleanup_rc" -ne 0 ]]; then
+        echo "[TEST-GATE] unit setup failed: infrastructure result channel cleanup" >&2
+        [[ "$unit_infra_rc" -ne 0 ]] || unit_infra_rc="$cleanup_rc"
+      fi
+    fi
+
+    effective_exit="$exit_code"
+    [[ "$unit_infra_rc" -ne 0 ]] && effective_exit="$unit_infra_rc"
+    echo "[TEST-GATE] unit=${label} type=${type} exit=${effective_exit}" >&2
+
+    if [[ "$unit_infra_rc" -ne 0 ]]; then
+      failed+=("$label")
+      [[ "$infrastructure_rc" -ne 0 ]] || infrastructure_rc="$unit_infra_rc"
+      continue
+    fi
 
     case "$type" in
       bash|pm)
@@ -331,10 +568,15 @@ _test_gate_run_units() {
       junit)
         local xml="${label}/test-results.xml"
         local parsed
+        parsed=""
         if [[ -f "$xml" ]] && parsed=$(_test_gate_parse_junit_failures "$xml" "$label"); then
-          while IFS= read -r pl; do
-            [[ -n "$pl" ]] && failed+=("$pl")
-          done <<< "$parsed"
+          if [[ -n "$parsed" ]]; then
+            while IFS= read -r pl; do
+              [[ -n "$pl" ]] && failed+=("$pl")
+            done <<< "$parsed"
+          elif [[ "$exit_code" -ne 0 ]]; then
+            failed+=("$label")
+          fi
         elif [[ "$exit_code" -ne 0 ]]; then
           failed+=("$label")
         fi
@@ -343,7 +585,7 @@ _test_gate_run_units() {
   done <<< "$units"
 
   [[ "${#failed[@]}" -gt 0 ]] && printf '%s\n' "${failed[@]}"
-  return 0
+  return "$infrastructure_rc"
 }
 
 # ── QA-report audit trail (AC5) ─────────────────────────────────────────────
@@ -441,8 +683,9 @@ _run_deterministic_test_gate() {
   fi
 
   # ── Step 4: run affected units on HEAD (current committed diff) ──────────
-  local head_fail_list
-  head_fail_list=$(_test_gate_run_units "$worktree_path" "$units")
+  local head_fail_list="" head_run_rc=0
+  head_fail_list=$(_test_gate_run_units "$worktree_path" "$units") \
+    || head_run_rc=$?
 
   # ── Step 4.5: detached-checkout baseline, run same units, restore ────────
   # _test_gate_restore is called explicitly at every return point below
@@ -464,9 +707,26 @@ _run_deterministic_test_gate() {
     return 1
   fi
 
-  local base_fail_list
-  base_fail_list=$(_test_gate_run_units "$worktree_path" "$units")
+  local base_fail_list="" base_run_rc=0
+  base_fail_list=$(_test_gate_run_units "$worktree_path" "$units") \
+    || base_run_rc=$?
   _test_gate_restore "$worktree_path" "$branch"
+
+  # Infrastructure is authoritative before the differential failure lists.
+  # An identical setup failure on HEAD and baseline must never cancel out into
+  # PASS merely because the coarse labels compare equal.
+  if [[ "$head_run_rc" -ne 0 || "$base_run_rc" -ne 0 ]]; then
+    local infrastructure_reason="test infrastructure failed (HEAD exit ${head_run_rc}; baseline exit ${base_run_rc})"
+    _test_gate_append_report "$qa_report_path" "ESCALATED" "$base_ref" "$base_sha" \
+      "" "" "$infrastructure_reason"
+    echo "[ERROR] ${story_id} test-gate: ${infrastructure_reason} [class=TEST_GATE_INFRASTRUCTURE_FAILED]"
+    "$SCHEDULER" --set-phase-status "$story_id" failed "$BACKLOG_FILE" 2>/dev/null || true
+    if declare -F notify_escalation_inline >/dev/null 2>&1; then
+      notify_escalation_inline "$story_id" "test_gate_infrastructure_failed" \
+        "$infrastructure_reason"
+    fi
+    return 1
+  fi
 
   # ── Step 5-9: differential compare + report + terminal routing ───────────
   local new_failures

@@ -123,10 +123,20 @@ if [[ $find_rc -ne 0 ]]; then
   exit "$find_rc"
 fi
 sort "$FIND_OUT" -o "$FIND_OUT"
-mapfile -t SHELL_TESTS < "$FIND_OUT"
+sort_rc=$?
+if [[ $sort_rc -ne 0 ]]; then
+  fail_phase "shell-tests" "cannot sort discovered test paths — $(describe_status "$sort_rc")" "node-tests"
+  rm -f "$FIND_OUT" "$FIND_ERR"
+  exit "$sort_rc"
+fi
+SHELL_TESTS=()
+shell_total=0
+while IFS= read -r path; do
+  SHELL_TESTS[$shell_total]="$path"
+  shell_total=$((shell_total + 1))
+done < "$FIND_OUT"
 rm -f "$FIND_OUT" "$FIND_ERR"
 
-shell_total=${#SHELL_TESTS[@]}
 for ((i = 0; i < shell_total; i++)); do
   path="${SHELL_TESTS[$i]}"
   next_path=""
@@ -164,10 +174,21 @@ if [[ $find_rc -ne 0 ]]; then
   exit "$find_rc"
 fi
 sort "$FIND_OUT" -o "$FIND_OUT"
-mapfile -t NODE_TESTS < "$FIND_OUT"
+sort_rc=$?
+if [[ $sort_rc -ne 0 ]]; then
+  fail_phase "node-tests" "cannot sort discovered test paths — $(describe_status "$sort_rc")" \
+    "(none — final phase)"
+  rm -f "$FIND_OUT" "$FIND_ERR"
+  exit "$sort_rc"
+fi
+NODE_TESTS=()
+node_total=0
+while IFS= read -r path; do
+  NODE_TESTS[$node_total]="$path"
+  node_total=$((node_total + 1))
+done < "$FIND_OUT"
 rm -f "$FIND_OUT" "$FIND_ERR"
 
-node_total=${#NODE_TESTS[@]}
 for ((i = 0; i < node_total; i++)); do
   path="${NODE_TESTS[$i]}"
   next_path=""
