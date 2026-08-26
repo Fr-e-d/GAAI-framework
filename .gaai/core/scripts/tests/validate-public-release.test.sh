@@ -9,11 +9,12 @@
 # shell/Node tests and invokes the entrypoint as a real subprocess (never
 # sourced — the ordering/fail-fast guarantees are process-level).
 #
-# Covers AC2 (discovery exactly-once, non-test files ignored, exit 0 only
+# Covers AC2 (discovery exactly-once, lexical/empty corpora, non-test files ignored, exit 0 only
 # when everything passes), AC3 (failing test / non-executable / Node
 # failure / traversal-failure diagnostics), AC6 (fail-fast determinism:
 # first failure stops the run, reports next unstarted phase + next known
-# test path, no later check executes).
+# test path, no later check executes), and binds the copied validator to the
+# exact Bash interpreter that launched this contract test.
 #
 # Run: bash .gaai/core/scripts/tests/validate-public-release.test.sh
 # Exit 0 = all pass.
@@ -25,6 +26,7 @@ fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REAL_CORE="$(cd "$SCRIPT_DIR/../.." && pwd)"   # .../.gaai/core
+unset VALIDATOR_INTERPRETER_LOG
 
 declare -a TMP_DIRS=()
 cleanup_all() {
@@ -72,6 +74,52 @@ new_sandbox() {
   echo "$tmp"
 }
 
+# The copied production entrypoint must run through this test's exact current
+# interpreter. Calling it via its shebang would allow PATH to select a different
+# Bash and turn the dual-shell matrix into a false positive.
+run_validator() {
+  local core="$1" proj="$2"
+  if [[ -n "${VALIDATOR_INTERPRETER_LOG:-}" ]]; then
+    "$BASH" -c '
+      printf "%s|%s\n" "$BASH" "$BASH_VERSION" >> "$VALIDATOR_INTERPRETER_LOG"
+      exec "$BASH" "$@"
+    ' validator-interpreter-probe "$core/scripts/validate-public-release.sh" \
+      --core-dir "$core" --project-dir "$proj"
+    return $?
+  fi
+  "$BASH" "$core/scripts/validate-public-release.sh" \
+    --core-dir "$core" --project-dir "$proj"
+}
+
+# ---------------------------------------------------------------------------
+# K/L — explicit empty corpora + proof that the copied validator is bound to
+# the exact Bash interpreter running this test.
+# ---------------------------------------------------------------------------
+scenario_empty_corpora_and_interpreter_binding() {
+  local tmp core proj out rc interpreter_log expected actual
+  tmp="$(new_sandbox)"; core="$tmp/core"; proj="$tmp/project"
+  build_passing_core "$core"; build_passing_project "$proj"
+
+  interpreter_log="$tmp/interpreter.log"
+  : > "$interpreter_log"
+  out="$(
+    export VALIDATOR_INTERPRETER_LOG="$interpreter_log"
+    run_validator "$core" "$proj" 2>&1
+  )"; rc=$?
+  [[ "$rc" -eq 0 ]] \
+    && pass "K: empty shell and Node corpora exit 0 under current Bash" \
+    || fail "K: empty corpora expected exit 0, got $rc — $out"
+  echo "$out" | grep -q "0 shell tests, 0 node tests" \
+    && pass "K: empty corpus final counts remain 0/0" \
+    || fail "K: empty corpus final counts missing — $out"
+
+  expected="$BASH|$BASH_VERSION"
+  actual="$(cat "$interpreter_log" 2>/dev/null)"
+  [[ "$actual" == "$expected" ]] \
+    && pass "L: copied validator executed through exact current \$BASH ($BASH_VERSION)" \
+    || fail "L: validator interpreter mismatch: expected '$expected', got '$actual'"
+}
+
 # ---------------------------------------------------------------------------
 # A/B — happy path: exactly-once discovery, non-matching entries ignored.
 # ---------------------------------------------------------------------------
@@ -114,7 +162,7 @@ EOF
   # non-.test.js file inside __tests__/ (excluded by name pattern)
   echo "not a test" > "$core/adapters/demo/__tests__/readme.md"
 
-  out="$("$core/scripts/validate-public-release.sh" --core-dir "$core" --project-dir "$proj" 2>&1)"; rc=$?
+  out="$(run_validator "$core" "$proj" 2>&1)"; rc=$?
 
   [[ $rc -eq 0 ]] && pass "A: happy path exits 0" || fail "A: happy path expected exit 0, got $rc — $out"
   if grep -qx "shell:aaa" "$marker" 2>/dev/null && grep -qx "node:aaa" "$marker" 2>/dev/null; then
@@ -153,7 +201,7 @@ require("fs").appendFileSync(process.env.MARKER_FILE, "node:should-not-run\n");
 process.exit(0);
 EOF
 
-  out="$("$core/scripts/validate-public-release.sh" --core-dir "$core" --project-dir "$proj" 2>&1)"; rc=$?
+  out="$(run_validator "$core" "$proj" 2>&1)"; rc=$?
 
   [[ $rc -ne 0 ]] && pass "C: non-executable fixture → non-zero exit" || fail "C: expected non-zero exit, got 0"
   if echo "$out" | grep -qF "$core/scripts/tests/broken.sh" && echo "$out" | grep -q "not executable"; then
@@ -200,7 +248,7 @@ require("fs").appendFileSync(process.env.MARKER_FILE, "node:should-not-run\n");
 process.exit(0);
 EOF
 
-  out="$("$core/scripts/validate-public-release.sh" --core-dir "$core" --project-dir "$proj" 2>&1)"; rc=$?
+  out="$(run_validator "$core" "$proj" 2>&1)"; rc=$?
 
   [[ $rc -eq 1 ]] && pass "D: b-fail.sh exit 1 propagates as entrypoint exit 1" || fail "D: expected exit 1, got $rc"
   if echo "$out" | grep -qF "$core/scripts/tests/b-fail.sh" && echo "$out" | grep -q "exit 1"; then
@@ -237,7 +285,7 @@ kill -9 $$
 EOF
   chmod +x "$core/scripts/tests/self-kill.sh"
 
-  out="$("$core/scripts/validate-public-release.sh" --core-dir "$core" --project-dir "$proj" 2>&1)"; rc=$?
+  out="$(run_validator "$core" "$proj" 2>&1)"; rc=$?
 
   [[ $rc -eq 137 ]] && pass "E: signal-killed fixture propagates rc=137 (128+9)" || fail "E: expected rc=137, got $rc"
   echo "$out" | grep -q "terminated by signal 9" \
@@ -254,7 +302,7 @@ scenario_tests_dir_unreadable() {
   build_passing_core "$core"; build_passing_project "$proj"
 
   chmod 000 "$core/scripts/tests"
-  out="$("$core/scripts/validate-public-release.sh" --core-dir "$core" --project-dir "$proj" 2>&1)"; rc=$?
+  out="$(run_validator "$core" "$proj" 2>&1)"; rc=$?
   chmod 755 "$core/scripts/tests"   # restore so sandbox cleanup can proceed
 
   [[ $rc -ne 0 ]] && pass "F: unreadable scripts/tests/ → non-zero exit" || fail "F: expected non-zero exit, got 0"
@@ -275,7 +323,7 @@ scenario_adapters_dir_missing() {
   build_passing_core "$core"; build_passing_project "$proj"
   rm -rf "$core/adapters"
 
-  out="$("$core/scripts/validate-public-release.sh" --core-dir "$core" --project-dir "$proj" 2>&1)"; rc=$?
+  out="$(run_validator "$core" "$proj" 2>&1)"; rc=$?
 
   [[ $rc -ne 0 ]] && pass "G: missing adapters/ → non-zero exit" || fail "G: expected non-zero exit, got 0"
   if echo "$out" | grep -q "cannot traverse/list" && echo "$out" | grep -qF "$core/adapters"; then
@@ -304,7 +352,7 @@ exit 0
 EOF
   chmod +x "$core/scripts/tests/should-not-run.sh"
 
-  out="$("$core/scripts/validate-public-release.sh" --core-dir "$core" --project-dir "$proj" 2>&1)"; rc=$?
+  out="$(run_validator "$core" "$proj" 2>&1)"; rc=$?
 
   [[ $rc -ne 0 ]] && pass "H: health-check failure → non-zero exit" || fail "H: expected non-zero exit, got 0"
   echo "$out" | grep -q "next unstarted phase: artefact-sync" \
@@ -320,7 +368,7 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# I — AC1: shell fixtures execute in lexical path order.
+# I — AC1: shell and Node fixtures execute in lexical path order.
 # ---------------------------------------------------------------------------
 scenario_lexical_order() {
   local tmp core proj marker n rc actual
@@ -337,14 +385,21 @@ exit 0
 EOF
     chmod +x "$core/scripts/tests/${n}-fixture.sh"
   done
+  mkdir -p "$core/adapters/demo/__tests__"
+  for n in c b a; do
+    cat > "$core/adapters/demo/__tests__/${n}-fixture.test.js" <<EOF
+require("fs").appendFileSync(process.env.MARKER_FILE, "node:${n}\\n");
+process.exit(0);
+EOF
+  done
 
-  "$core/scripts/validate-public-release.sh" --core-dir "$core" --project-dir "$proj" >/dev/null 2>&1
+  run_validator "$core" "$proj" >/dev/null 2>&1
   rc=$?
   [[ $rc -eq 0 ]] || fail "I: expected clean pass, got exit $rc"
   actual="$(tr '\n' ',' < "$marker")"
-  [[ "$actual" == "shell:a,shell:b,shell:c," ]] \
-    && pass "I: shell fixtures executed in lexical order (a,b,c)" \
-    || fail "I: expected lexical order shell:a,shell:b,shell:c — got: $actual"
+  [[ "$actual" == "shell:a,shell:b,shell:c,node:a,node:b,node:c," ]] \
+    && pass "I: shell and Node fixtures executed in lexical phase/path order" \
+    || fail "I: expected lexical shell a,b,c then Node a,b,c — got: $actual"
 
   unset MARKER_FILE
 }
@@ -373,7 +428,7 @@ require("fs").appendFileSync(process.env.MARKER_FILE, "node:c-should-not-run\n")
 process.exit(0);
 EOF
 
-  out="$("$core/scripts/validate-public-release.sh" --core-dir "$core" --project-dir "$proj" 2>&1)"; rc=$?
+  out="$(run_validator "$core" "$proj" 2>&1)"; rc=$?
 
   [[ $rc -eq 3 ]] && pass "J: node fixture exit 3 propagates as entrypoint exit 3" || fail "J: expected exit 3, got $rc"
   if echo "$out" | grep -qF "$core/adapters/demo/__tests__/b-fail.test.js" && echo "$out" | grep -q "exit 3"; then
@@ -397,8 +452,125 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# M — Node test killed by signal retains the signal-derived status.
+# ---------------------------------------------------------------------------
+scenario_node_signal() {
+  local tmp core proj out rc path
+  tmp="$(new_sandbox)"; core="$tmp/core"; proj="$tmp/project"
+  build_passing_core "$core"; build_passing_project "$proj"
+
+  mkdir -p "$core/adapters/demo/__tests__"
+  path="$core/adapters/demo/__tests__/self-kill.test.js"
+  cat > "$path" <<'EOF'
+process.kill(process.pid, "SIGKILL");
+EOF
+
+  out="$(run_validator "$core" "$proj" 2>&1)"; rc=$?
+  [[ "$rc" -eq 137 ]] \
+    && pass "M: signal-killed Node fixture propagates rc=137" \
+    || fail "M: expected Node signal rc=137, got $rc"
+  echo "$out" | grep -qF "$path" && echo "$out" | grep -q "terminated by signal 9" \
+    && pass "M: Node signal diagnostic retains path and signal 9" \
+    || fail "M: Node signal diagnostic missing/wrong — $out"
+}
+
+install_sort_fault_stub() {
+  local bin_dir="$1"
+  mkdir -p "$bin_dir"
+  cat > "$bin_dir/sort" <<'EOF'
+#!/bin/sh
+input="${1:-}"
+if [ -f "$input" ]; then
+  case "${SORT_FAULT_MODE:-}" in
+    shell)
+      if grep -q '/scripts/tests/.*\.sh$' "$input"; then
+        printf '%s\n' "$input" >> "$SORT_TARGET_LOG"
+        exit 41
+      fi
+      ;;
+    node)
+      if grep -q '/adapters/.*/__tests__/.*\.test\.js$' "$input"; then
+        printf '%s\n' "$input" >> "$SORT_TARGET_LOG"
+        kill -9 "$$"
+        exit 99
+      fi
+      ;;
+  esac
+fi
+exec "$REAL_SORT_PATH" "$@"
+EOF
+  chmod +x "$bin_dir/sort"
+}
+
+# ---------------------------------------------------------------------------
+# N/O — sort failures are phase infrastructure failures, preserve status or
+# signal, clean discovery files and start no test in the affected/later phase.
+# ---------------------------------------------------------------------------
+scenario_sort_failures() {
+  local mode tmp core proj marker out rc stub_bin sort_log sort_target
+  local real_sort
+  real_sort="$(PATH=/usr/bin:/bin command -v sort)"
+
+  for mode in shell node; do
+    tmp="$(new_sandbox)"; core="$tmp/core"; proj="$tmp/project"
+    build_passing_core "$core"; build_passing_project "$proj"
+    marker="$tmp/marker.txt"; : > "$marker"
+    stub_bin="$tmp/bin"; sort_log="$tmp/sort-target.log"; : > "$sort_log"
+    install_sort_fault_stub "$stub_bin"
+
+    cat > "$core/scripts/tests/a-shell.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "shell-ran" >> "$MARKER_FILE"
+EOF
+    chmod +x "$core/scripts/tests/a-shell.sh"
+    mkdir -p "$core/adapters/demo/__tests__"
+    cat > "$core/adapters/demo/__tests__/a-node.test.js" <<'EOF'
+require("fs").appendFileSync(process.env.MARKER_FILE, "node-ran\n");
+EOF
+
+    out="$(
+      export PATH="$stub_bin:$PATH" SORT_FAULT_MODE="$mode"
+      export SORT_TARGET_LOG="$sort_log" REAL_SORT_PATH="$real_sort" MARKER_FILE="$marker"
+      run_validator "$core" "$proj" 2>&1
+    )"; rc=$?
+    sort_target="$(cat "$sort_log" 2>/dev/null)"
+
+    if [[ "$mode" == "shell" ]]; then
+      [[ "$rc" -eq 41 ]] \
+        && pass "N: shell discovery sort exit 41 propagates unchanged" \
+        || fail "N: shell sort expected rc=41, got $rc"
+      echo "$out" | grep -q "phase 'shell-tests'" \
+        && echo "$out" | grep -q "cannot sort discovered test paths — exit 41" \
+        && pass "N: shell sort failure has generic phase/status diagnostic" \
+        || fail "N: shell sort diagnostic missing/wrong — $out"
+      [[ ! -s "$marker" ]] \
+        && pass "N: shell sort failure starts no shell or Node test" \
+        || fail "N: a test ran after shell sort failure: $(cat "$marker")"
+    else
+      [[ "$rc" -eq 137 ]] \
+        && pass "O: Node discovery sort signal 9 propagates as rc=137" \
+        || fail "O: Node sort expected rc=137, got $rc"
+      echo "$out" | grep -q "phase 'node-tests'" \
+        && echo "$out" | grep -q "cannot sort discovered test paths — terminated by signal 9" \
+        && pass "O: Node sort failure has generic phase/signal diagnostic" \
+        || fail "O: Node sort diagnostic missing/wrong — $out"
+      [[ "$(cat "$marker" 2>/dev/null)" == "shell-ran" ]] \
+        && pass "O: Node sort failure starts no Node test or later work" \
+        || fail "O: Node sort failure execution boundary changed: $(cat "$marker" 2>/dev/null)"
+    fi
+
+    [[ -n "$sort_target" && ! -e "$sort_target" ]] \
+      && pass "${mode}: failed sort discovery tempfile is cleaned" \
+      || fail "${mode}: failed sort discovery tempfile leaked or was not observed"
+  done
+}
+
+# ---------------------------------------------------------------------------
 echo "GAAI validate-public-release.sh — hermetic contract test"
 echo "=========================================================="
+echo ""
+echo "=== K/L: empty corpora + exact current-Bash interpreter binding ==="
+scenario_empty_corpora_and_interpreter_binding
 echo ""
 echo "=== A/B: happy path + exactly-once discovery (ignores non-matching entries) ==="
 scenario_happy_path_and_discovery
@@ -426,6 +598,12 @@ scenario_lexical_order
 echo ""
 echo "=== J: Node invocation failure — fail-fast + next-path report (AC3+AC6) ==="
 scenario_node_failure_fail_fast
+echo ""
+echo "=== M: Node test killed by signal (AC3) ==="
+scenario_node_signal
+echo ""
+echo "=== N/O: shell and Node discovery sort failures ==="
+scenario_sort_failures
 
 echo ""
 echo "=========================================================="

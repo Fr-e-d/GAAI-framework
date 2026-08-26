@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- fix: keep local admission portable across Bash versions
 -: emit bounded policy-validated lifecycle journal records
 -: project lifecycle journals with exact-parent CAS
 - fix: make delivery daemon mktemp templates portable
