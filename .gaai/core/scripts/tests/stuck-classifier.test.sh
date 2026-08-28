@@ -1,548 +1,516 @@
 #!/usr/bin/env bash
-# stuck-classifier.test.sh — regression tests for classify_stuck_story() (E160S04)
-#
-# T1: stale_race_residual class → auto-recovery invoked + incident report written (rc=0)
-# T2: worktree_corruption_suspected class (phantom_deletes>100) → escalation with incident report (rc=1)
-# T3: pr_creation_silent_failure class → escalation (rc=1)
-# T4: unknown class → escalation with full evidence in incident body (rc=1)
-# T5: orphan_lock_classified (S02 marker present) → no-op skip (rc=2, no actions invoked)
-#
-# Usage: bash .gaai/core/scripts/tests/stuck-classifier.test.sh
+# Forward-only classifier and immutable-context contract tests.
 
 set -uo pipefail
 
+TEST_BASH="${GAAI_TEST_BASH:-${BASH:-/bin/bash}}"
+
 PASS_COUNT=0
 FAIL_COUNT=0
-
 pass() { echo "  PASS: $1"; PASS_COUNT=$(( PASS_COUNT + 1 )); }
 fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CLASSIFIER_LIB="$SCRIPT_DIR/../lib/stuck-classifier.sh"
+CLASSIFIER="$SCRIPT_DIR/../lib/stuck-classifier.sh"
+SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gaai-forward-classifier-XXXXXX")"
+trap 'rm -rf "$SANDBOX"' EXIT
+chmod 700 "$SANDBOX"
 
-FIXTURE_DIR="/tmp/gaai-stuck-classifier-test-$$"
-mkdir -p "$FIXTURE_DIR"
+printf 'INTERPRETER outer=%s inner=%s version=%s\n' \
+  "${BASH:-unknown}" "$TEST_BASH" "$BASH_VERSION"
+# shellcheck source=../lib/stuck-classifier.sh
+source "$CLASSIFIER"
 
-cleanup() { rm -rf "$FIXTURE_DIR"; }
-trap cleanup EXIT
+SOURCE_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+NOW=1787666400
 
-# ── Git repo helper ─────────────────────────────────────────────────────────────
-setup_git_repo() {
-  local project_dir="$1" yaml_content="$2"
-  local remote_dir="${project_dir}_remote.git"
-  rm -rf "$project_dir" "$remote_dir"
-  git init --bare "$remote_dir" -q
-  git clone "$remote_dir" "$project_dir" -q
-  git -C "$project_dir" config user.email "test@gaai.local"
-  git -C "$project_dir" config user.name "GAAI Test"
-  mkdir -p "$project_dir/.gaai/project/contexts/backlog"
-  printf '%s\n' "$yaml_content" > "$project_dir/.gaai/project/contexts/backlog/active.backlog.yaml"
-  git -C "$project_dir" add .
-  git -C "$project_dir" commit -m "initial" -q
-  git -C "$project_dir" push origin HEAD -q
+write_snapshot() {
+  local path="$1" status="$2" phase="$3" started="$4"
+  {
+    echo 'items:'
+    echo '- id: TST-FWD'
+    echo "  status: $status"
+    echo "  phase_status: $phase"
+    echo "  started_at: $started"
+  } > "$path"
+  chmod 600 "$path"
 }
 
-# ── Build test harness helper ───────────────────────────────────────────────────
-# Writes a self-contained bash script to $1 that:
-#   - Sets required env vars from fixture paths embedded at write time
-#   - Defines stub functions (log, notify_escalation, _recovery_revert_refined, etc.)
-#   - Sources the classifier lib
-#   - Calls classify_stuck_story with $SID and $PHASE_STATUS from harness env
-build_base_harness() {
-  local harness="$1"
-  local project_dir="$2"
-  local lock_dir="$3"
-  local log_dir="$4"
-  local gaai_project_dir="$5"
-  local backlog_file="$6"
+blob_for() { git hash-object -- "$1"; }
 
-  cat > "$harness" <<HARNESS
-#!/usr/bin/env bash
-set -uo pipefail
-
-PROJECT_DIR="$project_dir"
-LOCK_DIR="$lock_dir"
-LOG_DIR="$log_dir"
-GAAI_PROJECT_DIR="$gaai_project_dir"
-BACKLOG="$backlog_file"
-TARGET_BRANCH="main"
-GAAI_STUCK_CLASSIFY_TIMEOUT_SEC=5
-NOTIFY_CALLED=0
-REVERT_CALLED=0
-RECOVER_WT_CALLED=0
-
-log() { printf '[LOG] %s\n' "\$*" >&2; }
-
-notify_escalation() {
-  NOTIFY_CALLED=\$(( NOTIFY_CALLED + 1 ))
+classify() {
+  local path="$1" scope="$2" integrity="$3" plan="$4"
+  forward_classify_snapshot TST-FWD "$path" "$SOURCE_SHA" \
+    "$(blob_for "$path")" "$scope" "$integrity" "$plan" "$NOW"
 }
 
-_recovery_revert_refined() {
-  REVERT_CALLED=\$(( REVERT_CALLED + 1 ))
-  return 0
+expect_action() {
+  local label="$1" expected_action="$2" expected_reason="$3"
+  shift 3
+  local output rc=0
+  output=$("$@") || rc=$?
+  if [[ "$rc" -eq 0 && "${output%%$'\t'*}" == "$expected_action" \
+      && "$output" == "$expected_action"$'\t'"$expected_reason"$'\t'* ]]; then
+    pass "$label"
+  else
+    fail "$label (rc=$rc output=$output)"
+  fi
 }
 
-_recovery_resolve_worktree() {
-  echo "${FIXTURE_DIR}/\$1-worktree"
+expect_rejected() {
+  local label="$1"
+  shift
+  if "$@" >"$SANDBOX/rejected.out" 2>"$SANDBOX/rejected.err"; then
+    fail "$label"
+  elif [[ ! -s "$SANDBOX/rejected.out" && ! -s "$SANDBOX/rejected.err" ]]; then
+    pass "$label"
+  else
+    fail "$label leaked candidate/path/content evidence"
+  fi
 }
 
-# NOTE: _recover_worktree_safe_base is intentionally NOT defined here.
-# Tests that need it defined will append a definition after this base.
+echo "Forward classifier lifecycle matrix"
+SNAP="$SANDBOX/snapshot.yaml"
+write_snapshot "$SNAP" refined not_started null
+expect_action "refined first claim accepts absent_new" claim_candidate ready \
+  classify "$SNAP" main absent_new false
+expect_action "recovery never treats refined row as a claim" no_effect not_actionable \
+  classify "$SNAP" recovery verified false
 
-HARNESS
-}
+for CASE in \
+  'not_started true resume resumable' \
+  'planned true resume resumable' \
+  'planned false forward_fail required_plan_absent' \
+  'implemented true resume resumable' \
+  'qa_failed true resume resumable' \
+  'qa_passed true resume resumable' \
+  'failed true forward_terminal terminal_projection' \
+  'escalated true forward_terminal terminal_projection' \
+  'qa_escalated true forward_terminal terminal_projection' \
+  'done true hold_downstream merge_terminal_owned' \
+  'commit_stalled true hold_operator policy_stall'
+do
+  set -- $CASE
+  write_snapshot "$SNAP" in_progress "$1" '"2026-08-25T10:00:00Z"'
+  expect_action "in_progress/$1 closes as $3" "$3" "$4" \
+    classify "$SNAP" recovery verified "$2"
+done
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# T1 — stale_race_residual: terminal phase_status, no markers → auto-recovery
-# ═══════════════════════════════════════════════════════════════════════════════
-echo ""
-echo "=== T1: stale_race_residual — auto-recovery invoked + incident report written ==="
+for PHASE in failed escalated qa_escalated done commit_stalled; do
+  write_snapshot "$SNAP" in_progress "$PHASE" '"2026-08-25T10:00:00Z"'
+  case "$PHASE" in
+    failed|escalated|qa_escalated) TERMINAL_ACTION=forward_terminal; TERMINAL_REASON=terminal_projection ;;
+    done) TERMINAL_ACTION=hold_downstream; TERMINAL_REASON=merge_terminal_owned ;;
+    commit_stalled) TERMINAL_ACTION=hold_operator; TERMINAL_REASON=policy_stall ;;
+  esac
+  for INTEGRITY in verified recoverable unrecoverable unknown absent_new; do
+    expect_action "$PHASE is closed independently of $INTEGRITY integrity" \
+      "$TERMINAL_ACTION" "$TERMINAL_REASON" \
+      classify "$SNAP" recovery "$INTEGRITY" true
+  done
+done
 
-T1_SID="T1-STALE"
-T1_PROJ="$FIXTURE_DIR/t1-project"
-T1_LOCKS="$FIXTURE_DIR/t1-locks"
-T1_LOGS="$FIXTURE_DIR/t1-logs"
-T1_GAAI_PROJ="$FIXTURE_DIR/t1-gaai-project"
-T1_YAML="- id: ${T1_SID}
+write_snapshot "$SNAP" in_progress implemented '"2026-08-25T10:00:00Z"'
+expect_action "confirmed unrecoverable fails forward" forward_fail worktree_unrecoverable \
+  classify "$SNAP" recovery unrecoverable true
+expect_action "unknown integrity blocks" block_integrity integrity_unverified \
+  classify "$SNAP" recovery unknown true
+expect_action "recoverable is not provisional authority" block_integrity integrity_unverified \
+  classify "$SNAP" recovery recoverable true
+expect_action "bound first-claim absence is valid only at postclaim" resume resumable \
+  classify "$SNAP" postclaim absent_new true
+
+echo "Pinned bytes and record validation"
+EXPECTED_BLOB=$(blob_for "$SNAP")
+printf '\n# changed\n' >> "$SNAP"
+expect_rejected "changed bytes cannot match the pinned blob" \
+  forward_classify_snapshot TST-FWD "$SNAP" "$SOURCE_SHA" "$EXPECTED_BLOB" \
+    recovery verified true "$NOW"
+
+write_snapshot "$SNAP" in_progress implemented '"2026-08-25T10:00:00Z"'
+LINK="$SANDBOX/snapshot-link.yaml"
+ln -s "$SNAP" "$LINK"
+expect_rejected "symlink snapshot is rejected" \
+  forward_classify_snapshot TST-FWD "$LINK" "$SOURCE_SHA" "$(blob_for "$SNAP")" \
+    recovery verified true "$NOW"
+chmod 644 "$SNAP"
+expect_rejected "non-private snapshot is rejected" \
+  forward_classify_snapshot TST-FWD "$SNAP" "$SOURCE_SHA" "$(blob_for "$SNAP")" \
+    recovery verified true "$NOW"
+chmod 600 "$SNAP"
+
+cat >> "$SNAP" <<'YAML'
+- id: TST-FWD
   status: in_progress
-  phase_status: failed
-  delivery_pipeline: 3phase"
+  phase_status: implemented
+  started_at: "2026-08-25T10:00:00Z"
+YAML
+expect_rejected "duplicate Story is rejected" classify "$SNAP" recovery verified true
 
-mkdir -p "$T1_LOCKS" "$T1_LOGS" "$T1_GAAI_PROJ/contexts/artefacts/incidents"
-setup_git_repo "$T1_PROJ" "$T1_YAML"
-
-T1_BACKLOG="$T1_PROJ/.gaai/project/contexts/backlog/active.backlog.yaml"
-T1_HARNESS=$(mktemp /tmp/gaai-t1-harness-XXXXXX)
-build_base_harness "$T1_HARNESS" "$T1_PROJ" "$T1_LOCKS" "$T1_LOGS" "$T1_GAAI_PROJ" "$T1_BACKLOG"
-cat >> "$T1_HARNESS" <<T1APPEND
-
-source "$CLASSIFIER_LIB"
-
-classify_stuck_story "$T1_SID" "failed"
-T1_RC=\$?
-
-printf 'RC=%s\n' "\$T1_RC"
-printf 'REVERT_CALLED=%s\n' "\$REVERT_CALLED"
-printf 'NOTIFY_CALLED=%s\n' "\$NOTIFY_CALLED"
-
-# Find incident file
-T1_INCIDENT=\$(ls -t "${T1_GAAI_PROJ}/contexts/artefacts/incidents/incident-${T1_SID}-"*.md 2>/dev/null | head -1 || true)
-printf 'INCIDENT_EXISTS=%s\n' "\$([ -n "\$T1_INCIDENT" ] && [ -f "\$T1_INCIDENT" ] && echo yes || echo no)"
-if [ -f "\$T1_INCIDENT" ]; then
-  printf 'INCIDENT_CLASS=%s\n' "\$(grep -m1 '^class:' "\$T1_INCIDENT" | awk '{print \$2}' || true)"
-  printf 'INCIDENT_OUTCOME=%s\n' "\$(grep -m1 '^auto_recovery_outcome:' "\$T1_INCIDENT" | sed 's/.*: *//;s/\"//g' || true)"
-fi
-T1APPEND
-
-chmod +x "$T1_HARNESS"
-T1_OUT=$(bash "$T1_HARNESS" 2>/dev/null)
-rm -f "$T1_HARNESS"
-
-T1_RC=$(echo "$T1_OUT" | grep '^RC=' | cut -d= -f2)
-T1_REVERT=$(echo "$T1_OUT" | grep '^REVERT_CALLED=' | cut -d= -f2)
-T1_NOTIFY=$(echo "$T1_OUT" | grep '^NOTIFY_CALLED=' | cut -d= -f2)
-T1_INC_EXISTS=$(echo "$T1_OUT" | grep '^INCIDENT_EXISTS=' | cut -d= -f2)
-T1_INC_CLASS=$(echo "$T1_OUT" | grep '^INCIDENT_CLASS=' | cut -d= -f2)
-T1_INC_OUTCOME=$(echo "$T1_OUT" | grep '^INCIDENT_OUTCOME=' | cut -d= -f2)
-
-if [[ "$T1_RC" == "0" ]]; then
-  pass "T1: classify_stuck_story returned 0 (auto-recovered)"
-else
-  fail "T1: expected rc=0, got rc=${T1_RC:-?}"
-fi
-
-if [[ "$T1_REVERT" == "1" ]]; then
-  pass "T1: _recovery_revert_refined called once"
-else
-  fail "T1: expected REVERT_CALLED=1, got ${T1_REVERT:-0}"
-fi
-
-if [[ "$T1_NOTIFY" == "0" ]]; then
-  pass "T1: notify_escalation NOT called (no escalation on success)"
-else
-  fail "T1: expected NOTIFY_CALLED=0, got ${T1_NOTIFY:-?}"
-fi
-
-if [[ "$T1_INC_EXISTS" == "yes" ]]; then
-  pass "T1: incident report file written"
-else
-  fail "T1: incident report file not found"
-fi
-
-if [[ "$T1_INC_CLASS" == "stale_race_residual" ]]; then
-  pass "T1: incident report class=stale_race_residual"
-else
-  fail "T1: expected class=stale_race_residual, got '${T1_INC_CLASS:-?}'"
-fi
-
-if [[ "$T1_INC_OUTCOME" == "success" ]]; then
-  pass "T1: incident report auto_recovery_outcome=success"
-else
-  fail "T1: expected auto_recovery_outcome=success, got '${T1_INC_OUTCOME:-?}'"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T2 — worktree_corruption_suspected: phantom_deletes>100 → escalation
-# ═══════════════════════════════════════════════════════════════════════════════
-echo ""
-echo "=== T2: worktree_corruption_suspected — escalation with incident report path ==="
-
-T2_SID="T2-CORRUPT"
-T2_PROJ="$FIXTURE_DIR/t2-project"
-T2_REMOTE="${T2_PROJ}_remote.git"
-T2_LOCKS="$FIXTURE_DIR/t2-locks"
-T2_LOGS="$FIXTURE_DIR/t2-logs"
-T2_GAAI_PROJ="$FIXTURE_DIR/t2-gaai-project"
-T2_YAML="- id: ${T2_SID}
+cat > "$SNAP" <<'YAML'
+items:
+- id: TST-FWD
   status: in_progress
-  phase_status: something_odd
-  delivery_pipeline: 3phase"
+  status: failed
+  phase_status: implemented
+  started_at: "2026-08-25T10:00:00Z"
+YAML
+chmod 600 "$SNAP"
+expect_rejected "duplicate governed field is rejected" classify "$SNAP" recovery verified true
 
-mkdir -p "$T2_LOCKS" "$T2_LOGS" "$T2_GAAI_PROJ/contexts/artefacts/incidents"
+write_snapshot "$SNAP" in_progress implemented null
+expect_action "missing started_at blocks" block_invalid_record invalid_started_at \
+  classify "$SNAP" recovery verified true
+write_snapshot "$SNAP" in_progress implemented '"2026-08-25T10:00:00+00:00"'
+expect_action "normalized but non-canonical time blocks" block_invalid_record invalid_started_at \
+  classify "$SNAP" recovery verified true
+write_snapshot "$SNAP" in_progress implemented '"2026-08-25T14:00:01Z"'
+expect_action "future time blocks" block_invalid_record invalid_started_at \
+  classify "$SNAP" recovery verified true
+write_snapshot "$SNAP" in_progress worktree_recovery_failed '"2026-08-25T10:00:00Z"'
+expect_action "unratified lifecycle value blocks" block_invalid_record invalid_lifecycle \
+  classify "$SNAP" recovery verified true
 
-# Set up git repo with 102 files on main, all deleted on story branch
-rm -rf "$T2_PROJ" "$T2_REMOTE"
-git init --bare "$T2_REMOTE" -q
-git clone "$T2_REMOTE" "$T2_PROJ" -q
-git -C "$T2_PROJ" config user.email "test@gaai.local"
-git -C "$T2_PROJ" config user.name "GAAI Test"
-mkdir -p "$T2_PROJ/.gaai/project/contexts/backlog"
-printf '%s\n' "$T2_YAML" > "$T2_PROJ/.gaai/project/contexts/backlog/active.backlog.yaml"
-for i in $(seq 1 102); do printf 'file%s\n' "$i" > "$T2_PROJ/testfile_${i}.txt"; done
-git -C "$T2_PROJ" add -A
-git -C "$T2_PROJ" commit -q -m "initial-with-102-files"
-git -C "$T2_PROJ" push -q origin HEAD:main
-# Story branch deletes all 102 test files
-git -C "$T2_PROJ" checkout -q -b "story/${T2_SID}"
-for i in $(seq 1 102); do git -C "$T2_PROJ" rm -q "testfile_${i}.txt"; done
-git -C "$T2_PROJ" commit -q -m "delete files"
-git -C "$T2_PROJ" push -q origin "story/${T2_SID}"
-git -C "$T2_PROJ" checkout -q main
+echo "Descriptor/path replacement is rejected"
+write_snapshot "$SNAP" in_progress implemented '"2026-08-25T10:00:00Z"'
+RACE_SITE="$SANDBOX/race-site"
+mkdir "$RACE_SITE"
+cat > "$RACE_SITE/sitecustomize.py" <<'PY'
+import os
 
-T2_BACKLOG="$T2_PROJ/.gaai/project/contexts/backlog/active.backlog.yaml"
-T2_HARNESS=$(mktemp /tmp/gaai-t2-harness-XXXXXX)
-build_base_harness "$T2_HARNESS" "$T2_PROJ" "$T2_LOCKS" "$T2_LOGS" "$T2_GAAI_PROJ" "$T2_BACKLOG"
-cat >> "$T2_HARNESS" <<T2APPEND
-# _recover_worktree_safe_base intentionally NOT defined — test escalation path
+_real_open = os.open
+_target = os.environ.get("GAAI_RACE_TARGET")
+_replacement = os.environ.get("GAAI_RACE_REPLACEMENT")
+_done = False
 
-source "$CLASSIFIER_LIB"
+def race_open(path, flags, mode=0o777, *, dir_fd=None):
+    global _done
+    if dir_fd is None:
+        fd = _real_open(path, flags, mode)
+    else:
+        fd = _real_open(path, flags, mode, dir_fd=dir_fd)
+    if not _done and path == _target and flags & os.O_RDONLY == os.O_RDONLY:
+        _done = True
+        os.replace(_replacement, _target)
+    return fd
 
-classify_stuck_story "$T2_SID" "something_odd"
-T2_RC=\$?
-
-printf 'RC=%s\n' "\$T2_RC"
-printf 'NOTIFY_CALLED=%s\n' "\$NOTIFY_CALLED"
-printf 'REVERT_CALLED=%s\n' "\$REVERT_CALLED"
-
-T2_INCIDENT=\$(ls -t "${T2_GAAI_PROJ}/contexts/artefacts/incidents/incident-${T2_SID}-"*.md 2>/dev/null | head -1 || true)
-printf 'INCIDENT_EXISTS=%s\n' "\$([ -n "\$T2_INCIDENT" ] && [ -f "\$T2_INCIDENT" ] && echo yes || echo no)"
-if [ -f "\$T2_INCIDENT" ]; then
-  printf 'INCIDENT_CLASS=%s\n' "\$(grep -m1 '^class:' "\$T2_INCIDENT" | awk '{print \$2}' || true)"
-  printf 'INCIDENT_RECOVERY=%s\n' "\$(grep -m1 '^recovery_applicable:' "\$T2_INCIDENT" | awk '{print \$2}' || true)"
-fi
-T2APPEND
-
-chmod +x "$T2_HARNESS"
-T2_OUT=$(bash "$T2_HARNESS" 2>/dev/null)
-rm -f "$T2_HARNESS"
-
-T2_RC=$(echo "$T2_OUT" | grep '^RC=' | cut -d= -f2)
-T2_NOTIFY=$(echo "$T2_OUT" | grep '^NOTIFY_CALLED=' | cut -d= -f2)
-T2_REVERT=$(echo "$T2_OUT" | grep '^REVERT_CALLED=' | cut -d= -f2)
-T2_INC_EXISTS=$(echo "$T2_OUT" | grep '^INCIDENT_EXISTS=' | cut -d= -f2)
-T2_INC_CLASS=$(echo "$T2_OUT" | grep '^INCIDENT_CLASS=' | cut -d= -f2)
-T2_INC_RECOVERY=$(echo "$T2_OUT" | grep '^INCIDENT_RECOVERY=' | cut -d= -f2)
-
-if [[ "$T2_RC" == "1" ]]; then
-  pass "T2: classify_stuck_story returned 1 (escalated)"
+os.open = race_open
+PY
+cp "$SNAP" "$SANDBOX/replacement.yaml"
+chmod 600 "$SANDBOX/replacement.yaml"
+RACE_BLOB=$(blob_for "$SNAP")
+if PYTHONPATH="$RACE_SITE" GAAI_RACE_TARGET="$SNAP" \
+    GAAI_RACE_REPLACEMENT="$SANDBOX/replacement.yaml" \
+    forward_classify_snapshot TST-FWD "$SNAP" "$SOURCE_SHA" "$RACE_BLOB" \
+      recovery verified true "$NOW" >"$SANDBOX/race.out" 2>"$SANDBOX/race.err"; then
+  fail "path replacement after open was accepted"
+elif [[ ! -s "$SANDBOX/race.out" && ! -s "$SANDBOX/race.err" ]]; then
+  pass "path replacement after open is rejected"
 else
-  fail "T2: expected rc=1, got rc=${T2_RC:-?}"
+  fail "path replacement rejection leaked evidence"
 fi
 
-if [[ "$T2_NOTIFY" == "1" ]]; then
-  pass "T2: notify_escalation called"
+echo "Immutable recovery contexts"
+CTX_DIR="$SANDBOX/contexts"
+mkdir "$CTX_DIR"
+chmod 700 "$CTX_DIR"
+CTX="$CTX_DIR/TST-FWD.json"
+HEX40=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+HEX64=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+STALL_EVENT_DIGEST=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+STALL_STATE_DIGEST=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+if forward_context_install "$CTX" TST-FWD "$SOURCE_SHA" "$HEX40" "$HEX64" \
+    none none none none none none verified resume resumable none; then
+  pass "successor context records explicit retained absence"
 else
-  fail "T2: expected NOTIFY_CALLED=1, got ${T2_NOTIFY:-0}"
+  fail "valid successor context was rejected"
 fi
-
-if [[ "$T2_REVERT" == "0" ]]; then
-  pass "T2: _recovery_revert_refined NOT called"
+CTX_ROW=$(forward_context_read "$CTX" 2>/dev/null || true)
+CTX_DIGEST="${CTX_ROW##*$'\t'}"
+if [[ "$CTX_ROW" == TST-FWD$'\t'*$'\tnone\tnone\tnone\tnone\tnone\tnone\tverified\tresume\tresumable\tnone\t'* ]]; then
+  pass "context reader returns closed typed facts"
 else
-  fail "T2: expected REVERT_CALLED=0, got ${T2_REVERT:-?}"
+  fail "context reader returned an unexpected schema"
 fi
-
-if [[ "$T2_INC_EXISTS" == "yes" ]]; then
-  pass "T2: incident report file written"
+STALL_CTX="$CTX_DIR/commit-stalled.json"
+if forward_context_install "$STALL_CTX" TST-FWD "$SOURCE_SHA" "$HEX40" "$HEX64" \
+    none none none none "$STALL_EVENT_DIGEST" "$STALL_STATE_DIGEST" \
+    verified forward_commit_stall stall_pending phase_status=commit_stalled \
+    && STALL_ROW=$(forward_context_read "$STALL_CTX" 2>/dev/null) \
+    && [[ "$STALL_ROW" == TST-FWD$'\t'*$'\t'"$STALL_EVENT_DIGEST"$'\t'"$STALL_STATE_DIGEST"$'\tverified\tforward_commit_stall\tstall_pending\tphase_status=commit_stalled\t'* ]]; then
+  pass "commit retry guard binds the exact forward commit-stall action"
 else
-  fail "T2: incident report file not found"
+  fail "valid forward commit-stall context was rejected"
 fi
+expect_rejected "hold_operator cannot carry a commit-stalled intention" \
+  forward_context_install "$CTX_DIR/invalid-hold-intention.json" TST-FWD \
+    "$SOURCE_SHA" "$HEX40" "$HEX64" none none none none \
+    "$STALL_EVENT_DIGEST" "$STALL_STATE_DIGEST" verified hold_operator \
+    policy_stall phase_status=commit_stalled
+chmod 777 "$CTX_DIR"
+expect_rejected "context read rejects a permission-widened parent" \
+  forward_context_read "$CTX"
+chmod 700 "$CTX_DIR"
+REAL_PARENT="$SANDBOX/real-parent"
+LINK_PARENT="$SANDBOX/link-parent"
+mkdir "$REAL_PARENT"
+chmod 700 "$REAL_PARENT"
+forward_context_install "$REAL_PARENT/linked.json" TST-FWD "$SOURCE_SHA" "$HEX40" \
+  "$HEX64" none none none none none none verified resume resumable none
+ln -s "$REAL_PARENT" "$LINK_PARENT"
+expect_rejected "context read rejects a symlinked parent" \
+  forward_context_read "$LINK_PARENT/linked.json"
+expect_rejected "immutable context cannot be rewritten" \
+  forward_context_install "$CTX" TST-FWD "$SOURCE_SHA" "$HEX40" "$HEX64" \
+    none none none none none none verified resume resumable none
 
-if [[ "$T2_INC_CLASS" == "worktree_corruption_suspected" ]]; then
-  pass "T2: incident report class=worktree_corruption_suspected"
+RETAINED="$CTX_DIR/retained.json"
+if forward_context_install "$RETAINED" TST-FWD "$SOURCE_SHA" "$HEX40" "$HEX64" \
+    retained "$HEX64" "$HEX40" "$HEX64" none none verified forward_fail \
+    required_plan_absent phase_status=failed,status=failed; then
+  pass "retained context requires actual token/source/record digests"
 else
-  fail "T2: expected class=worktree_corruption_suspected, got '${T2_INC_CLASS:-?}'"
+  fail "valid retained context was rejected"
 fi
+expect_rejected "fabricated retained identity is rejected" \
+  forward_context_install "$CTX_DIR/fabricated.json" TST-FWD "$SOURCE_SHA" "$HEX40" \
+    "$HEX64" retained none "$HEX40" "$HEX64" none none verified forward_fail \
+    required_plan_absent phase_status=failed,status=failed
 
-if [[ "$T2_INC_RECOVERY" == "false" ]]; then
-  pass "T2: recovery_applicable=false (worktree-recovery helper not available)"
+echo "Context parent identity is bound before installation"
+PARENT_RACE="$SANDBOX/parent-race"
+PARENT_OLD="$SANDBOX/parent-old"
+mkdir "$PARENT_RACE"
+chmod 700 "$PARENT_RACE"
+PARENT_SITE="$SANDBOX/parent-site"
+mkdir "$PARENT_SITE"
+cat > "$PARENT_SITE/sitecustomize.py" <<'PY'
+import os
+
+_real_open = os.open
+_real_rename = os.rename
+_real_mkdir = os.mkdir
+_target = os.environ["GAAI_PARENT_TARGET"]
+_old = os.environ["GAAI_PARENT_OLD"]
+_done = False
+
+def race_open(path, flags, mode=0o777, *, dir_fd=None):
+    global _done
+    if not _done and dir_fd is None and path == _target:
+        _done = True
+        _real_rename(_target, _old)
+        _real_mkdir(_target, 0o777)
+        os.chmod(_target, 0o777)
+    if dir_fd is None:
+        return _real_open(path, flags, mode)
+    return _real_open(path, flags, mode, dir_fd=dir_fd)
+
+os.open = race_open
+PY
+PARENT_RC=0
+PYTHONPATH="$PARENT_SITE" GAAI_PARENT_TARGET="$PARENT_RACE" \
+  GAAI_PARENT_OLD="$PARENT_OLD" \
+  forward_context_install "$PARENT_RACE/raced.json" TST-FWD "$SOURCE_SHA" \
+    "$HEX40" "$HEX64" none none none none none none verified resume resumable none \
+    >"$SANDBOX/parent.out" 2>"$SANDBOX/parent.err" || PARENT_RC=$?
+if [[ "$PARENT_RC" -ne 0 && ! -e "$PARENT_RACE/raced.json" \
+    && ! -s "$SANDBOX/parent.out" && ! -s "$SANDBOX/parent.err" ]]; then
+  pass "parent replacement or permission widening is rejected before context creation"
 else
-  fail "T2: expected recovery_applicable=false, got '${T2_INC_RECOVERY:-?}'"
+  fail "context install accepted a replaced or permissive parent"
 fi
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# T3 — pr_creation_silent_failure: all artefacts present, no pr_url → escalation
-# ═══════════════════════════════════════════════════════════════════════════════
+SHORT_DIR="$SANDBOX/short-write"
+mkdir "$SHORT_DIR"
+chmod 700 "$SHORT_DIR"
+SHORT_SITE="$SANDBOX/short-site"
+mkdir "$SHORT_SITE"
+cat > "$SHORT_SITE/sitecustomize.py" <<'PY'
+import os
+
+_real_write = os.write
+
+def short_write(fd, data):
+    return _real_write(fd, data[:max(1, len(data) // 2)])
+
+os.write = short_write
+PY
+if PYTHONPATH="$SHORT_SITE" forward_context_install "$SHORT_DIR/context.json" \
+    TST-FWD "$SOURCE_SHA" "$HEX40" "$HEX64" none none none none none none verified \
+    resume resumable none \
+    && forward_context_read "$SHORT_DIR/context.json" >/dev/null 2>&1; then
+  pass "short writes are completed before context publication"
+else
+  fail "short write produced missing or truncated context"
+fi
+ZERO_DIR="$SANDBOX/zero-write"
+mkdir "$ZERO_DIR"
+chmod 700 "$ZERO_DIR"
+ZERO_SITE="$SANDBOX/zero-site"
+mkdir "$ZERO_SITE"
+cat > "$ZERO_SITE/sitecustomize.py" <<'PY'
+import os
+os.write = lambda fd, data: 0
+PY
+expect_rejected "zero-byte write cannot publish a partial context" \
+  env PYTHONPATH="$ZERO_SITE" "$TEST_BASH" -c \
+    'source "$1"; forward_context_install "$2" TST-FWD "$3" "$4" "$5" none none none none none none verified resume resumable none' \
+    _ "$CLASSIFIER" "$ZERO_DIR/context.json" "$SOURCE_SHA" "$HEX40" "$HEX64"
+if [[ -e "$ZERO_DIR/context.json" ]]; then
+  fail "zero-byte write left a published context"
+else
+  pass "zero-byte write leaves no published context"
+fi
+
+expect_rejected "contradictory action/reason/intention is rejected at install" \
+  forward_context_install "$CTX_DIR/contradictory.json" TST-FWD "$SOURCE_SHA" \
+    "$HEX40" "$HEX64" none none none none none none verified resume ready status=failed
+
+TAMPER="$CTX_DIR/tamper.json"
+cp "$CTX" "$TAMPER"
+python3 - "$TAMPER" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="ascii") as handle:
+    obj = json.load(handle)
+obj["action"] = "attacker_action"
+with open(path, "w", encoding="ascii") as handle:
+    json.dump(obj, handle)
+PY
+chmod 600 "$TAMPER"
+expect_rejected "semantic action tamper is rejected at read" forward_context_read "$TAMPER"
+
+VERSION="$CTX_DIR/version.json"
+cp "$CTX" "$VERSION"
+python3 - "$VERSION" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="ascii") as handle:
+    obj = json.load(handle)
+obj["schema_version"] = "9.9.9"
+with open(path, "w", encoding="ascii") as handle:
+    json.dump(obj, handle)
+PY
+chmod 600 "$VERSION"
+expect_rejected "unknown context schema version is rejected" forward_context_read "$VERSION"
+
+TRUNCATED="$CTX_DIR/truncated.json"
+printf '{"schema_version":"1.0.0"' > "$TRUNCATED"
+chmod 600 "$TRUNCATED"
+expect_rejected "truncated context is rejected" forward_context_read "$TRUNCATED"
+
+python3 - "$CTX" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="ascii") as handle:
+    obj = json.load(handle)
+obj["extra"] = "not-allowed"
+with open(path, "w", encoding="ascii") as handle:
+    json.dump(obj, handle)
+PY
+chmod 600 "$CTX"
+expect_rejected "extra context keys are rejected" forward_context_read "$CTX"
+expect_rejected "context removal requires exact bytes digest" \
+  forward_context_remove "$RETAINED" "$HEX64"
+RETAINED_ROW=$(forward_context_read "$RETAINED")
+RETAINED_DIGEST="${RETAINED_ROW##*$'\t'}"
+if forward_context_remove "$RETAINED" "$RETAINED_DIGEST" && [[ ! -e "$RETAINED" ]]; then
+  pass "exact immutable context is durably retired"
+else
+  fail "exact immutable context could not be retired"
+fi
+
+CHMOD_REMOVE_DIR="$SANDBOX/chmod-remove"
+mkdir "$CHMOD_REMOVE_DIR"
+chmod 700 "$CHMOD_REMOVE_DIR"
+CHMOD_REMOVE_CTX="$CHMOD_REMOVE_DIR/context.json"
+forward_context_install "$CHMOD_REMOVE_CTX" TST-FWD "$SOURCE_SHA" "$HEX40" "$HEX64" \
+  none none none none none none verified resume resumable none
+CHMOD_REMOVE_ROW=$(forward_context_read "$CHMOD_REMOVE_CTX")
+CHMOD_REMOVE_DIGEST="${CHMOD_REMOVE_ROW##*$'\t'}"
+CHMOD_SITE="$SANDBOX/chmod-site"
+mkdir "$CHMOD_SITE"
+cat > "$CHMOD_SITE/sitecustomize.py" <<'PY'
+import os
+
+_real_open = os.open
+_target = os.environ["GAAI_CHMOD_PARENT"]
+_done = False
+
+def chmod_open(path, flags, mode=0o777, *, dir_fd=None):
+    global _done
+    if not _done and dir_fd is None and path == _target:
+        _done = True
+        os.chmod(_target, 0o777)
+    if dir_fd is None:
+        return _real_open(path, flags, mode)
+    return _real_open(path, flags, mode, dir_fd=dir_fd)
+
+os.open = chmod_open
+PY
+CHMOD_REMOVE_RC=0
+PYTHONPATH="$CHMOD_SITE" GAAI_CHMOD_PARENT="$CHMOD_REMOVE_DIR" \
+  forward_context_remove "$CHMOD_REMOVE_CTX" "$CHMOD_REMOVE_DIGEST" \
+    >"$SANDBOX/chmod-remove.out" 2>"$SANDBOX/chmod-remove.err" || CHMOD_REMOVE_RC=$?
+if [[ "$CHMOD_REMOVE_RC" -ne 0 && -f "$CHMOD_REMOVE_CTX" \
+    && ! -s "$SANDBOX/chmod-remove.out" && ! -s "$SANDBOX/chmod-remove.err" ]]; then
+  pass "retirement rejects in-place parent permission widening and preserves context"
+else
+  fail "retirement accepted widened parent permissions or lost context"
+fi
+
+echo "Context retirement preserves a raced successor"
+RACE_CONTEXT="$CTX_DIR/race-context.json"
+RACE_SUCCESSOR="$CTX_DIR/race-successor.json"
+forward_context_install "$RACE_CONTEXT" TST-FWD "$SOURCE_SHA" "$HEX40" "$HEX64" \
+  none none none none none none verified resume resumable none
+forward_context_install "$RACE_SUCCESSOR" TST-FWD "$SOURCE_SHA" "$HEX40" "$HEX64" \
+  none none none none none none verified no_effect not_actionable none
+RACE_CONTEXT_ROW=$(forward_context_read "$RACE_CONTEXT")
+RACE_CONTEXT_DIGEST="${RACE_CONTEXT_ROW##*$'\t'}"
+RACE_SUCCESSOR_DIGEST=$(shasum -a 256 "$RACE_SUCCESSOR" | awk '{print $1}')
+REMOVE_SITE="$SANDBOX/remove-site"
+mkdir "$REMOVE_SITE"
+cat > "$REMOVE_SITE/sitecustomize.py" <<'PY'
+import os
+
+_real_rename = os.rename
+_real_replace = os.replace
+_target = os.environ["GAAI_REMOVE_TARGET"]
+_successor = os.environ["GAAI_REMOVE_SUCCESSOR"]
+_done = False
+
+def race_rename(src, dst, *args, **kwargs):
+    global _done
+    if not _done and str(dst).endswith(".retire"):
+        _done = True
+        _real_replace(_successor, _target)
+    return _real_rename(src, dst, *args, **kwargs)
+
+os.rename = race_rename
+PY
+REMOVE_RC=0
+PYTHONPATH="$REMOVE_SITE" GAAI_REMOVE_TARGET="$RACE_CONTEXT" \
+  GAAI_REMOVE_SUCCESSOR="$RACE_SUCCESSOR" \
+  forward_context_remove "$RACE_CONTEXT" "$RACE_CONTEXT_DIGEST" \
+    >"$SANDBOX/remove-race.out" 2>"$SANDBOX/remove-race.err" || REMOVE_RC=$?
+AFTER_SUCCESSOR_DIGEST=$(shasum -a 256 "$RACE_CONTEXT" 2>/dev/null | awk '{print $1}')
+if [[ "$REMOVE_RC" -ne 0 && "$AFTER_SUCCESSOR_DIGEST" == "$RACE_SUCCESSOR_DIGEST" \
+    && ! -s "$SANDBOX/remove-race.out" && ! -s "$SANDBOX/remove-race.err" ]]; then
+  pass "retirement race rejects and preserves the successor inode bytes"
+else
+  fail "retirement race deleted or changed the successor"
+fi
+
+echo "Side-effect and privacy census"
+if ! find "$SANDBOX" -type f -name 'incident-*' | grep -q . \
+    && ! rg -n 'incident|phantom|_recovery_revert_refined|git log|git diff' \
+      "$CLASSIFIER" >/dev/null 2>&1; then
+  pass "classification has no incident, history, phantom-delete or reverse action path"
+else
+  fail "legacy classifier evidence/action remains"
+fi
+
 echo ""
-echo "=== T3: pr_creation_silent_failure — escalation with incident report ==="
-
-T3_SID="T3-PRFAIL"
-T3_PROJ="$FIXTURE_DIR/t3-project"
-T3_LOCKS="$FIXTURE_DIR/t3-locks"
-T3_LOGS="$FIXTURE_DIR/t3-logs"
-T3_GAAI_PROJ="$FIXTURE_DIR/t3-gaai-project"
-T3_WORKTREE="$FIXTURE_DIR/${T3_SID}-worktree"
-T3_YAML="- id: ${T3_SID}
-  status: in_progress
-  phase_status: qa_passed
-  delivery_pipeline: 3phase"
-
-mkdir -p "$T3_LOCKS" "$T3_LOGS" "$T3_GAAI_PROJ/contexts/artefacts/incidents"
-# Create artefact files that trigger pr_creation_silent_failure heuristic
-mkdir -p "$T3_WORKTREE/.gaai/project/contexts/artefacts/impl-reports"
-mkdir -p "$T3_WORKTREE/.gaai/project/contexts/artefacts/qa-reports"
-touch "$T3_WORKTREE/.gaai/project/contexts/artefacts/impl-reports/${T3_SID}.impl-report.md"
-touch "$T3_WORKTREE/.gaai/project/contexts/artefacts/qa-reports/${T3_SID}.qa-report.md"
-touch "$T3_LOGS/${T3_SID}.deploy.log"
-setup_git_repo "$T3_PROJ" "$T3_YAML"
-
-T3_BACKLOG="$T3_PROJ/.gaai/project/contexts/backlog/active.backlog.yaml"
-T3_HARNESS=$(mktemp /tmp/gaai-t3-harness-XXXXXX)
-build_base_harness "$T3_HARNESS" "$T3_PROJ" "$T3_LOCKS" "$T3_LOGS" "$T3_GAAI_PROJ" "$T3_BACKLOG"
-cat >> "$T3_HARNESS" <<T3APPEND
-
-source "$CLASSIFIER_LIB"
-
-classify_stuck_story "$T3_SID" "qa_passed"
-T3_RC=\$?
-
-printf 'RC=%s\n' "\$T3_RC"
-printf 'NOTIFY_CALLED=%s\n' "\$NOTIFY_CALLED"
-
-T3_INCIDENT=\$(ls -t "${T3_GAAI_PROJ}/contexts/artefacts/incidents/incident-${T3_SID}-"*.md 2>/dev/null | head -1 || true)
-printf 'INCIDENT_EXISTS=%s\n' "\$([ -n "\$T3_INCIDENT" ] && [ -f "\$T3_INCIDENT" ] && echo yes || echo no)"
-if [ -f "\$T3_INCIDENT" ]; then
-  printf 'INCIDENT_CLASS=%s\n' "\$(grep -m1 '^class:' "\$T3_INCIDENT" | awk '{print \$2}' || true)"
-  printf 'INCIDENT_RECOVERY=%s\n' "\$(grep -m1 '^recovery_applicable:' "\$T3_INCIDENT" | awk '{print \$2}' || true)"
-fi
-T3APPEND
-
-chmod +x "$T3_HARNESS"
-T3_OUT=$(bash "$T3_HARNESS" 2>/dev/null)
-rm -f "$T3_HARNESS"
-
-T3_RC=$(echo "$T3_OUT" | grep '^RC=' | cut -d= -f2)
-T3_NOTIFY=$(echo "$T3_OUT" | grep '^NOTIFY_CALLED=' | cut -d= -f2)
-T3_INC_EXISTS=$(echo "$T3_OUT" | grep '^INCIDENT_EXISTS=' | cut -d= -f2)
-T3_INC_CLASS=$(echo "$T3_OUT" | grep '^INCIDENT_CLASS=' | cut -d= -f2)
-T3_INC_RECOVERY=$(echo "$T3_OUT" | grep '^INCIDENT_RECOVERY=' | cut -d= -f2)
-
-if [[ "$T3_RC" == "1" ]]; then
-  pass "T3: classify_stuck_story returned 1 (escalated)"
-else
-  fail "T3: expected rc=1, got rc=${T3_RC:-?}"
-fi
-
-if [[ "$T3_NOTIFY" == "1" ]]; then
-  pass "T3: notify_escalation called"
-else
-  fail "T3: expected NOTIFY_CALLED=1, got ${T3_NOTIFY:-0}"
-fi
-
-if [[ "$T3_INC_EXISTS" == "yes" ]]; then
-  pass "T3: incident report file written"
-else
-  fail "T3: incident report file not found"
-fi
-
-if [[ "$T3_INC_CLASS" == "pr_creation_silent_failure" ]]; then
-  pass "T3: incident report class=pr_creation_silent_failure"
-else
-  fail "T3: expected class=pr_creation_silent_failure, got '${T3_INC_CLASS:-?}'"
-fi
-
-if [[ "$T3_INC_RECOVERY" == "false" ]]; then
-  pass "T3: recovery_applicable=false"
-else
-  fail "T3: expected recovery_applicable=false, got '${T3_INC_RECOVERY:-?}'"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T4 — unknown class: no heuristic matches → escalation with full evidence body
-# ═══════════════════════════════════════════════════════════════════════════════
-echo ""
-echo "=== T4: unknown class — escalation with evidence sections in incident body ==="
-
-T4_SID="T4-UNK"
-T4_PROJ="$FIXTURE_DIR/t4-project"
-T4_LOCKS="$FIXTURE_DIR/t4-locks"
-T4_LOGS="$FIXTURE_DIR/t4-logs"
-T4_GAAI_PROJ="$FIXTURE_DIR/t4-gaai-project"
-T4_YAML="- id: ${T4_SID}
-  status: in_progress
-  phase_status: bizarre_custom_value
-  delivery_pipeline: 3phase"
-
-mkdir -p "$T4_LOCKS" "$T4_LOGS" "$T4_GAAI_PROJ/contexts/artefacts/incidents"
-setup_git_repo "$T4_PROJ" "$T4_YAML"
-
-T4_BACKLOG="$T4_PROJ/.gaai/project/contexts/backlog/active.backlog.yaml"
-T4_HARNESS=$(mktemp /tmp/gaai-t4-harness-XXXXXX)
-build_base_harness "$T4_HARNESS" "$T4_PROJ" "$T4_LOCKS" "$T4_LOGS" "$T4_GAAI_PROJ" "$T4_BACKLOG"
-cat >> "$T4_HARNESS" <<T4APPEND
-
-source "$CLASSIFIER_LIB"
-
-classify_stuck_story "$T4_SID" "bizarre_custom_value"
-T4_RC=\$?
-
-printf 'RC=%s\n' "\$T4_RC"
-printf 'NOTIFY_CALLED=%s\n' "\$NOTIFY_CALLED"
-
-T4_INCIDENT=\$(ls -t "${T4_GAAI_PROJ}/contexts/artefacts/incidents/incident-${T4_SID}-"*.md 2>/dev/null | head -1 || true)
-printf 'INCIDENT_EXISTS=%s\n' "\$([ -n "\$T4_INCIDENT" ] && [ -f "\$T4_INCIDENT" ] && echo yes || echo no)"
-if [ -f "\$T4_INCIDENT" ]; then
-  printf 'INCIDENT_CLASS=%s\n' "\$(grep -m1 '^class:' "\$T4_INCIDENT" | awk '{print \$2}' || true)"
-  printf 'HAS_EVIDENCE=%s\n' "\$(grep -c '## Evidence Collected' "\$T4_INCIDENT" 2>/dev/null || true)"
-  printf 'HAS_RATIONALE=%s\n' "\$(grep -c '## Classification Rationale' "\$T4_INCIDENT" 2>/dev/null || true)"
-fi
-T4APPEND
-
-chmod +x "$T4_HARNESS"
-T4_OUT=$(bash "$T4_HARNESS" 2>/dev/null)
-rm -f "$T4_HARNESS"
-
-T4_RC=$(echo "$T4_OUT" | grep '^RC=' | cut -d= -f2)
-T4_NOTIFY=$(echo "$T4_OUT" | grep '^NOTIFY_CALLED=' | cut -d= -f2)
-T4_INC_EXISTS=$(echo "$T4_OUT" | grep '^INCIDENT_EXISTS=' | cut -d= -f2)
-T4_INC_CLASS=$(echo "$T4_OUT" | grep '^INCIDENT_CLASS=' | cut -d= -f2)
-T4_HAS_EVIDENCE=$(echo "$T4_OUT" | grep '^HAS_EVIDENCE=' | cut -d= -f2)
-T4_HAS_RATIONALE=$(echo "$T4_OUT" | grep '^HAS_RATIONALE=' | cut -d= -f2)
-
-if [[ "$T4_RC" == "1" ]]; then
-  pass "T4: classify_stuck_story returned 1 (escalated)"
-else
-  fail "T4: expected rc=1, got rc=${T4_RC:-?}"
-fi
-
-if [[ "$T4_NOTIFY" == "1" ]]; then
-  pass "T4: notify_escalation called"
-else
-  fail "T4: expected NOTIFY_CALLED=1, got ${T4_NOTIFY:-0}"
-fi
-
-if [[ "$T4_INC_EXISTS" == "yes" ]]; then
-  pass "T4: incident report file written"
-else
-  fail "T4: incident report file not found"
-fi
-
-if [[ "$T4_INC_CLASS" == "unknown" ]]; then
-  pass "T4: incident report class=unknown"
-else
-  fail "T4: expected class=unknown, got '${T4_INC_CLASS:-?}'"
-fi
-
-if [[ "${T4_HAS_EVIDENCE:-0}" -ge "1" ]]; then
-  pass "T4: incident report contains ## Evidence Collected section"
-else
-  fail "T4: incident report missing ## Evidence Collected section"
-fi
-
-if [[ "${T4_HAS_RATIONALE:-0}" -ge "1" ]]; then
-  pass "T4: incident report contains ## Classification Rationale section"
-else
-  fail "T4: incident report missing ## Classification Rationale section"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# T5 — orphan_lock_classified: S02 marker present → no-op skip, no side effects
-# ═══════════════════════════════════════════════════════════════════════════════
-echo ""
-echo "=== T5: orphan_lock_classified — no-op skip (backward-compat) ==="
-
-T5_SID="T5-COMPAT"
-T5_PROJ="$FIXTURE_DIR/t5-project"
-T5_LOCKS="$FIXTURE_DIR/t5-locks"
-T5_LOGS="$FIXTURE_DIR/t5-logs"
-T5_GAAI_PROJ="$FIXTURE_DIR/t5-gaai-project"
-T5_YAML="- id: ${T5_SID}
-  status: in_progress
-  phase_status: not_started
-  delivery_pipeline: 3phase"
-
-mkdir -p "$T5_LOCKS" "$T5_LOGS" "$T5_GAAI_PROJ/contexts/artefacts/incidents"
-setup_git_repo "$T5_PROJ" "$T5_YAML"
-# Place S02 orphan-classified marker
-touch "$T5_LOCKS/${T5_SID}.orphan-classified"
-
-T5_BACKLOG="$T5_PROJ/.gaai/project/contexts/backlog/active.backlog.yaml"
-T5_HARNESS=$(mktemp /tmp/gaai-t5-harness-XXXXXX)
-build_base_harness "$T5_HARNESS" "$T5_PROJ" "$T5_LOCKS" "$T5_LOGS" "$T5_GAAI_PROJ" "$T5_BACKLOG"
-cat >> "$T5_HARNESS" <<T5APPEND
-
-source "$CLASSIFIER_LIB"
-
-classify_stuck_story "$T5_SID" "not_started"
-T5_RC=\$?
-
-printf 'RC=%s\n' "\$T5_RC"
-printf 'REVERT_CALLED=%s\n' "\$REVERT_CALLED"
-printf 'NOTIFY_CALLED=%s\n' "\$NOTIFY_CALLED"
-
-T5_INCIDENT=\$(ls -t "${T5_GAAI_PROJ}/contexts/artefacts/incidents/incident-${T5_SID}-"*.md 2>/dev/null | head -1 || true)
-printf 'INCIDENT_EXISTS=%s\n' "\$([ -n "\$T5_INCIDENT" ] && [ -f "\$T5_INCIDENT" ] && echo yes || echo no)"
-T5APPEND
-
-chmod +x "$T5_HARNESS"
-T5_OUT=$(bash "$T5_HARNESS" 2>/dev/null)
-rm -f "$T5_HARNESS"
-
-T5_RC=$(echo "$T5_OUT" | grep '^RC=' | cut -d= -f2)
-T5_REVERT=$(echo "$T5_OUT" | grep '^REVERT_CALLED=' | cut -d= -f2)
-T5_NOTIFY=$(echo "$T5_OUT" | grep '^NOTIFY_CALLED=' | cut -d= -f2)
-T5_INC_EXISTS=$(echo "$T5_OUT" | grep '^INCIDENT_EXISTS=' | cut -d= -f2)
-
-if [[ "$T5_RC" == "2" ]]; then
-  pass "T5: classify_stuck_story returned 2 (no-op skip)"
-else
-  fail "T5: expected rc=2, got rc=${T5_RC:-?}"
-fi
-
-if [[ "$T5_REVERT" == "0" ]]; then
-  pass "T5: _recovery_revert_refined NOT called (no double-handling)"
-else
-  fail "T5: expected REVERT_CALLED=0, got ${T5_REVERT:-?}"
-fi
-
-if [[ "$T5_NOTIFY" == "0" ]]; then
-  pass "T5: notify_escalation NOT called"
-else
-  fail "T5: expected NOTIFY_CALLED=0, got ${T5_NOTIFY:-?}"
-fi
-
-if [[ "$T5_INC_EXISTS" == "no" ]]; then
-  pass "T5: no incident report written for no-op class"
-else
-  fail "T5: incident report was unexpectedly written for no-op class"
-fi
-
-# ─── Summary ────────────────────────────────────────────────────────────────────
-echo ""
-echo "Results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
-if [[ "$FAIL_COUNT" -eq 0 ]]; then
-  echo "ALL TESTS PASSED"
-  exit 0
-else
-  echo "SOME TESTS FAILED"
-  exit 1
-fi
+echo "Classifier results: $PASS_COUNT passed, $FAIL_COUNT failed"
+[[ "$FAIL_COUNT" -eq 0 ]]

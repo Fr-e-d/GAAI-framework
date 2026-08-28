@@ -3,6 +3,10 @@
 
 set -uo pipefail
 
+TEST_BASH="${GAAI_TEST_BASH:-${BASH:-/bin/bash}}"
+printf 'INTERPRETER outer=%s inner=%s version=%s\n' \
+  "${BASH:-unknown}" "$TEST_BASH" "$BASH_VERSION"
+
 PASS_COUNT=0
 FAIL_COUNT=0
 pass() { echo "  PASS: $1"; PASS_COUNT=$(( PASS_COUNT + 1 )); }
@@ -18,6 +22,8 @@ setup_repo() {
   local repo="$1" remote="${1}.git"
   git init -q --bare "$remote"
   git clone -q "$remote" "$repo"
+  git -C "$repo" remote set-url --push origin "$remote"
+  [[ "$(git -C "$repo" remote get-url --push origin)" == "$remote" ]] || return 1
   git -C "$repo" config user.email test@gaai.local
   git -C "$repo" config user.name "GAAI Test"
   git -C "$repo" checkout -q -b staging
@@ -54,6 +60,14 @@ items:
 - id: TST-EMPTY-RUN
   status: in_progress
   phase_status: planned
+- id: TST-RECOVERY
+  status: in_progress
+  phase_status: planned
+  started_at: "2026-08-25T10:00:00Z"
+- id: TST-RETAINED
+  status: in_progress
+  phase_status: planned
+  started_at: "2026-08-25T10:00:00Z"
 - id: E999S99
   status: done
   phase_status: done
@@ -212,9 +226,11 @@ ln -s "$T1E_OWNER_NAME" "${STAGING_LOCK}.d"
 T1E_ACTIVE="$SANDBOX/t1e-active"
 T1E_OVERLAP="$SANDBOX/t1e-overlap"
 T1E_CALLS="$SANDBOX/t1e-calls"
-export T1E_ACTIVE T1E_OVERLAP T1E_CALLS
-cat > "$NO_FLOCK_BIN/t1e-callback" <<'CALLBACK'
-#!/bin/bash
+INNER_VERSION_LOG="$SANDBOX/inner-versions.log"
+export T1E_ACTIVE T1E_OVERLAP T1E_CALLS INNER_VERSION_LOG
+printf '#!%s\n' "$TEST_BASH" > "$NO_FLOCK_BIN/t1e-callback"
+cat >> "$NO_FLOCK_BIN/t1e-callback" <<'CALLBACK'
+printf '%s\t%s\n' "$BASH" "$BASH_VERSION" >> "$INNER_VERSION_LOG"
 if ! mkdir "$T1E_ACTIVE" 2>/dev/null; then
   printf '%s\n' overlap > "$T1E_OVERLAP"
 fi
@@ -246,8 +262,9 @@ T1F_VIOLATION="$SANDBOX/t1f-violation"
 T1F_PROCESS_LOCK="${STAGING_LOCK}.d"
 export LOCK_REAL_RM T1F_RELEASE_STARTED T1F_RELEASE_DONE T1F_PROCESS_LOCK
 "$LOCK_REAL_RM" -f "$NO_FLOCK_BIN/rm"
-cat > "$NO_FLOCK_BIN/rm" <<'RM'
-#!/bin/bash
+printf '#!%s\n' "$TEST_BASH" > "$NO_FLOCK_BIN/rm"
+cat >> "$NO_FLOCK_BIN/rm" <<'RM'
+printf '%s\t%s\n' "$BASH" "$BASH_VERSION" >> "$INNER_VERSION_LOG"
 for target in "$@"; do
   if [[ "$target" == "$T1F_PROCESS_LOCK" && ! -e "$T1F_RELEASE_DONE" ]]; then
     printf '%s\n' started > "$T1F_RELEASE_STARTED"
@@ -269,8 +286,9 @@ done
 kill -KILL "$T1F_RELEASER" 2>/dev/null || true
 wait "$T1F_RELEASER" 2>/dev/null || true
 export T1F_RELEASE_DONE T1F_ENTERED T1F_VIOLATION
-cat > "$NO_FLOCK_BIN/t1f-callback" <<'CALLBACK'
-#!/bin/bash
+printf '#!%s\n' "$TEST_BASH" > "$NO_FLOCK_BIN/t1f-callback"
+cat >> "$NO_FLOCK_BIN/t1f-callback" <<'CALLBACK'
+printf '%s\t%s\n' "$BASH" "$BASH_VERSION" >> "$INNER_VERSION_LOG"
 [[ -e "$T1F_RELEASE_DONE" ]] || printf '%s\n' overlap > "$T1F_VIOLATION"
 printf '%s\n' entered > "$T1F_ENTERED"
 CALLBACK
@@ -289,8 +307,9 @@ ln -s "$LOCK_REAL_RM" "$NO_FLOCK_BIN/rm"
 
 echo "T1g: failed portable release is reported and remains recoverable"
 "$LOCK_REAL_RM" -f "$NO_FLOCK_BIN/rm"
-cat > "$NO_FLOCK_BIN/rm" <<'RM'
-#!/bin/bash
+printf '#!%s\n' "$TEST_BASH" > "$NO_FLOCK_BIN/rm"
+cat >> "$NO_FLOCK_BIN/rm" <<'RM'
+printf '%s\t%s\n' "$BASH" "$BASH_VERSION" >> "$INNER_VERSION_LOG"
 for target in "$@"; do
   [[ "$target" == "$T1F_PROCESS_LOCK" ]] && exit 1
 done
@@ -311,6 +330,19 @@ if [[ "$T1G_RELEASE_RC" -ne 0 && "$T1G_RETAINED" == true \
 else
   fail "T1g: unlink failure was hidden or left an unrecoverable owner"
 fi
+T1G2_MATCH=true
+T1G2_OBSERVED=""
+while IFS=$'\t' read -r T1G2_BINARY T1G2_VERSION; do
+  T1G2_OBSERVED="${T1G2_OBSERVED}${T1G2_BINARY}:${T1G2_VERSION}|"
+  [[ "$T1G2_BINARY" == "$TEST_BASH" && -n "$T1G2_VERSION" ]] || T1G2_MATCH=false
+done < "$INNER_VERSION_LOG"
+if [[ -s "$INNER_VERSION_LOG" && "$T1G2_MATCH" != true ]]; then
+  fail "T1g2: nested interpreter mismatch: $T1G2_OBSERVED"
+elif [[ -s "$INNER_VERSION_LOG" && "$T1G2_MATCH" == true ]]; then
+  pass "T1g2: nested harnesses record the selected interpreter and version"
+else
+  fail "T1g2: nested harness interpreter evidence is empty"
+fi
 
 echo "T1h: ownerless legacy directory remains fail-closed until its owner releases"
 mkdir "${STAGING_LOCK}.d"
@@ -327,8 +359,8 @@ PATH="$LOCK_ORIGINAL_PATH"
 unset GAAI_STAGING_LOCK_TIMEOUT_SEC
 export PATH
 
-echo "T1i: first-stage writer allowlist excludes S15 contexts"
-for T1B_WRITER in daemon.claim recovery.scan pr-watcher; do
+echo "T1i: first-stage writer allowlist excludes S15 contexts and unauthenticated recovery"
+for T1B_WRITER in daemon.claim pr-watcher; do
   if ( cd "$REPO" && _journal_persist_lifecycle TST-S14 "$T1B_WRITER" status in_progress ) \
       >/dev/null 2>&1; then
     fail "T1i: S15 writer context ${T1B_WRITER} was accepted"
@@ -336,6 +368,57 @@ for T1B_WRITER in daemon.claim recovery.scan pr-watcher; do
     pass "T1i: S15 writer context ${T1B_WRITER} is rejected"
   fi
 done
+if ( cd "$REPO" && _journal_persist_lifecycle TST-RECOVERY recovery.scan \
+      phase_status failed status failed ) >/dev/null 2>&1; then
+  fail "T1i: direct recovery.scan caller was accepted"
+else
+  pass "T1i: direct recovery.scan caller is rejected"
+fi
+
+echo "T1i2: base-held daemon caller is the only recovery.scan authority"
+DAEMON_ASSET="$REPO/.gaai/core/scripts/delivery-daemon.sh"
+cat > "$DAEMON_ASSET" <<'DAEMON'
+#!/usr/bin/env bash
+set -uo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+BACKLOG_REL=.gaai/project/contexts/backlog/active.backlog.yaml
+BACKLOG_FILE="$PROJECT_DIR/$BACKLOG_REL"
+LOCK_DIR="$PROJECT_DIR/.gaai/project/contexts/backlog/.delivery-locks"
+STAGING_LOCK="$LOCK_DIR/.staging.lock"
+TARGET_BRANCH=staging
+source "$SCRIPT_DIR/lib/chore-commit.sh"
+source "$SCRIPT_DIR/daemon-dispatch.sh"
+GAAI_LIFECYCLE_CALLER_ASSET=.gaai/core/scripts/delivery-daemon.sh
+export GAAI_LIFECYCLE_CALLER_ASSET
+_journal_persist_lifecycle TST-RECOVERY recovery.scan phase_status failed status failed
+DAEMON
+chmod 755 "$DAEMON_ASSET"
+git -C "$REPO" add .gaai/core/scripts/delivery-daemon.sh
+git -C "$REPO" commit -q -m 'fixture: base-held recovery caller'
+git -C "$REPO" push -q origin staging
+if "$TEST_BASH" "$DAEMON_ASSET" >"$SANDBOX/t1i2.out" 2>"$SANDBOX/t1i2.err" \
+    && git -C "$REPO" show "origin/staging:$BACKLOG_REL" \
+      | awk '/TST-RECOVERY/{s=1} s&&/status: failed/{a=1} s&&/phase_status: failed/{b=1} END{exit !(a&&b)}'; then
+  pass "T1i2: exact base-held daemon caller projects the forward failure"
+else
+  fail "T1i2: exact base-held daemon caller did not project recovery.scan"
+fi
+COPIED_DAEMON="$REPO/.gaai/core/scripts/copied-daemon.sh"
+if cp "$DAEMON_ASSET" "$COPIED_DAEMON" \
+    && "$TEST_BASH" "$COPIED_DAEMON" >/dev/null 2>&1; then
+  fail "T1i2: copied daemon caller was accepted"
+else
+  pass "T1i2: copied daemon caller is rejected"
+fi
+rm -f "$COPIED_DAEMON"
+printf '\n# candidate tamper\n' >> "$DAEMON_ASSET"
+if "$TEST_BASH" "$DAEMON_ASSET" >/dev/null 2>&1; then
+  fail "T1i2: changed daemon asset was accepted"
+else
+  pass "T1i2: changed daemon asset is rejected"
+fi
+git -C "$REPO" checkout -- .gaai/core/scripts/delivery-daemon.sh
 
 echo "T1j: predictable legacy state temporaries cannot redirect writes"
 mkdir -p "$LOCK_DIR/.journal-runs"
@@ -455,27 +538,173 @@ if [[ "$T3_RC" -ne 0 && -f "$T3_STATE" ]] \
 else
   fail "T3a: retryable projection was misclassified, authorized state or lost evidence"
 fi
-( cd "$REPO" && _journal_resume_pending_lifecycle TST-RESTART dispatch.plan )
+T3_MANIFEST=$(_journal_inspect_pending_lifecycle TST-RESTART dispatch.plan 2>/dev/null || true)
+IFS=$'\t' read -r T3_TOKEN T3_SOURCE T3_TOKEN_DIGEST T3_STATE_DIGEST T3_RECORDS_DIGEST \
+  <<< "${T3_MANIFEST%%$'\n'*}"
+T3_EXPECTED_TOKEN_DIGEST=$(printf '%s' "$T3_TOKEN" | shasum -a 256 | awk '{print $1}')
+if [[ "$T3_TOKEN" =~ ^[0-9a-f]{64}$ && "$T3_SOURCE" =~ ^[0-9a-f]{40}$ \
+    && "$T3_TOKEN_DIGEST" == "$T3_EXPECTED_TOKEN_DIGEST" \
+    && "$T3_STATE_DIGEST" =~ ^[0-9a-f]{64}$ \
+    && "$T3_RECORDS_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
+  pass "T3a2: retained inspection exposes the actual token/source/record digests"
+else
+  fail "T3a2: retained inspection did not bind the real attempt"
+fi
+T3_RECORD_BASENAME=$(printf '%s\n' "$T3_MANIFEST" | awk -F '\t' 'NR == 2 {print $2}')
+T3_WRITER_KEY=$(printf '%s' dispatch.plan | shasum -a 256 | awk '{print $1}')
+T3_RECORD="$LOCK_DIR/journal/writers/$T3_WRITER_KEY/records/$T3_RECORD_BASENAME"
+cp "$T3_RECORD" "$SANDBOX/t3-record.saved"
+printf ' ' >> "$T3_RECORD"
+if _journal_inspect_pending_lifecycle TST-RESTART dispatch.plan \
+    >"$SANDBOX/t3-tamper.out" 2>"$SANDBOX/t3-tamper.err"; then
+  fail "T3a3: changed retained record bytes were accepted"
+elif [[ ! -s "$SANDBOX/t3-tamper.out" && ! -s "$SANDBOX/t3-tamper.err" ]]; then
+  pass "T3a3: changed retained record bytes block without leaking evidence"
+else
+  fail "T3a3: changed retained record rejection leaked evidence"
+fi
+mv "$SANDBOX/t3-record.saved" "$T3_RECORD"
+chmod 600 "$T3_RECORD"
+cp "$T3_RECORD" "$SANDBOX/t3-record.original"
+cp "$T3_STATE" "$SANDBOX/t3-state.original"
+for T3_KIND in extra_key schema source_blob sequence emitted_at intent_mismatch; do
+  cp "$SANDBOX/t3-record.original" "$T3_RECORD"
+  cp "$SANDBOX/t3-state.original" "$T3_STATE"
+  python3 - "$T3_RECORD" "$T3_STATE" "$T3_KIND" <<'PY'
+import hashlib, json, sys
+
+record_path, state_path, kind = sys.argv[1:]
+with open(record_path, encoding="utf-8") as handle:
+    wrapper = json.load(handle)
+record = wrapper["record"]
+if kind == "extra_key":
+    record["unexpected"] = "x"
+elif kind == "schema":
+    record["schema_version"] = "9.9.9"
+elif kind == "source_blob":
+    record["source_blob"] = "not-an-object"
+elif kind == "sequence":
+    record["sequence"] = 0
+elif kind == "emitted_at":
+    record["emitted_at"] = "not-a-time"
+elif kind == "intent_mismatch":
+    record["intent_digest"] = "f" * 64
+wire = lambda value: json.dumps(
+    value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+)
+wrapper["digest"] = hashlib.sha256(wire(record).encode("utf-8")).hexdigest()
+with open(record_path, "w", encoding="utf-8") as handle:
+    handle.write(wire(wrapper) + "\n")
+with open(state_path, encoding="ascii") as handle:
+    lines = handle.read().splitlines()
+parts = lines[1].split("\t")
+parts[2] = wrapper["digest"]
+lines[1] = "\t".join(parts)
+with open(state_path, "w", encoding="ascii") as handle:
+    handle.write("\n".join(lines) + "\n")
+PY
+  chmod 600 "$T3_RECORD" "$T3_STATE"
+  if _journal_inspect_pending_lifecycle TST-RESTART dispatch.plan \
+      >"$SANDBOX/t3-semantic.out" 2>"$SANDBOX/t3-semantic.err"; then
+    fail "T3a4: semantic record forgery $T3_KIND was accepted"
+  elif [[ ! -s "$SANDBOX/t3-semantic.out" && ! -s "$SANDBOX/t3-semantic.err" ]]; then
+    pass "T3a4: semantic record forgery $T3_KIND is rejected"
+  else
+    fail "T3a4: semantic record forgery $T3_KIND leaked evidence"
+  fi
+done
+for T3_CODEPOINT in 2028 2029; do
+  cp "$SANDBOX/t3-record.original" "$T3_RECORD"
+  cp "$SANDBOX/t3-state.original" "$T3_STATE"
+  T3_FORGED_BASENAME=$(python3 - "$T3_RECORD" "$T3_STATE" "$T3_CODEPOINT" <<'PY'
+import hashlib, json, os, sys
+
+record_path, state_path, codepoint = sys.argv[1:]
+with open(record_path, encoding="utf-8") as handle:
+    wrapper = json.load(handle)
+record = wrapper["record"]
+record["field"] = "blocked_reason"
+record["old_value"] = None
+record["new_value"] = chr(int(codepoint, 16))
+intent = {key: record[key] for key in (
+    "schema_version", "story_id", "field", "old_value", "new_value",
+    "source_commit", "source_blob", "writer_context", "run_token",
+)}
+wire = lambda value: json.dumps(
+    value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+)
+intent_digest = hashlib.sha256(wire(intent).encode("utf-8")).hexdigest()
+record["intent_digest"] = intent_digest
+wrapper["intent_digest"] = intent_digest
+wrapper["digest"] = hashlib.sha256(wire(record).encode("utf-8")).hexdigest()
+basename = f"{record['sequence']:020d}-{intent_digest[:16]}.json"
+forged_path = os.path.join(os.path.dirname(record_path), basename)
+with open(forged_path, "w", encoding="utf-8") as handle:
+    handle.write(wire(wrapper) + "\n")
+os.chmod(forged_path, 0o600)
+with open(state_path, encoding="ascii") as handle:
+    lines = handle.read().splitlines()
+lines[1] = "\t".join(("blocked_reason", basename, wrapper["digest"]))
+with open(state_path, "w", encoding="ascii") as handle:
+    handle.write("\n".join(lines) + "\n")
+print(basename)
+PY
+  )
+  chmod 600 "$T3_STATE"
+  if _journal_inspect_pending_lifecycle TST-RESTART dispatch.plan \
+      >"$SANDBOX/t3-policy.out" 2>"$SANDBOX/t3-policy.err"; then
+    fail "T3a5: blocked_reason U+$T3_CODEPOINT policy forgery was accepted"
+  elif [[ ! -s "$SANDBOX/t3-policy.out" && ! -s "$SANDBOX/t3-policy.err" ]]; then
+    pass "T3a5: blocked_reason U+$T3_CODEPOINT policy forgery is rejected"
+  else
+    fail "T3a5: blocked_reason U+$T3_CODEPOINT rejection leaked evidence"
+  fi
+  rm -f "$(dirname "$T3_RECORD")/$T3_FORGED_BASENAME"
+done
+mv "$SANDBOX/t3-record.original" "$T3_RECORD"
+mv "$SANDBOX/t3-state.original" "$T3_STATE"
+chmod 600 "$T3_RECORD" "$T3_STATE"
+T3B_RC=0
+( cd "$REPO" && _journal_resume_pending_lifecycle TST-RESTART dispatch.plan ) \
+  2>"$SANDBOX/t3-resume.log" || T3B_RC=$?
 T3_AFTER=$(git -C "$REPO" show "origin/staging:$BACKLOG_REL")
-if printf '%s\n' "$T3_AFTER" | awk '/TST-RESTART/{s=1} s&&/status: in_progress/{found=1} END{exit !found}' \
+if [[ "$T3B_RC" -eq 0 ]] \
+    && printf '%s\n' "$T3_AFTER" | awk '/TST-RESTART/{s=1} s&&/status: in_progress/{found=1} END{exit !found}' \
     && [[ ! -f "$T3_STATE" ]]; then
   pass "T3b: retry finalized the retained record and retired run state"
 else
+  sed 's/^/    /' "$SANDBOX/t3-resume.log" >&2
+  T3_DIAG_RC=0
+  _journal_inspect_pending_lifecycle TST-RESTART dispatch.plan \
+    >"$SANDBOX/t3-resume.manifest" 2>"$SANDBOX/t3-resume.inspect.err" || T3_DIAG_RC=$?
+  printf '    resume_rc=%s inspect_rc=%s state_present=%s\n' \
+    "$T3B_RC" "$T3_DIAG_RC" "$([[ -f "$T3_STATE" ]] && printf true || printf false)" >&2
+  sed 's/^/    manifest: /' "$SANDBOX/t3-resume.manifest" >&2
+  sed 's/^/    inspect: /' "$SANDBOX/t3-resume.inspect.err" >&2
   fail "T3b: retained run did not resume exactly"
 fi
 
-echo "T3c: header-only run state is retired as an empty attempt"
+echo "T3c: header-only run state remains retained ambiguity"
 backlog_journal_begin_run "$BACKLOG_FILE" dispatch.impl
 T3C_STATE="$LOCK_DIR/.journal-runs/dispatch.impl.TST-EMPTY-RUN.state"
 T3C_SOURCE=$(git -C "$REPO" rev-parse origin/staging)
 _lifecycle_write_run_state "$T3C_STATE" create \
   "$BACKLOG_JOURNAL_RUN_TOKEN" "$T3C_SOURCE"
 T3C_RC=0
-_journal_resume_pending_lifecycle TST-EMPTY-RUN dispatch.impl >/dev/null 2>&1 || T3C_RC=$?
-if [[ "$T3C_RC" -eq 2 && ! -e "$T3C_STATE" ]]; then
-  pass "T3c: empty run state returns nothing-to-resume and is durably retired"
+_journal_resume_pending_lifecycle TST-EMPTY-RUN dispatch.impl \
+  >"$SANDBOX/t3c.out" 2>"$SANDBOX/t3c.err" || T3C_RC=$?
+if [[ "$T3C_RC" -ne 0 && -f "$T3C_STATE" ]] \
+    && grep -q 'outcome=rejected reason=empty_run_state' "$SANDBOX/t3c.err"; then
+  pass "T3c: empty run state blocks and preserves exact retained evidence"
 else
-  fail "T3c: empty run state remained a permanent dispatch blocker"
+  fail "T3c: empty run state was erased or treated as absence"
+fi
+T3D_RC=0
+_journal_inspect_pending_lifecycle TST-ABSENT dispatch.plan >/dev/null 2>&1 || T3D_RC=$?
+if [[ "$T3D_RC" -eq 2 ]]; then
+  pass "T3d: missing retained state is explicit absence, never a pseudo-token"
+else
+  fail "T3d: missing retained state was not classified as absence"
 fi
 
 echo "T4: integral cost metadata retains its canonical magnitude"
@@ -564,6 +793,13 @@ if [[ "$T6_CONFLICT_RC" -ne 0 ]] \
     && printf '%s\n' "$T6_CONFLICT_REMOTE" | awk '/TST-CONFLICT/{s=1} s&&/status: refined/{found=1} END{exit !found}'; then
   pass "T6: conflicted records remain recoverable and cannot claim completion"
 else
+  sed 's/^/    /' "$SANDBOX/t6-conflict.log" >&2
+  T6_DIAG_RC=0
+  _journal_inspect_pending_lifecycle TST-CONFLICT dispatch.plan \
+    >"$SANDBOX/t6-conflict.manifest" 2>"$SANDBOX/t6-conflict.inspect.err" || T6_DIAG_RC=$?
+  printf '    resume_rc=%s inspect_rc=%s\n' "$T6_CONFLICT_RC" "$T6_DIAG_RC" >&2
+  sed 's/^/    manifest: /' "$SANDBOX/t6-conflict.manifest" >&2
+  sed 's/^/    inspect: /' "$SANDBOX/t6-conflict.inspect.err" >&2
   fail "T6: conflicted records were misclassified, retired or published"
 fi
 
@@ -605,7 +841,7 @@ printf '{"type":"result","total_cost_usd":1.25}\n' \
   > "$HOOK_REPO/.gaai/project/contexts/backlog/.delivery-logs/E999S99.log"
 T7_RC=0
 printf '{"transcript_path":""}\n' | GAAI_BACKLOG_PROJECTION_FAULT=before_push \
-  bash "$HOOK_REPO/.gaai/core/scripts/post-delivery-hook.sh" >/dev/null 2>&1 || T7_RC=$?
+  "$TEST_BASH" "$HOOK_REPO/.gaai/core/scripts/post-delivery-hook.sh" >/dev/null 2>&1 || T7_RC=$?
 T7_REMOTE=$(git -C "$HOOK_REPO" show "origin/staging:$BACKLOG_REL")
 if [[ "$T7_RC" -ne 0 ]] \
     && printf '%s\n' "$T7_REMOTE" | awk '/E999S99/{s=1} s&&/cost_usd: null/{found=1} END{exit !found}' \
@@ -614,12 +850,124 @@ if [[ "$T7_RC" -ne 0 ]] \
 else
   fail "T7a: Stop hook failed open"
 fi
-printf '{"transcript_path":""}\n' | bash "$HOOK_REPO/.gaai/core/scripts/post-delivery-hook.sh" >/dev/null 2>&1
+printf '{"transcript_path":""}\n' \
+  | "$TEST_BASH" "$HOOK_REPO/.gaai/core/scripts/post-delivery-hook.sh" >/dev/null 2>&1
 T7_AFTER=$(git -C "$HOOK_REPO" show "origin/staging:$BACKLOG_REL")
 if printf '%s\n' "$T7_AFTER" | awk '/E999S99/{s=1} s&&/cost_usd: 1.25/{found=1} END{exit !found}'; then
   pass "T7b: Stop hook restart finalized the retained metadata"
 else
   fail "T7b: Stop hook restart did not recover metadata"
+fi
+
+echo "T8: full retained projection settles once and a fresh restart retires orphan context"
+RETAINED_DAEMON="$REPO/.gaai/core/scripts/delivery-daemon.sh"
+cat > "$RETAINED_DAEMON" <<'DAEMON_HEAD'
+#!/usr/bin/env bash
+set -uo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+REPO_ROOT="$PROJECT_DIR"
+BACKLOG_REL=.gaai/project/contexts/backlog/active.backlog.yaml
+BACKLOG_FILE="$PROJECT_DIR/$BACKLOG_REL"
+BACKLOG="$BACKLOG_FILE"
+LOCK_DIR="$PROJECT_DIR/.gaai/project/contexts/backlog/.delivery-locks"
+STAGING_LOCK="$LOCK_DIR/.staging.lock"
+TARGET_BRANCH=staging
+GAAI_WORKTREES_BASE="$PROJECT_DIR/.worktrees"
+mkdir -p "$GAAI_WORKTREES_BASE" "$LOCK_DIR"
+chmod 700 "$LOCK_DIR"
+log() { printf '%s\n' "$*" >&2; }
+source "$SCRIPT_DIR/lib/chore-commit.sh"
+source "$SCRIPT_DIR/lib/backlog-yaml.sh"
+source "$SCRIPT_DIR/lib/worktree-integrity.sh"
+source "$SCRIPT_DIR/lib/stuck-classifier.sh"
+source "$SCRIPT_DIR/lib/backlog-journal.sh"
+source "$SCRIPT_DIR/daemon-dispatch.sh"
+DAEMON_HEAD
+awk '/^_forward_sha256\(\)/{on=1} /^exceeded_stories\(\)/{on=0} on{print}' \
+  "$SCRIPTS/delivery-daemon.sh" >> "$RETAINED_DAEMON"
+cat >> "$RETAINED_DAEMON" <<'DAEMON_BODY'
+GAAI_LIFECYCLE_CALLER_ASSET=.gaai/core/scripts/delivery-daemon.sh
+export GAAI_LIFECYCLE_CALLER_ASSET
+mode="${1:-prepare}"
+context=$(_forward_context_path TST-RETAINED) || exit 1
+if [[ "$mode" == restart ]]; then
+  _forward_recovery_one TST-RETAINED
+  [[ ! -e "$context" && ! -L "$context" ]]
+  exit $?
+fi
+source_sha=$(git -C "$PROJECT_DIR" rev-parse origin/staging) || exit 1
+backlog_journal_begin_run "$BACKLOG_FILE" recovery.scan || exit 1
+token="$BACKLOG_JOURNAL_RUN_TOKEN"
+GAAI_BACKLOG_JOURNAL_SOURCE_REF="$source_sha" \
+  backlog_journal_emit "$BACKLOG_FILE" TST-RETAINED phase_status failed recovery.scan "$token" || exit 1
+phase_name=$(basename "$BACKLOG_JOURNAL_RECORD_PATH")
+phase_digest="$BACKLOG_JOURNAL_RECORD_DIGEST"
+GAAI_BACKLOG_JOURNAL_SOURCE_REF="$source_sha" \
+  backlog_journal_emit "$BACKLOG_FILE" TST-RETAINED status failed recovery.scan "$token" || exit 1
+status_name=$(basename "$BACKLOG_JOURNAL_RECORD_PATH")
+status_digest="$BACKLOG_JOURNAL_RECORD_DIGEST"
+state="$LOCK_DIR/.journal-runs/recovery.scan.TST-RETAINED.state"
+mkdir -p "$(dirname "$state")"; chmod 700 "$(dirname "$state")"
+_lifecycle_write_run_state "$state" create "$token" "$source_sha" || exit 1
+_lifecycle_write_run_state "$state" append phase_status "$phase_name" "$phase_digest" || exit 1
+_lifecycle_write_run_state "$state" append status "$status_name" "$status_digest" || exit 1
+manifest=$(_journal_inspect_pending_lifecycle TST-RETAINED recovery.scan) || exit 1
+_forward_manifest_args "$manifest" || exit 1
+_forward_classify TST-RETAINED recovery unknown false || exit 1
+old_source="$_FORWARD_SOURCE"; old_blob="$_FORWARD_BLOB"; old_record="$_FORWARD_RECORD_DIGEST"
+IFS=$'\t' read -r _ retained_source token_digest state_digest records_digest \
+  <<< "${manifest%%$'\n'*}"
+row=$(_forward_bind_context "$context" TST-RETAINED "$old_source" "$old_blob" \
+  "$old_record" retained "$token_digest" "$retained_source" "$records_digest" \
+  none none unknown forward_terminal terminal_projection \
+  phase_status=failed,status=failed) || exit 1
+context_digest=${row##*$'\t'}
+_forward_retained_settle TST-RETAINED "$manifest" "$context" "$context_digest" || exit 1
+[[ ! -e "$state" && ! -e "$context" ]] || exit 1
+# Recreate the exact post-projector/pre-context-retirement crash window. A
+# second process must recognize accepted remote bytes without a run-state.
+forward_context_install "$context" TST-RETAINED "$old_source" "$old_blob" \
+  "$old_record" retained "$token_digest" "$retained_source" "$records_digest" \
+  none none unknown forward_terminal terminal_projection \
+  phase_status=failed,status=failed || exit 1
+DAEMON_BODY
+chmod 755 "$RETAINED_DAEMON"
+# Prior projection tests intentionally advance the bare remote without
+# rewriting this fixture checkout. Reconcile only the authoritative backlog,
+# then fast-forward before publishing the base-held recovery asset.
+git -C "$REPO" fetch -q origin staging
+git -C "$REPO" checkout -q origin/staging -- "$BACKLOG_REL"
+git -C "$REPO" merge -q --ff-only origin/staging
+git -C "$REPO" add .gaai/core/scripts/delivery-daemon.sh "$BACKLOG_REL"
+git -C "$REPO" commit -q -m 'fixture: retained recovery coordinator'
+git -C "$REPO" push -q origin staging
+# The production settlement boundary now requires a real, clean Story
+# worktree before it can retire retained lifecycle evidence.  Materialize that
+# exact worktree in the hermetic fixture instead of authorizing cleanup from an
+# ambient or absent path.
+git -C "$REPO" worktree add -q --detach \
+  "$REPO/.worktrees/TST-RETAINED-workspace" origin/staging
+T8_PREPARE_RC=0
+"$TEST_BASH" "$RETAINED_DAEMON" prepare >"$SANDBOX/t8-prepare.out" \
+  2>"$SANDBOX/t8-prepare.err" || T8_PREPARE_RC=$?
+T8_STATE="$LOCK_DIR/.journal-runs/recovery.scan.TST-RETAINED.state"
+T8_CONTEXT="$LOCK_DIR/.recovery-contexts/recovery.scan.TST-RETAINED.json"
+if [[ "$T8_PREPARE_RC" -eq 0 && ! -e "$T8_STATE" && -f "$T8_CONTEXT" ]] \
+    && git -C "$REPO" show "origin/staging:$BACKLOG_REL" \
+      | awk '/TST-RETAINED/{s=1} s&&/status: failed/{a=1} s&&/phase_status: failed/{b=1} END{exit !(a&&b)}'; then
+  pass "T8a: real recovery journal projected once, retired state and preserved crash context"
+else
+  fail "T8a: retained projection did not complete the exact success/crash window"
+fi
+T8_RESTART_RC=0
+"$TEST_BASH" "$RETAINED_DAEMON" restart >"$SANDBOX/t8-restart.out" \
+  2>"$SANDBOX/t8-restart.err" || T8_RESTART_RC=$?
+if [[ "$T8_RESTART_RC" -eq 0 && ! -e "$T8_STATE" && ! -e "$T8_CONTEXT" ]] \
+    && grep -q 'outcome=accepted reason=already_current' "$SANDBOX/t8-restart.err"; then
+  pass "T8b: fresh process retired orphan retained context idempotently"
+else
+  fail "T8b: fresh restart did not close the retained crash window"
 fi
 
 echo ""

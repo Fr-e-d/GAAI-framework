@@ -32,10 +32,54 @@ _setup_origin_staging() {
   "$_REAL_GIT_BIN" init -q --bare "$bare"
   "$_REAL_GIT_BIN" -C "$repo" remote remove origin 2>/dev/null || true
   "$_REAL_GIT_BIN" -C "$repo" remote add origin "$bare"
+  "$_REAL_GIT_BIN" -C "$repo" remote set-url --push origin "$bare"
+  [[ "$("$_REAL_GIT_BIN" -C "$repo" remote get-url --push origin)" == "$bare" ]] || return 1
   # staging (daemon default base) + preview (a non-staging target some tests
   # set via TARGET_BRANCH, e.g. T43) so origin/<target> resolves either way.
   "$_REAL_GIT_BIN" -C "$repo" push -q origin "${start_ref}:refs/heads/staging" "${start_ref}:refs/heads/preview"
   "$_REAL_GIT_BIN" -C "$repo" fetch -q origin
+}
+
+# Bind a PLAN fixture to the same immutable target identity carried by the
+# production wrapper. Historical state-machine fixtures keep their mutable
+# scheduler YAML outside the Git repo, so materialize a canonical `items:`
+# snapshot at BACKLOG_REL, publish it to the active target, then derive all
+# three expected values through the real descriptor-bound classifier.
+_bind_plan_target_fixture() {
+  local story_id="$1" repo="${2:-$PROJECT_DIR}"
+  local rel="${BACKLOG_REL:-.gaai/project/contexts/backlog/active.backlog.yaml}"
+  local target="${TARGET_BRANCH:-staging}" tracked="$repo/$rel"
+  local snapshot source blob facts record
+  mkdir -p "$(dirname "$tracked")"
+  if awk 'NF { print; exit }' "$BACKLOG_FILE" | grep -q '^items:'; then
+    cp "$BACKLOG_FILE" "$tracked"
+  else
+    {
+      printf 'items:\n'
+      sed 's/^/  /' "$BACKLOG_FILE"
+    } > "$tracked"
+  fi
+  "$_REAL_GIT_BIN" -C "$repo" add "$rel"
+  if ! "$_REAL_GIT_BIN" -C "$repo" diff --cached --quiet -- "$rel"; then
+    "$_REAL_GIT_BIN" -C "$repo" commit -q -m "bind ${story_id} plan target"
+  fi
+  "$_REAL_GIT_BIN" -C "$repo" push -q origin "HEAD:refs/heads/${target}"
+  "$_REAL_GIT_BIN" -C "$repo" fetch -q origin "$target"
+  source=$("$_REAL_GIT_BIN" -C "$repo" rev-parse "origin/${target}") || return 1
+  blob=$("$_REAL_GIT_BIN" -C "$repo" rev-parse "${source}:${rel}") || return 1
+  snapshot=$(mktemp "${LOCK_DIR:?}/.plan-fixture-XXXXXX") || return 1
+  chmod 600 "$snapshot"
+  "$_REAL_GIT_BIN" -C "$repo" show "${source}:${rel}" > "$snapshot" || {
+    rm -f "$snapshot"; return 1; }
+  facts=$(forward_classify_snapshot "$story_id" "$snapshot" "$source" "$blob" \
+    postclaim verified false) || { rm -f "$snapshot"; return 1; }
+  rm -f "$snapshot"
+  IFS=$'\t' read -r _ _ _ _ _ record _ _ <<< "$facts"
+  [[ "$record" =~ ^[0-9a-f]{64}$ ]] || return 1
+  export BACKLOG_REL="$rel" TARGET_BRANCH="$target"
+  export GAAI_EXPECTED_TARGET_SOURCE="$source"
+  export GAAI_EXPECTED_TARGET_BLOB="$blob"
+  export GAAI_EXPECTED_TARGET_RECORD="$record"
 }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -44,8 +88,10 @@ SCHEDULER="$SCRIPT_DIR/../backlog-scheduler.sh"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 # ── Fixture YAML in /tmp ──────────────────────────────────────
-FIXTURE="/tmp/gaai-daemon-state-machine.test.yaml"
-ROUTING_LOG="/tmp/gaai-daemon-state-machine.routing.jsonl"
+# Bash lanes may execute this corpus concurrently. PID-bound names prevent
+# one lane from rewriting another lane's backlog and routing evidence.
+FIXTURE="/tmp/gaai-daemon-state-machine.test.$$.yaml"
+ROUTING_LOG="/tmp/gaai-daemon-state-machine.routing.$$.jsonl"
 
 # Clean up on exit
 cleanup() {
@@ -107,9 +153,26 @@ export ROUTING_LOG_PATH="$ROUTING_LOG"
 export GAAI_STUB_DELAY_S=0
 export LOCK_DIR="/tmp/gaai-daemon-state-machine.locks.$$"
 mkdir -p "$LOCK_DIR"
+chmod 700 "$LOCK_DIR"
 
 # shellcheck disable=SC1090
 source "$DISPATCH_LIB"
+
+# The descriptor-bound commit retry owner must reject an unsafe lock parent
+# and accept the same empty-state operation once the parent is private.
+echo "S17-LOCK-PARENT: commit retry containment enforces private parent mode"
+chmod 755 "$LOCK_DIR"
+if _commit_retry_clear TST-LOCK-PARENT; then
+  fail "S17-LOCK-PARENT-a: group-readable lock parent was accepted"
+else
+  pass "S17-LOCK-PARENT-a: group-readable lock parent is rejected"
+fi
+chmod 700 "$LOCK_DIR"
+if _commit_retry_clear TST-LOCK-PARENT; then
+  pass "S17-LOCK-PARENT-b: private lock parent is accepted"
+else
+  fail "S17-LOCK-PARENT-b: private lock parent was rejected"
+fi
 
 # Most historical state-machine cases isolate routing/phase behavior from the
 # persistence substrate. The dedicated caller-cutover integration suite
@@ -324,6 +387,7 @@ chmod +x "$DISPATCH_SHIM_DIR/pnpm"
 DISPATCH_OLD_PROJECT_DIR="$PROJECT_DIR"
 export PROJECT_DIR="$DISPATCH_PROJECT_DIR"
 export GAAI_WORKTREES_BASE="$DISPATCH_WORKTREES_BASE"
+_bind_plan_target_fixture "$(awk '/^- id:/ { print $3; exit }' "$FIXTURE")" "$DISPATCH_PROJECT_DIR"
 
 for _impl_id in TST-3PHASE-PLANNED; do
   _wt="$DISPATCH_WORKTREES_BASE/${_impl_id}-workspace"
@@ -623,6 +687,7 @@ unset GAAI_WORKTREE_PATH CLAUDE_MODEL_PRIMARY GAAI_WORKTREES_BASE
 export PROJECT_DIR="$DISPATCH_OLD_PROJECT_DIR"
 unset DISPATCH_REAL_NODE IMPL_SPAWN_STUB_PATH DISPATCH_FIXTURE_DIR DISPATCH_SHIM_DIR DISPATCH_OLD_PATH DISPATCH_PROJECT_DIR DISPATCH_WORKTREES_BASE DISPATCH_OLD_PROJECT_DIR
 rm -rf "/tmp/gaai-dispatch-tests-$$"
+rm -rf "/tmp/gaai-dispatch-tests-$$.origin.git"
 
 # ── T9-T14: handle_plan_phase real spawn tests ────────────────
 # These tests exercise handle_plan_phase directly (not via dispatch_3phase_story)
@@ -683,6 +748,8 @@ YAML_APPEND
 # ── claude shim directory ─────────────────────────────────────
 SHIM_DIR="$PLAN_FIXTURE_DIR/shims"
 mkdir -p "$SHIM_DIR"
+GAAI_TEST_PLAN_MODEL_CALL_LOG="$PLAN_FIXTURE_DIR/model-calls.log"
+export GAAI_TEST_PLAN_MODEL_CALL_LOG
 
 cat > "$SHIM_DIR/pnpm" << 'PLAN_PNPM_SHIM_EOF'
 #!/usr/bin/env bash
@@ -696,6 +763,7 @@ make_success_shim() {
   cat > "$SHIM_DIR/claude" << 'SHIM_EOF'
 #!/usr/bin/env bash
 # claude shim: writes valid plan content and exits 0
+printf 'success\n' >> "${GAAI_TEST_PLAN_MODEL_CALL_LOG:?}"
 if [[ -n "${GAAI_PLAN_PATH:-}" ]]; then
   cat > "$GAAI_PLAN_PATH" << 'PLAN_EOF'
 ---
@@ -718,6 +786,7 @@ SHIM_EOF
 make_fail_shim() {
   cat > "$SHIM_DIR/claude" << 'SHIM_EOF'
 #!/usr/bin/env bash
+printf 'exit1\n' >> "${GAAI_TEST_PLAN_MODEL_CALL_LOG:?}"
 exit 1
 SHIM_EOF
   chmod +x "$SHIM_DIR/claude"
@@ -737,10 +806,12 @@ export CLAUDE_MODEL_PRIMARY="claude-sonnet-4-6"
 # Point PROJECT_DIR to the test project dir so handle_plan_phase finds planning.daemon-prompt.md
 export PROJECT_DIR_ORIG="$PROJECT_DIR"
 export PROJECT_DIR="$PLAN_PROJECT_DIR"
+_bind_plan_target_fixture "$PLAN_STORY_ID" "$PLAN_PROJECT_DIR"
 
 # ── T9: successful Plan phase spawn — phase_status advances ──
 echo "T9: handle_plan_phase — mock claude exits 0, valid plan output"
 make_success_shim
+: > "$GAAI_TEST_PLAN_MODEL_CALL_LOG"
 "$SCHEDULER" --set-phase-status "$PLAN_STORY_ID" not_started "$FIXTURE" 2>/dev/null || true
 rm -f "$PLAN_PATH"
 git -C "$PLAN_PROJECT_DIR" worktree remove -f "$PLAN_WORKTREE" >/dev/null 2>&1 || rm -rf "$PLAN_WORKTREE"
@@ -765,6 +836,12 @@ else
   fail "T9b: (skipped — T9a failed)"
   fail "T9c: (skipped — T9a failed)"
 fi
+if [[ "$(cat "$GAAI_TEST_PLAN_MODEL_CALL_LOG" 2>/dev/null)" == success ]] \
+    && ! grep -q 'TARGET_IDENTITY_CHANGED' "$ROUTING_LOG" 2>/dev/null; then
+  pass "T9d: success mock was reached after exact target binding"
+else
+  fail "T9d: success mock was not reached or target guard caused the result"
+fi
 
 # ── T10: routing record has pipeline:3phase + model field ──────
 echo "T10: routing.jsonl has pipeline:3phase + model from CLAUDE_MODEL_PRIMARY"
@@ -787,6 +864,7 @@ fi
 # ── T11: error path — mock claude exits non-zero ───────────────
 echo "T11: handle_plan_phase — mock claude exits 1 → no phase advance, error record"
 make_fail_shim
+: > "$GAAI_TEST_PLAN_MODEL_CALL_LOG"
 "$SCHEDULER" --set-phase-status "$PLAN_STORY_ID" not_started "$FIXTURE" 2>/dev/null || true
 rm -f "$PLAN_PATH"
 git -C "$PLAN_PROJECT_DIR" worktree remove -f "$PLAN_WORKTREE" >/dev/null 2>&1 || rm -rf "$PLAN_WORKTREE"
@@ -811,12 +889,19 @@ else
     fail "T11c: routing.jsonl missing error record — content: $(head -2 "$ROUTING_LOG" 2>/dev/null)"
   fi
 fi
+if [[ "$(cat "$GAAI_TEST_PLAN_MODEL_CALL_LOG" 2>/dev/null)" == exit1 ]] \
+    && ! grep -q 'TARGET_IDENTITY_CHANGED' "$ROUTING_LOG" 2>/dev/null; then
+  pass "T11d: exit-1 mock, not target identity, caused the failure"
+else
+  fail "T11d: expected exit-1 mock cause was not reached cleanly"
+fi
 
 # ── T12: pipefail propagation — mock exits 1, tee succeeds ────
 echo "T12: pipefail propagation — PIPESTATUS[0] captures claude exit 1 through tee"
 # Same shim as T11 (exits 1); tee will still succeed (exit 0).
 # handle_plan_phase must detect claude_exit=1 via PIPESTATUS[0], not tee's exit.
 make_fail_shim
+: > "$GAAI_TEST_PLAN_MODEL_CALL_LOG"
 "$SCHEDULER" --set-phase-status "$PLAN_STORY_ID" not_started "$FIXTURE" 2>/dev/null || true
 rm -f "$PLAN_PATH"
 git -C "$PLAN_PROJECT_DIR" worktree remove -f "$PLAN_WORKTREE" >/dev/null 2>&1 || rm -rf "$PLAN_WORKTREE"
@@ -828,17 +913,25 @@ if handle_plan_phase "$PLAN_STORY_ID" "$TRACE" 2>/dev/null; then
 else
   pass "T12: PIPESTATUS[0] correctly captures claude exit 1 through tee pipe"
 fi
+if [[ "$(cat "$GAAI_TEST_PLAN_MODEL_CALL_LOG" 2>/dev/null)" == exit1 ]] \
+    && ! grep -q 'TARGET_IDENTITY_CHANGED' "$ROUTING_LOG" 2>/dev/null; then
+  pass "T12b: pipefail assertion reached the exit-1 model cause"
+else
+  fail "T12b: pipefail result was short-circuited before the model"
+fi
 
 # ── T13: 0-byte plan output guard ─────────────────────────────
 echo "T13: 0-byte plan file → NO_ARTEFACT error path"
 cat > "$SHIM_DIR/claude" << 'SHIM_T13'
 #!/usr/bin/env bash
+printf 'empty\n' >> "${GAAI_TEST_PLAN_MODEL_CALL_LOG:?}"
 if [[ -n "${GAAI_PLAN_PATH:-}" ]]; then
   touch "$GAAI_PLAN_PATH"
 fi
 exit 0
 SHIM_T13
 chmod +x "$SHIM_DIR/claude"
+: > "$GAAI_TEST_PLAN_MODEL_CALL_LOG"
 "$SCHEDULER" --set-phase-status "$PLAN_STORY_ID" not_started "$FIXTURE" 2>/dev/null || true
 rm -f "$PLAN_PATH"
 git -C "$PLAN_PROJECT_DIR" worktree remove -f "$PLAN_WORKTREE" >/dev/null 2>&1 || rm -rf "$PLAN_WORKTREE"
@@ -857,17 +950,25 @@ else
     fail "T13b: expected not_started, got '$new_ps'"
   fi
 fi
+if [[ "$(cat "$GAAI_TEST_PLAN_MODEL_CALL_LOG" 2>/dev/null)" == empty ]] \
+    && ! grep -q 'TARGET_IDENTITY_CHANGED' "$ROUTING_LOG" 2>/dev/null; then
+  pass "T13c: empty-output mock, not target identity, caused rejection"
+else
+  fail "T13c: empty-output model cause was not reached cleanly"
+fi
 
 # ── T14: missing '## ' heading guard ──────────────────────────
 echo "T14: plan file without '## ' heading → PARSE_ERROR path"
 cat > "$SHIM_DIR/claude" << 'SHIM_T14'
 #!/usr/bin/env bash
+printf 'parse\n' >> "${GAAI_TEST_PLAN_MODEL_CALL_LOG:?}"
 if [[ -n "${GAAI_PLAN_PATH:-}" ]]; then
   printf '# Only h1 heading here\nSome content but no level-2 heading.\n' > "$GAAI_PLAN_PATH"
 fi
 exit 0
 SHIM_T14
 chmod +x "$SHIM_DIR/claude"
+: > "$GAAI_TEST_PLAN_MODEL_CALL_LOG"
 "$SCHEDULER" --set-phase-status "$PLAN_STORY_ID" not_started "$FIXTURE" 2>/dev/null || true
 rm -f "$PLAN_PATH"
 git -C "$PLAN_PROJECT_DIR" worktree remove -f "$PLAN_WORKTREE" >/dev/null 2>&1 || rm -rf "$PLAN_WORKTREE"
@@ -885,11 +986,19 @@ else
     fail "T14b: expected PARSE_ERROR in routing log — content: $(head -2 "$ROUTING_LOG" 2>/dev/null)"
   fi
 fi
+if [[ "$(cat "$GAAI_TEST_PLAN_MODEL_CALL_LOG" 2>/dev/null)" == parse ]] \
+    && ! grep -q 'TARGET_IDENTITY_CHANGED' "$ROUTING_LOG" 2>/dev/null; then
+  pass "T14c: parse-output mock, not target identity, caused rejection"
+else
+  fail "T14c: parse-output model cause was not reached cleanly"
+fi
 
 # Restore PATH and PROJECT_DIR
 export PATH="$OLD_PATH"
 export PROJECT_DIR="$PROJECT_DIR_ORIG"
 unset GAAI_WORKTREES_BASE
+unset GAAI_TEST_PLAN_MODEL_CALL_LOG GAAI_EXPECTED_TARGET_SOURCE \
+  GAAI_EXPECTED_TARGET_BLOB GAAI_EXPECTED_TARGET_RECORD
 
 # Cleanup plan phase test fixtures
 rm -rf "$PLAN_FIXTURE_DIR"
@@ -1658,6 +1767,12 @@ cat >> "$FIXTURE" << 'YAML_COMMIT'
   delivery_pipeline: 3phase
   title: "Guard 2 merged PR test story"
   impl_model: primary
+- id: TST-COMMIT-ROUTEFAIL
+  status: in_progress
+  phase_status: qa_passed
+  delivery_pipeline: 3phase
+  title: "Terminal routing failure story"
+  impl_model: primary
 YAML_COMMIT
 
 # Helper: create a real git worktree with optional story auto_merge frontmatter
@@ -1694,7 +1809,7 @@ make_commit_worktree() {
 }
 
 # Create worktrees for all commit test stories (TST-COMMIT-SKIPMERGE created separately below)
-for _csid in TST-COMMIT-01 TST-COMMIT-NOTITLE TST-COMMIT-AUTOMERGE TST-COMMIT-PUSHFAIL TST-COMMIT-ALREADY-DONE TST-COMMIT-GUARD1 TST-COMMIT-GUARD2; do
+for _csid in TST-COMMIT-01 TST-COMMIT-NOTITLE TST-COMMIT-AUTOMERGE TST-COMMIT-PUSHFAIL TST-COMMIT-ALREADY-DONE TST-COMMIT-GUARD1 TST-COMMIT-GUARD2 TST-COMMIT-ROUTEFAIL; do
   make_commit_worktree "$_csid"
 done
 # TST-COMMIT-SKIPMERGE gets auto_merge: false frontmatter
@@ -2228,6 +2343,22 @@ else
   fail "T46b-2: (skipped)"
 fi
 GAAI_SHIM_GH_PR_MERGED=0
+
+# ── T47: terminal routing failure blocks DONE and propagates nonzero ─────
+echo "T47: terminal routing failure is fail-closed"
+make_commit_worktree "TST-COMMIT-ROUTEFAIL"
+"$SCHEDULER" --set-phase-status "TST-COMMIT-ROUTEFAIL" qa_passed "$FIXTURE" 2>/dev/null || true
+T47_ROUTING_DEF=$(declare -f _emit_commit_routing_record)
+_emit_commit_routing_record() { return 1; }
+T47_RC=0
+T47_OUTPUT=$(handle_commit_phase "TST-COMMIT-ROUTEFAIL" "test-trace-routefail" 2>&1) || T47_RC=$?
+eval "$T47_ROUTING_DEF"
+if [[ "$T47_RC" -ne 0 && "$T47_OUTPUT" != *"phase=commit DONE"* ]]; then
+  pass "T47: failed terminal routing returns nonzero before DONE"
+else
+  fail "T47: terminal routing failure returned rc=$T47_RC or emitted DONE"
+fi
+unset T47_ROUTING_DEF T47_RC T47_OUTPUT
 
 # Cleanup commit phase test fixtures
 export PATH="$COMMIT_OLD_PATH"
@@ -3299,6 +3430,8 @@ mkdir -p "$LAR_REPO/.gaai/project/ci" "$LAR_REPO/src" "$LOCAL_ADMISSION_FIXTURE/
 git init -q --bare "$LAR_REMOTE"; git init -q "$LAR_REPO"
 git -C "$LAR_REPO" config user.email test@example.com; git -C "$LAR_REPO" config user.name Test
 git -C "$LAR_REPO" checkout -q -b staging; git -C "$LAR_REPO" remote add origin "$LAR_REMOTE"
+git -C "$LAR_REPO" remote set-url --push origin "$LAR_REMOTE"
+[[ "$(git -C "$LAR_REPO" remote get-url --push origin)" == "$LAR_REMOTE" ]] || exit 1
 printf '{"name":"admission-fixture"}\n' > "$LAR_REPO/package.json"
 cat > "$LAR_REPO/.gaai/project/ci/local-admission.json" <<POLICY_EOF
 {"schema_version":"1.0.0","policy_version":"test-1","repository":{"project_id":"fixture/project","remote":"$LAR_REMOTE","base_ref":"staging"},"limits":{"max_policy_bytes":100000,"max_diff_bytes":100000,"max_changed_paths":20,"max_commands":5,"max_selectors":5,"max_identifier_bytes":80,"max_arguments_per_command":8,"max_argument_bytes":200,"max_receipt_bytes":65536,"max_result_bytes":32768},"commands":[{"id":"unit","argv":["node","-e","process.exit(0)"],"timeout_seconds":10,"output_limit_bytes":1024,"config_paths":["package.json"]}],"selectors":[{"id":"source","path_prefixes":["src"],"exact_paths":[],"command_ids":["unit"]}],"exhaustive_command_ids":["unit"],"non_executable_prefixes":[".gaai/project/contexts/artefacts"],"broadening_prefixes":["package.json"],"broadening_patterns":["tsconfig*.json"],"dependency_inputs":["package.json"],"risk_input_policy":{"keys":["cross_cutting","dependency_changed"],"exhaustive_when_true":["cross_cutting","dependency_changed"]},"required_environment":["node_version","platform","arch","path_digest"],"executable_suffixes":[".js",".mjs",".sh",".json"],"executable_names":["Dockerfile","Makefile"]}
