@@ -2,20 +2,22 @@
 # story-file-reconcile.test.sh — regression tests for _reconcile_story_file_from_staging
 #
 # T1: story.md matches staging → helper returns 0, no commit, no qa-report deletion
-# T2: story.md differs (operator amendment) → checkout overwrites, commit with
-#     [daemon-recovery:story-file-drift] trailer, qa-report deleted, HEAD invariant
+# T2: story.md differs (operator amendment) → exact configured-target checkout
+#     overwrites, commits [daemon:story-file-drift], and invalidates QA evidence
 # T3: story.md absent in worktree → checkout creates file, commit appears
 # T4: staging copy missing → helper returns 2, escalation recorded, no commit
-# T5: git fetch fails (offline) → helper proceeds with cached origin/staging ref
+# T5: git fetch fails (offline) → cached target refs grant no authority
 # T6: joint contract — after T2 refresh + qa-report deleted, E160S13 stub finds
 #     no qa-report → silent-skip → no injection
-# T7: worktree directory does not exist (fresh-pickup dispatch path) → helper
-#     returns 0 silently with explanatory log (no misleading "fetch failed" /
-#     "staging copy MISSING" → no spurious escalation)
+# T7: an absent worktree blocks unless the caller supplies the exact pre-claim
+#     absent_new binding; recovery never manufactures that binding itself
 #
 # Usage: bash .gaai/core/scripts/tests/story-file-reconcile.test.sh
 
 set -uo pipefail
+
+TEST_BASH="${GAAI_TEST_BASH:-${BASH:-/bin/bash}}"
+printf 'interpreter=%s version=%s\n' "$TEST_BASH" "$BASH_VERSION"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -25,6 +27,7 @@ fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DAEMON="$SCRIPT_DIR/../delivery-daemon.sh"
+TARGET_BRANCH=staging
 
 # ── Fixture setup ──────────────────────────────────────────────────────────────
 FIXTURE_DIR="/tmp/gaai-story-reconcile-test-$$"
@@ -39,7 +42,7 @@ trap cleanup EXIT
 #   $repo_dir    — clone with remote "origin" pointing to bare repo
 #   staging      — branch with story.md
 #   story/<sid>  — branch forked from staging
-# Sets REPO_DIR, REMOTE_DIR
+# Sets REPO_DIR, REMOTE_DIR, PROJECT_DIR
 setup_repo() {
   local sid="$1"
   local repo_dir="$FIXTURE_DIR/repo-${sid}-$$"
@@ -52,12 +55,15 @@ setup_repo() {
 
   # Clone and set up
   git clone "$remote_dir" "$repo_dir" -q
+  git -C "$repo_dir" remote set-url --push origin "$remote_dir"
+  [[ "$(git -C "$repo_dir" remote get-url --push origin)" == "$remote_dir" ]] || return 1
   git -C "$repo_dir" config user.email "test@gaai.local"
   git -C "$repo_dir" config user.name "GAAI Test"
 
   # Create initial commit on default branch
   mkdir -p "$repo_dir/.gaai/project/contexts/artefacts/stories"
   mkdir -p "$repo_dir/.gaai/project/contexts/artefacts/qa-reports"
+  mkdir -p "$repo_dir/.gaai/project/contexts/backlog"
   echo "initial" > "$repo_dir/.gaai/project/contexts/backlog/active.backlog.yaml"
   # Add story.md to staging (source of truth)
   echo "story: ${sid} initial content" > "$repo_dir/.gaai/project/contexts/artefacts/stories/${sid}.story.md"
@@ -78,6 +84,12 @@ setup_repo() {
 
   REPO_DIR="$repo_dir"
   REMOTE_DIR="$remote_dir"
+  PROJECT_DIR="$repo_dir"
+}
+
+configured_target_source() {
+  git -C "$PROJECT_DIR" fetch origin "$TARGET_BRANCH" -q \
+    && git -C "$PROJECT_DIR" rev-parse "origin/${TARGET_BRANCH}"
 }
 
 # ── Extract helper function directly for in-process use ────────────────────────
@@ -132,9 +144,15 @@ run_T1() {
   local head_before
   head_before=$(git -C "$wt" rev-parse HEAD)
 
+  local expected_source
+  if ! expected_source=$(configured_target_source); then
+    fail "T1 setup: configured-target authority unavailable"
+    return
+  fi
+
   ESCALATION_REASON=""
   local rc=0
-  _reconcile_story_file_from_staging "$sid" "$wt" || rc=$?
+  _reconcile_story_file_from_staging "$sid" "$wt" "$expected_source" || rc=$?
 
   if [[ "$rc" -eq 0 ]]; then
     pass "T1: return code is 0 (in-sync)"
@@ -185,9 +203,15 @@ run_T2() {
   local head_before
   head_before=$(git -C "$wt" rev-parse HEAD)
 
+  local expected_source
+  if ! expected_source=$(configured_target_source); then
+    fail "T2 setup: configured-target authority unavailable"
+    return
+  fi
+
   ESCALATION_REASON=""
   local rc=0
-  _reconcile_story_file_from_staging "$sid" "$wt" || rc=$?
+  _reconcile_story_file_from_staging "$sid" "$wt" "$expected_source" || rc=$?
 
   if [[ "$rc" -eq 1 ]]; then
     pass "T2: return code is 1 (refreshed)"
@@ -198,8 +222,8 @@ run_T2() {
   # Verify commit appears with trailer
   local last_commit
   last_commit=$(git -C "$wt" log --oneline -1)
-  if echo "$last_commit" | grep -q "\[daemon-recovery:story-file-drift\]"; then
-    pass "T2: commit has [daemon-recovery:story-file-drift] trailer"
+  if echo "$last_commit" | grep -q "\[daemon:story-file-drift\]"; then
+    pass "T2: commit has [daemon:story-file-drift] trailer"
   else
     fail "T2: commit missing trailer — got: $last_commit"
   fi
@@ -269,9 +293,15 @@ run_T3() {
     return
   fi
 
+  local expected_source
+  if ! expected_source=$(configured_target_source); then
+    fail "T3 setup: configured-target authority unavailable"
+    return
+  fi
+
   ESCALATION_REASON=""
   local rc=0
-  _reconcile_story_file_from_staging "$sid" "$wt" || rc=$?
+  _reconcile_story_file_from_staging "$sid" "$wt" "$expected_source" || rc=$?
 
   if [[ "$rc" -eq 1 ]]; then
     pass "T3: return code is 1 (refreshed — new file)"
@@ -287,7 +317,7 @@ run_T3() {
 
   local last_commit
   last_commit=$(git -C "$wt" log --oneline -1)
-  if echo "$last_commit" | grep -q "\[daemon-recovery:story-file-drift\]"; then
+  if echo "$last_commit" | grep -q "\[daemon:story-file-drift\]"; then
     pass "T3: commit has trailer"
   else
     fail "T3: commit missing trailer — got: $last_commit"
@@ -317,9 +347,15 @@ run_T4() {
   local head_before
   head_before=$(git -C "$wt" rev-parse HEAD)
 
+  local expected_source
+  if ! expected_source=$(configured_target_source); then
+    fail "T4 setup: configured-target authority unavailable"
+    return
+  fi
+
   ESCALATION_REASON=""
   local rc=0
-  _reconcile_story_file_from_staging "$sid" "$wt" || rc=$?
+  _reconcile_story_file_from_staging "$sid" "$wt" "$expected_source" || rc=$?
 
   if [[ "$rc" -eq 2 ]]; then
     pass "T4: return code is 2 (staging missing)"
@@ -340,14 +376,14 @@ run_T4() {
     fail "T4: HEAD changed unexpectedly"
   fi
 
-  if grep -q "staging copy MISSING" "$_TEST_LOG_FILE" 2>/dev/null; then
-    pass "T4: log contains 'staging copy MISSING'"
+  if grep -q "configured-target copy MISSING" "$_TEST_LOG_FILE" 2>/dev/null; then
+    pass "T4: log contains 'configured-target copy MISSING'"
   else
-    fail "T4: log missing 'staging copy MISSING'"
+    fail "T4: log missing configured-target failure"
   fi
 }
 
-# ── T5: git fetch fails → proceeds with cached origin/staging ─────────────────
+# ── T5: git fetch fails → cached refs are non-authorizing ────────────────────
 run_T5() {
   echo ""
   echo "── T5: git fetch fails (offline simulation) ────────────────"
@@ -368,31 +404,39 @@ run_T5() {
 
   git -C "$wt" checkout "story/${sid}" -q
 
-  # Fetch origin/staging into local refs so the cached ref exists
+  # Fetch into the cache first, then make the remote unavailable. The helper
+  # must still reject: cached refs are not current configured-target evidence.
   git -C "$wt" fetch origin staging -q
+  local expected_source
+  expected_source=$(git -C "$wt" rev-parse "origin/${TARGET_BRANCH}")
 
   # Now break the remote so fetch will fail, but origin/staging ref is cached
-  git -C "$wt" remote set-url origin "file:///nonexistent/path-$$" 2>/dev/null || \
-    git -C "$wt" remote remove origin && git -C "$wt" remote add origin "file:///nonexistent/path-$$"
+  if ! git -C "$wt" remote set-url origin "file:///nonexistent/path-$$" 2>/dev/null; then
+    git -C "$wt" remote remove origin
+    git -C "$wt" remote add origin "file:///nonexistent/path-$$"
+  fi
 
   ESCALATION_REASON=""
   local rc=0
-  _reconcile_story_file_from_staging "$sid" "$wt" || rc=$?
+  _reconcile_story_file_from_staging "$sid" "$wt" "$expected_source" || rc=$?
 
-  # With cached ref, should still detect drift → return 1
-  if [[ "$rc" -eq 1 ]]; then
-    pass "T5: return code is 1 (drift detected via cached ref)"
-  elif [[ "$rc" -eq 0 ]]; then
-    # Also acceptable: cached ref matched somehow
-    pass "T5: return code is 0 (acceptable fallback)"
+  if [[ "$rc" -eq 2 ]]; then
+    pass "T5: offline fetch blocks cached-ref reconciliation"
   else
-    fail "T5: unexpected return code $rc"
+    fail "T5: expected fail-closed return 2, got $rc"
   fi
 
-  if grep -q "fetch failed" "$_TEST_LOG_FILE" 2>/dev/null; then
-    pass "T5: log contains 'fetch failed'"
+  if grep -q "configured target changed — skipping spawn" "$_TEST_LOG_FILE" 2>/dev/null; then
+    pass "T5: log records fresh configured-target authority failure"
   else
-    fail "T5: log missing 'fetch failed'"
+    fail "T5: log missing configured-target authority failure"
+  fi
+
+  if [[ "$(cat "$wt/.gaai/project/contexts/artefacts/stories/${sid}.story.md")" \
+      == "story: ${sid} initial content" ]]; then
+    pass "T5: unavailable target leaves Story bytes unchanged"
+  else
+    fail "T5: cached target bytes mutated the Story while offline"
   fi
 }
 
@@ -420,9 +464,15 @@ run_T6() {
 
   ESCALATION_REASON=""
 
+  local expected_source
+  if ! expected_source=$(configured_target_source); then
+    fail "T6 setup: configured-target authority unavailable"
+    return
+  fi
+
   # Run Step 1: S14 reconcile (should delete qa-report)
   local rc=0
-  _reconcile_story_file_from_staging "$sid" "$wt" || rc=$?
+  _reconcile_story_file_from_staging "$sid" "$wt" "$expected_source" || rc=$?
 
   if [[ "$rc" -ne 1 ]]; then
     fail "T6 setup: S14 reconcile did not return 1 (got $rc)"
@@ -458,25 +508,31 @@ run_T6() {
   # Verify the commit has the trailer
   local last_commit
   last_commit=$(git -C "$wt" log --oneline -1)
-  if echo "$last_commit" | grep -q "\[daemon-recovery:story-file-drift\]"; then
-    pass "T6: commit trailer present (daemon-recovery taxonomy)"
+  if echo "$last_commit" | grep -q "\[daemon:story-file-drift\]"; then
+    pass "T6: configured-target refresh commit trailer is present"
   else
     fail "T6: commit missing trailer — got: $last_commit"
   fi
 }
 
-# ── T7: worktree directory missing → return 0 silently (fresh-pickup case) ────
+# ── T7: absent worktree requires the caller's bound first-claim proof ─────────
 run_T7() {
   echo ""
-  echo "── T7: worktree not yet created (fresh-pickup dispatch) ────"
+  echo "── T7: absent worktree is typed and caller-bound ──────────"
 
   local sid="ETEST007"
   _TEST_LOG_FILE="$FIXTURE_DIR/t7.log"
   : > "$_TEST_LOG_FILE"
 
-  # Compute a worktree path that DOES NOT exist (the dispatch flow's
-  # _recovery_resolve_worktree returns this exact pattern, before
-  # handle_plan_phase creates the actual directory).
+  setup_repo "$sid"
+  local expected_source
+  if ! expected_source=$(configured_target_source); then
+    fail "T7 setup: configured-target authority unavailable"
+    return
+  fi
+
+  # Compute a worktree path that does not exist. Recovery supplies no
+  # absent_new proof and therefore must fail closed.
   local wt="$FIXTURE_DIR/wt-missing-${sid}-$$"
   rm -rf "$wt"
 
@@ -487,36 +543,40 @@ run_T7() {
 
   ESCALATION_REASON=""
   local rc=0
-  _reconcile_story_file_from_staging "$sid" "$wt" || rc=$?
+  _reconcile_story_file_from_staging "$sid" "$wt" "$expected_source" || rc=$?
 
-  if [[ "$rc" -eq 0 ]]; then
-    pass "T7: return code is 0 (skipped — fresh pickup, no drift possible)"
+  if [[ "$rc" -eq 2 ]]; then
+    pass "T7: unbound absent worktree blocks spawn"
   else
-    fail "T7: expected return 0, got $rc"
+    fail "T7: expected unbound return 2, got $rc"
   fi
 
-  if grep -q "worktree not yet created" "$_TEST_LOG_FILE" 2>/dev/null; then
-    pass "T7: log explains the skip ('worktree not yet created')"
+  if grep -q "worktree absent outside bound first claim" "$_TEST_LOG_FILE" 2>/dev/null; then
+    pass "T7: log identifies absent worktree without authority"
   else
-    fail "T7: log missing fresh-pickup skip message"
+    fail "T7: log missing unbound-absence reason"
   fi
 
-  if grep -q "fetch failed" "$_TEST_LOG_FILE" 2>/dev/null; then
-    fail "T7: log contains misleading 'fetch failed' — pre-flight guard not applied"
+  if grep -q "configured-target fetch failed" "$_TEST_LOG_FILE" 2>/dev/null; then
+    fail "T7: configured-target authority was unavailable"
   else
-    pass "T7: log does not contain misleading 'fetch failed'"
+    pass "T7: configured-target authority remains available"
   fi
 
-  if grep -q "staging copy MISSING" "$_TEST_LOG_FILE" 2>/dev/null; then
-    fail "T7: log contains misleading 'staging copy MISSING' — pre-flight guard not applied"
+  if [[ -d "$wt" ]]; then
+    fail "T7: unbound absence created or removed local state"
   else
-    pass "T7: log does not contain misleading 'staging copy MISSING'"
+    pass "T7: unbound absence preserves filesystem state"
   fi
 
-  if [[ -z "$ESCALATION_REASON" ]]; then
-    pass "T7: no escalation triggered"
+  : > "$_TEST_LOG_FILE"
+  rc=0
+  _reconcile_story_file_from_staging "$sid" "$wt" "$expected_source" true || rc=$?
+  if [[ "$rc" -eq 0 ]] \
+      && grep -q "exact pre-claim absent_new binding" "$_TEST_LOG_FILE"; then
+    pass "T7: explicit pre-claim absent_new binding permits first spawn"
   else
-    fail "T7: unexpected escalation — reason='$ESCALATION_REASON'"
+    fail "T7: bound first-claim absence was not recognized exactly"
   fi
 }
 

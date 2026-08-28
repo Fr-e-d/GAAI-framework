@@ -74,6 +74,7 @@ source "$ROOT/.gaai/core/scripts/lib/commit-retry-containment.sh"
 
 LOCK_DIR="$TMP/locks"
 mkdir -p "$LOCK_DIR"
+chmod 700 "$LOCK_DIR"
 # This unit matrix exercises the pre-threshold reset rules. Terminal behavior
 # at the production default threshold is covered by T-COMMIT-RETRY-THRESHOLD.
 COMMIT_PHASE_RETRY_THRESHOLD=10
@@ -148,10 +149,20 @@ fi
 eval "$_ORIGINAL_SHA_HELPER"
 
 DAEMON="$ROOT/.gaai/core/scripts/delivery-daemon.sh"
+TERMINAL_NOTICE=$(
+  awk '
+    /_forward_evidence_for_intention "\$sid" accepted policy_stall/ { capture = 1 }
+    capture { print }
+    capture && /rm -f "\$_FORWARD_SNAPSHOT"/ { exit }
+  ' "$DAEMON"
+)
 if grep -q 'GAAI_COMMIT_PHASE_RETRY_THRESHOLD:-3' "$DAEMON" \
   && grep -q '_commit_retry_observe' "$DAEMON" \
-  && grep -q 'repeated for ${_cd_new} cycles' "$DAEMON"; then
-  _ok "T2f: configurable threshold, recovery integration and actionable cycle notification are wired"
+  && grep -Fq 'repeated commit outcome reached containment; phase field updated, relaunch inhibited' <<< "$TERMINAL_NOTICE" \
+  && grep -Fq 'notify_escalation "$sid" "Commit-phase repeated failure — stalled"' <<< "$TERMINAL_NOTICE" \
+  && grep -Fq 'Repeated commit-phase failure reached containment; inspect candidate progress before an operator-owned reset' <<< "$TERMINAL_NOTICE" \
+  && ! grep -Eq '\$\{?_cd_(new|outcome)\}?|count=|cycles?' <<< "$TERMINAL_NOTICE"; then
+  _ok "T2f: configurable threshold, recovery integration and names-only containment evidence are wired"
 else
   _fail "T2f: retry containment integration contract is incomplete"
 fi

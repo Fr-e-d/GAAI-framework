@@ -8,21 +8,23 @@
 # though the acceptance criterion that motivated the new cycle was never
 # implemented. Fix: `_merged_pr_is_current_cycle()` refuses any merged-PR
 # candidate whose GitHub createdAt/mergedAt are not both strictly later than
-# the current cycle's started_at, and every reconciliation entry path
-# (PR watcher, stale guard, drift/qa_passed/not_started recovery) is routed
-# through it before `_reconcile_merged_pr()` may mutate the backlog.
+# the current cycle's started_at. The PR watcher and direct merge reconcile
+# retain that gate; forward-only Framework recovery remains GitHub-independent.
 #
 # PART 1 covers the ten reject reasons + equality + the current-cycle accept,
 # exercised directly against the real extracted gate functions.
-# PART 2 proves each of the five reconciliation entry paths refuses the
-# reused-branch false completion (old PR created+merged before the new
-# cycle began) without mutating the backlog.
+# PART 2 proves the PR watcher refuses the reused-branch false completion and
+# the forward-only recovery coordinator consumes only pinned target evidence,
+# never GitHub, daemon-home drift or cached target refs.
 # PART 3 proves the happy path still lands atomically with
 # completed_at > started_at (AC4), through the real (unstubbed)
 # _reconcile_merged_pr.
 #
 # Usage: bash .gaai/core/scripts/tests/merge-cycle-reconcile.test.sh
 set -uo pipefail
+
+TEST_BASH="${GAAI_TEST_BASH:-${BASH:-/bin/bash}}"
+printf 'interpreter=%s version=%s\n' "$TEST_BASH" "$BASH_VERSION"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -46,6 +48,8 @@ setup_git_repo() {
   rm -rf "$project_dir" "$remote_dir"
   git init --bare "$remote_dir" -q
   git clone "$remote_dir" "$project_dir" -q
+  git -C "$project_dir" remote set-url --push origin "$remote_dir"
+  [[ "$(git -C "$project_dir" remote get-url --push origin)" == "$remote_dir" ]] || return 1
   git -C "$project_dir" config user.email "test@gaai.local"
   git -C "$project_dir" config user.name "GAAI Test"
   git -C "$project_dir" checkout -b staging -q 2>/dev/null || git -C "$project_dir" checkout staging -q
@@ -168,7 +172,7 @@ check TST-VALID       ""                         "garbage"                   mis
 check TST-VALID       "garbage"                  ""                          invalid_pr_created_at precedence_invalid_created
 RUNNER
 chmod +x "$P1_RUNNER"
-P1_OUT=$(bash "$P1_RUNNER" 2>&1)
+P1_OUT=$(GAAI_TEST_BASH="$TEST_BASH" "$TEST_BASH" "$P1_RUNNER" 2>&1)
 
 while IFS= read -r line; do
   [[ "$line" == RESULT* ]] || continue
@@ -266,7 +270,7 @@ eval "\$(awk '
 watch_pr_merge_status
 HARNESS
 chmod +x "$E_HARNESS"
-bash "$E_HARNESS" 2>/dev/null
+GAAI_TEST_BASH="$TEST_BASH" "$TEST_BASH" "$E_HARNESS" 2>/dev/null
 
 if [[ ! -f "$FIXTURE_DIR/e-reconcile-called" ]]; then
   pass "path E (PR watcher): reused-branch old PR did NOT trigger reconcile"
@@ -285,390 +289,140 @@ else
   fail "path E (PR watcher): expected in_progress, got '$E_STATUS'"
 fi
 
-# --- Path A: stale guard (check_stale_in_progress) -------------------------
-A_DIR="$FIXTURE_DIR/a-project"
-A_LOCK="$FIXTURE_DIR/a-locks"; mkdir -p "$A_LOCK"
-A_LOG="$FIXTURE_DIR/a.log"; touch "$A_LOG"
-A_MOCK="$FIXTURE_DIR/a-mock-gh"; create_mock_gh "$A_MOCK"
-A_SID="TST-A01"
-A_YAML="items:
-- id: $A_SID
+# --- Forward-only recovery compatibility ---------------------------------
+# Recovery no longer inspects GitHub or reconciles merge-terminal state. It
+# classifies exactly one configured-target snapshot and emits a closed hold
+# for merge-terminal phase rows. The PR watcher above remains the sole
+# GitHub observation entry path in this suite.
+F_DIR="$FIXTURE_DIR/forward-project"
+F_LOCK="$FIXTURE_DIR/forward-locks"
+F_LOG="$FIXTURE_DIR/forward.log"
+F_MOCK="$FIXTURE_DIR/forward-mock"
+F_GH_CALLED="$FIXTURE_DIR/forward-gh-called"
+F_SID="TST-FWD"
+F_STARTED="2026-08-25T10:00:00Z"
+F_YAML="items:
+- id: $F_SID
   status: in_progress
-  phase_status: planned
-  started_at: \"$NEW_STARTED\""
-setup_git_repo "$A_DIR" "$A_YAML"
-GIT_COMMITTER_DATE="2020-01-01T00:00:00Z" GIT_AUTHOR_DATE="2020-01-01T00:00:00Z" \
-  git -C "$A_DIR" commit --allow-empty -m "chore($A_SID): in_progress [daemon]" -q
-git -C "$A_DIR" push origin HEAD -q
-export MOCK_GH_RESPONSE="[{\"number\":701,\"mergedAt\":\"$OLD_MERGED\",\"state\":\"MERGED\",\"createdAt\":\"$OLD_CREATED\"}]"
-export MOCK_GH_EXIT=0
+  phase_status: done
+  started_at: \"$F_STARTED\""
+setup_git_repo "$F_DIR" "$F_YAML"
+mkdir -p "$F_LOCK" "$F_MOCK"
+chmod 700 "$F_LOCK"
+cat > "$F_MOCK/gh" <<MOCK
+#!/bin/sh
+printf called > "$F_GH_CALLED"
+exit 1
+MOCK
+chmod +x "$F_MOCK/gh"
 
-A_HARNESS="$FIXTURE_DIR/a-harness.sh"
-cat > "$A_HARNESS" <<HARNESS
-#!/usr/bin/env bash
-set -uo pipefail
-export PATH="$A_MOCK:\$PATH"
-PROJECT_DIR="$A_DIR"
-BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
-BACKLOG="\$PROJECT_DIR/\$BACKLOG_REL"
-BACKLOG_FILE="\$BACKLOG"
-LOCK_DIR="$A_LOCK"
-LOG_DIR="$A_LOCK/logs"
-LOG_FILE="$A_LOG"
-TARGET_BRANCH="staging"
-SCHEDULER="$SCHEDULER"
-DRY_RUN=false
-STALENESS_THRESHOLD=0
-SUSPEND_GRACE_UNTIL=0
-GAAI_RECONCILE_GRACE_SEC=0
-mkdir -p "\$LOG_DIR" "\$LOCK_DIR"
-RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
-log() { echo "\$*" >> "\$LOG_FILE"; }
-is_locked() { return 1; }
-with_staging_lock() { "\$@"; }
-notify_escalation() { return 0; }
-track_for_resolution() { return 0; }
-_write_drift_marker() { return 0; }
-_reconcile_merged_pr() { echo called > "$FIXTURE_DIR/a-reconcile-called"; return 0; }
-fetch_and_read_backlog() {
-  git -C "\$PROJECT_DIR" show "origin/staging:\$BACKLOG_REL" 2>/dev/null || cat "\$BACKLOG"
-}
-source "$SCRIPT_DIR/../lib/backlog-yaml.sh"
-source "$SCRIPT_DIR/../lib/commit-retry-containment.sh"
-_BACKLOG_YQ_AVAILABLE="no"
-set +e
-eval "\$(awk '
-  /^_merged_pr_started_at\(\)/{p=1; depth=0}
-  /^_merged_pr_is_current_cycle\(\)/{p=1; depth=0}
-  /^check_stale_in_progress\(\)/{p=1; depth=0}
-  p { print
-    for (i=1;i<=length(\$0);i++){c=substr(\$0,i,1); if(c=="{")depth++; if(c=="}")depth--}
-    if (p && depth==0 && NR>1){p=0}
-  }
-' "$DAEMON" 2>/dev/null)"
-check_stale_in_progress
-HARNESS
-chmod +x "$A_HARNESS"
-bash "$A_HARNESS" > /dev/null 2>&1
-
-if [[ ! -f "$FIXTURE_DIR/a-reconcile-called" ]]; then
-  pass "path A (stale guard): reused-branch old PR did NOT trigger reconcile"
-else
-  fail "path A (stale guard): reconcile was called on a pre-cycle merged PR"
-fi
-if grep -q '\[CYCLE-GUARD\].*reason=pr_before_cycle' "$A_LOG" 2>/dev/null; then
-  pass "path A (stale guard): CYCLE-GUARD reason=pr_before_cycle logged"
-else
-  fail "path A (stale guard): expected CYCLE-GUARD pr_before_cycle log line, got: $(tail -5 "$A_LOG" 2>/dev/null)"
-fi
-A_STATUS=$(git -C "$A_DIR" show origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml 2>/dev/null | grep "status:" | head -1 | awk '{print $2}')
-if [[ "$A_STATUS" != "done" ]]; then
-  pass "path A (stale guard): origin backlog never reached done ('$A_STATUS' — existing fail-closed recovery may still run per AC3)"
-else
-  fail "path A (stale guard): origin backlog reached done — false completion"
-fi
-
-# Re-run paths E and A with the second false-completion shape: the PR was
-# created before the cycle but merged after it began. Reusing the same harness
-# ensures the real caller wiring — not only the direct gate — is exercised.
-: > "$E_LOG"
-rm -f "$FIXTURE_DIR/e-reconcile-called"
-rm -f "$E_LOCK/.pr-watcher.last-poll"
-export MOCK_GH_RESPONSE="{\"mergedAt\":\"$LATE_MERGED\",\"state\":\"MERGED\",\"baseRefName\":\"staging\",\"createdAt\":\"$OLD_CREATED\"}"
-bash "$E_HARNESS" 2>/dev/null
-if [[ ! -f "$FIXTURE_DIR/e-reconcile-called" ]] \
-   && grep -q '\[CYCLE-GUARD\].*reason=pr_before_cycle' "$E_LOG" \
-   && [[ "$(git -C "$E_DIR" show origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml | grep -m1 'status:' | awk '{print $2}')" == "in_progress" ]]; then
-  pass "path E late-merge: createdAt-before-cycle candidate rejected without mutation"
-else
-  fail "path E late-merge: caller did not preserve current-cycle boundary"
-fi
-
-setup_git_repo "$A_DIR" "$A_YAML"
-GIT_COMMITTER_DATE="2020-01-01T00:00:00Z" GIT_AUTHOR_DATE="2020-01-01T00:00:00Z" \
-  git -C "$A_DIR" commit --allow-empty -m "chore($A_SID): in_progress [daemon]" -q
-git -C "$A_DIR" push origin HEAD -q
-: > "$A_LOG"
-rm -f "$FIXTURE_DIR/a-reconcile-called"
-export MOCK_GH_RESPONSE="[{\"number\":701,\"mergedAt\":\"$LATE_MERGED\",\"state\":\"MERGED\",\"createdAt\":\"$OLD_CREATED\"}]"
-bash "$A_HARNESS" >/dev/null 2>&1
-if [[ ! -f "$FIXTURE_DIR/a-reconcile-called" ]] \
-   && grep -q '\[CYCLE-GUARD\].*reason=pr_before_cycle' "$A_LOG" \
-   && [[ "$(git -C "$A_DIR" show origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml | grep -m1 'status:' | awk '{print $2}')" != "done" ]]; then
-  pass "path A late-merge: createdAt-before-cycle candidate rejected without completion"
-else
-  fail "path A late-merge: stale guard accepted an earlier-cycle PR"
-fi
-
-# --- Paths B/C/D: crash_recovery_scan (drift, qa_passed, not_started) -----
-# $5 (local_drift_status): when non-empty, the LOCAL working-tree backlog file
-# is overwritten post-clone (uncommitted) with this status, diverging from
-# origin — the genuine trigger for site B's "WT advanced past origin" branch
-# (crash_recovery_scan compares backlog_status($BACKLOG) against origin's).
-run_recovery_scan_case() {
-  local label="$1" sid="$2" phase_status_line="$3" extra_yaml="$4" local_drift_status="${5:-}"
-  local candidate_created="${6:-$OLD_CREATED}" candidate_merged="${7:-$OLD_MERGED}"
-  local local_drift_phase="${8:-}" crash_marker="${9:-}"
-  local dir="$FIXTURE_DIR/rs-$label-project"
-  local lock="$FIXTURE_DIR/rs-$label-locks"; mkdir -p "$lock"
-  local logf="$FIXTURE_DIR/rs-$label.log"; touch "$logf"
-  local mockdir="$FIXTURE_DIR/rs-$label-mock-gh"; create_mock_gh "$mockdir"
-  local yaml="items:
-- id: $sid
-  status: in_progress
-$phase_status_line
-$extra_yaml
-  started_at: \"$NEW_STARTED\""
-  setup_git_repo "$dir" "$yaml"
-  [[ -n "$crash_marker" ]] && touch "$lock/${sid}.${crash_marker}"
-  if [[ -n "$local_drift_status" || -n "$local_drift_phase" ]]; then
-    local local_phase_status_line="$phase_status_line"
-    [[ -n "$local_drift_phase" ]] && local_phase_status_line="  phase_status: $local_drift_phase"
-    printf 'items:\n- id: %s\n  status: %s\n%s\n%s\n  started_at: "%s"\n' \
-      "$sid" "${local_drift_status:-in_progress}" "$local_phase_status_line" "$extra_yaml" "$NEW_STARTED" \
-      > "$dir/.gaai/project/contexts/backlog/active.backlog.yaml"
-  fi
-  export MOCK_GH_RESPONSE="[{\"number\":701,\"mergedAt\":\"$candidate_merged\",\"state\":\"MERGED\",\"createdAt\":\"$candidate_created\"}]"
-  export MOCK_GH_EXIT=0
-
-  local harness="$FIXTURE_DIR/rs-$label-harness.sh"
-  cat > "$harness" <<HARNESS
-#!/usr/bin/env bash
-set -uo pipefail
-export PATH="$mockdir:\$PATH"
-PROJECT_DIR="$dir"
-BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
-BACKLOG="\$PROJECT_DIR/\$BACKLOG_REL"
-BACKLOG_FILE="\$BACKLOG"
-LOCK_DIR="$lock"
-LOG_DIR="$lock/logs"
-LOG_FILE="$logf"
-TARGET_BRANCH="staging"
-SCHEDULER="$SCHEDULER"
-DRY_RUN=false
-mkdir -p "\$LOG_DIR" "\$LOCK_DIR"
-RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
-log() { echo "\$*" >> "\$LOG_FILE"; }
-with_staging_lock() { "\$@"; }
-is_locked() { return 1; }
-_reconcile_merged_pr() { echo called > "$FIXTURE_DIR/rs-$label-reconcile-called"; return 0; }
-_recovery_resolve_worktree() { echo "/nonexistent/\${1}-workspace"; }
-_recovery_relaunch() { return 0; }
-_recovery_set_status() { return 0; }
-_recovery_revert_refined() { echo called > "$FIXTURE_DIR/rs-$label-revert-called"; return 0; }
-_recovery_reconcile_crash_drift() {
-  echo called > "$FIXTURE_DIR/rs-$label-crash-reconcile-called"
-  ( cd "\$PROJECT_DIR" && _commit_accumulated_backlog_drift "\$1" "\$BACKLOG_REL" "\$TARGET_BRANCH" "test-crash-drift" )
-}
-_write_drift_marker() { echo "\$*" > "$FIXTURE_DIR/rs-$label-drift-marker"; return 0; }
-_clear_drift_marker_if_clean() { return 0; }
-fetch_and_read_backlog() {
-  git -C "\$PROJECT_DIR" show "origin/staging:\$BACKLOG_REL" 2>/dev/null || cat "\$BACKLOG"
-}
-source "$SCRIPT_DIR/../lib/backlog-yaml.sh"
-source "$SCRIPT_DIR/../lib/commit-retry-containment.sh"
-source "$CHORE_LIB"
-set +e
-eval "\$(awk '
-  /^_merged_pr_started_at\(\)/{p=1; depth=0}
-  /^_merged_pr_is_current_cycle\(\)/{p=1; depth=0}
-  /^_recovery_commit_story_phase_drift\(\)/{p=1; depth=0}
-  /^crash_recovery_scan\(\)/{p=1; depth=0}
-  p { print
-    for (i=1;i<=length(\$0);i++){c=substr(\$0,i,1); if(c=="{")depth++; if(c=="}")depth--}
-    if (p && depth==0 && NR>1){p=0}
-  }
-' "$DAEMON" 2>/dev/null)"
-crash_recovery_scan
-HARNESS
-  chmod +x "$harness"
-  bash "$harness" > /dev/null 2>&1
-
-  if [[ ! -f "$FIXTURE_DIR/rs-$label-reconcile-called" ]]; then
-    pass "path (recovery-scan/$label): reused-branch old PR did NOT trigger reconcile"
-  else
-    fail "path (recovery-scan/$label): reconcile was called on a pre-cycle merged PR"
-  fi
-  if grep -q '\[CYCLE-GUARD\].*reason=pr_before_cycle' "$logf" 2>/dev/null; then
-    pass "path (recovery-scan/$label): CYCLE-GUARD reason=pr_before_cycle logged"
-  else
-    fail "path (recovery-scan/$label): expected CYCLE-GUARD pr_before_cycle log line, got: $(tail -5 "$logf" 2>/dev/null)"
-  fi
-}
-
-# Path B: working-tree drift (local WT status=done, origin still in_progress/
-# qa_passed) — rejected PR evidence must quarantine, never commit local done.
-run_recovery_scan_case "b-drift" "TST-B01" "  phase_status: qa_passed" "" "done"
-if [[ "$(git -C "$FIXTURE_DIR/rs-b-drift-project" show origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml | grep -m1 'status:' | awk '{print $2}')" == "in_progress" ]]; then
-  pass "path B (drift recovery): real drift helper did not push local status:done after rejection"
-else
-  fail "path B (drift recovery): origin changed after rejected PR evidence"
-fi
-if [[ -f "$FIXTURE_DIR/rs-b-drift-drift-marker" ]] && grep -q 'unverified-terminal-drift' "$FIXTURE_DIR/rs-b-drift-drift-marker"; then
-  pass "path B (drift recovery): unverified terminal drift quarantined with marker"
-else
-  fail "path B (drift recovery): expected unverified-terminal-drift marker"
-fi
-
-# The same bypass can be encoded as status=in_progress/phase_status=done. The
-# real drift helper must not publish that phase and let the later case branch
-# promote status to done without accepted PR provenance.
-run_recovery_scan_case "b-phase-drift" "TST-B03" "  phase_status: qa_passed" "" "" "$OLD_CREATED" "$OLD_MERGED" "done"
-B_PHASE_REMOTE=$(git -C "$FIXTURE_DIR/rs-b-phase-drift-project" show origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml)
-if [[ "$(printf '%s\n' "$B_PHASE_REMOTE" | grep -m1 'status:' | awk '{print $2}')" == "in_progress" ]] \
-   && [[ "$(printf '%s\n' "$B_PHASE_REMOTE" | grep -m1 'phase_status:' | awk '{print $2}')" == "qa_passed" ]]; then
-  pass "path B (phase drift): real helper left origin in_progress/qa_passed after rejection"
-else
-  fail "path B (phase drift): terminal phase drift reached origin after rejected PR evidence"
-fi
-
-# A crash marker must not make phase_status:done authoritative. The terminal
-# guard has to run before _recovery_reconcile_crash_drift, not only in the
-# ordinary drift branch.
-run_recovery_scan_case "b-phase-drift-marker" "TST-B05" "  phase_status: qa_passed" "" "" "$OLD_CREATED" "$OLD_MERGED" "done" "interrupted"
-B_MARKER_REMOTE=$(git -C "$FIXTURE_DIR/rs-b-phase-drift-marker-project" show origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml)
-if [[ "$(printf '%s\n' "$B_MARKER_REMOTE" | grep -m1 'status:' | awk '{print $2}')" == "in_progress" ]] \
-   && [[ "$(printf '%s\n' "$B_MARKER_REMOTE" | grep -m1 'phase_status:' | awk '{print $2}')" == "qa_passed" ]] \
-   && [[ ! -f "$FIXTURE_DIR/rs-b-phase-drift-marker-crash-reconcile-called" ]] \
-   && grep -q 'unverified-terminal-drift' "$FIXTURE_DIR/rs-b-phase-drift-marker-drift-marker"; then
-  pass "path B crash-marker bypass: terminal phase refused before crash-drift publication"
-else
-  fail "path B crash-marker bypass: marker authorized terminal drift without current-cycle PR evidence"
-fi
-
-# The drift helper stages the complete backlog file. A benign non-terminal
-# drift for Story A must not carry Story B's local terminal drift to origin.
-X_DIR="$FIXTURE_DIR/cross-story-project"
-X_LOCK="$FIXTURE_DIR/cross-story-locks"; mkdir -p "$X_LOCK"
-X_LOG="$FIXTURE_DIR/cross-story.log"; touch "$X_LOG"
-X_MOCK="$FIXTURE_DIR/cross-story-mock-gh"; create_mock_gh "$X_MOCK"
-X_YAML="items:
-- id: TST-XA
-  status: in_progress
-  phase_status: qa_passed
-  started_at: \"$NEW_STARTED\"
-- id: TST-XB
-  status: in_progress
-  phase_status: qa_passed
-  started_at: \"$NEW_STARTED\""
-setup_git_repo "$X_DIR" "$X_YAML"
-cat > "$X_DIR/.gaai/project/contexts/backlog/active.backlog.yaml" <<XLOCAL
+# Deliberately diverge daemon-home bytes. The forward scanner must ignore
+# them and use the freshly fetched configured target object only.
+cat > "$F_DIR/.gaai/project/contexts/backlog/active.backlog.yaml" <<LOCAL
 items:
-- id: TST-XA
-  status: in_progress
-  phase_status: implemented
-  started_at: "$NEW_STARTED"
-- id: TST-XB
-  status: in_progress
-  phase_status: qa_passed
-  started_at: "$NEW_STARTED"
-XLOCAL
-mkdir -p "$FIXTURE_DIR/lib"
-cp "$SCRIPT_DIR/../lib/backlog-yaml.sh" "$FIXTURE_DIR/lib/backlog-yaml.sh"
-X_SCHEDULER="$FIXTURE_DIR/cross-story-scheduler.sh"
-cat > "$X_SCHEDULER" <<XSCHED
-#!/usr/bin/env bash
-# Inject the cross-Story terminal mutation after the isolated helper has read
-# its fresh remote snapshot, at the exact point the old implementation staged
-# the live shared backlog.
-"$SCHEDULER" --set-field TST-XB phase_status done "$X_DIR/.gaai/project/contexts/backlog/active.backlog.yaml" >/dev/null
-exec "$SCHEDULER" "\$@"
-XSCHED
-chmod +x "$X_SCHEDULER"
-export MOCK_GH_RESPONSE="[{\"number\":702,\"mergedAt\":\"$OLD_MERGED\",\"state\":\"MERGED\",\"createdAt\":\"$OLD_CREATED\"}]"
-export MOCK_GH_EXIT=0
-X_HARNESS="$FIXTURE_DIR/cross-story-harness.sh"
-cat > "$X_HARNESS" <<XHARNESS
+- id: $F_SID
+  status: done
+  phase_status: done
+  started_at: "$F_STARTED"
+LOCAL
+F_BEFORE_SHA=$(git -C "$F_DIR" rev-parse origin/staging)
+F_BEFORE_BLOB=$(git -C "$F_DIR" rev-parse \
+  "origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml")
+
+F_HARNESS="$FIXTURE_DIR/forward-harness.sh"
+cat > "$F_HARNESS" <<HARNESS
 #!/usr/bin/env bash
 set -uo pipefail
-export PATH="$X_MOCK:\$PATH"
-PROJECT_DIR="$X_DIR"
+printf 'inner_interpreter=%s version=%s\n' "\${BASH:-unknown}" "\$BASH_VERSION"
+export PATH="$F_MOCK:\$PATH"
+PROJECT_DIR="$F_DIR"
+REPO_ROOT="\$PROJECT_DIR"
 BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
-BACKLOG="\$PROJECT_DIR/\$BACKLOG_REL"
-BACKLOG_FILE="\$BACKLOG"
-LOCK_DIR="$X_LOCK"
-LOG_DIR="$X_LOCK/logs"
-LOG_FILE="$X_LOG"
-TARGET_BRANCH="staging"
-SCHEDULER="$X_SCHEDULER"
-DRY_RUN=false
-mkdir -p "\$LOG_DIR"
-RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
-log() { echo "\$*" >> "\$LOG_FILE"; }
-with_staging_lock() { "\$@"; }
-is_locked() { return 1; }
-_reconcile_merged_pr() { return 0; }
-_recovery_resolve_worktree() { echo "/nonexistent/\${1}-workspace"; }
-_recovery_relaunch() { return 0; }
-_recovery_set_status() { return 0; }
-_recovery_revert_refined() { return 0; }
-_recovery_reconcile_crash_drift() { return 0; }
-_write_drift_marker() { echo "\$*" > "$FIXTURE_DIR/cross-story-drift-marker"; return 0; }
-_clear_drift_marker_if_clean() { return 0; }
-fetch_and_read_backlog() { git -C "\$PROJECT_DIR" show "origin/staging:\$BACKLOG_REL"; }
+BACKLOG_FILE="\$PROJECT_DIR/\$BACKLOG_REL"
+BACKLOG="\$BACKLOG_FILE"
+LOCK_DIR="$F_LOCK"
+TARGET_BRANCH=staging
+GAAI_WORKTREES_BASE="$FIXTURE_DIR/forward-worktrees"
+mkdir -p "\$GAAI_WORKTREES_BASE"
+log() { printf '%s\n' "\$*" >> "$F_LOG"; }
+source "$SCRIPT_DIR/../lib/chore-commit.sh"
 source "$SCRIPT_DIR/../lib/backlog-yaml.sh"
-source "$SCRIPT_DIR/../lib/commit-retry-containment.sh"
-source "$CHORE_LIB"
-set +e
+source "$SCRIPT_DIR/../lib/worktree-integrity.sh"
+source "$SCRIPT_DIR/../lib/stuck-classifier.sh"
+source "$SCRIPT_DIR/../lib/backlog-journal.sh"
+source "$SCRIPT_DIR/../daemon-dispatch.sh"
 eval "\$(awk '
-  /^_merged_pr_started_at\(\)/{p=1; depth=0}
-  /^_merged_pr_is_current_cycle\(\)/{p=1; depth=0}
-  /^_recovery_commit_story_phase_drift\(\)/{p=1; depth=0}
-  /^crash_recovery_scan\(\)/{p=1; depth=0}
-  p { print
-    for (i=1;i<=length(\$0);i++){c=substr(\$0,i,1); if(c=="{")depth++; if(c=="}")depth--}
-    if (p && depth==0 && NR>1){p=0}
-  }
+  /^_forward_sha256\(\)/{on=1}
+  /^exceeded_stories\(\)/{on=0}
+  on{print}
 ' "$DAEMON")"
-crash_recovery_scan --only-sid TST-XA
-XHARNESS
-chmod +x "$X_HARNESS"
-bash "$X_HARNESS" >/dev/null 2>&1
-X_REMOTE=$(git -C "$X_DIR" show origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml)
-X_REMOTE_PHASES=$(printf '%s\n' "$X_REMOTE" | awk '/phase_status:/{print $2}' | paste -sd ',' -)
-X_LOCAL_PHASES=$(awk '/phase_status:/{print $2}' "$X_DIR/.gaai/project/contexts/backlog/active.backlog.yaml" | paste -sd ',' -)
-if [[ "$X_REMOTE_PHASES" == "implemented,qa_passed" ]] \
-   && [[ "$X_LOCAL_PHASES" == "implemented,done" ]]; then
-  pass "path B cross-Story race: immutable isolated commit excludes concurrent terminal mutation"
+cd /
+forward_recovery_scan --only-sid "$F_SID"
+HARNESS
+chmod +x "$F_HARNESS"
+F_RC=0
+GAAI_TEST_BASH="$TEST_BASH" "$TEST_BASH" "$F_HARNESS" \
+  >"$FIXTURE_DIR/forward.out" 2>"$FIXTURE_DIR/forward.err" || F_RC=$?
+F_AFTER_SHA=$(git -C "$F_DIR" rev-parse origin/staging)
+F_AFTER_BLOB=$(git -C "$F_DIR" rev-parse \
+  "origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml")
+
+if [[ "$F_RC" -eq 0 ]] \
+    && grep -q 'outcome=held reason=merge_terminal_owned' "$FIXTURE_DIR/forward.err"; then
+  pass "forward recovery: merge-terminal row is pinned and held for its downstream owner"
 else
-  fail "path B cross-Story race: concurrent terminal mutation hitchhiked into origin"
+  sed 's/^/    /' "$FIXTURE_DIR/forward.err" >&2
+  fail "forward recovery: pinned merge-terminal classification did not hold"
+fi
+if [[ ! -e "$F_GH_CALLED" ]]; then
+  pass "forward recovery: no GitHub or merge-terminal authority is invoked"
+else
+  fail "forward recovery: GitHub was consulted outside the PR watcher boundary"
+fi
+if [[ "$F_BEFORE_SHA" == "$F_AFTER_SHA" && "$F_BEFORE_BLOB" == "$F_AFTER_BLOB" ]]; then
+  pass "forward recovery: hold preserves exact remote commit and backlog blob"
+else
+  fail "forward recovery: no-op mutated configured-target authority"
+fi
+if grep -q 'status: done' "$F_DIR/.gaai/project/contexts/backlog/active.backlog.yaml"; then
+  pass "forward recovery: daemon-home drift is neither consumed nor published"
+else
+  fail "forward recovery: local drift was rewritten or treated as authority"
+fi
+if grep -q "inner_interpreter=$TEST_BASH" "$FIXTURE_DIR/forward.out"     && grep -q "version=$BASH_VERSION" "$FIXTURE_DIR/forward.out"; then
+  pass "forward recovery: nested harness records the selected Bash"
+else
+  fail "forward recovery: nested interpreter receipt is missing"
 fi
 
-# Path C: qa_passed recovery
-run_recovery_scan_case "c-qapass" "TST-C01" "  phase_status: qa_passed" ""
-
-# Path D: not_started recovery
-run_recovery_scan_case "d-notstarted" "TST-D01" "  phase_status: not_started" ""
-if [[ -f "$FIXTURE_DIR/rs-d-notstarted-revert-called" ]]; then
-  pass "path D (not_started recovery): gate rejection fell through to existing revert-refined path (AC3)"
+# A cached target ref is deliberately present, but fetch is now unavailable.
+# Recovery must block without falling back to that cache or local backlog.
+git -C "$F_DIR" remote set-url origin "file:///nonexistent/forward-$$"
+F_OFFLINE_RC=0
+GAAI_TEST_BASH="$TEST_BASH" "$TEST_BASH" "$F_HARNESS" \
+  >"$FIXTURE_DIR/forward-offline.out" 2>"$FIXTURE_DIR/forward-offline.err" \
+  || F_OFFLINE_RC=$?
+if [[ "$F_OFFLINE_RC" -ne 0 ]] \
+    && [[ "$(git -C "$F_DIR" rev-parse origin/staging)" == "$F_AFTER_SHA" ]] \
+    && ! grep -Eq 'outcome=(accepted|launched)' "$FIXTURE_DIR/forward-offline.err"; then
+  pass "forward recovery: unavailable configured target rejects cached/local authority"
 else
-  fail "path D (not_started recovery): revert-refined fallback was not reached after gate rejection"
+  fail "forward recovery: offline scan used stale evidence or claimed an effect"
 fi
 
-# The second false-completion shape: PR created before the cycle but merged
-# after it began. Every recovery path must still reject on createdAt.
-run_recovery_scan_case "b-drift-late" "TST-B02" "  phase_status: qa_passed" "" "done" "$OLD_CREATED" "$LATE_MERGED"
-if [[ "$(git -C "$FIXTURE_DIR/rs-b-drift-late-project" show origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml | grep -m1 'status:' | awk '{print $2}')" == "in_progress" ]]; then
-  pass "path B late-merge: origin stayed in_progress after createdAt rejection"
+LEGACY_RECOVERY_RE='check_stale_in_progress|crash_recovery_scan|_recovery_revert_refined|_recovery_reconcile_crash_drift'
+if rg -n "$LEGACY_RECOVERY_RE" "$DAEMON" >/dev/null 2>&1; then
+  fail "forward recovery: deleted reverse coordinator symbols returned"
 else
-  fail "path B late-merge: origin changed after createdAt rejection"
+  pass "forward recovery: reverse/stale coordinator symbols remain deleted"
 fi
-run_recovery_scan_case "b-phase-drift-late" "TST-B04" "  phase_status: qa_passed" "" "" "$OLD_CREATED" "$LATE_MERGED" "done"
-B_PHASE_LATE_REMOTE=$(git -C "$FIXTURE_DIR/rs-b-phase-drift-late-project" show origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml)
-if [[ "$(printf '%s\n' "$B_PHASE_LATE_REMOTE" | grep -m1 'status:' | awk '{print $2}')" == "in_progress" ]] \
-   && [[ "$(printf '%s\n' "$B_PHASE_LATE_REMOTE" | grep -m1 'phase_status:' | awk '{print $2}')" == "qa_passed" ]]; then
-  pass "path B late-merge (phase drift): origin stayed in_progress/qa_passed"
+if awk '/^_forward_sha256\(\)/{on=1} /^exceeded_stories\(\)/{on=0} on{print}' "$DAEMON" \
+    | rg -n 'gh (api|pr)|_merged_pr|_reconcile_merged_pr|watch_pr_merge_status' \
+      >/dev/null 2>&1; then
+  fail "forward recovery: coordinator gained independent GitHub or merge authority"
 else
-  fail "path B late-merge (phase drift): terminal phase drift reached origin"
+  pass "forward recovery: coordinator remains provider-neutral and merge-independent"
 fi
-run_recovery_scan_case "c-qapass-late" "TST-C02" "  phase_status: qa_passed" "" "" "$OLD_CREATED" "$LATE_MERGED"
-run_recovery_scan_case "d-notstarted-late" "TST-D02" "  phase_status: not_started" "" "" "$OLD_CREATED" "$LATE_MERGED"
-if [[ -f "$FIXTURE_DIR/rs-d-notstarted-late-revert-called" ]]; then
-  pass "path D late-merge: rejected candidate reached revert-refined recovery"
-else
-  fail "path D late-merge: revert-refined recovery was not reached"
-fi
-
 # --- Direct mutation-boundary refusal: real _reconcile_merged_pr, byte-identical origin
 mkdir -p "$FIXTURE_DIR/lib"
 cp "$SCRIPT_DIR/../lib/backlog-yaml.sh" "$FIXTURE_DIR/lib/backlog-yaml.sh"
@@ -712,7 +466,7 @@ eval "\$(awk '
 _reconcile_merged_pr "$R_SID" "$OLD_MERGED" 701 "$OLD_CREATED"
 RUNNER
 chmod +x "$R_RUNNER"
-bash "$R_RUNNER" >/dev/null 2>&1 || true
+GAAI_TEST_BASH="$TEST_BASH" "$TEST_BASH" "$R_RUNNER" >/dev/null 2>&1 || true
 R_AFTER_SHA=$(git -C "$R_DIR" rev-parse origin/staging)
 R_AFTER_BLOB=$(git -C "$R_DIR" rev-parse "origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml")
 if [[ "$R_BEFORE_SHA" == "$R_AFTER_SHA" && "$R_BEFORE_BLOB" == "$R_AFTER_BLOB" ]] \
@@ -772,7 +526,7 @@ eval "\$(awk '
 _reconcile_merged_pr "$T_SID" "2030-03-11T09:00:00Z" 702 "2030-03-10T23:00:00Z"
 RUNNER
 chmod +x "$T_RUNNER"
-bash "$T_RUNNER" >/dev/null 2>&1 || true
+GAAI_TEST_BASH="$TEST_BASH" "$TEST_BASH" "$T_RUNNER" >/dev/null 2>&1 || true
 T_REMOTE=$(git -C "$T_DIR" show origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml)
 if [[ "$(printf '%s\n' "$T_REMOTE" | grep -m1 'status:' | awk '{print $2}')" == "in_progress" ]] \
    && grep -q 'reason=pr_before_cycle' "$T_LOG"; then
@@ -838,7 +592,7 @@ eval "\$(awk '
 _reconcile_merged_pr "$P3_SID" "$P3_MERGED" "900" "$P3_CREATED"
 RUNNER
 chmod +x "$P3_RUNNER"
-bash "$P3_RUNNER" > /dev/null 2>&1
+GAAI_TEST_BASH="$TEST_BASH" "$TEST_BASH" "$P3_RUNNER" > /dev/null 2>&1
 P3_AFTER_COUNT=$(git -C "$P3_DIR" rev-list --count origin/staging)
 
 P3_BACKLOG=$(git -C "$P3_DIR" show origin/staging:.gaai/project/contexts/backlog/active.backlog.yaml 2>/dev/null || echo "")
@@ -876,7 +630,7 @@ fi
 
 # Idempotence: the already-done precheck runs under the lock and must not add
 # another commit or partially rewrite the terminal row.
-bash "$P3_RUNNER" > /dev/null 2>&1
+GAAI_TEST_BASH="$TEST_BASH" "$TEST_BASH" "$P3_RUNNER" > /dev/null 2>&1
 P3_SECOND_COUNT=$(git -C "$P3_DIR" rev-list --count origin/staging)
 if [[ "$P3_SECOND_COUNT" -eq "$P3_AFTER_COUNT" ]]; then
   pass "PART 3: repeated reconcile is idempotent (no second commit)"

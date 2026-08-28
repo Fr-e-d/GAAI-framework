@@ -1,303 +1,599 @@
 #!/usr/bin/env bash
-# lib/stuck-classifier.sh — structured failure classifier for stuck stories
-#
-# classify_stuck_story <sid> [<current_phase_status>]
-#   Returns:
-#     0 = auto-recovery action taken and succeeded
-#     1 = escalation fired (incident report written with path in remediation hint)
-#     2 = no-op (already classified by S02/S03, or prior successful recovery)
-#
-# Env vars (provided by sourcing daemon):
-#   PROJECT_DIR, GAAI_PROJECT_DIR, LOCK_DIR, LOG_DIR, TARGET_BRANCH, BACKLOG
-#   GAAI_STUCK_CLASSIFY_TIMEOUT_SEC  (default 10)
-#   GAAI_STUCK_CLASSIFY_DELETIONS_MAX (default 100)
-#
-# Functions required from daemon scope:
-#   log, notify_escalation, _recovery_revert_refined, _recovery_resolve_worktree
-#   _recover_worktree_safe_base (optional — checked via declare -F)
+# lib/stuck-classifier.sh — pinned, forward-only delivery classification.
 
 [[ -n "${_STUCK_CLASSIFIER_SH_SOURCED:-}" ]] && return 0
 _STUCK_CLASSIFIER_SH_SOURCED=1
 
-# Portable timeout: uses `timeout` (Linux/GNU), `gtimeout` (macOS brew), or runs directly.
-_classify_run_timed() {
-  local _secs="$1"; shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$_secs" "$@"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "$_secs" "$@"
+# One semantic validator is injected into each descriptor-bound operation so
+# install, read and retire cannot drift onto different context schemas.
+_FORWARD_CONTEXT_VALIDATE_PY='def validate_context(obj):
+    keys = {
+        "action", "attempt", "attempt_digest", "blob", "current_record_digest",
+        "event_digest", "integrity", "intended_fields", "reason",
+        "records_digest", "retained_source", "schema_version", "source",
+        "state_digest", "story", "writer",
+    }
+    if (set(obj) != keys or obj.get("writer") != "recovery.scan"
+            or obj.get("schema_version") != "1.0.0"):
+        raise ValueError
+    object_re = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+    digest_re = re.compile(r"[0-9a-f]{64}")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", obj.get("story", "")):
+        raise ValueError
+    if not object_re.fullmatch(obj.get("source", "")):
+        raise ValueError
+    if not object_re.fullmatch(obj.get("blob", "")):
+        raise ValueError
+    if not digest_re.fullmatch(obj.get("current_record_digest", "")):
+        raise ValueError
+    if obj.get("attempt") == "retained":
+        if not digest_re.fullmatch(obj.get("attempt_digest", "")):
+            raise ValueError
+        if not digest_re.fullmatch(obj.get("records_digest", "")):
+            raise ValueError
+        if not object_re.fullmatch(obj.get("retained_source", "")):
+            raise ValueError
+    elif obj.get("attempt") == "none":
+        if any(obj.get(key) != "none" for key in (
+            "attempt_digest", "records_digest", "retained_source"
+        )):
+            raise ValueError
+    else:
+        raise ValueError
+    commit_stall = (
+        obj.get("action") == "forward_commit_stall"
+        and obj.get("reason") == "stall_pending"
+        and obj.get("intended_fields") == "phase_status=commit_stalled"
+    )
+    if commit_stall:
+        if (obj.get("attempt") != "none"
+                or not digest_re.fullmatch(obj.get("event_digest", ""))
+                or not digest_re.fullmatch(obj.get("state_digest", ""))):
+            raise ValueError
+    elif obj.get("event_digest") != "none" or obj.get("state_digest") != "none":
+        raise ValueError
+    any_integrity = {"verified", "recoverable", "unrecoverable", "unknown", "absent_new"}
+    matrix = {
+        ("claim_candidate", "ready"): ({"verified", "absent_new"}, {"none"}),
+        ("resume", "resumable"): ({"verified", "absent_new"}, {"none"}),
+        ("forward_fail", "required_plan_absent"): (
+            {"verified"}, {"phase_status=failed,status=failed"}
+        ),
+        ("forward_fail", "worktree_unrecoverable"): (
+            {"unrecoverable"}, {"phase_status=failed,status=failed"}
+        ),
+        ("forward_terminal", "terminal_projection"): (
+            any_integrity, {
+                "none", "status=failed", "status=escalated",
+                "phase_status=failed,status=failed",
+            }
+        ),
+        ("hold_downstream", "merge_terminal_owned"): (any_integrity, {"none"}),
+        ("forward_commit_stall", "stall_pending"): (
+            any_integrity, {"phase_status=commit_stalled"}
+        ),
+        ("hold_operator", "policy_stall"): (any_integrity, {"none"}),
+        ("no_effect", "not_actionable"): (any_integrity, {"none"}),
+    }
+    allowed = matrix.get((obj.get("action"), obj.get("reason")))
+    if allowed is None:
+        raise ValueError
+    if obj.get("integrity") not in allowed[0] or obj.get("intended_fields") not in allowed[1]:
+        raise ValueError
+    if obj.get("action") == "claim_candidate" and obj.get("attempt") != "none":
+        raise ValueError
+'
+
+# One descriptor-bound reader owns both Story classification and recovery
+# enumeration.  The path is opened once without following links, its inode is
+# held through the read, and the exact bytes are bound to the pinned Git blob
+# before the strict YAML loader sees them.
+_forward_read_snapshot() {
+  [[ "$#" -ge 4 && "$#" -le 9 ]] || return 1
+  python3 - "$@" <<'PY'
+import datetime
+import hashlib
+import os
+import re
+import stat
+import subprocess
+import sys
+
+try:
+    import yaml
+except ImportError:
+    raise SystemExit(1)
+
+path, source_sha, expected_blob, mode = sys.argv[1:5]
+if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", source_sha):
+    raise SystemExit(1)
+if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", expected_blob):
+    raise SystemExit(1)
+if mode == "classify":
+    if len(sys.argv) not in {9, 10}:
+        raise SystemExit(1)
+    story, scope, integrity, plan_present = sys.argv[5:9]
+    now_raw = sys.argv[9] if len(sys.argv) == 10 else ""
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", story):
+        raise SystemExit(1)
+    if scope not in {"main", "postclaim", "recovery"}:
+        raise SystemExit(1)
+    if integrity not in {
+        "verified", "recoverable", "unrecoverable", "unknown", "absent_new"
+    }:
+        raise SystemExit(1)
+    if plan_present not in {"true", "false"}:
+        raise SystemExit(1)
+elif mode == "enumerate":
+    if len(sys.argv) not in {5, 6}:
+        raise SystemExit(1)
+    only = sys.argv[5] if len(sys.argv) == 6 else ""
+    if only and not re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", only):
+        raise SystemExit(1)
+else:
+    raise SystemExit(1)
+
+fd = None
+try:
+    before = os.lstat(path)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    opened = os.fstat(fd)
+    after = os.lstat(path)
+    if not stat.S_ISREG(opened.st_mode):
+        raise ValueError
+    if opened.st_uid != os.geteuid() or opened.st_mode & 0o077:
+        raise ValueError
+    identity = (opened.st_dev, opened.st_ino)
+    if identity != (before.st_dev, before.st_ino):
+        raise ValueError
+    if identity != (after.st_dev, after.st_ino):
+        raise ValueError
+    chunks = []
+    while True:
+        chunk = os.read(fd, 131072)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    data = b"".join(chunks)
+except (OSError, ValueError):
+    raise SystemExit(1)
+finally:
+    if fd is not None:
+        os.close(fd)
+
+try:
+    actual_blob = subprocess.run(
+        ["git", "hash-object", "--stdin"], input=data,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True,
+    ).stdout.decode("ascii").strip()
+except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+    raise SystemExit(1)
+if actual_blob != expected_blob:
+    raise SystemExit(1)
+
+class UniqueLoader(yaml.SafeLoader):
+    pass
+
+def construct_mapping(loader, node, deep=False):
+    result = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in result:
+            raise ValueError
+        result[key] = loader.construct_object(value_node, deep=deep)
+    return result
+
+UniqueLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping
+)
+try:
+    document = yaml.load(data.decode("utf-8"), Loader=UniqueLoader)
+    items = document["items"]
+    if not isinstance(items, list):
+        raise ValueError
+    indexed = {}
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError
+        sid = item.get("id")
+        if not isinstance(sid, str) or not re.fullmatch(
+            r"[A-Za-z][A-Za-z0-9._-]{0,63}", sid
+        ):
+            raise ValueError
+        if sid in indexed:
+            raise ValueError
+        indexed[sid] = item
+except (KeyError, TypeError, UnicodeDecodeError, ValueError, yaml.YAMLError):
+    raise SystemExit(1)
+
+if mode == "enumerate":
+    if only:
+        if only not in indexed:
+            raise SystemExit(1)
+        selected = [only]
+    else:
+        selected = [
+            sid for sid, item in indexed.items()
+            if item.get("status") == "in_progress"
+        ]
+    sys.stdout.write("\n".join(selected))
+    raise SystemExit(0)
+
+item = indexed.get(story)
+if item is None:
+    raise SystemExit(1)
+
+status = item.get("status")
+phase = item.get("phase_status")
+started = item.get("started_at")
+statuses = {"refined", "in_progress", "done", "failed", "escalated"}
+phases = {
+    "not_started", "planned", "implemented", "qa_failed", "qa_passed",
+    "failed", "escalated", "qa_escalated", "done", "commit_stalled",
+}
+if status not in statuses or phase not in phases:
+    action, reason = "block_invalid_record", "invalid_lifecycle"
+elif status == "in_progress":
+    canonical = isinstance(started, str) and re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+        started,
+    )
+    if not canonical:
+        action, reason = "block_invalid_record", "invalid_started_at"
+    else:
+        try:
+            parsed = datetime.datetime.strptime(
+                started, "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=datetime.timezone.utc)
+            now = (
+                datetime.datetime.fromtimestamp(int(now_raw), datetime.timezone.utc)
+                if now_raw else datetime.datetime.now(datetime.timezone.utc)
+            )
+            if parsed > now:
+                raise ValueError
+        except (OverflowError, ValueError):
+            action, reason = "block_invalid_record", "invalid_started_at"
+        else:
+            if phase == "done":
+                action, reason = "hold_downstream", "merge_terminal_owned"
+            elif phase == "commit_stalled":
+                action, reason = "hold_operator", "policy_stall"
+            elif phase in {"failed", "escalated", "qa_escalated"}:
+                action, reason = "forward_terminal", "terminal_projection"
+            elif integrity in {"unknown", "recoverable"}:
+                action, reason = "block_integrity", "integrity_unverified"
+            elif integrity == "absent_new" and scope != "postclaim":
+                action, reason = "block_integrity", "integrity_unverified"
+            elif integrity == "unrecoverable":
+                action, reason = "forward_fail", "worktree_unrecoverable"
+            elif phase == "planned" and plan_present == "false":
+                action, reason = "forward_fail", "required_plan_absent"
+            elif phase in {
+                "not_started", "planned", "implemented", "qa_failed", "qa_passed"
+            }:
+                action, reason = "resume", "resumable"
+            else:
+                action, reason = "block_invalid_record", "invalid_lifecycle"
+elif status == "refined" and phase == "not_started" and scope == "main":
+    if integrity in {"verified", "absent_new"}:
+        action, reason = "claim_candidate", "ready"
+    else:
+        action, reason = "block_integrity", "integrity_unverified"
+else:
+    action, reason = "no_effect", "not_actionable"
+
+wire_started = started if isinstance(started, str) else "none"
+facts = (
+    action, reason, status or "none", phase or "none", wire_started,
+    hashlib.sha256(data).hexdigest(), source_sha, expected_blob,
+)
+if any("\t" in str(value) or "\n" in str(value) for value in facts):
+    raise SystemExit(1)
+sys.stdout.write("\t".join(facts))
+PY
+}
+
+# forward_classify_snapshot <story> <snapshot> <source-sha> <blob> <scope>
+#   <integrity> <plan-present> [<now-epoch>]
+#
+# Emits one tab-delimited, allowlisted fact row:
+#   action reason status phase started_at bytes_digest source_sha blob
+# Classification is intentionally side-effect free. In particular it never
+# creates a recovery context or guesses authority from local repository state.
+forward_classify_snapshot() {
+  [[ "$#" -ge 7 && "$#" -le 8 ]] || return 1
+  local story="$1" path="$2" source="$3" blob="$4" scope="$5"
+  local integrity="$6" plan="$7"
+  if [[ "$#" -eq 8 ]]; then
+    _forward_read_snapshot "$path" "$source" "$blob" classify \
+      "$story" "$scope" "$integrity" "$plan" "$8"
   else
-    "$@"
+    _forward_read_snapshot "$path" "$source" "$blob" classify \
+      "$story" "$scope" "$integrity" "$plan"
   fi
 }
 
-classify_stuck_story() {
-  local sid="$1"
-  local current_ps="${2:-}"
-
-  local _classify_timeout="${GAAI_STUCK_CLASSIFY_TIMEOUT_SEC:-10}"
-  local _phantom_threshold="${GAAI_STUCK_CLASSIFY_DELETIONS_MAX:-100}"
-  local _ps_key="${current_ps:-empty}"
-
-  local _gaai_project="${GAAI_PROJECT_DIR:-${PROJECT_DIR}/.gaai/project}"
-  local incidents_dir="${_gaai_project}/contexts/artefacts/incidents"
-
-  local utc_ts utc_ts_filename
-  utc_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  utc_ts_filename=$(date -u +%Y%m%dT%H%M%SZ)
-  local incident_file="${incidents_dir}/incident-${sid}-${utc_ts_filename}.md"
-
-  # ── Section A: Idempotence check ────────────────────────────────────────────
-  # If a prior successful recovery for this story+phase_status exists, skip.
-  local _prior_report
-  _prior_report=$(ls -t "${incidents_dir}/incident-${sid}-"*.md 2>/dev/null | head -1 || true)
-  if [[ -n "$_prior_report" && -f "$_prior_report" ]]; then
-    local _prior_outcome _prior_ps
-    _prior_outcome=$(grep -m1 "^auto_recovery_outcome:" "$_prior_report" 2>/dev/null \
-      | sed 's/^auto_recovery_outcome: *//;s/"//g' | tr -d '[:space:]' || true)
-    _prior_ps=$(grep -m1 "^phase_status_at_classification:" "$_prior_report" 2>/dev/null \
-      | sed 's/^phase_status_at_classification: *//;s/"//g' | tr -d '[:space:]' || true)
-    if [[ "$_prior_outcome" == "success" ]] && [[ "$_prior_ps" == "$_ps_key" ]]; then
-      log "[STUCK-CLASSIFY] $sid : prior successful recovery found (phase_status=${_ps_key}, outcome=success) — skip (no-op)"
-      return 2
-    fi
-  fi
-
-  mkdir -p "$incidents_dir"
-
-  # ── Section B: Evidence collection ──────────────────────────────────────────
-  local worktree_path
-  worktree_path=$(_recovery_resolve_worktree "$sid")
-
-  # Branch commits (story branch vs TARGET_BRANCH on remote; fall back to local refs)
-  local branch_commits branch_commit_count
-  branch_commits=$(_classify_run_timed "$_classify_timeout" \
-    git -C "$PROJECT_DIR" log "origin/${TARGET_BRANCH}..origin/story/${sid}" --oneline 2>/dev/null \
-    || _classify_run_timed "$_classify_timeout" \
-       git -C "$PROJECT_DIR" log "${TARGET_BRANCH}..story/${sid}" --oneline 2>/dev/null \
-    || true)
-  branch_commit_count=$(echo "$branch_commits" | grep -c . 2>/dev/null || true)
-  [[ -z "$branch_commits" ]] && branch_commit_count=0
-
-  # Phantom deletes: files removed on story branch vs TARGET_BRANCH
-  # Falls back to local branch refs if remote tracking refs are absent.
-  local phantom_deletes=0
-  local _pd_out
-  _pd_out=$(_classify_run_timed "$_classify_timeout" \
-    git -C "$PROJECT_DIR" diff --name-only --diff-filter=D \
-    "origin/${TARGET_BRANCH}...origin/story/${sid}" 2>/dev/null \
-    || _classify_run_timed "$_classify_timeout" \
-       git -C "$PROJECT_DIR" diff --name-only --diff-filter=D \
-       "${TARGET_BRANCH}...story/${sid}" 2>/dev/null \
-    || echo "")
-  if [[ -n "$_pd_out" ]]; then
-    phantom_deletes=$(echo "$_pd_out" | wc -l | tr -d ' ' || echo 0)
-  fi
-
-  # Artefact presence (on worktree filesystem)
-  local plan_file notes_file impl_report qa_report deploy_log
-  plan_file="${worktree_path}/.gaai/project/contexts/artefacts/plans/${sid}.execution-plan.md"
-  notes_file="${worktree_path}/.gaai/project/contexts/artefacts/notes/${sid}.notes.md"
-  impl_report="${worktree_path}/.gaai/project/contexts/artefacts/impl-reports/${sid}.impl-report.md"
-  qa_report="${worktree_path}/.gaai/project/contexts/artefacts/qa-reports/${sid}.qa-report.md"
-  [[ ! -f "$qa_report" ]] && \
-    qa_report="${worktree_path}/.gaai/project/contexts/artefacts/reports/${sid}.qa-report.md"
-  deploy_log="${LOG_DIR}/${sid}.deploy.log"
-
-  local artefacts_present=()
-  [[ -f "$plan_file" ]]   && artefacts_present+=("plan")
-  [[ -f "$notes_file" ]]  && artefacts_present+=("notes")
-  [[ -f "$impl_report" ]] && artefacts_present+=("impl-report")
-  [[ -f "$qa_report" ]]   && artefacts_present+=("qa-report")
-  [[ -f "$deploy_log" ]]  && artefacts_present+=("deploy-log")
-  local artefacts_str
-  if [[ ${#artefacts_present[@]} -gt 0 ]]; then
-    artefacts_str=$(IFS=,; echo "${artefacts_present[*]}")
+# forward_enumerate_snapshot <snapshot> <source-sha> <blob> [<only-story>]
+# Emits canonical in-progress Story IDs, or the one requested canonical ID.
+forward_enumerate_snapshot() {
+  [[ "$#" -ge 3 && "$#" -le 4 ]] || return 1
+  if [[ "$#" -eq 4 ]]; then
+    _forward_read_snapshot "$1" "$2" "$3" enumerate "$4"
   else
-    artefacts_str="none"
+    _forward_read_snapshot "$1" "$2" "$3" enumerate
   fi
+}
 
-  # Lock markers
-  local marker_reconcile marker_interrupted marker_commit_pending marker_orphan
-  marker_reconcile="$LOCK_DIR/${sid}.reconcile-in-progress"
-  marker_interrupted="$LOCK_DIR/${sid}.interrupted"
-  marker_commit_pending="$LOCK_DIR/${sid}.commit-pending"
-  marker_orphan="$LOCK_DIR/${sid}.orphan-classified"
+# forward_context_install <path> <story> <source-sha> <blob> <record-digest>
+#   <attempt> <attempt-digest> <retained-source> <records-digest>
+#   <event-digest> <state-digest> <integrity> <action> <reason> <intended-fields>
+#
+# The parent directory must already be private. The context is installed with
+# no-replace semantics and is never updated in place.
+forward_context_install() {
+  [[ "$#" -eq 15 ]] || return 1
+  python3 - "$_FORWARD_CONTEXT_VALIDATE_PY" "$@" <<'PY'
+import json
+import os
+import re
+import secrets
+import stat
+import sys
 
-  local markers_present=()
-  [[ -f "$marker_reconcile" ]]    && markers_present+=("reconcile-in-progress")
-  [[ -f "$marker_interrupted" ]]  && markers_present+=("interrupted")
-  [[ -f "$marker_commit_pending" ]] && markers_present+=("commit-pending")
-  [[ -f "$marker_orphan" ]]       && markers_present+=("orphan-classified")
-  local markers_str
-  if [[ ${#markers_present[@]} -gt 0 ]]; then
-    markers_str=$(IFS=,; echo "${markers_present[*]}")
-  else
-    markers_str="none"
-  fi
+exec(sys.argv[1])
+(path, story, source, blob, record_digest, attempt, attempt_digest,
+ retained_source, records_digest, event_digest, state_digest, integrity,
+ action, reason, intended) = sys.argv[2:]
+parent, name = os.path.split(path)
+if not parent or not name:
+    raise SystemExit(1)
+try:
+    parent_stat = os.lstat(parent)
+    if not stat.S_ISDIR(parent_stat.st_mode):
+        raise ValueError
+    if parent_stat.st_uid != os.geteuid() or parent_stat.st_mode & 0o077:
+        raise ValueError
+except (OSError, ValueError):
+    raise SystemExit(1)
+document = {
+    "action": action,
+    "attempt": attempt,
+    "attempt_digest": attempt_digest,
+    "blob": blob,
+    "current_record_digest": record_digest,
+    "event_digest": event_digest,
+    "integrity": integrity,
+    "intended_fields": intended,
+    "reason": reason,
+    "records_digest": records_digest,
+    "retained_source": retained_source,
+    "schema_version": "1.0.0",
+    "source": source,
+    "state_digest": state_digest,
+    "story": story,
+    "writer": "recovery.scan",
+}
+try:
+    validate_context(document)
+except (TypeError, ValueError):
+    raise SystemExit(1)
+wire = (
+    json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+).encode("ascii")
+dir_fd = os.open(
+    parent,
+    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+)
+opened_parent = os.fstat(dir_fd)
+if (not stat.S_ISDIR(opened_parent.st_mode)
+        or opened_parent.st_uid != os.geteuid()
+        or opened_parent.st_mode & 0o077
+        or (opened_parent.st_dev, opened_parent.st_ino)
+            != (parent_stat.st_dev, parent_stat.st_ino)):
+    os.close(dir_fd)
+    raise SystemExit(1)
+tmp = ".%s.%s.tmp" % (name, secrets.token_hex(12))
+fd = None
+try:
+    fd = os.open(
+        tmp,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+        dir_fd=dir_fd,
+    )
+    view = memoryview(wire)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            raise OSError
+        view = view[written:]
+    os.fsync(fd)
+    os.close(fd)
+    fd = None
+    os.link(
+        tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd, follow_symlinks=False
+    )
+    os.fsync(dir_fd)
+    os.unlink(tmp, dir_fd=dir_fd)
+except (FileExistsError, OSError):
+    raise SystemExit(1)
+finally:
+    if fd is not None:
+        os.close(fd)
+    try:
+        os.unlink(tmp, dir_fd=dir_fd)
+    except OSError:
+        pass
+    os.close(dir_fd)
+PY
+}
 
-  # Log tail (last 50 lines)
-  local log_tail_content="(unavailable: no log file)"
-  local log_file_path="${LOG_DIR}/${sid}.log"
-  if [[ -f "$log_file_path" ]]; then
-    log_tail_content=$(tail -50 "$log_file_path" 2>/dev/null || echo "(unavailable: read error)")
-  fi
+# Read the exact immutable context bytes after no-follow owner/mode/inode checks.
+forward_context_read() {
+  [[ "$#" -eq 1 ]] || return 1
+  python3 - "$_FORWARD_CONTEXT_VALIDATE_PY" "$1" <<'PY'
+import hashlib
+import json
+import os
+import re
+import stat
+import sys
 
-  log "[STUCK-CLASSIFY] $sid : classifying — phase_status=${current_ps:-empty} branch_commits=${branch_commit_count} artefacts=${artefacts_str}"
+exec(sys.argv[1])
+path = sys.argv[2]
+fd = None
+dir_fd = None
+try:
+    parent, name = os.path.split(path)
+    parent_before = os.lstat(parent)
+    if (not stat.S_ISDIR(parent_before.st_mode)
+            or parent_before.st_uid != os.geteuid()
+            or parent_before.st_mode & 0o077):
+        raise ValueError
+    dir_fd = os.open(
+        parent,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    parent_opened = os.fstat(dir_fd)
+    if (not stat.S_ISDIR(parent_opened.st_mode)
+            or parent_opened.st_uid != os.geteuid()
+            or parent_opened.st_mode & 0o077
+            or (parent_opened.st_dev, parent_opened.st_ino)
+                != (parent_before.st_dev, parent_before.st_ino)):
+        raise ValueError
+    before = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    fd = os.open(
+        name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd
+    )
+    opened = os.fstat(fd)
+    after = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    if not stat.S_ISREG(opened.st_mode):
+        raise ValueError
+    if opened.st_uid != os.geteuid() or opened.st_mode & 0o077:
+        raise ValueError
+    identity = (opened.st_dev, opened.st_ino)
+    if identity != (before.st_dev, before.st_ino):
+        raise ValueError
+    if identity != (after.st_dev, after.st_ino):
+        raise ValueError
+    chunks = []
+    while True:
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    data = b"".join(chunks)
+    obj = json.loads(data)
+    validate_context(obj)
+    values = [
+        obj[key] for key in (
+            "story", "source", "blob", "current_record_digest", "attempt",
+            "attempt_digest", "retained_source", "records_digest",
+            "event_digest", "state_digest", "integrity", "action", "reason",
+            "intended_fields",
+        )
+    ]
+    if any(
+        not isinstance(value, str) or "\t" in value or "\n" in value
+        for value in values
+    ):
+        raise ValueError
+    sys.stdout.write(
+        "\t".join(values + [hashlib.sha256(data).hexdigest()])
+    )
+except (OSError, TypeError, ValueError, json.JSONDecodeError):
+    raise SystemExit(1)
+finally:
+    if fd is not None:
+        os.close(fd)
+    if dir_fd is not None:
+        os.close(dir_fd)
+PY
+}
 
-  # ── Section C: Classification taxonomy ──────────────────────────────────────
-  # Evaluated top-to-bottom; first match wins.
-  local class="unknown"
-  local recovery_applicable="false"
-  local auto_action="none"
-  local class_rationale="No specific heuristic matched — classified as unknown."
+forward_context_remove() {
+  [[ "$#" -eq 2 && "$2" =~ ^[0-9a-f]{64}$ ]] || return 1
+  python3 - "$_FORWARD_CONTEXT_VALIDATE_PY" "$1" "$2" <<'PY'
+import hashlib
+import json
+import os
+import re
+import secrets
+import stat
+import sys
 
-  # 1. stale_race_residual
-  if [[ "$current_ps" =~ ^(done|failed|escalated|qa_escalated)$ ]] \
-     && [[ "$markers_str" == "none" ]]; then
-    class="stale_race_residual"
-    recovery_applicable="true"
-    auto_action="_recovery_revert_refined"
-    class_rationale="Terminal phase_status '${current_ps}' with status=in_progress and no markers present. Stale-race resolution should have caught this at-source; classifier is second-layer defense."
-
-  # 2. orphan_lock_classified — orphan-lock scan already handled
-  elif [[ -f "$marker_orphan" ]]; then
-    class="orphan_lock_classified"
-    recovery_applicable="true"
-    auto_action="no_op"
-    class_rationale="Orphan-classified marker present — orphan-lock scan already processed this story. No additional action needed."
-
-  # 3. pnpm_install_failed — pnpm-guard escalation path owns recovery
-  elif [[ "$current_ps" == "commit_failed" ]]; then
-    class="pnpm_install_failed"
-    recovery_applicable="true"
-    auto_action="no_op"
-    class_rationale="phase_status=commit_failed set by pnpm-guard when pnpm install fails pre-commit. pnpm-guard escalation path owns recovery."
-
-  # 4. worktree_corruption_suspected
-  elif (( phantom_deletes > _phantom_threshold )) || \
-       { [[ -d "${worktree_path}/.git" ]] && \
-         _classify_run_timed "$_classify_timeout" git -C "$worktree_path" fsck --no-progress 2>&1 \
-           | grep -q "error:" 2>/dev/null; }; then
-    class="worktree_corruption_suspected"
-    if declare -F _recover_worktree_safe_base >/dev/null 2>&1; then
-      recovery_applicable="true"
-      auto_action="_recover_worktree_safe_base"
-    else
-      recovery_applicable="false"
-      auto_action="none"
-    fi
-    local _s05_available
-    _s05_available=$(declare -F _recover_worktree_safe_base >/dev/null 2>&1 && echo yes || echo no)
-    class_rationale="Phantom deletes=${phantom_deletes} (threshold=${_phantom_threshold}) or git fsck error on worktree. worktree-recovery helper availability: ${_s05_available}."
-
-  # 5. qa_failed_orphan — retry cap exhausted by delivery retry-loop
-  elif [[ -f "$qa_report" ]] \
-       && echo "$log_tail_content" | grep -qE "(retry_cap_exhausted|max_retries.*exceeded|ESCALATE.*retry)" 2>/dev/null; then
-    class="qa_failed_orphan"
-    recovery_applicable="true"
-    auto_action="notify_escalation"
-    class_rationale="qa-report present and log tail contains retry-cap-exhausted signal. Retry-loop escalation path owns final disposition."
-
-  # 6. pr_creation_silent_failure
-  elif [[ -f "$deploy_log" ]] && [[ -f "$impl_report" ]] && [[ -f "$qa_report" ]] \
-       && [[ "$current_ps" =~ ^(implemented|qa_passed)$ ]] \
-       && ! grep -A10 "id: ${sid}" "$BACKLOG" 2>/dev/null | grep -q "pr_url:"; then
-    class="pr_creation_silent_failure"
-    recovery_applicable="false"
-    auto_action="none"
-    class_rationale="All delivery artefacts present (impl-report, qa-report, deploy-log) with phase_status=${current_ps} but no pr_url in backlog. PR creation likely failed silently."
-
-  # 7. unknown (catch-all)
-  else
-    class="unknown"
-    recovery_applicable="false"
-    auto_action="none"
-    class_rationale="No specific heuristic matched — classified as unknown."
-  fi
-
-  log "[STUCK-CLASSIFY] $sid : class=${class} recovery_applicable=${recovery_applicable} auto_action=${auto_action}"
-
-  # ── Section D: Auto-action execution (BEFORE incident report write — AC2) ──
-  local auto_recovery_outcome="n_a"
-  local _action_rc=0
-
-  case "$auto_action" in
-    no_op)
-      # S02/S03 already handled — return 2 immediately (no report written for no-op classes)
-      return 2
-      ;;
-
-    _recovery_revert_refined)
-      if _recovery_revert_refined "$sid" false "stale-race-residual"; then
-        auto_recovery_outcome="success"
-        log "[STUCK-CLASSIFY] $sid : auto-recovery success — _recovery_revert_refined completed"
-      else
-        auto_recovery_outcome="failed"
-        _action_rc=1
-        log "[STUCK-CLASSIFY] $sid : auto-recovery failed — _recovery_revert_refined returned non-zero"
-      fi
-      ;;
-
-    _recover_worktree_safe_base)
-      if _recover_worktree_safe_base "$sid" "$worktree_path" "$TARGET_BRANCH"; then
-        auto_recovery_outcome="success"
-        log "[STUCK-CLASSIFY] $sid : auto-recovery success — _recover_worktree_safe_base completed"
-      else
-        auto_recovery_outcome="failed"
-        _action_rc=1
-        log "[STUCK-CLASSIFY] $sid : auto-recovery failed — _recover_worktree_safe_base returned non-zero"
-      fi
-      ;;
-
-    notify_escalation|none)
-      # Escalation fires after report write
-      auto_recovery_outcome="n_a"
-      _action_rc=1
-      ;;
-  esac
-
-  # ── Section E: Incident report write (write-once after action, AC2) ─────────
-  local action_summary
-  if [[ "$auto_recovery_outcome" == "success" ]]; then
-    action_summary="Auto-action: ${auto_action} — outcome: success."
-  else
-    action_summary="Manual review required. Inspect the evidence above and the story branch: git log origin/${TARGET_BRANCH}..origin/story/${sid} --oneline; incident report: ${incident_file}"
-  fi
-
-  mkdir -p "$incidents_dir"
-  {
-    printf '%s\n'   "---"
-    printf '%s\n'   "classified_at: \"${utc_ts}\""
-    printf '%s\n'   "story_id: \"${sid}\""
-    printf '%s\n'   "phase_status_at_classification: \"${_ps_key}\""
-    printf '%s\n'   "class: ${class}"
-    printf '%s\n'   "recovery_applicable: ${recovery_applicable}"
-    printf '%s\n'   "auto_action_taken: \"${auto_action}\""
-    printf '%s\n'   "auto_recovery_outcome: \"${auto_recovery_outcome}\""
-    printf '%s\n\n' "---"
-    printf '%s\n\n' "## Evidence Collected"
-    printf '%s\n'   "- phase_status: ${current_ps:-empty}"
-    printf '%s\n'   "- branch_commits: ${branch_commit_count} commits"
-    printf '%s\n'   "- phantom_deletes: ${phantom_deletes}"
-    printf '%s\n'   "- artefacts_present: [${artefacts_str}]"
-    printf '%s\n'   "- markers: [${markers_str}]"
-    printf '%s\n\n' "- log_tail: (last 50 lines)"
-    printf '%s\n'   '```'
-    printf '%s\n'   "$log_tail_content"
-    printf '%s\n\n' '```'
-    printf '%s\n\n' "## Classification Rationale"
-    printf '%s\n\n' "$class_rationale"
-    printf '%s\n\n' "## Action Taken or Recommended"
-    printf '%s\n'   "$action_summary"
-  } > "$incident_file"
-
-  # ── Section F: Return value + escalation ────────────────────────────────────
-  if [[ "$auto_recovery_outcome" == "success" ]]; then
-    return 0
-  else
-    notify_escalation "$sid" "stuck-classified-${class}" "${incident_file}"
-    log "[STUCK-CLASSIFY] $sid : escalated with incident report ${incident_file}"
-    return 1
-  fi
+exec(sys.argv[1])
+path, expected_digest = sys.argv[2:]
+fd = None
+dir_fd = None
+quarantine = None
+try:
+    parent, name = os.path.split(path)
+    parent_before = os.lstat(parent)
+    if (not stat.S_ISDIR(parent_before.st_mode)
+            or parent_before.st_uid != os.geteuid()
+            or parent_before.st_mode & 0o077):
+        raise ValueError
+    dir_fd = os.open(
+        parent,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    parent_opened = os.fstat(dir_fd)
+    if (not stat.S_ISDIR(parent_opened.st_mode)
+            or parent_opened.st_uid != os.geteuid()
+            or parent_opened.st_mode & 0o077
+            or (parent_opened.st_dev, parent_opened.st_ino) != (
+                parent_before.st_dev, parent_before.st_ino
+            )):
+        raise ValueError
+    before = os.lstat(path)
+    fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
+    opened = os.fstat(fd)
+    after = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    identity = (opened.st_dev, opened.st_ino)
+    if not stat.S_ISREG(opened.st_mode):
+        raise ValueError
+    if opened.st_uid != os.geteuid() or opened.st_mode & 0o077:
+        raise ValueError
+    if identity != (before.st_dev, before.st_ino):
+        raise ValueError
+    if identity != (after.st_dev, after.st_ino):
+        raise ValueError
+    chunks = []
+    while True:
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    data = b"".join(chunks)
+    if hashlib.sha256(data).hexdigest() != expected_digest:
+        raise ValueError
+    obj = json.loads(data)
+    validate_context(obj)
+    quarantine = ".%s.%s.retire" % (name, secrets.token_hex(12))
+    os.rename(name, quarantine, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    moved = os.stat(quarantine, dir_fd=dir_fd, follow_symlinks=False)
+    if identity != (moved.st_dev, moved.st_ino):
+        # The name changed after validation. Restore the successor without
+        # overwriting anything and retain evidence if restoration cannot win.
+        os.link(
+            quarantine, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd,
+            follow_symlinks=False,
+        )
+        os.unlink(quarantine, dir_fd=dir_fd)
+        quarantine = None
+        os.fsync(dir_fd)
+        raise ValueError
+    os.unlink(quarantine, dir_fd=dir_fd)
+    quarantine = None
+    os.fsync(dir_fd)
+except (OSError, TypeError, ValueError, json.JSONDecodeError):
+    raise SystemExit(1)
+finally:
+    if fd is not None:
+        os.close(fd)
+    if dir_fd is not None:
+        os.close(dir_fd)
+PY
 }

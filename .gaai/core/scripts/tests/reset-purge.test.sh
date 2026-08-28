@@ -1,244 +1,126 @@
 #!/usr/bin/env bash
-# reset-purge.test.sh — AC5 regression for E222S01
-#
-# Asserts that _recovery_revert_refined atomically clears stale pr_url/pr_number,
-# the retry-counter entry, and the worktree+branch when reverting a story to refined.
-#
-# Usage: bash .gaai/core/scripts/tests/reset-purge.test.sh
+# Forward-only preservation matrix: recovery never rewinds or purges evidence.
+set -u
 
-set -uo pipefail
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)
+DAEMON="$ROOT/.gaai/core/scripts/delivery-daemon.sh"
+CLASSIFIER="$ROOT/.gaai/core/scripts/lib/stuck-classifier.sh"
+TEST_BASH="${GAAI_TEST_BASH:-$BASH}"
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/gaai-forward-preserve.XXXXXX")
+trap 'rm -rf "$TMP"' EXIT
+PASS=0; FAIL=0
+pass(){ PASS=$((PASS+1)); printf '  PASS: %s\n' "$1"; }
+fail(){ FAIL=$((FAIL+1)); printf '  FAIL: %s\n' "$1"; }
+expect(){ local n="$1"; shift; if "$@"; then pass "$n"; else fail "$n"; fi; }
 
-PASS_COUNT=0
-FAIL_COUNT=0
-pass() { echo "  PASS: $1"; PASS_COUNT=$(( PASS_COUNT + 1 )); }
-fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
+current=$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$BASH")
+selected=$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$TEST_BASH")
+printf 'interpreter=%s version=%s\n' "$current" "$BASH_VERSION"
+expect "exact selected interpreter" test "$current" = "$selected"
 
-SCRIPTS="$(cd "$(dirname "$0")/.." && pwd)"
-DAEMON="$SCRIPTS/delivery-daemon.sh"
-SCHEDULER="$SCRIPTS/backlog-scheduler.sh"
+HARNESS="$TMP/harness.sh"
+awk '/^_forward_sha256\(\)/{on=1} /^exceeded_stories\(\)/{on=0} on{print}' "$DAEMON" > "$HARNESS"
+awk '/^_reconcile_story_file_from_staging\(\)/{on=1} /^# ── PR merge watcher/{on=0} on{print}' "$DAEMON" >> "$HARNESS"
+source "$CLASSIFIER"
+source "$HARNESS"
 
-FIXTURE_DIR="/tmp/gaai-reset-purge-test-$$"
-cleanup() { rm -rf "$FIXTURE_DIR"; }
-trap cleanup EXIT
-mkdir -p "$FIXTURE_DIR"
+legacy='_recovery_revert_refined|status refined \[daemon-recovery|reset_phase|missing-plan|no-progress'
+if rg -n "$legacy" "$DAEMON" "$CLASSIFIER" >/dev/null 2>&1; then
+  fail "reverse reset and purge contracts are absent"
+else
+  pass "reverse reset and purge contracts are absent"
+fi
+if rg -n '_legacy_|_retired_' "$DAEMON" "$CLASSIFIER" >/dev/null 2>&1; then
+  fail "legacy behavior was not renamed in place"
+else
+  pass "legacy behavior was not renamed in place"
+fi
 
-SID="TST-RP01"
-BRANCH="main"
+LOCK_DIR="$TMP/locks"; mkdir -p "$LOCK_DIR"; chmod 700 "$LOCK_DIR"
+context=$(_forward_context_path EPRESERVE)
+source_a=1111111111111111111111111111111111111111
+source_b=2222222222222222222222222222222222222222
+blob=3333333333333333333333333333333333333333
+record=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+row=$(_forward_bind_context "$context" EPRESERVE "$source_a" "$blob" "$record" \
+  none none none none none none verified resume resumable none) || exit 1
+digest=${row##*$'\t'}
+before=$(shasum -a 256 "$context" | awk '{print $1}')
+if _forward_bind_context "$context" EPRESERVE "$source_b" "$blob" "$record" \
+    none none none none none none verified resume resumable none >/dev/null; then
+  fail "conflicting successor context is rejected"
+else
+  pass "conflicting successor context is rejected"
+fi
+after=$(shasum -a 256 "$context" | awk '{print $1}')
+expect "context mismatch preserves exact evidence bytes" test "$after" = "$before"
+if forward_context_remove "$context" bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; then
+  fail "wrong digest cannot purge context"
+else
+  pass "wrong digest cannot purge context"
+fi
+expect "wrong-digest failure preserves context" test -f "$context"
+expect "exact digest retires context" forward_context_remove "$context" "$digest"
+
+GAAI_WORKTREES_BASE="$TMP/worktrees"
+wt="$GAAI_WORKTREES_BASE/EPRESERVE-workspace"
+mkdir -p "$wt"
+printf 'operator evidence\n' > "$wt/uncommitted.txt"
+PROJECT_DIR="$TMP/repo"; REPO_ROOT="$PROJECT_DIR"
+TARGET_BRANCH=staging
 BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
-
-# ── fixture setup ──────────────────────────────────────────────────────────────
-PROJ="$FIXTURE_DIR/project"
-REMOTE="$FIXTURE_DIR/project_remote.git"
-WT_BASE="$FIXTURE_DIR/worktrees"
-WT_PATH="$WT_BASE/${SID}-workspace"
-LOCK_DIR="$FIXTURE_DIR/locks"
-LOG_FILE="$FIXTURE_DIR/daemon.log"
-BACKLOG="$PROJ/$BACKLOG_REL"
-RETRY_FILE="$LOCK_DIR/.retry-counts"
-
-mkdir -p "$LOCK_DIR" "$WT_BASE"
-touch "$LOG_FILE"
-
-# Backlog with pr_url + pr_number + a second story to verify no cross-story drift
-BACKLOG_YAML='items:
-- id: TST-RP01
-  status: in_progress
-  phase_status: qa_escalated
-  delivery_pipeline: 3phase
-  pr_url: "https://github.com/example/repo/pull/42"
-  pr_number: "42"
-- id: TST-OTHER
-  status: refined
-  phase_status: not_started
-  delivery_pipeline: 3phase'
-
-# Initialise bare remote + clone
-git init --bare "$REMOTE" -q
-git clone "$REMOTE" "$PROJ" -q
-git -C "$PROJ" config user.email "test@gaai.local"
-git -C "$PROJ" config user.name "GAAI Test"
-git -C "$PROJ" checkout -b "$BRANCH" -q 2>/dev/null || true
-mkdir -p "$(dirname "$BACKLOG")"
-printf '%s\n' "$BACKLOG_YAML" > "$BACKLOG"
-git -C "$PROJ" add .
-git -C "$PROJ" commit -m "initial" -q
-git -C "$PROJ" push origin "$BRANCH" -q
-
-# Retry-counts with story at cap + another story (should be preserved)
-printf '%s=3\nTST-OTHER=1\n' "$SID" > "$RETRY_FILE"
-
-# Create story branch + worktree
-git -C "$PROJ" checkout -b "story/$SID" -q
-git -C "$PROJ" checkout "$BRANCH" -q
-git -C "$PROJ" worktree add "$WT_PATH" "story/$SID" -q
-
-echo ""
-echo "=== reset-purge: AC5 — _recovery_revert_refined clears all stale state ==="
-echo ""
-
-# ── harness ────────────────────────────────────────────────────────────────────
-HARNESS=$(mktemp /tmp/gaai-rp-harness-XXXXXX)
-cat > "$HARNESS" <<HARNESS_EOF
-#!/usr/bin/env bash
-set -uo pipefail
-
-# Daemon global vars (all absolute paths, expanded at harness-generation time)
-PROJECT_DIR="$PROJ"
-GAAI_PROJECT_DIR="$PROJ/.gaai/project"
-BACKLOG="$BACKLOG"
-BACKLOG_FILE="$BACKLOG"
-BACKLOG_REL="$BACKLOG_REL"
-LOCK_DIR="$LOCK_DIR"
-RETRY_FILE="$RETRY_FILE"
-LOG_DIR="$FIXTURE_DIR"
-LOG_FILE="$LOG_FILE"
-STAGING_LOCK="$LOCK_DIR/.staging.lock"
-REBASE_CONFLICT_MARKER="$LOCK_DIR/.rebase-conflict.audit"
-DRIFT_MARKER="$LOCK_DIR/.drift-detected.audit"
-TARGET_BRANCH="$BRANCH"
-SCHEDULER="$SCHEDULER"
-SCRIPT_DIR="$SCRIPTS"
-GAAI_WORKTREES_BASE="$WT_BASE"
-PLATFORM="\$(uname)"
-RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
-
-log() { printf '%s\n' "\$*" >> "$LOG_FILE" 2>/dev/null || true; }
-
-# Minimal stubs
-with_staging_lock() { "\$@"; }
-notify_escalation()  { return 0; }
-is_locked()          { [[ -f "$LOCK_DIR/\$1.lock" ]]; }
-
-# Branch disposal moved out of the daemon into lib/worktree-integrity.sh.
-# _recovery_revert_refined delegates to _worktree_branch_delete_or_preserve,
-# so without this source the call resolved to "command not found", the
-# branch was left untouched, and T6 failed against a step that never ran.
-# shellcheck source=../lib/worktree-integrity.sh
-source "$SCRIPTS/lib/worktree-integrity.sh"
-
-# Extract required functions from the daemon source
-eval "\$(awk '
-  /^sed_inplace\(\)/{p=1; depth=0}
-  /^_write_drift_marker\(\)/{p=1; depth=0}
-  /^_recovery_resolve_worktree\(\)/{p=1; depth=0}
-  /^_recovery_revert_refined\(\)/{p=1; depth=0}
-  p {
-    print
-    for (i=1; i<=length(\$0); i++) {
-      c = substr(\$0, i, 1)
-      if (c == "{") depth++
-      if (c == "}") depth--
-    }
-    if (p && depth == 0 && NR > 1) { p=0 }
-  }
-' "$DAEMON" 2>/dev/null)"
-
-_recovery_revert_refined "$SID" "true" "test-reset"
-exit \$?
-HARNESS_EOF
-
-chmod +x "$HARNESS"
-set +e
-bash "$HARNESS" 2>/dev/null
-HARNESS_RC=$?
-set -e
-rm -f "$HARNESS"
-
-if [[ $HARNESS_RC -ne 0 ]]; then
-  fail "harness: _recovery_revert_refined returned $HARNESS_RC — commit or setup failed"
-  echo ""
-  echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed"
-  exit 1
-fi
-
-# ── assertions ────────────────────────────────────────────────────────────────
-
-echo "T1: pr_url removed from YAML for target story"
-if grep -A 15 "id: $SID" "$BACKLOG" | grep -q "pr_url:"; then
-  fail "T1: pr_url still present in YAML after reset"
+BACKLOG_FILE="$PROJECT_DIR/$BACKLOG_REL"; BACKLOG="$BACKLOG_FILE"
+remote="$TMP/remote.git"
+git init --bare "$remote" >/dev/null
+git init "$PROJECT_DIR" >/dev/null
+git -C "$PROJECT_DIR" config user.email "test@gaai.local"
+git -C "$PROJECT_DIR" config user.name "GAAI Test"
+mkdir -p "$(dirname "$BACKLOG_FILE")"
+printf 'items: []\n' > "$BACKLOG_FILE"
+git -C "$PROJECT_DIR" add "$BACKLOG_REL"
+git -C "$PROJECT_DIR" commit -m "seed configured target" >/dev/null
+git -C "$PROJECT_DIR" branch -M "$TARGET_BRANCH"
+git -C "$PROJECT_DIR" remote add origin "$remote"
+git -C "$PROJECT_DIR" remote set-url --push origin "$remote"
+[[ "$(git -C "$PROJECT_DIR" remote get-url --push origin)" == "$remote" ]] || exit 1
+git -C "$PROJECT_DIR" push -u origin "$TARGET_BRANCH" >/dev/null
+expected_source=$(git -C "$PROJECT_DIR" rev-parse "origin/${TARGET_BRANCH}")
+zero=0000000000000000000000000000000000000000000000000000000000000000
+_forward_worktree_state(){ printf '%s\n' verified; }
+_forward_plan_present(){ return 1; }
+_forward_classify(){ return 1; }
+_forward_evidence(){ :; }
+if _forward_recovery_one EPRESERVE; then
+  fail "source failure blocks recovery"
 else
-  pass "T1: pr_url absent from YAML"
+  pass "source failure blocks recovery"
 fi
+expect "blocked recovery preserves worktree bytes" grep -qx 'operator evidence' "$wt/uncommitted.txt"
 
-echo "T2: pr_number removed from YAML for target story"
-if grep -A 15 "id: $SID" "$BACKLOG" | grep -q "pr_number:"; then
-  fail "T2: pr_number still present in YAML after reset"
+log(){ :; }
+unborn="$TMP/unborn"
+git init "$unborn" >/dev/null
+printf 'local evidence\n' > "$unborn/operator.txt"
+if _reconcile_story_file_from_staging EPRESERVE "$unborn" "$expected_source"; then
+  fail "unborn worktree cannot be converted to fresh pickup"
 else
-  pass "T2: pr_number absent from YAML"
+  rc=$?
+  [[ "$rc" -eq 2 ]] && pass "unborn worktree cannot be converted to fresh pickup" \
+    || fail "unborn worktree returns typed refusal"
 fi
+expect "unborn refusal preserves local evidence" grep -qx 'local evidence' "$unborn/operator.txt"
 
-echo "T3: phase_status=not_started"
-PHASE=$(grep -A 10 "id: $SID" "$BACKLOG" | grep "phase_status:" | head -1 | awk '{print $2}')
-if [[ "$PHASE" == "not_started" ]]; then
-  pass "T3: phase_status=not_started"
-else
-  fail "T3: phase_status='$PHASE' (expected not_started)"
-fi
+python3 - "$DAEMON" <<'PY'
+import sys
+text = open(sys.argv[1]).read()
+start = text.index('_reconcile_story_file_from_staging()')
+end = text.index('# ── PR merge watcher', start)
+block = text[start:end]
+for forbidden in ('worktree remove --force', 'rm -rf', 'branch -D', 'status refined'):
+    if forbidden in block:
+        raise SystemExit(1)
+PY
+expect "story reconcile contains no destructive fallback" test "$?" -eq 0
 
-echo "T4: retry-counter entry cleared for target story"
-if [[ -f "$RETRY_FILE" ]] && grep -q "^${SID}=" "$RETRY_FILE"; then
-  fail "T4: $SID entry still present in .retry-counts"
-else
-  pass "T4: $SID retry-counter cleared"
-fi
-
-echo "T4b: other story retry-counter preserved"
-if [[ ! -f "$RETRY_FILE" ]] || ! grep -q "^TST-OTHER=1" "$RETRY_FILE"; then
-  fail "T4b: TST-OTHER=1 missing from .retry-counts (cross-story leak)"
-else
-  pass "T4b: TST-OTHER retry-counter preserved"
-fi
-
-echo "T5: worktree directory removed"
-if [[ -d "$WT_PATH" ]]; then
-  fail "T5: worktree '$WT_PATH' still exists"
-else
-  pass "T5: worktree removed"
-fi
-
-# T6 asserted "branch deleted". That was the pre-E1057 contract, and deleting an
-# unlanded branch is exactly the data-loss bug E1057 fixed:
-# _worktree_branch_delete_or_preserve now deletes only a verifiably landed branch
-# and otherwise renames it to <branch>-preserved-<utc>, freeing the original name
-# for the retry path while keeping the commits inspectable. This fixture's branch
-# is never pushed and its story is not done on origin, so preservation is the
-# correct outcome — assert the freed name plus the surviving commits, which is
-# what "clears stale state" means under the current contract.
-echo "T6: story branch name freed, commits preserved (not destroyed)"
-if git -C "$PROJ" branch --list "story/$SID" 2>/dev/null | grep -q "story/$SID$"; then
-  fail "T6: branch story/$SID still occupies the original name"
-else
-  pass "T6: original name story/$SID freed for retry"
-fi
-
-PRESERVED=$(git -C "$PROJ" branch --list "story/$SID-preserved-*" 2>/dev/null | tr -d ' *')
-if [[ -n "$PRESERVED" ]]; then
-  pass "T6b: commits preserved as $PRESERVED"
-else
-  fail "T6b: no story/$SID-preserved-* branch — unlanded commits were destroyed"
-fi
-
-if [[ -s "$LOCK_DIR/.branch-preserved.audit" ]] && grep -q "$SID" "$LOCK_DIR/.branch-preserved.audit"; then
-  pass "T6c: preservation recorded in .branch-preserved.audit"
-else
-  fail "T6c: preservation not recorded in .branch-preserved.audit"
-fi
-
-echo "T7: non-target story YAML untouched (cross-story drift guard)"
-STATUS_OTHER=$(grep -A 8 "id: TST-OTHER" "$BACKLOG" | grep "status:" | head -1 | awk '{print $2}')
-if [[ "$STATUS_OTHER" == "refined" ]]; then
-  pass "T7: TST-OTHER status unchanged (refined)"
-else
-  fail "T7: TST-OTHER status='$STATUS_OTHER' (expected refined — cross-story drift?)"
-fi
-
-# ── summary ───────────────────────────────────────────────────────────────────
-echo ""
-echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed"
-if [[ $FAIL_COUNT -eq 0 ]]; then
-  echo "ALL PASS"
-  exit 0
-else
-  echo "FAILURES: $FAIL_COUNT"
-  exit 1
-fi
+printf '\nResults: %d passed, %d failed\n' "$PASS" "$FAIL"
+(( FAIL == 0 ))

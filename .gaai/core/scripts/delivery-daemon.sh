@@ -739,117 +739,53 @@ clean_stale_locks() {
       fi
       continue
     fi
-    if ! kill -0 "$pid" 2>/dev/null; then
-      local sid
-      sid=$(basename "$lock" .lock)
-      log "${YELLOW}Stale lock removed: $sid (PID $pid gone)${NC}"
-      rm -f "$lock"
-    fi
+    # Numeric dead-PID locks are recovery evidence.  The forward coordinator
+    # retires the exact descriptor-bound lock only at the spawn boundary.
   done
 }
 
-# ── Cycle-time orphan-lock scan ────────────────────────────────
-# Runs every ORPHAN_SCAN_INTERVAL_TICKS poll ticks, BEFORE clean_stale_locks.
-# Iterates ${LOCK_DIR}/*.lock, reads PID from first line, verifies liveness
-# via kill -0. For each dead PID:
-#   1. Removes the lock file (so is_locked() returns false for recovery scan)
-#   2. Invokes crash_recovery_scan --only-sid <sid> (YAML classification + revert)
-# Bridges clean_stale_locks (lock-file removal only) and crash_recovery_scan
-# (YAML-based, startup-plus-periodic) to close the overnight blind window.
+# ── Cycle-time orphan-lock scan ──────────────────────────────────────────
+# Dead locks remain evidence until the forward coordinator authorizes one
+# exact relaunch.  A failed classification/projection leaves the lock intact.
 cycle_orphan_lock_scan() {
-  local scan_start_ts lock_count=0 detected=0 reverted=0 escalated=0 skipped=0
+  local scan_start_ts lock sid row rc state pid overall=0
   scan_start_ts=$(date +%s)
-
-  # Collect lock files — handle empty LOCK_DIR silently (AC3)
-  local lock
   for lock in "$LOCK_DIR"/*.lock; do
     [[ -f "$lock" ]] || continue
-    (( lock_count++ )) || true
-  done
-  if (( lock_count == 0 )); then
-    return 0
-  fi
-
-  log "${CYAN}[CYCLE-ORPHAN] scanning $lock_count lock files (interval=${ORPHAN_SCAN_INTERVAL_TICKS} ticks)${NC}"
-
-  for lock in "$LOCK_DIR"/*.lock; do
-    [[ -f "$lock" ]] || continue
-
-    # AC4: wall-clock cap
-    local now_ts
-    now_ts=$(date +%s)
-    if (( now_ts - scan_start_ts >= ORPHAN_SCAN_MAX_DURATION_SEC )); then
-      log "${YELLOW}[CYCLE-ORPHAN] scan exceeded ${ORPHAN_SCAN_MAX_DURATION_SEC}s — aborting this cycle, will retry next interval${NC}"
-      break
+    if (( $(date +%s) - scan_start_ts >= ORPHAN_SCAN_MAX_DURATION_SEC )); then
+      log "${YELLOW}[CYCLE-ORPHAN] bounded scan window reached — retrying next cycle${NC}"
+      return 1
     fi
-
-    local sid pid
     sid=$(basename "$lock" .lock)
-    pid=$(head -1 "$lock" 2>/dev/null || echo "")
-
-    # AC3: empty or placeholder PID → skip (clean_stale_locks territory)
-    if [[ -z "$pid" || "$pid" == "pending" ]]; then
-      log "${YELLOW}[CYCLE-ORPHAN] $sid : lock file unreadable PID — skipping, will recheck next interval${NC}"
-      (( skipped++ )) || true
+    if ! [[ "$sid" =~ ^[A-Za-z][A-Za-z0-9._-]{0,63}$ ]]; then
+      log "${YELLOW}[CYCLE-ORPHAN] invalid lock identity — preserving evidence${NC}"
+      overall=1
       continue
     fi
-    # AC3: non-numeric PID → skip
-    if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
-      log "${YELLOW}[CYCLE-ORPHAN] $sid : lock file unreadable PID — skipping, will recheck next interval${NC}"
-      (( skipped++ )) || true
+    rc=0
+    row=$(_forward_lock_state "$sid") || rc=$?
+    IFS=$'\t' read -r state pid <<< "$row"
+    if [[ "$rc" -ne 0 || "$state" == unknown ]]; then
+      if ! _forward_evidence "$sid" blocked invalid_record none \
+          0000000000000000000000000000000000000000000000000000000000000000 \
+          0000000000000000000000000000000000000000000000000000000000000000 \
+          none; then
+        return 4
+      fi
+      overall=1
       continue
     fi
-
-    # Liveness check
-    if kill -0 "$pid" 2>/dev/null; then
-      continue  # PID alive — not an orphan
-    fi
-
-    # AC3: EPERM guard — process may exist but be owned by another user.
-    # kill -0 returns 1 for both ESRCH (no process) and EPERM (can't signal).
-    # If the process appears in ps, treat as alive (fail-safe).
-    if ps -p "$pid" > /dev/null 2>&1; then
-      log "${YELLOW}[CYCLE-ORPHAN] $sid : kill -0 $pid denied (EPERM?) — treating as alive, skipping${NC}"
-      (( skipped++ )) || true
-      continue
-    fi
-
-    # Dead PID confirmed — remove lock so crash_recovery_scan --only-sid sees no live lock
-    rm -f "$lock" 2>/dev/null || true
-    (( detected++ )) || true
-    log "${CYAN}[CYCLE-ORPHAN] $sid : dead PID $pid detected — invoking recovery classification${NC}"
-
-    # Read story status before recovery (for post-recovery log line)
-    local pre_status
-    pre_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
-
-    local rc=0
-    crash_recovery_scan --only-sid "$sid" || rc=$?
-
-    # AC3: non-zero from recovery scan → log and continue, do not crash daemon
-    if (( rc != 0 )); then
-      log "${YELLOW}[CYCLE-ORPHAN] $sid : recovery scan returned $rc — continuing to next lock${NC}"
-      (( skipped++ )) || true
-      continue
-    fi
-
-    # Post-recovery: read updated status for log line (AC5 line 3)
-    local post_status
-    post_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
-    log "${CYAN}[CYCLE-ORPHAN] $sid : recovery classified as orphan-lock — story status now ${post_status:-unknown}${NC}"
-
-    if [[ "$post_status" == "refined" ]]; then
-      (( reverted++ )) || true
-    elif [[ "$post_status" == "escalated" ]]; then
-      (( escalated++ )) || true
-    else
-      (( skipped++ )) || true
-    fi
+    [[ "$state" == dead ]] || continue
+    rc=0
+    forward_recovery_scan --only-sid "$sid" || rc=$?
+    case "$rc" in
+      0) ;;
+      4) return 4 ;;
+      *) overall=1 ;;
+    esac
   done
-
-  log "${CYAN}[CYCLE-ORPHAN] scan complete : $detected orphans detected, $reverted reverted, $escalated escalated, $skipped skipped${NC}"
+  return "$overall"
 }
-
 # ── Heartbeat monitoring ─────────────────────────────────────────────────
 # Liveness signal is decoupled from claude -p log output: the wrapper runs a
 # background loop that touches $LOCK_DIR/<sid>.heartbeat every 30s for the
@@ -980,7 +916,7 @@ check_agent_activity_stale() {
     # stalls the story (observed in practice on a story with a long
     # differential test suite).
     local worktree_path
-    worktree_path=$(_recovery_resolve_worktree "$sid")
+    worktree_path=$(_forward_resolve_worktree "$sid")
     local impl_log="${worktree_path}/.delivery-logs/${sid}.impl.log"
     local plan_log="${worktree_path}/.delivery-logs/${sid}.plan.log"
     local qa_log="${worktree_path}/.delivery-logs/${sid}.qa.log"
@@ -1059,10 +995,16 @@ check_agent_activity_stale() {
 }
 
 active_count() {
-  local count=0
+  local count=0 sid row state pid rc
   for lock in "$LOCK_DIR"/*.lock; do
     [[ -f "$lock" ]] || continue
-    ((count++)) || true
+    sid=$(basename "$lock" .lock)
+    _forward_sid_valid "$sid" || return 1
+    rc=0
+    row=$(_forward_lock_state "$sid") || rc=$?
+    IFS=$'\t' read -r state pid <<< "$row"
+    [[ "$rc" -eq 0 && "$state" != unknown ]] || return 1
+    [[ "$state" == live ]] && count=$(( count + 1 ))
   done
   echo "$count"
 }
@@ -1119,6 +1061,1431 @@ has_exceeded_retries() {
   (( count >= MAX_RETRIES ))
 }
 
+# ── Forward-only recovery coordinator ────────────────────────────────────
+# Recovery decisions are made from one fetched target object.  None of these
+# helpers reads the mutable daemon-home backlog as authority.
+_forward_sha256() {
+  printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+}
+
+_forward_sid_valid() {
+  [[ "${1:-}" =~ ^[A-Za-z][A-Za-z0-9._-]{0,63}$ ]]
+}
+
+_forward_evidence_fatal() {
+  _daemon_evidence_fatal=true
+  return 1
+}
+
+_forward_evidence() {
+  local sid="$1" outcome="$2" reason="$3" attempt="$4"
+  local source_digest="$5" record_digest="$6" fields="${7:-none}"
+  _forward_sid_valid "$sid" || { _forward_evidence_fatal; return 1; }
+  case "$outcome" in
+    accepted|blocked|conflict|failure|held|launched|noop|retryable) ;;
+    *) _forward_evidence_fatal; return 1 ;;
+  esac
+  case "$reason" in
+    already_current|caller_untrusted|context_invalid|effect_inhibited|empty_run_state|integrity_unverified|invalid_record|merge_terminal_owned|none|not_actionable|pending_run|policy_stall|projection_failed|remote_changed|required_plan_absent|resumable|runner_live|source_unavailable|terminal_projection|worktree_unrecoverable) ;;
+    *) _forward_evidence_fatal; return 1 ;;
+  esac
+  [[ "$attempt" == none || "$attempt" =~ ^[0-9a-f]{64}$ ]] \
+    || { _forward_evidence_fatal; return 1; }
+  [[ "$source_digest" =~ ^[0-9a-f]{64}$ ]] \
+    || { _forward_evidence_fatal; return 1; }
+  [[ "$record_digest" =~ ^[0-9a-f]{64}$ ]] \
+    || { _forward_evidence_fatal; return 1; }
+  case "$fields" in
+    none|phase_status|phase_status,status|status) ;;
+    *) _forward_evidence_fatal; return 1 ;;
+  esac
+  [[ "$fields" != *"="* ]] || { _forward_evidence_fatal; return 1; }
+  printf '[FORWARD-RECOVERY] story=%s writer=recovery.scan outcome=%s reason=%s attempt=%s source_digest=%s record_digest=%s fields=%s\n' \
+    "$sid" "$outcome" "$reason" "$attempt" "$source_digest" "$record_digest" \
+    "$fields" >&2 || { _forward_evidence_fatal; return 1; }
+}
+
+# Context intentions stay value-bound for exact settlement. Observability is a
+# separate public surface and exposes only the names of affected fields.
+_forward_evidence_for_intention() {
+  local sid="$1" outcome="$2" reason="$3" attempt="$4"
+  local source_digest="$5" record_digest="$6" intention="${7:-none}" fields
+  case "$intention" in
+    none) fields=none ;;
+    phase_status=commit_stalled) fields=phase_status ;;
+    phase_status=failed,status=failed) fields=phase_status,status ;;
+    status=failed|status=escalated) fields=status ;;
+    *) _forward_evidence_fatal; return 1 ;;
+  esac
+  _forward_evidence "$sid" "$outcome" "$reason" "$attempt" \
+    "$source_digest" "$record_digest" "$fields"
+}
+
+# Main-loop deferrals expose a fixed reason and identity digests only. Missing
+# authority is represented by the zero digest rather than by ambient values.
+_forward_main_hold() {
+  local sid="$1" reason="$2"
+  local zero="0000000000000000000000000000000000000000000000000000000000000000"
+  local source_digest="${3:-$zero}"
+  local record_digest="${4:-$zero}"
+  [[ "$source_digest" =~ ^[0-9a-f]{64}$ ]] || source_digest="$zero"
+  [[ "$record_digest" =~ ^[0-9a-f]{64}$ ]] || record_digest="$zero"
+  _forward_evidence "$sid" held "$reason" none "$source_digest" \
+    "$record_digest" none
+}
+
+_forward_resolve_worktree() {
+  local sid="$1" repo_name
+  _forward_sid_valid "$sid" || return 1
+  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
+    printf '%s\n' "${GAAI_WORKTREES_BASE}/${sid}-workspace"
+    return 0
+  fi
+  repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
+  printf '%s\n' "$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
+}
+
+_forward_plan_present() {
+  local sid="$1" wt="$2"
+  [[ -s "$wt/.gaai/project/contexts/artefacts/plans/${sid}.execution-plan.md" ]]
+}
+
+# Emits verified, recoverable, unrecoverable, unknown or absent_new without
+# mutating the worktree. Exact-source repair is a separate authority-bound
+# operation performed only after a canonical target record has been admitted.
+_forward_worktree_state() {
+  local sid="$1" allow_absent="${2:-false}" wt rc=0 check_log porcelain
+  _forward_sid_valid "$sid" || { printf '%s\n' unknown; return 1; }
+  wt=$(_forward_resolve_worktree "$sid") || { printf '%s\n' unknown; return 1; }
+  if [[ ! -d "$wt" ]]; then
+    if [[ "$allow_absent" == true ]]; then
+      printf '%s\n' absent_new
+      return 0
+    fi
+    printf '%s\n' unknown
+    return 1
+  fi
+  # Unborn/null/corrupt metadata and all dirty/untracked evidence are
+  # preservation states, never inputs to the destructive safe-base helper.
+  git -C "$wt" rev-parse --verify -q HEAD >/dev/null 2>&1 || {
+    printf '%s\n' unknown; return 1; }
+  porcelain=$(git -C "$wt" status --porcelain 2>/dev/null) || {
+    printf '%s\n' unknown; return 1; }
+  if [[ -n "$porcelain" ]]; then
+    printf '%s\n' unknown
+    return 1
+  fi
+  check_log=$(mktemp "$LOCK_DIR/.integrity-XXXXXX" 2>/dev/null) || {
+    printf '%s\n' unknown; return 1; }
+  _check_worktree_integrity "$wt" "$TARGET_BRANCH" "$sid" >"$check_log" 2>&1 || rc=$?
+  case "$rc" in
+    0) rm -f "$check_log"; printf '%s\n' verified; return 0 ;;
+    1) rm -f "$check_log"; printf '%s\n' recoverable; return 1 ;;
+    2) rm -f "$check_log"; printf '%s\n' unrecoverable; return 2 ;;
+    *) rm -f "$check_log"; printf '%s\n' unknown; return 1 ;;
+  esac
+}
+
+# Repair one typed recoverable worktree against a private remote-tracking ref
+# pinned to the already-admitted target object. The shared recovery helper is
+# unchanged; this coordinator supplies its immutable base.
+_forward_repair_worktree_exact() {
+  local sid="$1" expected_source="$2" wt live private_branch private_ref
+  local repair_log repair_rc=0 cleanup_rc=0
+  _forward_sid_valid "$sid" || return 1
+  [[ "$expected_source" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || return 1
+  wt=$(_forward_resolve_worktree "$sid") || return 1
+  [[ -d "$wt" ]] || return 1
+  git -C "$PROJECT_DIR" fetch origin "$TARGET_BRANCH" --quiet || return 1
+  live=$(git -C "$PROJECT_DIR" rev-parse "origin/${TARGET_BRANCH}" 2>/dev/null) \
+    || return 1
+  [[ "$live" == "$expected_source" ]] || return 1
+  private_branch="gaai-forward-${sid}-$$-${RANDOM}"
+  private_ref="refs/remotes/origin/${private_branch}"
+  git -C "$PROJECT_DIR" check-ref-format "$private_ref" >/dev/null 2>&1 || return 1
+  git -C "$PROJECT_DIR" update-ref "$private_ref" "$expected_source" "" || return 1
+  repair_log=$(mktemp "$LOCK_DIR/.forward-repair-XXXXXX" 2>/dev/null) || {
+    git -C "$PROJECT_DIR" update-ref -d "$private_ref" "$expected_source" 2>/dev/null
+    return 1
+  }
+  chmod 600 "$repair_log" 2>/dev/null || {
+    rm -f "$repair_log"
+    git -C "$PROJECT_DIR" update-ref -d "$private_ref" "$expected_source" 2>/dev/null
+    return 1
+  }
+  _recover_worktree_safe_base "$sid" "$wt" "$private_branch" \
+    >"$repair_log" 2>&1 || repair_rc=$?
+  git -C "$PROJECT_DIR" update-ref -d "$private_ref" "$expected_source" \
+    2>/dev/null || cleanup_rc=$?
+  rm -f "$repair_log"
+  [[ "$cleanup_rc" -eq 0 ]] || return 1
+  git -C "$PROJECT_DIR" fetch origin "$TARGET_BRANCH" --quiet || return 1
+  live=$(git -C "$PROJECT_DIR" rev-parse "origin/${TARGET_BRANCH}" 2>/dev/null) \
+    || return 1
+  [[ "$live" == "$expected_source" ]] || return 1
+  case "$repair_rc" in
+    0) return 0 ;;
+    2) return 2 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Probe, optionally repair one typed recoverable state, and then require a
+# fresh non-mutating verdict. Callers must already have admitted the source.
+_forward_prepare_worktree() {
+  local sid="$1" expected_source="$2" allow_absent="${3:-false}"
+  local state rc=0
+  state=$(_forward_worktree_state "$sid" "$allow_absent") || rc=$?
+  case "$rc:$state" in
+    0:verified|0:absent_new) printf '%s\n' "$state"; return 0 ;;
+    1:recoverable)
+      _forward_repair_worktree_exact "$sid" "$expected_source" || return $?
+      rc=0
+      state=$(_forward_worktree_state "$sid" false) || rc=$?
+      [[ "$rc:$state" == 0:verified ]] || return 1
+      printf '%s\n' verified
+      return 0
+      ;;
+    2:unrecoverable) printf '%s\n' unrecoverable; return 2 ;;
+    *) printf '%s\n' unknown; return 1 ;;
+  esac
+}
+
+# Populates the _FORWARD_* globals from one exact origin/${TARGET_BRANCH}
+# backlog object and one descriptor-bound classifier read.
+_forward_classify() {
+  local sid="$1" scope="$2" integrity="$3" plan_present="$4"
+  local snapshot source blob facts
+  snapshot=$(mktemp "$LOCK_DIR/.forward-snapshot-XXXXXX" 2>/dev/null) || return 1
+  chmod 600 "$snapshot" 2>/dev/null || { rm -f "$snapshot"; return 1; }
+  if ! git -C "$PROJECT_DIR" fetch origin "$TARGET_BRANCH" --quiet \
+      || ! source=$(git -C "$PROJECT_DIR" rev-parse "origin/${TARGET_BRANCH}" 2>/dev/null) \
+      || ! [[ "$source" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] \
+      || ! blob=$(git -C "$PROJECT_DIR" rev-parse "${source}:${BACKLOG_REL}" 2>/dev/null) \
+      || ! [[ "$blob" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] \
+      || ! git -C "$PROJECT_DIR" show "${source}:${BACKLOG_REL}" > "$snapshot" 2>/dev/null \
+      || ! facts=$(forward_classify_snapshot "$sid" "$snapshot" "$source" "$blob" \
+           "$scope" "$integrity" "$plan_present"); then
+    rm -f "$snapshot"
+    return 1
+  fi
+  IFS=$'\t' read -r _FORWARD_ACTION _FORWARD_REASON _FORWARD_STATUS \
+    _FORWARD_PHASE _FORWARD_STARTED _FORWARD_RECORD_DIGEST \
+    _FORWARD_SOURCE _FORWARD_BLOB <<< "$facts"
+  _FORWARD_SNAPSHOT="$snapshot"
+  _FORWARD_SOURCE_DIGEST=$(_forward_sha256 "$_FORWARD_SOURCE") || {
+    rm -f "$snapshot"; return 1; }
+  return 0
+}
+
+# A preliminary main-loop classification admits target identity only. It must
+# be the integrity-blocked shape of the lifecycle stage that the loop itself
+# is about to advance; invalid, terminal and no-effect rows cannot authorize a
+# worktree repair.
+_forward_main_record_admitted() {
+  case "${1:-}:$_FORWARD_ACTION:$_FORWARD_REASON:$_FORWARD_STATUS:$_FORWARD_PHASE" in
+    pre:block_integrity:integrity_unverified:refined:not_started) return 0 ;;
+    post:block_integrity:integrity_unverified:in_progress:not_started|\
+    post:block_integrity:integrity_unverified:in_progress:planned|\
+    post:block_integrity:integrity_unverified:in_progress:implemented|\
+    post:block_integrity:integrity_unverified:in_progress:qa_failed|\
+    post:block_integrity:integrity_unverified:in_progress:qa_passed) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Re-establish final authority after Story-file reconciliation. Both recovery
+# and post-claim launch paths use this same boundary before context, retry or
+# spawn effects. The successful caller owns _FORWARD_SNAPSHOT and must remove
+# it after consuming the verified facts.
+_forward_revalidate_after_reconcile() {
+  local sid="$1" expected_source="$2" expected_blob="$3" expected_record="$4"
+  local scope="$5" allow_absent="${6:-false}" wt integrity plan=false
+  integrity=$(_forward_prepare_worktree "$sid" "$expected_source" "$allow_absent") \
+    || return 1
+  if [[ "$scope" == recovery && "$integrity" != verified ]]; then
+    return 1
+  fi
+  wt=$(_forward_resolve_worktree "$sid") || return 1
+  _forward_plan_present "$sid" "$wt" && plan=true
+  _forward_classify "$sid" "$scope" "$integrity" "$plan" || return 1
+  if [[ "$_FORWARD_SOURCE" != "$expected_source" \
+      || "$_FORWARD_BLOB" != "$expected_blob" \
+      || "$_FORWARD_RECORD_DIGEST" != "$expected_record" \
+      || "$_FORWARD_ACTION:$_FORWARD_REASON" != resume:resumable ]]; then
+    rm -f "$_FORWARD_SNAPSHOT"
+    return 1
+  fi
+  _FORWARD_FINAL_INTEGRITY="$integrity"
+}
+
+# Final effect-edge authority check. Unlike the reconciliation guard above it
+# is deliberately read-only: no worktree repair may occur after temporary
+# inhibitors have cleared and before retry/spawn authority is consumed.
+_forward_last_edge_guard() {
+  local sid="$1" expected_source="$2" expected_blob="$3" expected_record="$4"
+  local scope="$5" allow_absent="${6:-false}" wt integrity plan=false rc=0
+  [[ "$scope" == postclaim || "$scope" == recovery ]] || return 1
+  wt=$(_forward_resolve_worktree "$sid") || return 1
+  integrity=$(_forward_worktree_state "$sid" "$allow_absent") || rc=$?
+  case "$scope:$rc:$integrity" in
+    recovery:0:verified|postclaim:0:verified|postclaim:0:absent_new) ;;
+    *) return 1 ;;
+  esac
+  _forward_plan_present "$sid" "$wt" && plan=true
+  _forward_classify "$sid" "$scope" "$integrity" "$plan" || return 1
+  if [[ "$_FORWARD_SOURCE" != "$expected_source" \
+      || "$_FORWARD_BLOB" != "$expected_blob" \
+      || "$_FORWARD_RECORD_DIGEST" != "$expected_record" \
+      || "$_FORWARD_ACTION:$_FORWARD_REASON" != resume:resumable ]]; then
+    return 1
+  fi
+}
+
+_forward_context_path() {
+  local sid="$1" parent="$LOCK_DIR/.recovery-contexts"
+  _forward_sid_valid "$sid" || return 1
+  ( umask 077; mkdir -p "$parent" ) 2>/dev/null || return 1
+  printf '%s\n' "$parent/recovery.scan.${sid}.json"
+}
+
+# A missing post-claim worktree is recoverable only when an immutable context
+# from the same target record proves that this exact cycle was bound as
+# absent_new. This read grants no effect; it only selects the safe probe mode.
+_forward_absent_context_admitted() {
+  local sid="$1" source="$2" blob="$3" record="$4" context row
+  local c_story c_source c_blob c_record c_attempt c_attempt_digest
+  local c_retained c_records c_event c_state c_integrity c_action c_reason
+  local c_fields c_digest
+  context=$(_forward_context_path "$sid") || return 1
+  [[ -e "$context" && ! -L "$context" ]] || return 1
+  row=$(forward_context_read "$context") || return 1
+  IFS=$'\t' read -r c_story c_source c_blob c_record c_attempt c_attempt_digest \
+    c_retained c_records c_event c_state c_integrity c_action c_reason \
+    c_fields c_digest <<< "$row"
+  [[ "$c_story:$c_source:$c_blob:$c_record" == "$sid:$source:$blob:$record" \
+      && "$c_attempt:$c_attempt_digest:$c_retained:$c_records" == \
+        none:none:none:none \
+      && "$c_event:$c_state:$c_integrity:$c_action:$c_reason:$c_fields" == \
+        none:none:absent_new:resume:resumable:none \
+      && "$c_digest" =~ ^[0-9a-f]{64}$ ]]
+}
+
+_forward_bind_context() {
+  local path="$1"
+  shift
+  local expected actual
+  expected=$(IFS=$'\t'; printf '%s' "$*")
+  if forward_context_install "$path" "$@"; then
+    forward_context_read "$path"
+    return $?
+  fi
+  actual=$(forward_context_read "$path") || return 1
+  [[ "${actual%$'\t'*}" == "$expected" ]] || return 1
+  printf '%s\n' "$actual"
+}
+
+# Restore only the exact validated context row that this cycle CAS-retired.
+# This is used when retry persistence fails before any spawn was attempted.
+_forward_restore_context_row() {
+  [[ "$#" -eq 2 ]] || return 1
+  local path="$1" row="$2" actual
+  local story source blob record attempt attempt_digest retained records
+  local event state integrity action reason fields digest
+  IFS=$'\t' read -r story source blob record attempt attempt_digest retained \
+    records event state integrity action reason fields digest <<< "$row"
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  forward_context_install "$path" "$story" "$source" "$blob" "$record" \
+    "$attempt" "$attempt_digest" "$retained" "$records" "$event" "$state" \
+    "$integrity" "$action" "$reason" "$fields" || return 1
+  actual=$(forward_context_read "$path") || return 1
+  [[ "$actual" == "$row" ]]
+}
+
+_forward_manifest_args() {
+  local manifest="$1" rows field _name _digest value _location
+  _FORWARD_INTENDED=none
+  _FORWARD_JOURNAL_ARGS=()
+  [[ "$manifest" == *$'\n'* ]] || return 1
+  rows=${manifest#*$'\n'}
+  while IFS=$'\t' read -r field _name _digest value _location; do
+    [[ -n "$field" ]] || continue
+    case "$field" in phase_status|status) ;; *) return 1 ;; esac
+    _FORWARD_JOURNAL_ARGS+=("$field" "$value")
+  done <<< "$rows"
+  (( ${#_FORWARD_JOURNAL_ARGS[@]} >= 2 )) || return 1
+  if [[ "${_FORWARD_JOURNAL_ARGS[*]}" == "phase_status failed status failed" ]]; then
+    _FORWARD_INTENDED="phase_status=failed,status=failed"
+  elif [[ "${_FORWARD_JOURNAL_ARGS[*]}" == "phase_status commit_stalled" ]]; then
+    _FORWARD_INTENDED="phase_status=commit_stalled"
+  elif [[ "${_FORWARD_JOURNAL_ARGS[*]}" == "status failed" ]]; then
+    _FORWARD_INTENDED="status=failed"
+  elif [[ "${_FORWARD_JOURNAL_ARGS[*]}" == "status escalated" ]]; then
+    _FORWARD_INTENDED="status=escalated"
+  else
+    return 1
+  fi
+}
+
+_forward_project() {
+  local sid="$1" expected_source="$2"
+  shift 2
+  GAAI_LIFECYCLE_CALLER_ASSET=".gaai/core/scripts/delivery-daemon.sh" \
+  GAAI_LIFECYCLE_EXPECTED_SOURCE_SHA="$expected_source" \
+    _journal_persist_lifecycle "$sid" recovery.scan "$@"
+}
+
+# A repeated commit-phase outcome is a durable forward policy stall, never a
+# phase rewind or permission to buy another hosted attempt.  The observation
+# helper ignores daemon-authored bookkeeping and binds the decision to the
+# current candidate content.  Return 0 to permit the existing resume path, 2
+# after a verified commit_stalled projection, 1 on ambiguous evidence, and 4
+# when mandatory evidence cannot be persisted.
+_forward_commit_retry_guard() {
+  local sid="$1" wt="$2" integrity="$3" plan="$4"
+  [[ "$_FORWARD_ACTION:$_FORWARD_REASON:$_FORWARD_PHASE" == \
+      "resume:resumable:qa_passed" ]] || return 0
+  local observation snapshot _cd_new _cd_outcome _cd_progress
+  local _cd_state_count _cd_state_outcome _cd_state_progress
+  local _cd_event_digest _cd_state_digest
+  local _cd_threshold="${COMMIT_PHASE_RETRY_THRESHOLD:-3}"
+  observation=$(_commit_retry_observe "$sid" "$wt" \
+    "origin/${TARGET_BRANCH}" "$_cd_threshold") || return 1
+  IFS='|' read -r _cd_new _cd_outcome _cd_progress <<< "$observation"
+  [[ "$_cd_new" =~ ^[1-9][0-9]*$ && -n "$_cd_outcome" ]] || return 1
+  snapshot=$(_commit_retry_state_snapshot "$sid") || return 1
+  IFS='|' read -r _cd_state_count _cd_state_outcome _cd_state_progress \
+    _cd_event_digest _cd_state_digest <<< "$snapshot"
+  [[ "$_cd_state_count:$_cd_state_outcome:$_cd_state_progress" == \
+      "$_cd_new:$_cd_outcome:$_cd_progress" \
+      && "$_cd_event_digest" =~ ^[0-9a-f]{64}$ \
+      && "$_cd_state_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  if (( _cd_new < _cd_threshold )); then
+    log "${GREEN}[FORWARD-RECOVERY] ${sid} commit outcome remains below containment policy — resume remains eligible${NC}"
+    return 0
+  fi
+
+  local context row context_digest
+  context=$(_forward_context_path "$sid") || return 1
+  row=$(_forward_bind_context "$context" "$sid" "$_FORWARD_SOURCE" \
+    "$_FORWARD_BLOB" "$_FORWARD_RECORD_DIGEST" none none none none \
+    "$_cd_event_digest" "$_cd_state_digest" "$integrity" \
+    forward_commit_stall stall_pending phase_status=commit_stalled) || return 1
+  context_digest=${row##*$'\t'}
+  _forward_resume_policy_stall "$sid" "$wt" "$context" "$context_digest" \
+    "$_FORWARD_SOURCE" "$_FORWARD_BLOB" "$_FORWARD_RECORD_DIGEST" \
+    "$_cd_event_digest" "$_cd_state_digest" || return $?
+  return 2
+}
+
+# Resume a policy-stall context created before its journal run-state.  The
+# context carries one fixed intention; a restart may create/resume only that
+# transition after proving the original qa_passed object is still exact.  The
+# same path also finalizes a post-projector context whose remote field is
+# already current.
+_forward_resume_policy_stall() {
+  local sid="$1" wt="$2" context="$3" context_digest="$4"
+  local bound_source="$5" bound_blob="$6" bound_record="$7"
+  local expected_event="${8:-none}" expected_state="${9:-none}"
+  local retained_manifest="${10:-}" attempt_evidence=none
+  local retained_state_digest=none retained_rows=""
+  local observation snapshot _cd_new _cd_outcome _cd_progress
+  local _cd_state_count _cd_state_outcome _cd_state_progress
+  local _cd_event_digest _cd_state_digest
+  local _cd_threshold="${COMMIT_PHASE_RETRY_THRESHOLD:-3}"
+  observation=$(_commit_retry_observe "$sid" "$wt" \
+    "origin/${TARGET_BRANCH}" "$_cd_threshold") || return 1
+  IFS='|' read -r _cd_new _cd_outcome _cd_progress <<< "$observation"
+  snapshot=$(_commit_retry_state_snapshot "$sid") || return 1
+  IFS='|' read -r _cd_state_count _cd_state_outcome _cd_state_progress \
+    _cd_event_digest _cd_state_digest <<< "$snapshot"
+  [[ "$_cd_new" =~ ^[1-9][0-9]*$ && -n "$_cd_outcome" \
+      && "$_cd_progress" == stall_pending \
+      && "$_cd_state_count:$_cd_state_outcome:$_cd_state_progress" == \
+        "$_cd_new:$_cd_outcome:$_cd_progress" \
+      && "$_cd_event_digest" =~ ^[0-9a-f]{64}$ \
+      && "$_cd_state_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [[ "$expected_event" == none || "$expected_event" == "$_cd_event_digest" ]] \
+    || return 1
+  [[ "$expected_state" == none || "$expected_state" == "$_cd_state_digest" ]] \
+    || return 1
+  (( _cd_new >= _cd_threshold )) || return 1
+
+  if [[ -n "$retained_manifest" ]]; then
+    _forward_manifest_args "$retained_manifest" || return 1
+    [[ "$_FORWARD_INTENDED" == phase_status=commit_stalled ]] || return 1
+    local retained_token retained_source retained_token_digest retained_records_digest
+    local retained_header="" retained_line
+    retained_rows=""
+    while IFS= read -r retained_line; do
+      if [[ -z "$retained_header" ]]; then
+        retained_header="$retained_line"
+      else
+        retained_rows="${retained_rows}${retained_rows:+$'\n'}${retained_line}"
+      fi
+    done <<< "$retained_manifest"
+    [[ -n "$retained_header" && -n "$retained_rows" ]] || return 1
+    IFS=$'\t' read -r retained_token retained_source retained_token_digest \
+      retained_state_digest retained_records_digest \
+      <<< "$retained_header"
+    [[ "$retained_token" =~ ^[0-9a-f]{64}$ \
+        && "$retained_token_digest" =~ ^[0-9a-f]{64}$ \
+        && "$retained_state_digest" =~ ^[0-9a-f]{64}$ \
+        && "$retained_records_digest" =~ ^[0-9a-f]{64}$ \
+        && "$retained_source" == "$bound_source" ]] || return 1
+    attempt_evidence="$retained_token_digest"
+  fi
+
+  case "$_FORWARD_ACTION:$_FORWARD_REASON:$_FORWARD_PHASE" in
+    resume:resumable:qa_passed)
+      [[ "$bound_source" == "$_FORWARD_SOURCE" \
+          && "$bound_blob" == "$_FORWARD_BLOB" \
+          && "$bound_record" == "$_FORWARD_RECORD_DIGEST" ]] || return 1
+      _forward_project "$sid" "$_FORWARD_SOURCE" phase_status commit_stalled \
+        || return 1
+      ;;
+    hold_operator:policy_stall:commit_stalled)
+      if [[ "$retained_state_digest" != none ]]; then
+        local _field _name _digest _value location
+        while IFS=$'\t' read -r _field _name _digest _value location; do
+          [[ -n "$_field" && "$location" == applied ]] || return 1
+        done <<< "$retained_rows"
+        _journal_retire_accepted_lifecycle "$sid" recovery.scan \
+          "$retained_state_digest" || return 1
+      fi
+      ;;
+    *) return 1 ;;
+  esac
+  rm -f "$_FORWARD_SNAPSHOT"
+
+  local current_integrity=unknown current_plan=false
+  current_integrity=$(_forward_worktree_state "$sid" false) || return 1
+  _forward_plan_present "$sid" "$wt" && current_plan=true
+  _forward_classify "$sid" recovery "$current_integrity" "$current_plan" || return 1
+  if [[ "$_FORWARD_ACTION:$_FORWARD_REASON:$_FORWARD_PHASE" != \
+      "hold_operator:policy_stall:commit_stalled" ]] \
+      || ! _lifecycle_snapshot_matches "$_FORWARD_SNAPSHOT" "$sid" \
+        phase_status commit_stalled; then
+    rm -f "$_FORWARD_SNAPSHOT"
+    return 1
+  fi
+  forward_context_remove "$context" "$context_digest" || {
+    rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+  _commit_retry_clear "$sid" "$_cd_state_digest" || {
+    rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+  _forward_evidence_for_intention "$sid" accepted policy_stall "$attempt_evidence" \
+    "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" \
+    phase_status=commit_stalled || return 4
+  log "[$(date '+%Y-%m-%dT%H:%M:%SZ')] ${sid} repeated commit outcome reached containment; phase field updated, relaunch inhibited"
+  notify_escalation "$sid" "Commit-phase repeated failure — stalled" \
+    "Repeated commit-phase failure reached containment; inspect candidate progress before an operator-owned reset"
+  rm -f "$_FORWARD_SNAPSHOT"
+}
+
+_forward_runner_state() {
+  local sid="$1" handles live
+  command -v node >/dev/null 2>&1 || return 1
+  handles=$(node "$PROJECT_DIR/.gaai/core/adapters/claude-code/nested-claude-spawn.js" \
+    --reconcile-handles 2>/dev/null) || return 1
+  live=$(python3 - "$sid" "$handles" <<'PY'
+import json, re, sys
+sid, raw = sys.argv[1:]
+try:
+    report = json.loads(raw)
+    if not isinstance(report, dict):
+        raise ValueError
+    for key in ("live", "stale", "expired", "unreadable"):
+        if not isinstance(report.get(key), list):
+            raise ValueError
+    if report["unreadable"]:
+        raise ValueError
+    def identity(item):
+        if not isinstance(item, dict):
+            raise ValueError
+        story_id = item.get("story_id")
+        pid = item.get("pid")
+        state = item.get("state")
+        if (not isinstance(story_id, str)
+                or re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", story_id) is None
+                or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+                or state not in ("running", "polling", "killed")):
+            raise ValueError
+        return story_id
+    live_ids = [identity(item) for item in report["live"]]
+    stale_ids = [identity(item) for item in report["stale"]]
+    expired_ids = [identity(item) for item in report["expired"]]
+    found = sid in live_ids or sid in expired_ids
+except (ValueError, TypeError, json.JSONDecodeError):
+    raise SystemExit(1)
+print("1" if found else "0")
+PY
+  ) || return 1
+  case "$live" in
+    0) printf 'clear\n' ;;
+    1) printf 'live\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+_forward_runner_clear() {
+  [[ "$(_forward_runner_state "$1")" == clear ]]
+}
+
+_forward_active_markers_clear() {
+  local sid="$1" marker
+  for marker in "$LOCK_DIR/${sid}.plan.active" "$LOCK_DIR/${sid}.impl.active" \
+      "$LOCK_DIR/${sid}.qa.active" "$LOCK_DIR/${sid}.commit.active"; do
+    [[ ! -e "$marker" && ! -L "$marker" ]] || return 1
+  done
+}
+
+_forward_lock_state() {
+  local sid="$1" lock pid
+  _forward_sid_valid "$sid" || return 1
+  lock="$LOCK_DIR/$sid.lock"
+  if [[ ! -e "$lock" && ! -L "$lock" ]]; then
+    printf 'absent\tnone\n'
+    return 0
+  fi
+  pid=$(python3 - "$lock" <<'PY'
+import os, stat, sys
+path = sys.argv[1]
+fd = None
+try:
+    before = os.lstat(path)
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    opened = os.fstat(fd)
+    after = os.lstat(path)
+    if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.geteuid()
+            or opened.st_mode & 0o077
+            or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            or (opened.st_dev, opened.st_ino) != (after.st_dev, after.st_ino)):
+        raise ValueError
+    raw = b""
+    while True:
+        chunk = os.read(fd, 1024)
+        if not chunk:
+            break
+        raw += chunk
+    value = raw.decode("ascii").strip()
+    if not value.isdigit() or int(value) < 1:
+        raise ValueError
+    print(value)
+except (OSError, UnicodeError, ValueError):
+    raise SystemExit(1)
+finally:
+    if fd is not None:
+        os.close(fd)
+PY
+  ) || { printf 'unknown\tnone\n'; return 1; }
+  if kill -0 "$pid" 2>/dev/null || ps -p "$pid" >/dev/null 2>&1; then
+    printf 'live\t%s\n' "$pid"
+  else
+    printf 'dead\t%s\n' "$pid"
+  fi
+}
+
+_forward_retire_dead_lock() {
+  local sid="$1" expected_pid="$2" lock
+  _forward_sid_valid "$sid" || return 1
+  [[ "$expected_pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  lock="$LOCK_DIR/$sid.lock"
+  python3 - "$lock" "$expected_pid" <<'PY'
+import errno, fcntl, os, secrets, stat, sys
+path, expected = sys.argv[1:]
+parent, name = os.path.split(path)
+dir_fd = fd = None
+quarantine = None
+try:
+    parent_before = os.lstat(parent)
+    dir_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                     | getattr(os, "O_NOFOLLOW", 0))
+    parent_opened = os.fstat(dir_fd)
+    if (not stat.S_ISDIR(parent_opened.st_mode)
+            or parent_opened.st_uid != os.geteuid()
+            or parent_opened.st_mode & 0o077
+            or (parent_opened.st_dev, parent_opened.st_ino)
+               != (parent_before.st_dev, parent_before.st_ino)):
+        raise ValueError
+    before = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
+    # Serialize claim of this exact inode. A competing reader may already
+    # have opened it, but after acquiring the inode lock it must re-stat the
+    # directory entry and observe either absence or a successor identity.
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    parent_current = os.lstat(parent)
+    if ((parent_current.st_dev, parent_current.st_ino)
+            != (parent_opened.st_dev, parent_opened.st_ino)
+            or parent_current.st_uid != os.geteuid()
+            or parent_current.st_mode & 0o077):
+        raise ValueError
+    opened = os.fstat(fd)
+    after = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    identity = (opened.st_dev, opened.st_ino)
+    if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.geteuid()
+            or opened.st_mode & 0o077
+            or identity != (before.st_dev, before.st_ino)
+            or identity != (after.st_dev, after.st_ino)):
+        raise ValueError
+    raw = b""
+    while True:
+        chunk = os.read(fd, 1024)
+        if not chunk:
+            break
+        raw += chunk
+    if raw.decode("ascii").strip() != expected:
+        raise ValueError
+    # PID observations made before this inode lock may be stale through PID
+    # reuse. Only an immediate ESRCH proves that the exact numeric owner is
+    # still absent; live, inaccessible and ambiguous results all preserve it.
+    try:
+        os.kill(int(expected), 0)
+    except OSError as error:
+        if error.errno != errno.ESRCH:
+            raise ValueError
+    else:
+        raise ValueError
+    quarantine = ".%s.%s.retire" % (name, secrets.token_hex(12))
+    os.rename(name, quarantine, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    moved = os.stat(quarantine, dir_fd=dir_fd, follow_symlinks=False)
+    if identity != (moved.st_dev, moved.st_ino):
+        # A non-cooperating successor replaced the name after validation.
+        # Restore that successor only when the destination is still absent;
+        # never overwrite a newer entry and never unlink the current name.
+        os.link(
+            quarantine, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd,
+            follow_symlinks=False,
+        )
+        os.fsync(dir_fd)
+        os.unlink(quarantine, dir_fd=dir_fd)
+        quarantine = None
+        os.fsync(dir_fd)
+        raise ValueError
+    os.fsync(dir_fd)
+    os.unlink(quarantine, dir_fd=dir_fd)
+    quarantine = None
+    os.fsync(dir_fd)
+except (OSError, UnicodeError, ValueError):
+    raise SystemExit(1)
+finally:
+    if fd is not None:
+        os.close(fd)
+    if dir_fd is not None:
+        os.close(dir_fd)
+PY
+}
+
+# Last-moment relaunch: every mutable precondition is re-read after the
+# context is bound. The context is retired only immediately before spawn.
+_forward_relaunch() {
+  local sid="$1" context="$2" expected_context_digest="$3"
+  local wt integrity plan=false row c_story c_source c_blob c_record c_attempt
+  local c_attempt_digest c_retained c_records c_event c_state
+  local c_integrity c_action c_reason c_fields c_digest
+  _forward_sid_valid "$sid" || return 1
+  wt=$(_forward_resolve_worktree "$sid") || return 1
+  _forward_plan_present "$sid" "$wt" && plan=true
+  _forward_classify "$sid" recovery unknown "$plan" || return 1
+  row=$(forward_context_read "$context") || { rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+  IFS=$'\t' read -r c_story c_source c_blob c_record c_attempt c_attempt_digest \
+    c_retained c_records c_event c_state c_integrity c_action c_reason c_fields \
+    c_digest <<< "$row"
+  if [[ "$c_digest" != "$expected_context_digest" || "$c_story" != "$sid" \
+      || "$c_source" != "$_FORWARD_SOURCE" || "$c_blob" != "$_FORWARD_BLOB" \
+      || "$c_record" != "$_FORWARD_RECORD_DIGEST" || "$c_action" != resume \
+      || "$c_reason" != resumable || "$c_fields" != none \
+      || "$c_event:$c_state" != none:none ]]; then
+    rm -f "$_FORWARD_SNAPSHOT"
+    return 1
+  fi
+  rm -f "$_FORWARD_SNAPSHOT"
+  local bound_scope=recovery bound_allow_absent=false
+  if [[ "$c_integrity" == absent_new ]]; then
+    bound_scope=postclaim
+    bound_allow_absent=true
+  elif [[ "$c_integrity" != verified ]]; then
+    return 1
+  fi
+  local pending_rc=0
+  _journal_inspect_pending_lifecycle "$sid" recovery.scan >/dev/null 2>&1 || pending_rc=$?
+  [[ "$pending_rc" -eq 2 ]] || return 1
+  _forward_revalidate_after_reconcile "$sid" "$c_source" "$c_blob" \
+    "$c_record" "$bound_scope" "$bound_allow_absent" || return 1
+  rm -f "$_FORWARD_SNAPSHOT"
+  local lock_state lock_pid=""
+  IFS=$'\t' read -r lock_state lock_pid < <(_forward_lock_state "$sid") || return 1
+  [[ "$lock_state" != unknown ]] || return 1
+  [[ "$lock_state" != live ]] || return 2
+  _forward_active_markers_clear "$sid" || return 1
+  local runner_state
+  runner_state=$(_forward_runner_state "$sid") || return 1
+  [[ "$runner_state" != live ]] || return 2
+  ! tmux has-session -t "gaai-deliver-${sid}" 2>/dev/null || return 2
+  local active_now
+  active_now=$(active_count) || return 1
+  (( active_now < MAX_CONCURRENT )) || return 2
+  ! has_exceeded_retries "$sid" || return 1
+  local reconcile_rc=0
+  _reconcile_story_file_from_staging "$sid" "$wt" "$c_source" \
+    "$bound_allow_absent" || reconcile_rc=$?
+  [[ "$reconcile_rc" -le 1 ]] || return 1
+  _forward_revalidate_after_reconcile "$sid" "$c_source" "$c_blob" \
+    "$c_record" "$bound_scope" "$bound_allow_absent" || return 1
+  rm -f "$_FORWARD_SNAPSHOT"
+  local trace_id
+  trace_id=$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \
+    || python3 -c "import uuid; print(str(uuid.uuid4()),end='')") || return 1
+  if ! _forward_last_edge_guard "$sid" "$c_source" "$c_blob" "$c_record" \
+      "$bound_scope" "$bound_allow_absent"; then
+    if ! _forward_evidence "$sid" blocked remote_changed "$c_attempt_digest" \
+        "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none; then
+      rm -f "${_FORWARD_SNAPSHOT:-}"
+      return 4
+    fi
+    rm -f "${_FORWARD_SNAPSHOT:-}"
+    return 1
+  fi
+  rm -f "$_FORWARD_SNAPSHOT"
+  if [[ "$lock_state" == dead ]]; then
+    _forward_retire_dead_lock "$sid" "$lock_pid" || return 1
+    # Retiring an exact dead owner changes the execution-authority snapshot.
+    # Preserve the context and retry budget; a fresh cycle must re-admit every
+    # last-edge precondition before it can spawn.
+    return 2
+  fi
+  forward_context_remove "$context" "$expected_context_digest" || return 1
+  if ! increment_retry "$sid"; then
+    if ! _forward_restore_context_row "$context" "$row"; then
+      _forward_evidence "$sid" blocked context_invalid "$c_attempt_digest" \
+        "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none || return 4
+    fi
+    return 1
+  fi
+  launch_3phase_in_tmux "$sid" "$trace_id" "$c_source" "$c_blob" "$c_record"
+  return $?
+}
+
+_forward_retained_settle() {
+  local sid="$1" manifest="$2" context="$3" context_digest="$4"
+  local header rows token retained_source token_digest state_digest records_digest
+  header=${manifest%%$'\n'*}
+  rows=${manifest#*$'\n'}
+  IFS=$'\t' read -r token retained_source token_digest state_digest records_digest <<< "$header"
+  [[ "$token" =~ ^[0-9a-f]{64}$ && "$token_digest" =~ ^[0-9a-f]{64}$ \
+      && "$state_digest" =~ ^[0-9a-f]{64}$ && "$records_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  local accepted_before=false
+  if _lifecycle_snapshot_matches "$_FORWARD_SNAPSHOT" "$sid" "${_FORWARD_JOURNAL_ARGS[@]}"; then
+    accepted_before=true
+    local _field _name _digest _value location
+    while IFS=$'\t' read -r _field _name _digest _value location; do
+      [[ "$location" == applied ]] || return 1
+    done <<< "$rows"
+  else
+    _forward_project "$sid" "$_FORWARD_SOURCE" "${_FORWARD_JOURNAL_ARGS[@]}" || return 1
+  fi
+  rm -f "$_FORWARD_SNAPSHOT"
+
+  local verify_integrity=unknown verify_plan=false wt refreshed refreshed_rows pending_rc=0
+  if ! verify_integrity=$(_forward_worktree_state "$sid" false); then
+    rm -f "${_FORWARD_SNAPSHOT:-}"
+    return 2
+  fi
+  if [[ "$verify_integrity" != verified ]]; then
+    rm -f "${_FORWARD_SNAPSHOT:-}"
+    return 2
+  fi
+  wt=$(_forward_resolve_worktree "$sid") || return 1
+  _forward_plan_present "$sid" "$wt" && verify_plan=true
+  if ! _forward_classify "$sid" recovery "$verify_integrity" "$verify_plan"; then
+    rm -f "${_FORWARD_SNAPSHOT:-}"
+    return 3
+  fi
+  _lifecycle_snapshot_matches "$_FORWARD_SNAPSHOT" "$sid" "${_FORWARD_JOURNAL_ARGS[@]}" || {
+    rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+  if [[ "$accepted_before" == true ]]; then
+    refreshed=$(_journal_inspect_pending_lifecycle "$sid" recovery.scan) || {
+      rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+    refreshed_rows=${refreshed#*$'\n'}
+    local _field _name _digest _value location
+    while IFS=$'\t' read -r _field _name _digest _value location; do
+      [[ "$location" == applied ]] || { rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+    done <<< "$refreshed_rows"
+    # Remove the decision context first. If state retirement then fails, the
+    # exact retained attempt remains sufficient to bind a fresh context.
+    forward_context_remove "$context" "$context_digest" || {
+      rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+    _journal_retire_accepted_lifecycle "$sid" recovery.scan "$state_digest" || {
+      rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+  else
+    # A successful projector verifies the remote bytes and retires its own
+    # run-state. Absence is therefore the success proof here; attempting a
+    # second retirement turns success into a permanent retry loop.
+    _journal_inspect_pending_lifecycle "$sid" recovery.scan >/dev/null 2>&1 || pending_rc=$?
+    [[ "$pending_rc" -eq 2 ]] || { rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+    forward_context_remove "$context" "$context_digest" || {
+      rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+  fi
+  rm -f "$_FORWARD_SNAPSHOT"
+}
+
+_forward_recovery_one() {
+  local sid="$1" integrity=unknown wt plan=false manifest manifest_rc=0
+  local context context_row context_digest intended=none
+  local admitted_source admitted_blob admitted_record admitted_source_digest
+  local recovery_allow_absent=false recovery_scope=recovery
+  _forward_sid_valid "$sid" || return 1
+  wt=$(_forward_resolve_worktree "$sid") || return 1
+  _forward_plan_present "$sid" "$wt" && plan=true
+  if ! _forward_classify "$sid" recovery unknown "$plan"; then
+    local zero_digest="0000000000000000000000000000000000000000000000000000000000000000"
+    _forward_evidence "$sid" blocked source_unavailable none "$zero_digest" \
+      "$zero_digest" none || return 4
+    return 1
+  fi
+  admitted_source="$_FORWARD_SOURCE"
+  admitted_blob="$_FORWARD_BLOB"
+  admitted_record="$_FORWARD_RECORD_DIGEST"
+  admitted_source_digest="$_FORWARD_SOURCE_DIGEST"
+  if [[ "$_FORWARD_ACTION" == block_invalid_record ]]; then
+    _forward_evidence "$sid" blocked invalid_record none "$admitted_source_digest" \
+      "$admitted_record" none || return 4
+    rm -f "$_FORWARD_SNAPSHOT"
+    return 1
+  fi
+  if _forward_absent_context_admitted "$sid" "$admitted_source" \
+      "$admitted_blob" "$admitted_record"; then
+    recovery_allow_absent=true
+    recovery_scope=postclaim
+  fi
+
+  manifest=$(_journal_inspect_pending_lifecycle "$sid" recovery.scan) || manifest_rc=$?
+  case "$manifest_rc" in
+    0|2) ;;
+    1)
+    _forward_evidence "$sid" blocked invalid_record none "$_FORWARD_SOURCE_DIGEST" \
+      "$_FORWARD_RECORD_DIGEST" none || return 4
+    rm -f "$_FORWARD_SNAPSHOT"
+    return 1
+      ;;
+    *)
+      _forward_evidence "$sid" blocked invalid_record none "$_FORWARD_SOURCE_DIGEST" \
+        "$_FORWARD_RECORD_DIGEST" none || return 4
+      rm -f "$_FORWARD_SNAPSHOT"
+      return 1
+      ;;
+  esac
+
+  # Crash window: the projector may have verified the remote projection and
+  # retired run-state before the coordinator removed its retained context.
+  # Adopt only that exact digest-bound context, require its source to be an
+  # ancestor of the freshly pinned target, and retire it only when the exact
+  # intended fields are already current. Any ambiguity preserves the context.
+  if [[ "$manifest_rc" -eq 2 ]]; then
+    context=$(_forward_context_path "$sid") || { rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+    if [[ -e "$context" || -L "$context" ]]; then
+      local stale_row s_story s_source s_blob s_record s_attempt s_attempt_digest
+      local s_retained s_records s_event s_state s_integrity s_action s_reason
+      local s_fields s_digest stale_context_superseded=false
+      stale_row=$(forward_context_read "$context") || {
+        rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+      IFS=$'\t' read -r s_story s_source s_blob s_record s_attempt s_attempt_digest \
+        s_retained s_records s_event s_state s_integrity s_action s_reason \
+        s_fields s_digest <<< "$stale_row"
+      if [[ "$s_story" != "$sid" ]]; then
+        rm -f "$_FORWARD_SNAPSHOT"
+        return 1
+      fi
+      case "$s_attempt:$s_action:$s_reason:$s_fields" in
+        none:resume:resumable:none)
+          [[ "$s_attempt_digest:$s_records:$s_retained" == none:none:none \
+              && "$s_event:$s_state" == none:none \
+              && ( "$s_integrity" == verified || "$s_integrity" == absent_new ) ]] || {
+            rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+          ;;
+        retained:forward_terminal:terminal_projection:status=failed|\
+        retained:forward_terminal:terminal_projection:status=escalated|\
+        retained:forward_terminal:terminal_projection:phase_status=failed,status=failed)
+          [[ "$s_attempt_digest" =~ ^[0-9a-f]{64}$ \
+              && "$s_records" =~ ^[0-9a-f]{64}$ \
+              && "$s_retained" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || {
+            rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+          ;;
+        none:forward_commit_stall:stall_pending:phase_status=commit_stalled)
+          [[ "$s_attempt_digest:$s_records:$s_retained" == none:none:none \
+              && "$s_event" =~ ^[0-9a-f]{64}$ \
+              && "$s_state" =~ ^[0-9a-f]{64}$ ]] || {
+            rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+          ;;
+        *) rm -f "$_FORWARD_SNAPSHOT"; return 1 ;;
+      esac
+      if ! git -C "$PROJECT_DIR" merge-base --is-ancestor \
+          "$s_source" "$_FORWARD_SOURCE" 2>/dev/null; then
+        rm -f "$_FORWARD_SNAPSHOT"
+        return 1
+      fi
+      # Bind the orphan context to the immutable backlog object and Story
+      # record it names. An ancestor relation alone would allow a fabricated
+      # context to borrow an unrelated old source.
+      local stale_snapshot stale_blob stale_facts stale_record
+      stale_snapshot=$(mktemp "$LOCK_DIR/.forward-stale-XXXXXX" 2>/dev/null) || {
+        rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+      chmod 600 "$stale_snapshot" 2>/dev/null || {
+        rm -f "$stale_snapshot" "$_FORWARD_SNAPSHOT"; return 1; }
+      stale_blob=$(git -C "$PROJECT_DIR" rev-parse \
+        "${s_source}:${BACKLOG_REL}" 2>/dev/null) || {
+        rm -f "$stale_snapshot" "$_FORWARD_SNAPSHOT"; return 1; }
+      if [[ "$stale_blob" != "$s_blob" ]] \
+          || ! git -C "$PROJECT_DIR" show "${s_source}:${BACKLOG_REL}" \
+            > "$stale_snapshot" 2>/dev/null \
+          || ! stale_facts=$(forward_classify_snapshot "$sid" "$stale_snapshot" \
+            "$s_source" "$s_blob" recovery unknown false); then
+        rm -f "$stale_snapshot" "$_FORWARD_SNAPSHOT"
+        return 1
+      fi
+      IFS=$'\t' read -r _ _ _ _ _ stale_record _ _ <<< "$stale_facts"
+      rm -f "$stale_snapshot"
+      if [[ "$stale_record" != "$s_record" ]]; then
+        rm -f "$_FORWARD_SNAPSHOT"
+        return 1
+      fi
+      if [[ "$s_attempt:$s_action:$s_reason:$s_fields" == \
+          none:resume:resumable:none ]]; then
+        local stale_relaunch_rc=0 stale_source_digest
+        stale_source_digest=$(_forward_sha256 "$s_source") || {
+          rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+        if [[ "$s_source:$s_blob:$s_record" != \
+            "$_FORWARD_SOURCE:$_FORWARD_BLOB:$_FORWARD_RECORD_DIGEST" ]]; then
+          case "$_FORWARD_STATUS:$_FORWARD_PHASE" in
+            in_progress:not_started|in_progress:planned|in_progress:implemented|\
+            in_progress:qa_failed|in_progress:qa_passed) ;;
+            *) rm -f "$_FORWARD_SNAPSHOT"; return 1 ;;
+          esac
+          _forward_evidence "$sid" retryable remote_changed none \
+            "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none || return 4
+          forward_context_remove "$context" "$s_digest" || {
+            rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+          stale_context_superseded=true
+          # The current pinned snapshot remains live. The ordinary rc2 path
+          # below now performs typed repair, reclassification and a fresh
+          # context bind against B; its final repin still blocks A->B->C.
+        else
+          rm -f "$_FORWARD_SNAPSHOT"
+          _forward_relaunch "$sid" "$context" "$s_digest" || stale_relaunch_rc=$?
+          case "$stale_relaunch_rc" in
+            0)
+              _forward_evidence "$sid" launched resumable none \
+                "$stale_source_digest" "$s_record" none || return 4
+              return 0
+              ;;
+            2)
+              _forward_evidence "$sid" held effect_inhibited none \
+                "$stale_source_digest" "$s_record" none || return 4
+              return 2
+              ;;
+            4) return 4 ;;
+            *)
+              _forward_evidence "$sid" blocked effect_inhibited none \
+                "$stale_source_digest" "$s_record" none || return 4
+              return 1
+              ;;
+          esac
+        fi
+      fi
+      if [[ "$stale_context_superseded" != true ]]; then
+        if [[ "$s_attempt:$s_action:$s_reason:$s_fields" == \
+            none:forward_commit_stall:stall_pending:phase_status=commit_stalled ]]; then
+          local stale_policy_rc=0 stale_policy_source_digest
+          if ! stale_policy_source_digest=$(_forward_sha256 "$s_source"); then
+            local stale_policy_zero_digest="0000000000000000000000000000000000000000000000000000000000000000"
+            rm -f "$_FORWARD_SNAPSHOT"
+            _forward_evidence_for_intention "$sid" retryable source_unavailable \
+              none "$stale_policy_zero_digest" "$s_record" \
+              phase_status=commit_stalled || return 4
+            return 1
+          fi
+          _forward_resume_policy_stall "$sid" "$wt" "$context" "$s_digest" \
+            "$s_source" "$s_blob" "$s_record" "$s_event" "$s_state" \
+            || stale_policy_rc=$?
+          if [[ "$stale_policy_rc" -ne 0 ]]; then
+            rm -f "$_FORWARD_SNAPSHOT" 2>/dev/null || true
+            [[ "$stale_policy_rc" -eq 4 ]] && return 4
+            _forward_evidence_for_intention "$sid" retryable policy_stall none \
+              "$stale_policy_source_digest" "$s_record" \
+              phase_status=commit_stalled || return 4
+            return 1
+          fi
+          return 0
+        fi
+        local accepted_args=()
+        case "$s_fields" in
+          phase_status=commit_stalled) accepted_args=(phase_status commit_stalled) ;;
+          phase_status=failed,status=failed) accepted_args=(phase_status failed status failed) ;;
+          status=failed) accepted_args=(status failed) ;;
+          status=escalated) accepted_args=(status escalated) ;;
+          *) rm -f "$_FORWARD_SNAPSHOT"; return 1 ;;
+        esac
+        _lifecycle_snapshot_matches "$_FORWARD_SNAPSHOT" "$sid" "${accepted_args[@]}" || {
+          rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+        forward_context_remove "$context" "$s_digest" || {
+          rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+        _forward_evidence_for_intention "$sid" accepted already_current \
+          "$s_attempt_digest" "$_FORWARD_SOURCE_DIGEST" \
+          "$_FORWARD_RECORD_DIGEST" "$s_fields" || return 4
+      fi
+    elif [[ "$_FORWARD_ACTION:$_FORWARD_REASON:$_FORWARD_PHASE" == \
+        hold_operator:policy_stall:commit_stalled ]]; then
+      # Crash window after context retirement but before exact helper-state
+      # retirement. Re-adopt only the still-current content-bound stall state;
+      # absence or ambiguity remains fail-closed.
+      local adopted_observation adopted_snapshot adopted_count adopted_outcome
+      local adopted_progress adopted_state_count adopted_state_outcome
+      local adopted_state_progress adopted_event adopted_state
+      adopted_observation=$(_commit_retry_observe "$sid" "$wt" \
+        "origin/${TARGET_BRANCH}" "${COMMIT_PHASE_RETRY_THRESHOLD:-3}") || {
+        rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+      IFS='|' read -r adopted_count adopted_outcome adopted_progress \
+        <<< "$adopted_observation"
+      adopted_snapshot=$(_commit_retry_state_snapshot "$sid") || {
+        rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+      IFS='|' read -r adopted_state_count adopted_state_outcome \
+        adopted_state_progress adopted_event adopted_state <<< "$adopted_snapshot"
+      [[ "$adopted_count:$adopted_outcome:$adopted_progress" == \
+          "$adopted_state_count:$adopted_state_outcome:$adopted_state_progress" \
+          && "$adopted_progress" == stall_pending \
+          && "$adopted_event" =~ ^[0-9a-f]{64}$ \
+          && "$adopted_state" =~ ^[0-9a-f]{64}$ ]] || {
+        rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+      context_row=$(_forward_bind_context "$context" "$sid" "$_FORWARD_SOURCE" \
+        "$_FORWARD_BLOB" "$_FORWARD_RECORD_DIGEST" none none none none \
+        "$adopted_event" "$adopted_state" "$integrity" \
+        forward_commit_stall stall_pending phase_status=commit_stalled) || {
+        rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+      context_digest=${context_row##*$'\t'}
+      local adopted_policy_rc=0
+      local adopted_policy_source_digest="$_FORWARD_SOURCE_DIGEST"
+      local adopted_policy_record_digest="$_FORWARD_RECORD_DIGEST"
+      _forward_resume_policy_stall "$sid" "$wt" "$context" "$context_digest" \
+        "$_FORWARD_SOURCE" "$_FORWARD_BLOB" "$_FORWARD_RECORD_DIGEST" \
+        "$adopted_event" "$adopted_state" || adopted_policy_rc=$?
+      if [[ "$adopted_policy_rc" -ne 0 ]]; then
+        rm -f "$_FORWARD_SNAPSHOT"
+        [[ "$adopted_policy_rc" -eq 4 ]] && return 4
+        _forward_evidence_for_intention "$sid" retryable policy_stall none \
+          "$adopted_policy_source_digest" "$adopted_policy_record_digest" \
+          phase_status=commit_stalled || return 4
+        return 1
+      fi
+      return 0
+    fi
+  fi
+
+  # With no retained run left to settle, the pinned target may now authorize
+  # a typed repair. Journal evidence is always authenticated before this
+  # first potentially mutating boundary.
+  if [[ "$manifest_rc" -eq 2 ]]; then
+    rm -f "$_FORWARD_SNAPSHOT"
+    integrity=$(_forward_prepare_worktree "$sid" "$admitted_source" \
+      "$recovery_allow_absent") || integrity=unknown
+    plan=false
+    _forward_plan_present "$sid" "$wt" && plan=true
+    if ! _forward_classify "$sid" "$recovery_scope" "$integrity" "$plan" \
+        || [[ "$_FORWARD_SOURCE" != "$admitted_source" \
+            || "$_FORWARD_BLOB" != "$admitted_blob" \
+            || "$_FORWARD_RECORD_DIGEST" != "$admitted_record" ]]; then
+      _forward_evidence "$sid" blocked remote_changed none \
+        "$admitted_source_digest" "$admitted_record" none || return 4
+      rm -f "${_FORWARD_SNAPSHOT:-}"
+      return 1
+    fi
+  fi
+
+  if [[ "$manifest_rc" -eq 0 ]]; then
+    _forward_manifest_args "$manifest" || {
+      _forward_evidence "$sid" blocked invalid_record none "$_FORWARD_SOURCE_DIGEST" \
+        "$_FORWARD_RECORD_DIGEST" none || return 4
+      rm -f "$_FORWARD_SNAPSHOT"
+      return 1
+    }
+    local token retained_source token_digest state_digest records_digest
+    local retained_action retained_reason
+    IFS=$'\t' read -r token retained_source token_digest state_digest records_digest \
+      <<< "${manifest%%$'\n'*}"
+    if [[ "$_FORWARD_INTENDED" == phase_status=commit_stalled ]]; then
+      context=$(_forward_context_path "$sid") || {
+        rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+      [[ -e "$context" && ! -L "$context" ]] || {
+        _forward_evidence_for_intention "$sid" blocked context_invalid "$token_digest" \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" \
+          phase_status=commit_stalled || return 4
+        rm -f "$_FORWARD_SNAPSHOT"
+        return 1
+      }
+      local stall_row stall_story stall_source stall_blob stall_record
+      local stall_attempt stall_attempt_digest stall_retained stall_records
+      local stall_event stall_state stall_integrity stall_action stall_reason
+      local stall_fields stall_context_digest
+      stall_row=$(forward_context_read "$context") || {
+        rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+      IFS=$'\t' read -r stall_story stall_source stall_blob stall_record \
+        stall_attempt stall_attempt_digest stall_retained stall_records \
+        stall_event stall_state stall_integrity stall_action stall_reason \
+        stall_fields stall_context_digest <<< "$stall_row"
+      [[ "$stall_story" == "$sid" && "$stall_source" == "$retained_source" \
+          && "$stall_attempt:$stall_attempt_digest:$stall_retained:$stall_records" == \
+            none:none:none:none \
+          && "$stall_event" =~ ^[0-9a-f]{64}$ \
+          && "$stall_state" =~ ^[0-9a-f]{64}$ \
+          && "$stall_action:$stall_reason:$stall_fields" == \
+            forward_commit_stall:stall_pending:phase_status=commit_stalled ]] || {
+        _forward_evidence_for_intention "$sid" blocked context_invalid "$token_digest" \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" \
+          phase_status=commit_stalled || return 4
+        rm -f "$_FORWARD_SNAPSHOT"
+        return 1
+      }
+      local retained_policy_rc=0
+      local retained_policy_source_digest="$_FORWARD_SOURCE_DIGEST"
+      local retained_policy_record_digest="$_FORWARD_RECORD_DIGEST"
+      _forward_resume_policy_stall "$sid" "$wt" "$context" \
+        "$stall_context_digest" "$stall_source" "$stall_blob" "$stall_record" \
+        "$stall_event" "$stall_state" "$manifest" || retained_policy_rc=$?
+      if [[ "$retained_policy_rc" -ne 0 ]]; then
+        rm -f "$_FORWARD_SNAPSHOT"
+        [[ "$retained_policy_rc" -eq 4 ]] && return 4
+        _forward_evidence_for_intention "$sid" retryable policy_stall \
+          "$token_digest" "$retained_policy_source_digest" \
+          "$retained_policy_record_digest" phase_status=commit_stalled || return 4
+        return 1
+      fi
+      return 0
+    fi
+    case "$_FORWARD_INTENDED" in
+      phase_status=failed,status=failed)
+        retained_action=forward_terminal
+        retained_reason=terminal_projection
+        ;;
+      status=failed|status=escalated)
+        retained_action=forward_terminal
+        retained_reason=terminal_projection
+        ;;
+      *) rm -f "$_FORWARD_SNAPSHOT"; return 1 ;;
+    esac
+    context=$(_forward_context_path "$sid") || { rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+    context_row=$(_forward_bind_context "$context" "$sid" "$_FORWARD_SOURCE" \
+      "$_FORWARD_BLOB" "$_FORWARD_RECORD_DIGEST" retained "$token_digest" \
+      "$retained_source" "$records_digest" none none "$integrity" "$retained_action" \
+      "$retained_reason" "$_FORWARD_INTENDED") || {
+      _forward_evidence_for_intention "$sid" blocked context_invalid "$token_digest" \
+        "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" \
+        "$_FORWARD_INTENDED" || return 4
+      rm -f "$_FORWARD_SNAPSHOT"
+      return 1
+    }
+    context_digest=${context_row##*$'\t'}
+    local retained_settle_rc=0
+    local retained_evidence_source_digest="$_FORWARD_SOURCE_DIGEST"
+    local retained_evidence_record_digest="$_FORWARD_RECORD_DIGEST"
+    local retained_evidence_intended="$_FORWARD_INTENDED"
+    _forward_retained_settle "$sid" "$manifest" "$context" "$context_digest" \
+      || retained_settle_rc=$?
+    if [[ "$retained_settle_rc" -ne 0 ]]; then
+      [[ "$retained_settle_rc" -eq 4 ]] && return 4
+      local retained_failure_reason=projection_failed
+      case "$retained_settle_rc" in
+        2) retained_failure_reason=integrity_unverified ;;
+        3) retained_failure_reason=source_unavailable ;;
+      esac
+      _forward_evidence_for_intention "$sid" retryable \
+        "$retained_failure_reason" "$token_digest" \
+        "$retained_evidence_source_digest" "$retained_evidence_record_digest" \
+        "$retained_evidence_intended" || return 4
+      rm -f "$_FORWARD_SNAPSHOT" 2>/dev/null || true
+      return 1
+    fi
+    local settled_source_digest="$_FORWARD_SOURCE_DIGEST"
+    local settled_record_digest="$_FORWARD_RECORD_DIGEST"
+    local settled_intended="$_FORWARD_INTENDED"
+    _forward_evidence_for_intention "$sid" accepted already_current \
+      "$token_digest" "$settled_source_digest" "$settled_record_digest" \
+      "$settled_intended" || {
+      rm -f "${_FORWARD_SNAPSHOT:-}"
+      return 4
+    }
+    rm -f "${_FORWARD_SNAPSHOT:-}"
+    return 0
+  fi
+
+  if [[ "$_FORWARD_ACTION:$_FORWARD_REASON:$_FORWARD_PHASE" == \
+      "resume:resumable:qa_passed" ]]; then
+    local retry_guard_rc=0
+    _forward_commit_retry_guard "$sid" "$wt" "$integrity" "$plan" \
+      || retry_guard_rc=$?
+    case "$retry_guard_rc" in
+      0) ;;
+      2) return 0 ;;
+      4) return 4 ;;
+      *)
+        _forward_evidence "$sid" blocked effect_inhibited none \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none || return 4
+        rm -f "$_FORWARD_SNAPSHOT" 2>/dev/null || true
+        return 1
+        ;;
+    esac
+  fi
+
+  case "$_FORWARD_ACTION:$_FORWARD_REASON" in
+    resume:resumable) intended=none ;;
+    forward_fail:required_plan_absent|forward_fail:worktree_unrecoverable)
+      intended="phase_status=failed,status=failed" ;;
+    forward_terminal:terminal_projection)
+      case "$_FORWARD_PHASE" in
+        failed) intended="status=failed" ;;
+        escalated|qa_escalated) intended="status=escalated" ;;
+        *) rm -f "$_FORWARD_SNAPSHOT"; return 1 ;;
+      esac
+      ;;
+    hold_downstream:merge_terminal_owned)
+      _forward_evidence "$sid" held merge_terminal_owned none \
+        "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none || return 4
+      rm -f "$_FORWARD_SNAPSHOT"; return 0 ;;
+    hold_operator:policy_stall)
+      _forward_evidence "$sid" held policy_stall none "$_FORWARD_SOURCE_DIGEST" \
+        "$_FORWARD_RECORD_DIGEST" none || return 4
+      rm -f "$_FORWARD_SNAPSHOT"; return 0 ;;
+    no_effect:not_actionable)
+      _forward_evidence "$sid" noop not_actionable none "$_FORWARD_SOURCE_DIGEST" \
+        "$_FORWARD_RECORD_DIGEST" none || return 4
+      rm -f "$_FORWARD_SNAPSHOT"; return 0 ;;
+    block_integrity:integrity_unverified|block_invalid_record:*)
+      _forward_evidence "$sid" blocked integrity_unverified none \
+        "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none || return 4
+      rm -f "$_FORWARD_SNAPSHOT"; return 1 ;;
+    *) rm -f "$_FORWARD_SNAPSHOT"; return 1 ;;
+  esac
+
+  context=$(_forward_context_path "$sid") || { rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+  context_row=$(_forward_bind_context "$context" "$sid" "$_FORWARD_SOURCE" \
+    "$_FORWARD_BLOB" "$_FORWARD_RECORD_DIGEST" none none none none \
+    none none "$integrity" "$_FORWARD_ACTION" "$_FORWARD_REASON" "$intended") || {
+    _forward_evidence_for_intention "$sid" blocked context_invalid none \
+      "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" \
+      "$intended" || return 4
+    rm -f "$_FORWARD_SNAPSHOT"
+    return 1
+  }
+  context_digest=${context_row##*$'\t'}
+
+  if [[ "$_FORWARD_ACTION" == resume ]]; then
+    local relaunch_rc=0 relaunch_source_digest="$_FORWARD_SOURCE_DIGEST"
+    local relaunch_record_digest="$_FORWARD_RECORD_DIGEST"
+    rm -f "$_FORWARD_SNAPSHOT"
+    _forward_relaunch "$sid" "$context" "$context_digest" || relaunch_rc=$?
+    case "$relaunch_rc" in
+      0)
+        _forward_evidence "$sid" launched resumable none \
+          "$relaunch_source_digest" "$relaunch_record_digest" none || return 4
+        return 0
+        ;;
+      2)
+        _forward_evidence "$sid" held effect_inhibited none \
+          "$relaunch_source_digest" "$relaunch_record_digest" none || return 4
+        return 2
+        ;;
+      4) return 4 ;;
+      *)
+        _forward_evidence "$sid" blocked effect_inhibited none \
+          "$relaunch_source_digest" "$relaunch_record_digest" none || return 4
+        return 1
+        ;;
+    esac
+  fi
+
+  local args=()
+  case "$intended" in
+    phase_status=failed,status=failed) args=(phase_status failed status failed) ;;
+    status=failed) args=(status failed) ;;
+    status=escalated) args=(status escalated) ;;
+    *) rm -f "$_FORWARD_SNAPSHOT"; return 1 ;;
+  esac
+  local projected_source_digest="$_FORWARD_SOURCE_DIGEST"
+  local projected_record_digest="$_FORWARD_RECORD_DIGEST"
+  _forward_project "$sid" "$_FORWARD_SOURCE" "${args[@]}" || {
+    _forward_evidence_for_intention "$sid" retryable projection_failed none \
+      "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" \
+      "$intended" || return 4
+    rm -f "$_FORWARD_SNAPSHOT"; return 1; }
+  rm -f "$_FORWARD_SNAPSHOT"
+  integrity=$(_forward_worktree_state "$sid" false) || integrity=unknown
+  _forward_plan_present "$sid" "$wt" && plan=true || plan=false
+  if ! _forward_classify "$sid" recovery "$integrity" "$plan"; then
+    _forward_evidence_for_intention "$sid" retryable source_unavailable none \
+      "$projected_source_digest" "$projected_record_digest" \
+      "$intended" || return 4
+    rm -f "${_FORWARD_SNAPSHOT:-}"
+    return 1
+  fi
+  local reclassified_source_digest="$_FORWARD_SOURCE_DIGEST"
+  local reclassified_record_digest="$_FORWARD_RECORD_DIGEST"
+  if ! _lifecycle_snapshot_matches "$_FORWARD_SNAPSHOT" "$sid" "${args[@]}"; then
+    _forward_evidence_for_intention "$sid" conflict remote_changed none \
+      "$reclassified_source_digest" "$reclassified_record_digest" \
+      "$intended" || return 4
+    rm -f "$_FORWARD_SNAPSHOT"
+    return 1
+  fi
+  if ! forward_context_remove "$context" "$context_digest"; then
+    _forward_evidence_for_intention "$sid" retryable context_invalid none \
+      "$reclassified_source_digest" "$reclassified_record_digest" \
+      "$intended" || return 4
+    rm -f "$_FORWARD_SNAPSHOT"
+    return 1
+  fi
+  _forward_evidence_for_intention "$sid" accepted terminal_projection none \
+    "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" \
+    "$intended" || return 4
+  rm -f "$_FORWARD_SNAPSHOT"
+}
+
+forward_recovery_scan() {
+  local only_sid=""
+  if [[ "${1:-}" == --only-sid ]]; then
+    [[ -n "${2:-}" ]] || return 1
+    only_sid="$2"
+  fi
+  local index ids sid source blob overall=0 recovery_rc
+  index=$(mktemp "$LOCK_DIR/.forward-index-XXXXXX" 2>/dev/null) || return 1
+  chmod 600 "$index" 2>/dev/null || { rm -f "$index"; return 1; }
+  if ! git -C "$PROJECT_DIR" fetch origin "$TARGET_BRANCH" --quiet \
+      || ! source=$(git -C "$PROJECT_DIR" rev-parse "origin/${TARGET_BRANCH}" 2>/dev/null) \
+      || ! [[ "$source" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] \
+      || ! blob=$(git -C "$PROJECT_DIR" rev-parse "${source}:${BACKLOG_REL}" 2>/dev/null) \
+      || ! [[ "$blob" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] \
+      || ! git -C "$PROJECT_DIR" show "${source}:${BACKLOG_REL}" > "$index" 2>/dev/null; then
+    rm -f "$index"; return 1
+  fi
+  if [[ -n "$only_sid" ]]; then
+    ids=$(forward_enumerate_snapshot "$index" "$source" "$blob" "$only_sid") \
+      || { rm -f "$index"; return 1; }
+  else
+    ids=$(forward_enumerate_snapshot "$index" "$source" "$blob") \
+      || { rm -f "$index"; return 1; }
+  fi
+  rm -f "$index"
+  [[ -z "$ids" ]] && return 0
+  while IFS= read -r sid; do
+    [[ -n "$sid" ]] || continue
+    recovery_rc=0
+    _forward_recovery_one "$sid" || recovery_rc=$?
+    case "$recovery_rc" in
+      0|2|3) ;;
+      4) return 4 ;;
+      *) overall=1 ;;
+    esac
+  done <<< "$ids"
+  return "$overall"
+}
+
+
 exceeded_stories() {
   [[ -f "$RETRY_FILE" ]] || return 0
   while IFS='=' read -r sid count; do
@@ -1129,1021 +2496,31 @@ exceeded_stories() {
   return 0
 }
 
-# ── Staleness detection ──────────────────────────────────────────────────
-# Detects stories stuck in in_progress for longer than STALENESS_THRESHOLD.
-# Uses git log to find when the story was marked in_progress.
-# If stale and no local lock exists → mark as failed on staging.
-check_stale_in_progress() {
-  local backlog_content
-  backlog_content=$(fetch_and_read_backlog)
-  [[ -z "$backlog_content" ]] && return 0
-
-  # Extract story IDs with status: in_progress
-  local _bl_tmp3; _bl_tmp3=$(mktemp)
-  printf '%s\n' "$backlog_content" > "$_bl_tmp3"
-  local in_progress_ids
-  in_progress_ids=$(backlog_in_progress_ids "$_bl_tmp3" 2>/dev/null || true)
-  rm -f "$_bl_tmp3"
-
-  [[ -z "$in_progress_ids" ]] && return 0
-
-  local now
-  now=$(date +%s)
-
-  # Post-resume grace: lock-mtime ages are inflated by the freeze duration after
-  # a host suspend / daemon pause, so the staleness heuristic would brute-force
-  # mark every in-flight story as failed. Stand down for the grace window —
-  # wrappers either re-prove liveness (their locks get touched) or are caught by
-  # the next normal cycle.
-  if (( now < SUSPEND_GRACE_UNTIL )); then
-    return 0
-  fi
-
-  while IFS= read -r sid; do
-    [[ -z "$sid" ]] && continue
-
-    # Skip if we have an active local lock (delivery is running on this machine)
-    if is_locked "$sid"; then
-      continue
-    fi
-
-    # Check when the in_progress commit was made (git log on staging)
-    local commit_epoch
-    commit_epoch=$(git -C "$PROJECT_DIR" log "origin/${TARGET_BRANCH}" \
-      --format='%at' -1 --grep="chore(${sid}): in_progress" 2>/dev/null || echo "")
-
-    if [[ -z "$commit_epoch" ]]; then
-      # Can't determine age — skip
-      continue
-    fi
-
-    local age=$(( now - commit_epoch ))
-
-    if (( age > STALENESS_THRESHOLD )); then
-      local age_min=$(( age / 60 ))
-      log "${RED}STALE: $sid has been in_progress for ${age_min}min (threshold: $(( STALENESS_THRESHOLD / 60 ))min)${NC}"
-
-      if $DRY_RUN; then
-        log "${YELLOW}[DRY RUN] Would mark $sid as failed${NC}"
-        continue
-      fi
-
-      # AC2/AC4: Stale-race mutex — check reconcile-in-progress marker written by
-      # wrapper EXIT trap (_reconcile_yaml_status_on_exit). Typical reconcile window = 1-5s;
-      # TTL default 90s = 18× safety margin. Prevents false-positive daemon-staleness verdict
-      # during the narrow window between wrapper terminal phase_status and chore-commit push.
-      local _rip_marker="$LOCK_DIR/${sid}.reconcile-in-progress"
-      local _rip_ttl="${GAAI_RECONCILE_GRACE_SEC:-90}"
-      if [[ -f "$_rip_marker" ]]; then
-        local _rip_mtime=0
-        if [[ "$(uname)" == "Darwin" ]]; then
-          _rip_mtime=$(stat -c %Y "$_rip_marker" 2>/dev/null || stat -f %m "$_rip_marker" 2>/dev/null || echo 0)
-        else
-          _rip_mtime=$(stat -c %Y "$_rip_marker" 2>/dev/null || echo 0)
-        fi
-        local _rip_age=$(( now - _rip_mtime ))
-        if (( _rip_age <= _rip_ttl )); then
-          log "[STALE-CHECK] $sid : reconcile-in-progress marker fresh (age=${_rip_age}s, ttl=${_rip_ttl}s) — skipping (will recheck next tick)"
-          continue
-        else
-          log "[STALE-CHECK] $sid : reconcile-in-progress marker stale (age=${_rip_age}s > ttl=${_rip_ttl}s) — proceeding with normal verdict"
-        fi
-      fi
-
-      # AC3: Before stale-failing, check if the delivery PR is already merged or if
-      # qa_passed awaits human merge — both cases must NOT be brute-force-failed.
-      # gh is optional — skip guard if not installed (backward compat).
-      if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
-        local _stale_json="" _stale_merged_at="" _stale_pr_state="" _stale_pr_number="" _stale_created_at=""
-        _stale_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt,state,createdAt --limit 1 2>/dev/null || echo "")
-        if [[ -n "$_stale_json" ]]; then
-          read -r _stale_merged_at _stale_pr_state _stale_pr_number _stale_created_at < <(
-            printf '%s' "$_stale_json" | python3 -c "
-import json,sys
-try:
-    d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
-    print((s.get('mergedAt') or '-'), (s.get('state') or '-'), (s.get('number') or '-'), (s.get('createdAt') or '-'))
-except Exception:
-    print('- - - -')" 2>/dev/null || echo "- - - -")
-        fi
-        # Merged PR: reconcile to done instead of stale-failing (AC3a), but only
-        # when the merge is current-cycle evidence (AC1/AC2) — otherwise fall
-        # through to the qa_passed/OPEN hold and the normal stale-fail below.
-        if [[ -n "$_stale_merged_at" && "$_stale_merged_at" != "-" ]] \
-           && _merged_pr_is_current_cycle "$sid" "$_stale_created_at" "$_stale_merged_at" "$_stale_pr_number"; then
-          log "${GREEN}[STALE-CHECK] $sid : delivery PR #${_stale_pr_number} already merged ($_stale_merged_at) — reconciling to done instead of stale-failing${NC}"
-          if _reconcile_merged_pr "$sid" "$_stale_merged_at" "$_stale_pr_number" "$_stale_created_at"; then
-            notify_escalation "$sid" "Auto-reconciled merged story (stale guard)" "Delivery PR was merged; status reconciled to done automatically"
-            track_for_resolution "$sid" "done"
-          fi
-          continue
-        fi
-        # qa_passed + OPEN PR: wrapper finished delivery, PR awaits human merge — hold (AC3b)
-        local _stale_ps="" _stale_ps_tmp
-        _stale_ps_tmp=$(mktemp)
-        if git -C "$PROJECT_DIR" show "origin/${TARGET_BRANCH}:${BACKLOG_REL}" > "$_stale_ps_tmp" 2>/dev/null; then
-          _stale_ps=$(backlog_phase_status "$sid" "$_stale_ps_tmp" 2>/dev/null || true)
-        fi
-        rm -f "$_stale_ps_tmp" 2>/dev/null || true
-        if [[ "$_stale_ps" == "qa_passed" && -n "$_stale_pr_state" && "$_stale_pr_state" == "OPEN" ]]; then
-          log "${CYAN}[STALE-CHECK] $sid : phase_status=qa_passed with OPEN PR #${_stale_pr_number} — holding, not stale-failing${NC}"
-          continue
-        fi
-      fi
-
-      # Mark as failed on staging
-      log "${YELLOW}Marking $sid as failed (stale in_progress)...${NC}"
-      local reset_script
-      reset_script=$(mktemp)
-      cat > "$reset_script" <<RSTEOF
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$PROJECT_DIR"
-BACKLOG_FILE="$BACKLOG"
-BACKLOG_REL="$BACKLOG_REL"
-LOCK_DIR="$LOCK_DIR"
-TARGET_BRANCH="$TARGET_BRANCH"
-SCHEDULER="$SCHEDULER"
-# shellcheck source=lib/chore-commit.sh
-source "$SCRIPT_DIR/lib/chore-commit.sh"
-chore_commit_field "$sid" status failed "chore($sid): failed [daemon-staleness]" || exit \$?
-RSTEOF
-      chmod +x "$reset_script"
-      local stale_rc=0
-      with_staging_lock bash "$reset_script" 2>/dev/null || stale_rc=$?
-      rm -f "$reset_script"
-      if [[ "$stale_rc" -eq 0 ]]; then
-        log "${GREEN}$sid marked as failed (stale recovery)${NC}"
-        notify_escalation "$sid" "Stale: stuck in_progress for ${age_min}min" "Run: git log --oneline origin/staging | grep $sid — then reset manually or re-refine"
-        track_for_resolution "$sid" "failed"
-      elif [[ "$stale_rc" -eq 6 ]]; then
-        _write_drift_marker "commit" "staleness-failed-$sid"
-      else
-        log "${RED}Could not mark $sid as failed — manual intervention needed${NC}"
-      fi
-    fi
-  done <<< "$in_progress_ids"
-}
-
-# ── OSS-5 : Crash-recovery scan ──────────────────────────────────────────
-# Runs ONCE at daemon start, BEFORE the main loop. For each story
-# `status: in_progress` in the backlog with NO live wrapper lock,
-# classifies the story state via (.interrupted touch, phase_status, worktree
-# state, artefact filesystem) and decides : skip / re-launch (resume) /
-# revert refined / reconcile-status.
-#
-# Rationale : the historical check_stale_in_progress brute-force-marks
-# orphan in_progress stories as `failed` after STALENESS_THRESHOLD even
-# when the work was intact (commits pushed, PR created, artefacts
-# produced). This scan inspects what was actually accomplished and
-# resumes from the latest valid checkpoint instead.
-#
-# Coexistence : check_stale_in_progress stays in the main loop as a
-# fallback for during-life orphans not caught at startup. V1.5 may
-# deprecate it once OSS-5 is proven.
-#
-# Decision table :
-#   .interrupted touch present
-#     → revert status:refined, KEEP phase_status, no retry++, rm touch
-#       Reason : daemon-start.sh --stop graceful drain (OSS-3) ; clean resume next start.
-#   live wrapper (lock + PID alive)
-#     → skip — wrapper survived daemon restart via independent tmux
-#   phase_status terminal (done|failed|escalated|qa_escalated)
-#     → reconcile YAML status if mismatched, no relaunch
-#   phase_status in {qa_passed, implemented, qa_failed}
-#     → re-launch wrapper to resume from current phase
-#   phase_status == planned + execution-plan.md present
-#     → re-launch (resumes impl)
-#   phase_status == planned + no execution-plan
-#     → revert refined + reset phase_status:not_started + retry++
-#   phase_status == not_started or empty
-#     → revert refined + retry++
-crash_recovery_scan() {
-  local _only_sid=""
-  if [[ "${1:-}" == "--only-sid" ]]; then
-    _only_sid="${2:-}"
-    shift 2 2>/dev/null || true
-  fi
-
-  # Publish one non-terminal recovery phase without staging the live shared
-  # backlog file. Defining this scan-private helper here keeps extracted test
-  # harnesses behaviorally complete while avoiding a second public entrypoint.
-  # The locked child starts from one fresh origin snapshot, changes only the
-  # named Story, creates an exact-parent commit through a private index, and
-  # then advances daemon-home HEAD with --mixed so concurrent local writes
-  # remain in the working tree. Cross-Story hitchhiking is impossible even
-  # when another writer mutates BACKLOG between this call and commit creation.
-  _recovery_commit_story_phase_drift() {   # $1=sid $2=phase_status $3=context
-    local sid="$1" target_phase="$2" context="${3:-recovery}"
-    [[ "$sid" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
-    case "$target_phase" in
-      not_started|planned|implemented|qa_failed|qa_passed|failed|escalated|qa_escalated|commit_stalled|worktree_recovery_failed) ;;
-      *) return 1 ;;
-    esac
-    case "$context" in
-      recovery-scan|crash-drift-reconcile) ;;
-      *) return 1 ;;
-    esac
-
-    local script_dir
-    script_dir=$(cd "$(dirname "$SCHEDULER")" && pwd)
-    local phase_script
-    phase_script=$(mktemp "$LOCK_DIR/.recovery-phase-XXXXXX" 2>/dev/null) || {
-      log "${RED}[RECOVERY] temporary script creation failed${NC}"
-      return 1
-    }
-    cat > "$phase_script" <<'PHASE_EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-PROJECT_DIR="$1"
-BACKLOG_REL="$2"
-TARGET_BRANCH="$3"
-SCHEDULER="$4"
-SCRIPT_DIR="$5"
-SID="$6"
-TARGET_PHASE="$7"
-CONTEXT="$8"
-cd "$PROJECT_DIR"
-source "$SCRIPT_DIR/lib/backlog-yaml.sh"
-
-snapshot= index_file=
-cleanup() { rm -f "${snapshot:-}" "${index_file:-}" 2>/dev/null || true; }
-trap cleanup EXIT
-
-git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || exit 1
-remote_sha=$(git rev-parse "origin/$TARGET_BRANCH" 2>/dev/null) || exit 1
-snapshot=$(mktemp)
-git show "${remote_sha}:$BACKLOG_REL" > "$snapshot" 2>/dev/null || exit 1
-
-remote_status=$(backlog_status "$SID" "$snapshot" 2>/dev/null || true)
-[[ "$remote_status" == "in_progress" ]] || exit 1
-remote_phase=$(backlog_phase_status "$SID" "$snapshot" 2>/dev/null || true)
-if [[ "$remote_phase" == "$TARGET_PHASE" ]]; then
-  git reset --mixed "$remote_sha" --quiet
-  exit 0
-fi
-
-"$SCHEDULER" --set-field "$SID" phase_status "$TARGET_PHASE" "$snapshot" >/dev/null
-index_file=$(mktemp)
-rm -f "$index_file"
-GIT_INDEX_FILE="$index_file" git read-tree "$remote_sha"
-backlog_blob=$(git hash-object -w -- "$snapshot")
-GIT_INDEX_FILE="$index_file" git update-index --add --cacheinfo 100644 "$backlog_blob" "$BACKLOG_REL"
-new_tree=$(GIT_INDEX_FILE="$index_file" git write-tree)
-commit_subject="chore($SID): phase_status=$TARGET_PHASE [$CONTEXT]"
-if [[ "$CONTEXT" == "recovery-scan" ]]; then
-  commit_subject="chore(daemon): commit isolated phase_status=$TARGET_PHASE [recovery-scan $SID]"
-fi
-new_commit=$(printf '%s\n' "$commit_subject" \
-  | git commit-tree "$new_tree" -p "$remote_sha")
-git push origin "$new_commit:refs/heads/$TARGET_BRANCH" --quiet 2>/dev/null || exit 1
-git reset --mixed "$new_commit" --quiet
-PHASE_EOF
-    chmod +x "$phase_script"
-    local rc=0
-    with_staging_lock bash "$phase_script" \
-      "$PROJECT_DIR" "$BACKLOG_REL" "$TARGET_BRANCH" "$SCHEDULER" "$script_dir" \
-      "$sid" "$target_phase" "$context" 2>>"${LOG_FILE:-/dev/null}" || rc=$?
-    rm -f "$phase_script" 2>/dev/null || true
-    return "$rc"
-  }
-
-  local backlog_content
-  backlog_content=$(fetch_and_read_backlog)
-  [[ -z "$backlog_content" ]] && return 0
-
-  # Extract (id|phase_status) pairs for status:in_progress stories using helper.
-  local in_progress_pairs=""
-  local _bl_tmp5; _bl_tmp5=$(mktemp)
-  printf '%s\n' "$backlog_content" > "$_bl_tmp5"
-  local _ip_ids
-  _ip_ids=$(backlog_in_progress_ids "$_bl_tmp5" 2>/dev/null || true)
-  if [[ -n "$_ip_ids" ]]; then
-    while IFS= read -r _ip_sid; do
-      [[ -z "$_ip_sid" ]] && continue
-      [[ -n "$_only_sid" && "$_ip_sid" != "$_only_sid" ]] && continue
-      local _ip_ps
-      _ip_ps=$(backlog_phase_status "$_ip_sid" "$_bl_tmp5" 2>/dev/null || true)
-      in_progress_pairs+="${_ip_sid}|${_ip_ps:-}"$'\n'
-    done <<< "$_ip_ids"
-    in_progress_pairs="${in_progress_pairs%$'\n'}"  # trim trailing newline
-  fi
-  rm -f "$_bl_tmp5"
-
-  [[ -z "$in_progress_pairs" ]] && {
-    log "${CYAN}[RECOVERY] No in_progress stories to evaluate${NC}"
-    return 0
-  }
-
-  log "${CYAN}[RECOVERY] Crash-recovery scan : evaluating in_progress stories${NC}"
-
-  local resumed=0 reverted=0 reconciled=0 skipped=0 interrupted=0 drift_detected=0
-
-  while IFS= read -r pair; do
-    [[ -z "$pair" ]] && continue
-    local sid ps
-    sid="${pair%%|*}"
-    ps="${pair##*|}"
-
-    # ── Path 2 (moved) : live wrapper survived restart → skip ─────────────
-    # Evaluated first, before drift-defer/interrupted classification, so a live
-    # wrapper is never misreported as "relaunch deferred" nor reverted (AC2).
-    # clean_stale_locks() already ran earlier this tick, so a lock file here
-    # reflects a live PID.
-    if is_locked "$sid"; then
-      log "${BLUE}[RECOVERY] $sid : live wrapper detected — skipping (will continue independently)${NC}"
-      ((skipped++)) || true
-      continue
-    fi
-
-    # A terminal commit-policy mismatch normally persists as phase_status
-    # commit_stalled. If that scheduler mutation failed, dispatch atomically
-    # published this fallback marker. It is an operator-owned inhibit: inspect
-    # and reconcile the policy, then remove the marker explicitly. Ordinary
-    # recovery scans must never clear it or re-launch the wrapper.
-    local _policy_stall_marker="$LOCK_DIR/.commit-policy-stalled-${sid}"
-    if [[ -f "$_policy_stall_marker" ]]; then
-      log "${YELLOW}[RECOVERY] $sid : durable commit-policy stall marker present — skipping relaunch; operator must reconcile and remove ${_policy_stall_marker}${NC}"
-      ((skipped++)) || true
-      continue
-    fi
-    local _retry_stall_marker
-    _retry_stall_marker=$(_commit_retry_stall_marker_path "$sid")
-    if [[ -f "$_retry_stall_marker" ]]; then
-      log "${YELLOW}[RECOVERY] $sid : durable commit-retry stall marker present — skipping relaunch; operator must inspect and remove ${_retry_stall_marker}${NC}"
-      ((skipped++)) || true
-      continue
-    fi
-
-    # ── AC1: per-story working-tree drift check (in_progress targets only) ───────────
-    # HEAD says in_progress; compare WT status/phase_status. Only checks stories that
-    # are already in in_progress_pairs (HEAD status == in_progress). Benign edits on
-    # draft/deferred/refined stories do NOT freeze recovery for the whole backlog.
-    if [[ -f "$BACKLOG" ]]; then
-      local wt_status wt_ps
-      wt_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
-      wt_ps=$(backlog_phase_status "$sid" "$BACKLOG" 2>/dev/null || true)
-      if [[ -n "$wt_status" ]] && ( [[ "$wt_status" != "in_progress" ]] || [[ "$wt_ps" != "$ps" ]] ); then
-        # Crash-drift signature: in_progress status unchanged, phase_status advanced,
-        # no live lock, daemon marker present. Terminal phase_status:done is
-        # deliberately excluded: it must first pass the normal current-cycle
-        # PR check below and can never be published from a crash marker alone.
-        local _hang_m="$LOCK_DIR/${sid}.agent-hang.marker"
-        local _int_m="$LOCK_DIR/${sid}.interrupted"
-        if [[ "$wt_status" == "in_progress" \
-           && -n "$wt_ps" && "$wt_ps" != "$ps" && "$wt_ps" != "done" \
-           && ( -f "$_hang_m" || -f "$_int_m" ) ]] \
-           && ! is_locked "$sid"; then
-          log "${CYAN}[RECOVERY-CRASH-DRIFT] $sid : crash-drift signature detected — HEAD phase_status=${ps:-empty} WT=${wt_ps} — attempting auto-reconcile${NC}"
-          local _reconcile_rc=0
-          _recovery_reconcile_crash_drift "$sid" "$ps" "$wt_ps" || _reconcile_rc=$?
-          if [[ "$_reconcile_rc" -eq 0 ]]; then
-            ps="$wt_ps"
-            rm -f "$_hang_m" "$_int_m" 2>/dev/null || true
-            _clear_drift_marker_if_clean
-            # fall through to case classification with updated ps
-          else
-            log "${YELLOW}[RECOVERY-CRASH-DRIFT] $sid : reconcile failed (rc=$_reconcile_rc) — deferring to next scan${NC}"
-            _write_drift_marker "scan" "crash-drift-reconcile-failed-$sid"
-            drift_detected=1
-            continue
-          fi
-        else
-          # Done-flip-lag heal: a drift where the WT advanced past origin (e.g. WT
-          # qa_passed while HEAD is still not_started) commonly means the delivery
-          # finished + its PR merged but the phase_status chore-commits raced and never
-          # reached origin. Without this check the drift-skip strands the story
-          # in_progress forever (it short-circuits before the merged-PR reconcile at the
-          # phase_status cases below). So: if story/$sid's delivery PR is already merged,
-          # reconcile to done here instead of skipping. --head "story/$sid" (not --search)
-          # matches ONLY the delivery branch PR, never a Discovery/babysit PR (see the
-          # matching note at the phase_status reconcile sites).
-          if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
-            local _dr_json _dr_merged_at _dr_number _dr_created_at
-            _dr_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt,createdAt --limit 1 2>/dev/null || echo "")
-            _dr_merged_at=""
-            _dr_number=""
-            _dr_created_at=""
-            if [[ -n "$_dr_json" ]]; then
-              read -r _dr_merged_at _dr_number _dr_created_at < <(printf '%s' "$_dr_json" | python3 -c "import json,sys
-try:
-    d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
-    print((s.get('mergedAt') or '-'), (s.get('number') or '-'), (s.get('createdAt') or '-'))
-except Exception:
-    print('- - -')" 2>/dev/null || echo "- - -")
-            fi
-            # AC2: gated on current-cycle provenance; gate failure falls through
-            # to the drift-skip path below (same shape as merged_at being empty).
-            if [[ -n "$_dr_merged_at" && "$_dr_merged_at" != "-" ]] \
-               && _merged_pr_is_current_cycle "$sid" "$_dr_created_at" "$_dr_merged_at" "$_dr_number"; then
-              log "${GREEN}[RECOVERY] $sid : working-tree drift but delivery PR #${_dr_number} already merged (${_dr_merged_at}) — reconciling to done instead of skipping${NC}"
-              if _reconcile_merged_pr "$sid" "$_dr_merged_at" "$_dr_number" "$_dr_created_at"; then
-                _commit_retry_clear "$sid"
-                _clear_drift_marker_if_clean
-                ((reconciled++)) || true
-                continue
-              fi
-              log "${YELLOW}[RECOVERY] $sid : merged-PR reconcile failed — falling through to drift-skip${NC}"
-            fi
-          fi
-          # Local terminal drift is never safe recovery evidence on its own. A
-          # valid current-cycle PR was given the opportunity to reconcile above;
-          # without that proof, committing status:done OR phase_status:done can
-          # reach the phase_status=done fallback and bypass the provenance gate.
-          if [[ "$wt_status" != "in_progress" || "$wt_ps" == "done" ]]; then
-            log "${YELLOW}[RECOVERY] $sid : refusing terminal working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) without accepted current-cycle PR evidence${NC}"
-            _write_drift_marker "scan" "unverified-terminal-drift-$sid"
-            drift_detected=1
-            continue
-          fi
-          local _drift_rc=0
-          _recovery_commit_story_phase_drift "$sid" "$wt_ps" "recovery-scan" || _drift_rc=$?
-          if [[ "$_drift_rc" -ne 0 ]]; then
-            log "${YELLOW}[RECOVERY] $sid : working-tree drift (HEAD=in_progress/${ps:-empty}, WT=${wt_status:-?}/${wt_ps:-?}) — isolated phase commit failed (rc=$_drift_rc), writing drift-marker${NC}"
-            _write_drift_marker "scan" "drift-$sid"
-            drift_detected=1
-            continue
-          elif [[ "$wt_status" == "in_progress" ]]; then
-            # phase_status-only drift: commit landed, re-evaluate this story under
-            # its now-current phase_status instead of deferring another scan cycle
-            # (was an unconditional continue that never reverted a dead not_started
-            # story and never cleared the daemon-home drift).
-            log "${GREEN}[RECOVERY] $sid : committed isolated phase drift (HEAD=in_progress/${wt_ps:-empty}) — evaluating phase_status${NC}"
-            ps="$wt_ps"
-            _clear_drift_marker_if_clean
-            # no continue — fall through to phase_status classification below
-          else
-            # WT status itself moved away from in_progress — not a safe fallthrough
-            # target this cycle; keep the conservative defer-to-next-scan.
-            log "${GREEN}[RECOVERY] $sid : committed accumulated backlog drift (status changed to ${wt_status:-?}) — relaunch deferred to next scan${NC}"
-            _clear_drift_marker_if_clean
-            continue
-          fi
-        fi
-      fi
-    fi
-
-    # ── Path 1 : .interrupted touch (graceful daemon-start.sh --stop, OSS-3) ─────────
-    local interrupted_marker="$LOCK_DIR/${sid}.interrupted"
-    if [[ -f "$interrupted_marker" ]]; then
-      # A graceful interrupt (daemon --stop, or a host suspend/resume that trips
-      # the graceful-stop path) is NOT a delivery failure and must never charge a
-      # retry. It does not itself increment the retry count. BUT when it hits during
-      # the `planned` phase, the execution-plan.md is worktree-local and does not
-      # survive the fresh-pickup re-launch — so keeping phase_status=planned makes
-      # the NEXT recovery scan (marker already removed) see "planned but no
-      # execution-plan.md" and wrongly charge a retry via the missing-plan path.
-      # Reset the phase to not_started for `planned` so the story re-plans cleanly
-      # with no spurious retry; preserve durable phases (implemented/qa_passed —
-      # their work is committed to the story branch, so a resume is safe and cheap).
-      local _int_reset="false"
-      [[ "$ps" == "planned" ]] && _int_reset="true"
-      log "${YELLOW}[RECOVERY] $sid : .interrupted present — graceful stop, reverting refined (phase_status=${ps:-empty}, reset=${_int_reset})${NC}"
-      if $DRY_RUN; then
-        log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined (reset_phase=${_int_reset}) + rm .interrupted${NC}"
-        ((interrupted++)) || true
-        continue
-      fi
-      if _recovery_revert_refined "$sid" "$_int_reset" "interrupted"; then
-        rm -f "$interrupted_marker"
-        ((interrupted++)) || true
-      else
-        log "${RED}[RECOVERY] $sid : revert refined failed — manual intervention${NC}"
-      fi
-      continue
-    fi
-
-    # ── Resolve worktree path (mirror handle_*_phase formula) ─────────────
-    local worktree_path
-    worktree_path=$(_recovery_resolve_worktree "$sid")
-
-    # ── Classify by phase_status ──────────────────────────────────────────
-    case "$ps" in
-      done)
-        _commit_retry_clear "$sid"
-        log "${GREEN}[RECOVERY] $sid : phase_status=done — reconciling YAML status${NC}"
-        if $DRY_RUN; then
-          log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=done${NC}"
-          ((reconciled++)) || true
-          continue
-        fi
-        if _recovery_set_status "$sid" "done" "reconcile-done"; then
-          ((reconciled++)) || true
-        fi
-        # Secondary triage safety-net: fires only if primary was skipped (AC2, AC3).
-        if declare -f _run_triage_for_story >/dev/null 2>&1; then
-          _run_triage_for_story "$sid" 2>/dev/null || true
-        fi
-        ;;
-      failed)
-        _commit_retry_clear "$sid"
-        rm -f "$LOCK_DIR/.qa-spawn-deaths-${sid}" "$LOCK_DIR/.qa-spawn-deaths-${sid}.head" \
-              "$LOCK_DIR/.qa-spawn-death-pending-${sid}" 2>/dev/null || true
-        log "${YELLOW}[RECOVERY] $sid : phase_status=failed — reconciling YAML status${NC}"
-        if $DRY_RUN; then
-          log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=failed${NC}"
-          ((reconciled++)) || true
-          continue
-        fi
-        if _recovery_set_status "$sid" "failed" "reconcile-failed"; then
-          ((reconciled++)) || true
-        fi
-        ;;
-      escalated|qa_escalated)
-        _commit_retry_clear "$sid"
-        rm -f "$LOCK_DIR/.qa-spawn-deaths-${sid}" "$LOCK_DIR/.qa-spawn-deaths-${sid}.head" \
-              "$LOCK_DIR/.qa-spawn-death-pending-${sid}" 2>/dev/null || true
-        log "${YELLOW}[RECOVERY] $sid : phase_status=$ps — reconciling YAML status escalated${NC}"
-        if $DRY_RUN; then
-          log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid status=escalated${NC}"
-          ((reconciled++)) || true
-          continue
-        fi
-        if _recovery_set_status "$sid" "escalated" "reconcile-escalated"; then
-          ((reconciled++)) || true
-        fi
-        ;;
-      commit_stalled)
-        log "${YELLOW}[RECOVERY] $sid : phase_status=commit_stalled — skipping relaunch, operator must inspect and reset${NC}"
-        ((skipped++)) || true
-        ;;
-      qa_passed)
-        rm -f "$LOCK_DIR/.qa-spawn-deaths-${sid}" "$LOCK_DIR/.qa-spawn-deaths-${sid}.head" \
-              "$LOCK_DIR/.qa-spawn-death-pending-${sid}" 2>/dev/null || true
-        # Merged-PR guard (loop-breaker): a qa_passed wrapper whose PR is already
-        # merged has nothing left to deliver. Without this, a stranded done-
-        # reconciliation (push race, or PR-watcher chore-commit returning rc=1)
-        # makes RECOVERY re-launch the wrapper forever — the bounded-death counter
-        # below never trips because it resets whenever the worktree HEAD moves
-        # (which a relaunch causes). Detect a merged PR here and reconcile to done
-        # (idempotent) instead of re-delivering an already-merged story.
-        if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
-          # --head "story/$sid" (not --search "$sid"): match ONLY this story's delivery
-          # branch PR. A bare --search matches any PR whose title/body contains the story
-          # id — including the Discovery PR that promoted the story to refined — which
-          # falsely reconciled refined/in_progress stories to done (completed_at < started_at).
-          _rg_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt,createdAt --limit 1 2>/dev/null || echo "")
-          _rg_merged_at=""
-          _rg_number=""
-          _rg_created_at=""
-          if [[ -n "$_rg_json" ]]; then
-            read -r _rg_merged_at _rg_number _rg_created_at < <(printf '%s' "$_rg_json" | python3 -c "import json,sys
-try:
-    d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
-    print((s.get('mergedAt') or '-'), (s.get('number') or '-'), (s.get('createdAt') or '-'))
-except Exception:
-    print('- - -')" 2>/dev/null || echo "- - -")
-          fi
-          # AC2: gated on current-cycle provenance; gate failure falls through
-          # to the bounded-retry guard below instead of re-launching or reverting.
-          if [[ -n "$_rg_merged_at" && "$_rg_merged_at" != "-" ]] \
-             && _merged_pr_is_current_cycle "$sid" "$_rg_created_at" "$_rg_merged_at" "$_rg_number"; then
-            log "${GREEN}[RECOVERY] $sid : phase_status=qa_passed but PR #${_rg_number} already merged ($_rg_merged_at) — reconciling to done instead of re-launching${NC}"
-            if _reconcile_merged_pr "$sid" "$_rg_merged_at" "$_rg_number" "$_rg_created_at"; then
-              _commit_retry_clear "$sid"
-              ((reconciled++)) || true
-            else
-              ((skipped++)) || true
-            fi
-            continue
-          fi
-        fi
-        # Bounded-retry guard: progress is new non-bookkeeping candidate content
-        # or a different blocking outcome. Daemon-authored QA/backlog evidence may
-        # move HEAD, but cannot buy a fresh hosted retry by itself.
-        local _cd_observation _cd_new _cd_outcome _cd_progress
-        local _cd_threshold="${COMMIT_PHASE_RETRY_THRESHOLD:-3}"
-        if ! _cd_observation=$(_commit_retry_observe \
-          "$sid" "$worktree_path" "origin/${TARGET_BRANCH:-staging}" \
-          "$_cd_threshold"); then
-          log "${YELLOW}[RECOVERY] $sid : commit retry observation unavailable — skipping relaunch this scan${NC}"
-          ((skipped++)) || true
-          continue
-        fi
-        IFS='|' read -r _cd_new _cd_outcome _cd_progress <<< "$_cd_observation"
-        if (( _cd_new >= _cd_threshold )); then
-          log "[$(date '+%Y-%m-%dT%H:%M:%SZ')] $sid COMMIT_PHASE_REPEATED_FAILURE cycles=${_cd_new} outcome=${_cd_outcome} action=stall_set_commit_stalled"
-          if ! $DRY_RUN; then
-            local _cd_persistence="none" _cd_remote_snapshot="" _cd_remote_phase=""
-            # Keep daemon-home's live backlog aligned with the exact private-index
-            # commit below. Failure here is not authority: the remote transaction
-            # and fallback marker independently decide whether the stall is durable.
-            "$SCHEDULER" --set-phase-status \
-              "$sid" commit_stalled "$BACKLOG" >/dev/null 2>&1 || true
-            if _recovery_commit_story_phase_drift \
-              "$sid" commit_stalled recovery-scan; then
-              if _cd_remote_snapshot=$(mktemp \
-                "$LOCK_DIR/.commit-retry-remote-XXXXXX"); then
-                if git -C "$PROJECT_DIR" fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null \
-                  && git -C "$PROJECT_DIR" show \
-                    "origin/${TARGET_BRANCH}:${BACKLOG_REL}" > "$_cd_remote_snapshot" 2>/dev/null; then
-                  _cd_remote_phase=$(backlog_phase_status \
-                    "$sid" "$_cd_remote_snapshot" 2>/dev/null || true)
-                fi
-                rm -f "$_cd_remote_snapshot" 2>/dev/null || true
-              fi
-              [[ "$_cd_remote_phase" == "commit_stalled" ]] \
-                && _cd_persistence="origin"
-            fi
-            if [[ "$_cd_persistence" == "none" ]] \
-              && _commit_retry_write_stall_marker \
-                "$sid" "$_cd_outcome" "$_cd_new" "$_cd_threshold"; then
-              _cd_persistence="marker"
-            fi
-            if declare -f notify_escalation_inline >/dev/null 2>&1; then
-              notify_escalation_inline "$sid" "Commit-phase repeated failure — stalled" \
-                "Outcome ${_cd_outcome} repeated for ${_cd_new} cycles (threshold=${_cd_threshold}, persistence=${_cd_persistence}). Inspect the worktree; if present remove $(_commit_retry_stall_marker_path "$sid"), then reset phase_status to qa_passed only after progress."
-            fi
-            if [[ "$_cd_persistence" == "none" ]]; then
-              log "${RED}[RECOVERY] $sid : STALL_PERSISTENCE_FAILED — retry state preserved and relaunch inhibited; stop the daemon and repair persistence${NC}"
-              ((skipped++)) || true
-              continue
-            fi
-            _commit_retry_clear "$sid"
-          else
-            log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid commit_stalled${NC}"
-          fi
-          ((skipped++)) || true
-        else
-          log "${GREEN}[RECOVERY] $sid : phase_status=qa_passed cycles=${_cd_new}/${_cd_threshold} outcome=${_cd_outcome} progress=${_cd_progress} — re-launching wrapper${NC}"
-          if $DRY_RUN; then
-            log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
-            ((resumed++)) || true
-            continue
-          fi
-          if _recovery_relaunch "$sid"; then
-            ((resumed++)) || true
-          fi
-        fi
-        ;;
-      implemented|qa_failed)
-        _commit_retry_clear "$sid"
-        # AC1/AC2: bounded QA spawn-death counter (only for phase_status=implemented)
-        if [[ "$ps" == "implemented" ]]; then
-          _qsd_pending="${LOCK_DIR}/.qa-spawn-death-pending-${sid}"
-          _qsd_file="${LOCK_DIR}/.qa-spawn-deaths-${sid}"
-          _qsd_head_file="${_qsd_file}.head"
-          if [[ -f "$_qsd_pending" ]]; then
-            _qsd_current=$(cat "$_qsd_file" 2>/dev/null | tr -d '[:space:]' || echo 0)
-            _qsd_current=$(( _qsd_current > 1000 ? 1000 : _qsd_current ))
-            _qsd_head_now=$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null || echo "")
-            _qsd_head_prev=$(cat "$_qsd_head_file" 2>/dev/null | tr -d '[:space:]' || echo "")
-            if [[ -n "$_qsd_head_now" && "$_qsd_head_now" == "$_qsd_head_prev" ]]; then
-              _qsd_new=$(( _qsd_current + 1 ))
-              _qsd_new=$(( _qsd_new > 1000 ? 1000 : _qsd_new ))
-              printf '%s\n' "$_qsd_new" > "${_qsd_file}.tmp" && mv "${_qsd_file}.tmp" "$_qsd_file" 2>/dev/null || true
-            else
-              _qsd_new=1
-              printf '%s\n' "$_qsd_new" > "${_qsd_file}.tmp" && mv "${_qsd_file}.tmp" "$_qsd_file" 2>/dev/null || true
-              printf '%s\n' "$_qsd_head_now" > "${_qsd_head_file}.tmp" && mv "${_qsd_head_file}.tmp" "$_qsd_head_file" 2>/dev/null || true
-            fi
-            rm -f "$_qsd_pending" 2>/dev/null || true
-            _qsd_max="${GAAI_QA_SPAWN_RETRY_MAX:-3}"
-            if (( _qsd_new >= _qsd_max )); then
-              log "[$(date '+%Y-%m-%dT%H:%M:%SZ')] $sid QA_SPAWN_FAILED — exhausted ${_qsd_new} retries (cap=${_qsd_max}) — escalating to failed"
-              if ! $DRY_RUN; then
-                _recovery_set_status "$sid" "failed" "qa-spawn-exhausted"
-                rm -f "$_qsd_file" "$_qsd_head_file" 2>/dev/null || true
-                if declare -f notify_escalation_inline >/dev/null 2>&1; then
-                  notify_escalation_inline "$sid" "QA spawn-failure exhausted retries" \
-                    "QA_SPAWN_FAILED repeated ${_qsd_new}×. Inspect QA agent config (max-turns, model) then reset phase_status=implemented to retry."
-                fi
-              else
-                log "${YELLOW}[RECOVERY] [DRY RUN] would set $sid failed (qa-spawn-exhausted)${NC}"
-              fi
-              ((skipped++)) || true
-              continue
-            fi
-            log "${GREEN}[RECOVERY] $sid : phase_status=implemented spawn-deaths=${_qsd_new}/${_qsd_max} — re-launching${NC}"
-          else
-            log "${GREEN}[RECOVERY] $sid : phase_status=$ps — re-launching wrapper to resume${NC}"
-          fi
-        else
-          log "${GREEN}[RECOVERY] $sid : phase_status=$ps — re-launching wrapper to resume${NC}"
-        fi
-        if $DRY_RUN; then
-          log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
-          ((resumed++)) || true
-          continue
-        fi
-        if _recovery_relaunch "$sid"; then
-          ((resumed++)) || true
-        fi
-        ;;
-      planned)
-        local plan_path="${worktree_path}/.gaai/project/contexts/artefacts/plans/${sid}.execution-plan.md"
-        if [[ -s "$plan_path" ]]; then
-          log "${GREEN}[RECOVERY] $sid : phase_status=planned + execution-plan.md present — re-launching${NC}"
-          if $DRY_RUN; then
-            log "${YELLOW}[RECOVERY] [DRY RUN] would re-launch $sid${NC}"
-            ((resumed++)) || true
-            continue
-          fi
-          if _recovery_relaunch "$sid"; then
-            ((resumed++)) || true
-          fi
-        else
-          log "${YELLOW}[RECOVERY] $sid : phase_status=planned but no execution-plan.md — revert refined + reset phase_status${NC}"
-          if $DRY_RUN; then
-            log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined + reset phase_status${NC}"
-            ((reverted++)) || true
-            continue
-          fi
-          if _recovery_revert_refined "$sid" "true" "missing-plan"; then
-            increment_retry "$sid"
-            ((reverted++)) || true
-          fi
-        fi
-        ;;
-      not_started|"")
-        # Merged-PR guard (mirrors the qa_passed case above): when a delivered
-        # story's done-flip push is stranded (working-tree drift pauses the commit),
-        # origin still shows in_progress/not_started even though its PR is already
-        # merged. Without this guard, recovery reverts it refined + retry++ and
-        # re-delivers an already-merged story (duplicate PR). Detect a merged PR and
-        # reconcile to done (idempotent) instead of reverting.
-        if ! $DRY_RUN && command -v gh >/dev/null 2>&1; then
-          # --head "story/$sid" (not --search "$sid"): see the matching note above —
-          # avoid matching the Discovery/promotion PR (id in title) as a delivery PR.
-          _ns_json=$(gh pr list --state all --head "story/$sid" --json number,mergedAt,createdAt --limit 1 2>/dev/null || echo "")
-          _ns_merged_at=""
-          _ns_number=""
-          _ns_created_at=""
-          if [[ -n "$_ns_json" ]]; then
-            read -r _ns_merged_at _ns_number _ns_created_at < <(printf '%s' "$_ns_json" | python3 -c "import json,sys
-try:
-    d=json.load(sys.stdin); s=d[0] if isinstance(d,list) and d else {}
-    print((s.get('mergedAt') or '-'), (s.get('number') or '-'), (s.get('createdAt') or '-'))
-except Exception:
-    print('- - -')" 2>/dev/null || echo "- - -")
-          fi
-          # AC2: gated on current-cycle provenance; gate failure falls through
-          # to the revert-refined path below instead of reconciling.
-          if [[ -n "$_ns_merged_at" && "$_ns_merged_at" != "-" ]] \
-             && _merged_pr_is_current_cycle "$sid" "$_ns_created_at" "$_ns_merged_at" "$_ns_number"; then
-            log "${GREEN}[RECOVERY] $sid : phase_status=${ps:-empty} but PR #${_ns_number} already merged ($_ns_merged_at) — reconciling to done instead of reverting${NC}"
-            if _reconcile_merged_pr "$sid" "$_ns_merged_at" "$_ns_number" "$_ns_created_at"; then
-              _commit_retry_clear "$sid"
-              ((reconciled++)) || true
-            else
-              ((skipped++)) || true
-            fi
-            continue
-          fi
-        fi
-        log "${YELLOW}[RECOVERY] $sid : phase_status=${ps:-empty} — revert refined + retry++${NC}"
-        if $DRY_RUN; then
-          log "${YELLOW}[RECOVERY] [DRY RUN] would revert $sid refined${NC}"
-          ((reverted++)) || true
-          continue
-        fi
-        if _recovery_revert_refined "$sid" "false" "no-progress"; then
-          increment_retry "$sid"
-          ((reverted++)) || true
-        fi
-        ;;
-      worktree_recovery_failed)
-        # environment problem detected pre-spawn — do not re-launch
-        # operator must inspect worktree + stash, then re-refine if needed
-        log "${YELLOW}[RECOVERY] $sid : phase_status=worktree_recovery_failed — environment problem, not re-launching (operator must resolve)${NC}"
-        ((skipped++)) || true
-        ;;
-      *)
-        # Stuck-story classifier — final layer when no existing recovery path matched
-        local _cls_rc=0
-        classify_stuck_story "$sid" "$ps" || _cls_rc=$?
-        case "$_cls_rc" in
-          0) ((resumed++)) || true ;;  # auto-recovered
-          2) ((skipped++)) || true ;;  # no-op (S02/S03 already handled, or prior successful recovery)
-          *) ((skipped++)) || true ;;  # 1=escalated, or unexpected — incident report written
-        esac
-        ;;
-    esac
-  done <<< "$in_progress_pairs"
-
-  # AC1/AC4: if this scan detected no drift, clear the marker (working tree is clean).
-  if [[ "$drift_detected" -eq 0 ]]; then
-    _clear_drift_marker_if_clean
-  fi
-
-  log "${CYAN}[RECOVERY] Scan done : resumed=$resumed reverted=$reverted reconciled=$reconciled interrupted=$interrupted skipped=$skipped${NC}"
-}
-
-# ── OSS-5 helper : worktree path resolution ──────────────────────────────
-# Mirror of the formula in handle_plan_phase / handle_impl_phase / handle_qa_phase.
-# Kept duplicated here so crash_recovery_scan does not depend on dispatch
-# library being sourced (forward-compat : recovery may move to its own helper
-# script V1.5).
-_recovery_resolve_worktree() {
-  local sid="$1"
-  if [[ -n "${GAAI_WORKTREES_BASE:-}" ]]; then
-    echo "${GAAI_WORKTREES_BASE}/${sid}-workspace"
-  else
-    local repo_name
-    repo_name=$(basename "${REPO_ROOT:-$PROJECT_DIR}")
-    echo "$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${sid}-workspace"
-  fi
-}
-
-# ── recovery helper : reconcile crash-drift by committing WT phase_status ──
-# Called when crash_recovery_scan detects the crash-drift signature:
-# in_progress status + advanced WT phase_status + dead lock + daemon marker.
-# Commits the WT phase_status to HEAD with daemon attribution so the normal
-# classification case block can proceed without human intervention.
-# Args: sid, head_ps (HEAD phase_status), wt_ps (working-tree phase_status)
-# Exit codes: 0=committed, 1=failure (cross-story drift or git error)
-_recovery_reconcile_crash_drift() {
-  local sid="$1" head_ps="$2" wt_ps="$3"
-
-  # Cross-story drift guard — same awk heuristic as chore_commit_field.
-  # Refuse if the WT diff touches any story block other than the target.
-  local _csd_lines
-  _csd_lines=$(git -C "$PROJECT_DIR" diff -U0 HEAD -- "$BACKLOG_REL" 2>/dev/null \
-    | awk -v sid="$sid" '
-        /^@@/ { in_hunk=1; next }
-        in_hunk && /^[+-]- id: / {
-          gsub(/^[+-]- id: */, "")
-          gsub(/[[:space:]]+$/, "")
-          if ($0 != sid) print
-        }
-      ' | wc -l | tr -d '[:space:]' 2>/dev/null || echo "0")
-  if [[ "$_csd_lines" != "0" ]]; then
-    log "${YELLOW}[RECOVERY-CRASH-DRIFT] $sid : cross-story drift in WT ($_csd_lines other block(s)) — refusing reconcile, deferring to operator${NC}"
-    return 1
-  fi
-
-  log "${CYAN}[RECOVERY-CRASH-DRIFT] $sid : auto-reconciling — HEAD phase_status=${head_ps:-empty} → WT=${wt_ps}${NC}"
-
-  local _ts
-  _ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
-  local _rc=0
-  _recovery_commit_story_phase_drift "$sid" "$wt_ps" "crash-drift-reconcile" || _rc=$?
-
-  # AC4: append JSON audit record (non-fatal — audit write failure does not fail reconcile)
-  local _hang_present=false _int_present=false
-  [[ -f "$LOCK_DIR/${sid}.agent-hang.marker" ]] && _hang_present=true
-  [[ -f "$LOCK_DIR/${sid}.interrupted" ]] && _int_present=true
-  local _outcome="committed"
-  [[ "$_rc" -ne 0 ]] && _outcome="failed"
-  local _commit_subject="chore($sid): phase_status=$wt_ps [crash-drift-reconcile]"
-  printf '{"event":"crash_drift_reconciled","ts":"%s","story_id":"%s","head_phase_status":"%s","wt_phase_status":"%s","hang_marker":%s,"interrupted_marker":%s,"outcome":"%s","commit_subject":"%s"}\n' \
-    "$_ts" "$sid" "${head_ps:-}" "$wt_ps" "$_hang_present" "$_int_present" "$_outcome" "$_commit_subject" \
-    >> "$CRASH_DRIFT_RECONCILE_AUDIT" 2>/dev/null || true
-
-  return "$_rc"
-}
-
-# ── OSS-5 helper : revert YAML status to refined (cross-device pushed) ────
-# Args: sid, reset_phase_status (true|false), reason (log marker).
-# Pulls staging, removes stale pr_url/pr_number, sets status, optionally
-# resets phase_status, commits+pushes. On success: clears retry-counter
-# and removes stale worktree+branch so re-delivery starts clean (AC1-AC4).
-_recovery_revert_refined() {
-  local sid="$1" reset_phase="$2" reason="$3"
-  local script
-  script=$(mktemp)
-  cat > "$script" <<RSTEOF
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$PROJECT_DIR"
-BACKLOG_FILE="$BACKLOG"
-BACKLOG_REL="$BACKLOG_REL"
-LOCK_DIR="$LOCK_DIR"
-TARGET_BRANCH="$TARGET_BRANCH"
-SCHEDULER="$SCHEDULER"
-# shellcheck source=lib/chore-commit.sh
-source "$SCRIPT_DIR/lib/chore-commit.sh"
-if ! git pull origin "$TARGET_BRANCH" --ff-only --quiet 2>&1; then
-  git fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null || true
-  if ! git rebase "origin/$TARGET_BRANCH" --quiet 2>/dev/null; then
-    git rebase --abort --quiet 2>/dev/null || true
-    echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebase failed (genuine conflict). Skipping this transition. Operator intervention required." >> "$LOG_FILE" 2>/dev/null || true
-    printf '%s|recovery|rebase-failed-revert-$sid\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
-    exit 1
-  fi
-  echo "[$(date -u +%H:%M:%SZ)] Push race detected — rebased onto origin/$TARGET_BRANCH cleanly, retrying push" >> "$LOG_FILE" 2>/dev/null || true
-  rm -f "$REBASE_CONFLICT_MARKER" 2>/dev/null || true
-fi
-# AC1 — remove stale pr_url / pr_number before status reset (idempotent — no-op if absent)
-python3 - "$BACKLOG" "$sid" <<'PREOF' 2>/dev/null || true
-import sys, re
-file_path = sys.argv[1]
-target_id = sys.argv[2]
-with open(file_path, 'r') as f:
-    lines = f.readlines()
-block_start = -1
-block_end = len(lines)
-for i, line in enumerate(lines):
-    stripped = line.strip()
-    if re.match(r'-\s+id:\s+' + re.escape(target_id) + r'\s*$', stripped):
-        block_start = i
-        continue
-    if block_start >= 0 and re.match(r'-\s+id:\s+', stripped):
-        block_end = i
-        break
-if block_start < 0:
-    sys.exit(0)
-new_lines = [l for idx, l in enumerate(lines)
-             if not (block_start <= idx < block_end and re.match(r'^\s+(pr_url|pr_number):', l))]
-with open(file_path, 'w') as f:
-    f.writelines(new_lines)
-PREOF
-RSTEOF
-  if [[ "$reset_phase" == "true" ]]; then
-    cat >> "$script" <<RSTEOF
-chore_commit_multi_field "$sid" status refined phase_status not_started "chore($sid): refined [daemon-recovery:$reason]" || exit \$?
-RSTEOF
-  else
-    cat >> "$script" <<RSTEOF
-chore_commit_field "$sid" status refined "chore($sid): refined [daemon-recovery:$reason]" || exit \$?
-RSTEOF
-  fi
-  cat >> "$script" <<'RSTEOF'
-RSTEOF
-  chmod +x "$script"
-  local rc=0
-  with_staging_lock bash "$script" 2>/dev/null || rc=$?
-  rm -f "$script"
-  if [[ "$rc" -eq 6 ]]; then
-    _write_drift_marker "commit" "revert-refined-$sid"
-  fi
-  if [[ "$rc" -eq 0 ]]; then
-    # AC2: purge retry-counter entry so re-delivery starts from zero (idempotent).
-    # Gated on reason: a graceful operator stop ("interrupted") or an
-    # unclassified future reason resets to zero (safe — same as today); a
-    # recovery-death revert ("no-progress"/"missing-plan") must NOT purge, or
-    # the caller's immediately-following increment_retry() always lands on an
-    # absent entry and a repeatedly-dying story never reaches MAX_RETRIES.
-    # A new call site that death-reverts (i.e. always follows with
-    # increment_retry()) must be added to the no-purge list below, or its
-    # retries will silently reset to zero every time instead of accumulating.
-    case "$reason" in
-      no-progress|missing-plan) : ;;
-      *)
-        if [[ -f "$RETRY_FILE" ]]; then
-          sed_inplace "/^${sid}=/d" "$RETRY_FILE" 2>/dev/null || true
-        fi
-        ;;
-    esac
-    # AC3: remove stale worktree and story branch so next delivery takes fresh-worktree path
-    local wt_path
-    wt_path=$(_recovery_resolve_worktree "$sid")
-    if [[ -d "$wt_path" ]]; then
-      git -C "$PROJECT_DIR" worktree remove --force "$wt_path" 2>/dev/null \
-        || rm -rf "$wt_path" 2>/dev/null || true
-      git -C "$PROJECT_DIR" worktree prune 2>/dev/null || true
-    fi
-    # Landed-or-preserved guard (orchestration.rules.md §Branch Rules → Worktree
-    # lifecycle & cleanup) — this is the observed incident path: a death-revert
-    # during commit phase must never destroy unpushed work.
-    _worktree_branch_delete_or_preserve "$sid" "story/${sid}" "recovery-death-revert" || true
-  fi
-  return $rc
-}
-
-# ── OSS-5 helper : reconcile YAML status to a target value ────────────────
-# Used when phase_status is terminal (done|failed|escalated) but YAML status
-# still reads in_progress. Idempotent : commits only if there's a real diff.
-_recovery_set_status() {
-  local sid="$1" new_status="$2" reason="$3"
-  local script
-  script=$(mktemp)
-  cat > "$script" <<RSTEOF
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$PROJECT_DIR"
-BACKLOG_FILE="$BACKLOG"
-BACKLOG_REL="$BACKLOG_REL"
-LOCK_DIR="$LOCK_DIR"
-TARGET_BRANCH="$TARGET_BRANCH"
-SCHEDULER="$SCHEDULER"
-# shellcheck source=lib/chore-commit.sh
-source "$SCRIPT_DIR/lib/chore-commit.sh"
-chore_commit_field "$sid" status "$new_status" "chore($sid): $new_status [daemon-recovery:$reason]" || exit \$?
-RSTEOF
-  chmod +x "$script"
-  local rc=0
-  with_staging_lock bash "$script" 2>/dev/null || rc=$?
-  rm -f "$script"
-  if [[ "$rc" -eq 6 ]]; then
-    _write_drift_marker "commit" "reconcile-$new_status-$sid"
-  fi
-  return $rc
-}
-
 # ── Pre-spawn story.md reconcile from origin/staging ──────────────────────────
 # Ensures wrapper reads operator amendments committed to staging but not yet in
 # the worktree branch. Also invalidates the prior cycle's qa-report when
 # story.md drifts, preventing cross-cycle injection against stale AC numbers.
-# Args : <sid> <wt_path>
+# Args : <sid> <wt_path> <expected-source> [<allow-absent>]
 # Returns : 0 (in-sync, no action), 1 (refreshed + qa-report deleted), 2 (staging missing → skip spawn)
 _reconcile_story_file_from_staging() {
   local sid="$1"
   local wt_path="$2"
+  local expected_source="$3"
+  local allow_absent="${4:-false}"
   local story_path=".gaai/project/contexts/artefacts/stories/${sid}.story.md"
   local abs_story="${wt_path}/${story_path}"
   local qa_report="${wt_path}/.gaai/project/contexts/artefacts/qa-reports/${sid}.qa-report.md"
   local tag="[STORY-FILE-RECONCILE]"
+
+  [[ "$expected_source" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || return 2
+  local live_source
+  if ! git -C "$PROJECT_DIR" fetch origin "$TARGET_BRANCH" --quiet 2>/dev/null \
+      || ! live_source=$(git -C "$PROJECT_DIR" rev-parse \
+        "origin/${TARGET_BRANCH}" 2>/dev/null) \
+      || [[ "$live_source" != "$expected_source" ]]; then
+    log "${tag} ${sid} : configured target changed — skipping spawn"
+    return 2
+  fi
 
   # Pre-flight : worktree may not exist yet on fresh-pickup dispatch path.
   # The worktree is created by handle_plan_phase inside the wrapper, which
@@ -2155,8 +2532,12 @@ _reconcile_story_file_from_staging() {
   # "staging copy MISSING" messages, triggering spurious escalations that
   # block delivery of every fresh story.
   if [[ ! -d "$wt_path" ]]; then
-    log "${tag} ${sid} : worktree not yet created (fresh pickup) — skip reconcile, wrapper will populate from story/${sid} branch"
-    return 0
+    if [[ "$allow_absent" == true ]]; then
+      log "${tag} ${sid} : exact pre-claim absent_new binding — wrapper will create worktree"
+      return 0
+    fi
+    log "${tag} ${sid} : worktree absent outside bound first claim — skipping spawn"
+    return 2
   fi
 
   # Guard: an existing worktree whose branch was deleted out from under it (re-delivery
@@ -2165,29 +2546,22 @@ _reconcile_story_file_from_staging() {
   # daemon main loop before the wrapper ever spawns. Detect it, prune the corrupt
   # worktree, and treat as a fresh pickup so the wrapper recreates it cleanly.
   if ! git -C "$wt_path" rev-parse --verify -q HEAD >/dev/null 2>&1; then
-    log "${tag} ${sid} : worktree has null/unborn HEAD (corrupt — branch deleted under it), pruning → fresh pickup"
-    git worktree remove --force "$wt_path" 2>/dev/null || rm -rf "$wt_path"
-    git worktree prune 2>/dev/null || true
-    return 0
+    log "${tag} ${sid} : worktree has null/unborn HEAD — preserving evidence and skipping spawn"
+    return 2
   fi
 
-  log "${tag} ${sid} : checking story.md against origin/staging (wt=${wt_path})"
+  log "${tag} ${sid} : checking story.md against configured target (wt=${wt_path})"
 
-  # Fetch (best-effort — failure is non-fatal, proceed with cached ref)
-  if ! git -C "$wt_path" fetch origin staging --quiet 2>/dev/null; then
-    log "${tag} ${sid} : fetch failed, proceeding with cached origin/staging"
-  fi
-
-  # Overwrite WT file + stage atomically; capture stderr to detect missing-file error
+  # Overwrite WT file + stage from the exact source admitted by the caller.
   local checkout_err
-  if ! checkout_err=$(git -C "$wt_path" checkout origin/staging -- "$story_path" 2>&1); then
-    log "${tag} ${sid} : staging copy MISSING — escalating, skipping spawn"
+  if ! checkout_err=$(git -C "$wt_path" checkout "$expected_source" -- "$story_path" 2>&1); then
+    log "${tag} ${sid} : configured-target copy MISSING — escalating, skipping spawn"
     return 2
   fi
 
   # Treat zero-byte result as missing (defensive guard)
   if [[ ! -s "$abs_story" ]]; then
-    log "${tag} ${sid} : staging copy MISSING (empty file) — escalating, skipping spawn"
+    log "${tag} ${sid} : configured-target copy MISSING (empty file) — escalating, skipping spawn"
     return 2
   fi
 
@@ -2199,9 +2573,12 @@ _reconcile_story_file_from_staging() {
 
   # Drift detected — commit only the story.md path, preserve HEAD pointer on story/<sid>
   local commit_sha
-  git -C "$wt_path" commit \
-    -m "chore(${sid}): refresh story.md from staging [daemon-recovery:story-file-drift]" \
-    -- "$story_path" 2>/dev/null
+  if ! git -C "$wt_path" commit \
+      -m "chore(${sid}): refresh story.md from configured target [daemon:story-file-drift]" \
+      -- "$story_path" 2>/dev/null; then
+    log "${tag} ${sid} : configured-target refresh commit failed — skipping spawn"
+    return 2
+  fi
   commit_sha=$(git -C "$wt_path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
   log "${tag} ${sid} : DRIFT DETECTED — refreshed via git checkout, commit=${commit_sha} on story/${sid}"
 
@@ -2211,81 +2588,6 @@ _reconcile_story_file_from_staging() {
   log "${tag} ${sid} : prior qa-report deleted at ${qa_report} (joint contract with cross-cycle qa-report injection)"
 
   return 1
-}
-
-# ── OSS-5 helper : re-launch a 3phase wrapper for an in_progress story ────
-# Skips pre_launch_mark_in_progress — story is already status:in_progress in
-# YAML (we're resuming, not initiating). Generates a fresh trace_id.
-# Requires daemon-dispatch.sh sourced (caller orders the call site).
-_recovery_relaunch() {
-  local sid="$1"
-
-  # AC2: re-read WT status immediately before spawning (covers the narrow race window
-  # between AC1's scan-time drift check and the wrapper spawn — e.g. operator commits
-  # a reset between the case "$ps" branch and this function call).
-  local wt_recheck_status=""
-  if [[ -f "$BACKLOG" ]]; then
-    wt_recheck_status=$(backlog_status "$sid" "$BACKLOG" 2>/dev/null || true)
-  fi
-  if [[ -n "$wt_recheck_status" && "$wt_recheck_status" != "in_progress" ]]; then
-    log "${YELLOW}[RECOVERY] $sid : status changed to $wt_recheck_status mid-scan — skipping relaunch${NC}"
-    return 1
-  fi
-
-  # Cap-respect : recovery relaunch must honour MAX_CONCURRENT just like the
-  # main dispatch loop. Without this, the recovery scan can launch a wrapper
-  # while 3/3 slots are already held by live deliveries, producing 4/3
-  # over-dispatch observed empirically when a zombie in_progress story is
-  # re-detected mid-cycle.
-  local _active_now
-  _active_now=$(active_count)
-  if (( _active_now >= MAX_CONCURRENT )); then
-    log "${YELLOW}[RECOVERY] $sid : skipping relaunch — slots full (${_active_now}/${MAX_CONCURRENT}), will retry next scan${NC}"
-    return 1
-  fi
-
-  # Handle reconciliation : a phase can look stranded merely because its wrapper
-  # stopped watching — the runner it spawned may still be working in the worktree.
-  # Relaunching then puts two live sessions on one worktree, and the losing one's
-  # files get overwritten. The reconcile pass prunes handles whose process is gone
-  # (those are genuinely stranded and SHOULD relaunch) and reports the ones still
-  # running; a live handle rooted in this story's worktree means there is nothing
-  # to relaunch yet. Best-effort: any failure here falls through to the relaunch,
-  # preserving prior behaviour rather than stalling recovery.
-  #
-  # Matching is on the handle's own story_id. The worktree-path substring below is
-  # only a fallback for handles written before that field existed — inferring a
-  # story from a path shape is a guess, and it is wrong for any layout that does
-  # not embed the id.
-  local _handles_json _live_here=""
-  _handles_json=$(node "$PROJECT_DIR/.gaai/core/adapters/claude-code/nested-claude-spawn.js" \
-    --reconcile-handles 2>/dev/null || true)
-  if [[ -n "$_handles_json" ]]; then
-    _live_here=$(printf '%s' "$_handles_json" | python3 -c '
-import json, sys
-try:
-    live = json.load(sys.stdin).get("live", [])
-except Exception:
-    sys.exit(0)
-sid = sys.argv[1]
-legacy = sid + "-workspace"
-def matches(h):
-    if h.get("story_id"):
-        return h["story_id"] == sid
-    return legacy in (h.get("cwd") or "")
-print("1" if any(matches(h) for h in live) else "")
-' "$sid" 2>/dev/null || true)
-  fi
-  if [[ "$_live_here" == "1" ]]; then
-    log "${YELLOW}[RECOVERY] $sid : live runner handle still rooted in this worktree — skipping relaunch to avoid a duplicate session${NC}"
-    return 1
-  fi
-
-  local trace_id
-  trace_id=$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \
-    || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
-    || echo "recovery-$(date +%s)-$$-$RANDOM")
-  launch_3phase_in_tmux "$sid" "$trace_id"
 }
 
 # ── PR merge watcher + reconcile helpers ────────────────────────────────────
@@ -3084,6 +3386,200 @@ _resolve_cross_cycle_qa_report() {
   printf '%s\n%s\n%s\n%s\n' "$qa_report" "$phase" "$verdict" "$_replan_val"
 }
 
+# Create a per-attempt raw secret through an exclusive no-follow descriptor.
+# The token is supplied on stdin, never argv. The private lock directory is
+# descriptor-bound before any name is created.
+_attempt_secret_create() {
+  local sid="$1" token="$2"
+  [[ "$sid" =~ ^[A-Za-z][A-Za-z0-9._-]{0,63}$ && -n "$token" ]] || return 1
+  printf '%s' "$token" | python3 -c '
+import os, secrets, stat, sys
+parent, sid = sys.argv[1:]
+payload = sys.stdin.buffer.read()
+if not payload or b"\0" in payload or len(payload) > 65536:
+    raise SystemExit(1)
+dir_fd = fd = None
+name = None
+try:
+    before = os.lstat(parent)
+    dir_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                     | getattr(os, "O_NOFOLLOW", 0))
+    opened = os.fstat(dir_fd)
+    if (not stat.S_ISDIR(opened.st_mode) or opened.st_uid != os.geteuid()
+            or opened.st_mode & 0o077
+            or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)):
+        raise ValueError
+    while True:
+        name = ".daemon-secret.%s.%s.env" % (sid, secrets.token_hex(16))
+        try:
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=dir_fd)
+            break
+        except FileExistsError:
+            continue
+    os.fchmod(fd, 0o600)
+    view = memoryview(payload)
+    while view:
+        count = os.write(fd, view)
+        if count <= 0:
+            raise OSError
+        view = view[count:]
+    os.fsync(fd)
+    os.close(fd); fd = None
+    os.fsync(dir_fd)
+    print(os.path.join(parent, name))
+except (OSError, ValueError):
+    if name is not None and dir_fd is not None:
+        try: os.unlink(name, dir_fd=dir_fd)
+        except OSError: pass
+    raise SystemExit(1)
+finally:
+    if fd is not None: os.close(fd)
+    if dir_fd is not None: os.close(dir_fd)
+' "$LOCK_DIR" "$sid"
+}
+
+# Generate a private, per-attempt launcher. It opens the raw secret once with
+# O_NOFOLLOW, validates owner/mode/type/inode, unlinks that exact entry, then
+# execs the wrapper with the token in its environment. No shell source or
+# shared predictable env file participates in the spawn.
+_attempt_launcher_create() {
+  local sid="$1" secret_path="$2" wrapper="$3"
+  [[ "$sid" =~ ^[A-Za-z][A-Za-z0-9._-]{0,63}$ ]] || return 1
+  python3 - "$LOCK_DIR" "$sid" "$secret_path" "$wrapper" <<'PY'
+import os, secrets, shlex, stat, sys
+parent, sid, secret_path, wrapper = sys.argv[1:]
+dir_fd = fd = None
+name = None
+loader = r'''import os, stat, sys
+secret_path, wrapper, launcher = sys.argv[1:]
+parent, name = os.path.split(secret_path)
+dir_fd = fd = None
+try:
+    parent_before = os.lstat(parent)
+    dir_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                     | getattr(os, "O_NOFOLLOW", 0))
+    parent_opened = os.fstat(dir_fd)
+    if (not stat.S_ISDIR(parent_opened.st_mode)
+            or parent_opened.st_uid != os.geteuid()
+            or parent_opened.st_mode & 0o077
+            or (parent_opened.st_dev, parent_opened.st_ino)
+               != (parent_before.st_dev, parent_before.st_ino)):
+        raise ValueError
+    before = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
+    opened = os.fstat(fd)
+    after = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    identity = (opened.st_dev, opened.st_ino)
+    if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.geteuid()
+            or opened.st_mode & 0o077 or identity != (before.st_dev, before.st_ino)
+            or identity != (after.st_dev, after.st_ino)):
+        raise ValueError
+    chunks = []
+    while True:
+        chunk = os.read(fd, 65536)
+        if not chunk: break
+        chunks.append(chunk)
+    payload = b"".join(chunks)
+    if not payload or b"\0" in payload or len(payload) > 65536:
+        raise ValueError
+    token = payload.decode("utf-8")
+    wrapper_stat = os.lstat(wrapper)
+    if (not stat.S_ISREG(wrapper_stat.st_mode)
+            or wrapper_stat.st_uid != os.geteuid()
+            or not wrapper_stat.st_mode & stat.S_IXUSR):
+        raise ValueError
+    current = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    if identity != (current.st_dev, current.st_ino):
+        raise ValueError
+    os.unlink(name, dir_fd=dir_fd)
+    os.fsync(dir_fd)
+    try: os.unlink(launcher)
+    except OSError: pass
+    env = os.environ.copy()
+    env["GAAI_IMPL_AUTH_TOKEN"] = token
+    os.execve(wrapper, [wrapper], env)
+except (OSError, UnicodeError, ValueError):
+    raise SystemExit(1)
+finally:
+    if fd is not None: os.close(fd)
+    if dir_fd is not None: os.close(dir_fd)
+'''
+try:
+    before = os.lstat(parent)
+    dir_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                     | getattr(os, "O_NOFOLLOW", 0))
+    opened = os.fstat(dir_fd)
+    if (not stat.S_ISDIR(opened.st_mode) or opened.st_uid != os.geteuid()
+            or opened.st_mode & 0o077
+            or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)):
+        raise ValueError
+    while True:
+        name = ".daemon-launch.%s.%s.sh" % (sid, secrets.token_hex(16))
+        try:
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | getattr(os, "O_NOFOLLOW", 0), 0o700, dir_fd=dir_fd)
+            break
+        except FileExistsError:
+            continue
+    path = os.path.join(parent, name)
+    body = ("#!/bin/sh\nexec python3 -c %s %s %s %s\n" % (
+        shlex.quote(loader), shlex.quote(secret_path), shlex.quote(wrapper), shlex.quote(path)
+    )).encode("utf-8")
+    view = memoryview(body)
+    while view:
+        count = os.write(fd, view)
+        if count <= 0: raise OSError
+        view = view[count:]
+    os.fchmod(fd, 0o700)
+    os.fsync(fd)
+    os.close(fd); fd = None
+    os.fsync(dir_fd)
+    print(path)
+except (OSError, ValueError):
+    if name is not None and dir_fd is not None:
+        try: os.unlink(name, dir_fd=dir_fd)
+        except OSError: pass
+    raise SystemExit(1)
+finally:
+    if fd is not None: os.close(fd)
+    if dir_fd is not None: os.close(dir_fd)
+PY
+}
+
+_attempt_file_cleanup() {
+  local path="$1"
+  python3 - "$path" <<'PY'
+import os, stat, sys
+path = sys.argv[1]
+parent, name = os.path.split(path)
+if not (name.startswith(".daemon-secret.") or name.startswith(".daemon-launch.")):
+    raise SystemExit(1)
+dir_fd = None
+try:
+    before = os.lstat(parent)
+    dir_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                     | getattr(os, "O_NOFOLLOW", 0))
+    opened = os.fstat(dir_fd)
+    if (not stat.S_ISDIR(opened.st_mode) or opened.st_uid != os.geteuid()
+            or opened.st_mode & 0o077
+            or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)):
+        raise ValueError
+    try:
+        entry = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        raise SystemExit(0)
+    if entry.st_uid != os.geteuid():
+        raise ValueError
+    os.unlink(name, dir_fd=dir_fd)
+    os.fsync(dir_fd)
+except (OSError, ValueError):
+    raise SystemExit(1)
+finally:
+    if dir_fd is not None: os.close(dir_fd)
+PY
+}
+
 # ── Launch 3phase delivery in dedicated tmux session ────────────────────
 # Restores docstring promise "Active deliveries keep running independently
 # after daemon stop" for the 3phase pipeline. Without this isolation, daemon's
@@ -3096,9 +3592,17 @@ _resolve_cross_cycle_qa_report() {
 launch_3phase_in_tmux() {
   local story_id="$1"
   local trace_id="$2"
+  local expected_source="$3"
+  local expected_blob="$4"
+  local expected_record="$5"
   local wrapper="$LOCK_DIR/${story_id}_3phase_run.sh"
 
-  cat > "$wrapper" <<WRAPPER_EOF
+  [[ "$expected_source" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ \
+      && "$expected_blob" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ \
+      && "$expected_record" =~ ^[0-9a-f]{64}$ ]] || return 1
+
+  local wrapper_write_rc=0
+  cat > "$wrapper" <<WRAPPER_EOF || wrapper_write_rc=$?
 #!/usr/bin/env bash
 # Auto-generated by delivery-daemon for $story_id (3phase) — cleaned up on exit
 set +e
@@ -3106,6 +3610,7 @@ set +e
 LOCK_FILE="$LOCK_DIR/$story_id.lock"
 HEARTBEAT_FILE="$LOCK_DIR/$story_id.heartbeat"
 INTERRUPTED_FILE="$LOCK_DIR/$story_id.interrupted"
+umask 077
 echo \$\$ > "\$LOCK_FILE"
 
 # ── Dedicated heartbeat (decoupled from claude -p log output) ──────────────
@@ -3119,23 +3624,29 @@ disown \$HEARTBEAT_PID 2>/dev/null || true
 
 cleanup() {
   kill \$HEARTBEAT_PID 2>/dev/null || true
-  # Backstop reap: SIGKILL any process still rooted in this story's worktree (orphaned
-  # test runners / dev-build servers / worker pools an agent left behind). The per-phase
-  # sweep in daemon-dispatch handles the common case; this covers a graceful daemon stop
-  # where the wrapper exits between/after a phase. Delegates to the dispatch helper (sourced
-  # below) for the centralised empty-pattern safety guard; declare -f tolerates an early
-  # exit before the source. \`${story_id}-workspace\` is a unique, tightly-scoped match.
-  declare -f _reap_worktree_orphans >/dev/null 2>&1 && _reap_worktree_orphans "${story_id}-workspace"
-  # AC2 (E134S14): only reconcile on clean exit — skip if interrupted
-  if [[ "\$_INTERRUPT_REQUESTED" != "1" ]] && [[ ! -f "\$INTERRUPTED_FILE" ]]; then
-    # AC1 (E134S14): reconcile top-level YAML status from phase_status before releasing lock.
-    # Guard: declare -f ensures the function was sourced (not a pre-source exit).
-    if declare -f _reconcile_yaml_status_on_exit >/dev/null 2>&1; then
-      _reconcile_yaml_status_on_exit "$story_id"
+  # Killing this wrapper-owned process is local containment.  When target
+  # authority is lost, preserve the exact lock and last heartbeat files so
+  # forward recovery can classify the failed attempt from durable evidence.
+  if [[ "\$_DISPATCH_AUTHORITY_FAILED" != "1" ]]; then
+    # Backstop reap: SIGKILL any process still rooted in this story's worktree (orphaned
+    # test runners / dev-build servers / worker pools an agent left behind). The per-phase
+    # sweep in daemon-dispatch handles the common case; this covers a graceful daemon stop
+    # where the wrapper exits between/after a phase. Delegates to the dispatch helper (sourced
+    # below) for the centralised empty-pattern safety guard; declare -f tolerates an early
+    # exit before the source. \`${story_id}-workspace\` is a unique, tightly-scoped match.
+    # Only reconcile on clean exit — skip if interrupted.
+    if [[ "\$_INTERRUPT_REQUESTED" != "1" \
+        && ! -f "\$INTERRUPTED_FILE" ]]; then
+      declare -f _reap_worktree_orphans >/dev/null 2>&1 && _reap_worktree_orphans "${story_id}-workspace"
+      # Reconcile top-level YAML status from phase_status before releasing lock.
+      # Guard: declare -f ensures the function was sourced (not a pre-source exit).
+      if declare -f _reconcile_yaml_status_on_exit >/dev/null 2>&1; then
+        _reconcile_yaml_status_on_exit "$story_id"
+      fi
     fi
+    rm -f "\$LOCK_FILE" "\$HEARTBEAT_FILE"
   fi
-  rm -f "\$LOCK_FILE" "\$HEARTBEAT_FILE"
-  # NB: do NOT remove \$INTERRUPTED_FILE — OSS-5 (crash_recovery_scan) reads
+  # NB: do NOT remove \$INTERRUPTED_FILE — the forward recovery scan reads
   # it at the next daemon start to differentiate graceful daemon-start.sh --stop from
   # crash. The recovery scan removes it after reverting status:refined.
 }
@@ -3152,6 +3663,7 @@ trap cleanup EXIT
 # .interrupted file is still set, so OSS-5 still classifies this as a graceful
 # stop on next start.
 _INTERRUPT_REQUESTED=0
+_DISPATCH_AUTHORITY_FAILED=0
 on_interrupt() {
   _INTERRUPT_REQUESTED=1
   date +%s > "\$INTERRUPTED_FILE" 2>/dev/null || true
@@ -3193,10 +3705,18 @@ export GAAI_AUTO_MERGE_ADMIN_FALLBACK="${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-false}"
 export GAAI_QA_REPORT_PATH="${GAAI_QA_REPORT_PATH:-}"
 export GAAI_QA_INJECT_PHASE="${GAAI_QA_INJECT_PHASE:-}"
 export GAAI_QA_INJECT_PHASE_SNAPSHOT="${GAAI_QA_INJECT_PHASE:-}"
+export GAAI_EXPECTED_TARGET_SOURCE="$expected_source"
+export GAAI_EXPECTED_TARGET_BLOB="$expected_blob"
+export GAAI_EXPECTED_TARGET_RECORD="$expected_record"
+export GAAI_DISPATCH_IDENTITY_GUARD=required
 
 # Source dispatch helpers (function definitions only — no top-level work).
 # Plain source, no pipe : pipe creates subshell which loses function defs.
-source "$PROJECT_DIR/.gaai/core/scripts/daemon-dispatch.sh"
+if ! source "$PROJECT_DIR/.gaai/core/scripts/daemon-dispatch.sh"; then
+  _DISPATCH_AUTHORITY_FAILED=1
+  echo "[ERROR] $story_id — dispatch library unavailable; refusing wrapper launch" >&2
+  exit 1
+fi
 
 # Source chore-commit helper (Option B' flock+yq — E134S16)
 export BACKLOG_REL="$BACKLOG_REL"
@@ -3205,12 +3725,40 @@ source "$PROJECT_DIR/.gaai/core/scripts/lib/chore-commit.sh"
 
 # 3phase loop — same logic as in-process version, just runs in own tmux
 while true; do
-  if ! dispatch_3phase_story "$story_id" "$trace_id"; then
-    _ps=\$(get_phase_status "$story_id" 2>/dev/null || echo "?")
+  _ps_before=\$(get_phase_status "$story_id" 2>/dev/null || echo "?")
+  CHORE_JOURNAL_OUTCOME=""
+  CHORE_JOURNAL_COMMIT=""
+  _dispatch_rc=0
+  dispatch_3phase_story "$story_id" "$trace_id" || _dispatch_rc=\$?
+  _ps=\$(get_phase_status "$story_id" 2>/dev/null || echo "?")
+  _receipt_observed=0
+  if [[ -n "\${CHORE_JOURNAL_OUTCOME:-}" \
+      || -n "\${CHORE_JOURNAL_COMMIT:-}" ]]; then
+    _receipt_observed=1
+  fi
+  # A durable write can publish its exact receipt before a later local-file
+  # step fails, or can change a non-phase Story field.  Receipt presence is
+  # therefore independently authoritative; local phase inequality is only a
+  # second trigger and can never substitute for an exact applied receipt.
+  if [[ "\$_receipt_observed" == "1" || "\$_ps" != "\$_ps_before" ]]; then
+    if ! _dispatch_rebind_expected_target_identity "$story_id"; then
+      _DISPATCH_AUTHORITY_FAILED=1
+      echo "[\$(date '+%H:%M:%S')] $story_id — target identity rebind failed after durable phase transition"
+      break
+    fi
+  fi
+  # A handler can return non-zero after its lifecycle transition was already
+  # durably published.  Rebind that transition first; only then interpret its
+  # process result so no successful write bypasses the authority boundary.
+  if [[ "\$_dispatch_rc" -ne 0 ]]; then
+    # A non-zero return after an observed durable receipt can mean local
+    # adoption failed after publication.  Preserve lock/heartbeat evidence for
+    # forward recovery instead of authorizing ordinary cleanup from local bytes.
+    [[ "\$_dispatch_rc" -eq 3 || "\$_receipt_observed" == "1" ]] \
+      && _DISPATCH_AUTHORITY_FAILED=1
     echo "[\$(date '+%H:%M:%S')] $story_id — 3phase dispatch error at phase_status='\${_ps}' — story left in place for retry"
     break
   fi
-  _ps=\$(get_phase_status "$story_id" 2>/dev/null || echo "?")
   # OSS-3 : honour graceful drain request before evaluating terminal states
   # so daemon-start.sh --stop interrupts at the closest phase boundary without losing
   # the current phase_status. INTERRUPTED_FILE is preserved across exit
@@ -3234,38 +3782,37 @@ while true; do
       ;;
   esac
 done
+
+# Preserve the wrapper's terminal process result for local launch probes and
+# post-mortem supervision.  The EXIT trap contains the owned heartbeat process
+# but does not erase durable authority evidence or override this status.
+if [[ "\$_DISPATCH_AUTHORITY_FAILED" == "1" ]]; then
+  exit 3
+fi
+if [[ "\${_dispatch_rc:-0}" -ne 0 ]]; then
+  exit "\$_dispatch_rc"
+fi
+exit 0
 WRAPPER_EOF
 
-  chmod +x "$wrapper"
+  [[ "$wrapper_write_rc" -eq 0 && -s "$wrapper" ]] || return 1
+  chmod +x "$wrapper" || return 1
 
-  # ── Pre-spawn story.md reconcile from staging ────────────────────────────
-  local _sfr_wt
-  _sfr_wt=$(_recovery_resolve_worktree "$story_id")
-  if declare -f _reconcile_story_file_from_staging >/dev/null 2>&1; then
-    local _sfr_rc=0
-    _reconcile_story_file_from_staging "$story_id" "$_sfr_wt" || _sfr_rc=$?
-    if [[ "$_sfr_rc" -eq 2 ]]; then
-      notify_escalation_inline "$story_id" \
-        "story_file_missing_on_staging" \
-        "Verify story.md exists at .gaai/project/contexts/artefacts/stories/${story_id}.story.md on origin/staging — daemon will not spawn wrapper until resolved"
-      return
-    fi
-  fi
-
-  # Forward critical env vars into tmux session so child phases see them.
-  # SECRET HANDLING: GAAI_IMPL_AUTH_TOKEN is written to a 0600 env-file and SOURCED inside the
-  # deliver session (see secrets_prefix below + the tmux new-session call), NOT passed via
-  # `tmux -e` — `-e KEY=VALUE` exposes the value in the tmux process argv (visible to `ps`).
-  local secrets_file="$LOCK_DIR/.daemon-secrets.env"
-  local secrets_prefix=""
+  # Forward critical env vars into tmux. The auth token uses a unique private
+  # descriptor-bound file and launcher; it never appears in tmux argv.
+  local secrets_file="" attempt_launcher="" launch_command="$wrapper"
   if [[ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ]]; then
-    ( umask 077; printf 'export GAAI_IMPL_AUTH_TOKEN=%q\n' "${GAAI_IMPL_AUTH_TOKEN}" > "$secrets_file" )
-    secrets_prefix=". '$secrets_file'; "
+    secrets_file=$(_attempt_secret_create "$story_id" "$GAAI_IMPL_AUTH_TOKEN") || return 1
+    attempt_launcher=$(_attempt_launcher_create "$story_id" "$secrets_file" "$wrapper") || {
+      _attempt_file_cleanup "$secrets_file" || true
+      return 1
+    }
+    launch_command="$attempt_launcher"
   fi
   local tmux_env_args=()
   [[ -n "${GAAI_CLAUDE_PROXY_BASE_URL:-}" ]] && tmux_env_args+=(-e "GAAI_CLAUDE_PROXY_BASE_URL=${GAAI_CLAUDE_PROXY_BASE_URL}")
   [[ -n "${GAAI_IMPL_BASE_URL:-}"   ]] && tmux_env_args+=(-e "GAAI_IMPL_BASE_URL=${GAAI_IMPL_BASE_URL}")
-  # GAAI_IMPL_AUTH_TOKEN intentionally NOT forwarded via -e — sourced from secrets_file (above).
+  # GAAI_IMPL_AUTH_TOKEN intentionally is not forwarded via -e.
   [[ -n "${GAAI_IMPL_MODEL:-}"      ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL=${GAAI_IMPL_MODEL}")
   [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
   [[ -n "${GAAI_AUTO_MERGE_POLICY:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_POLICY=${GAAI_AUTO_MERGE_POLICY}")
@@ -3304,7 +3851,13 @@ WRAPPER_EOF
     unset GAAI_QA_REPORT_PATH GAAI_QA_INJECT_PHASE 2>/dev/null || true
   fi
 
-  tmux new-session -d -s "gaai-deliver-${story_id}" ${tmux_env_args[@]+"${tmux_env_args[@]}"} "${secrets_prefix}$wrapper"
+  if ! tmux new-session -d -s "gaai-deliver-${story_id}" \
+      ${tmux_env_args[@]+"${tmux_env_args[@]}"} "$launch_command"; then
+    [[ -z "$secrets_file" ]] || _attempt_file_cleanup "$secrets_file" || true
+    [[ -z "$attempt_launcher" ]] || _attempt_file_cleanup "$attempt_launcher" || true
+    log "${RED}[FORWARD-RECOVERY] story=${story_id} spawn failed before session creation${NC}"
+    return 1
+  fi
 
   # Pipe wrapper stdout/stderr to persistent log for post-mortem diagnosis.
   # Non-fatal: log WARN on failure and continue.
@@ -3326,7 +3879,16 @@ WRAPPER_EOF
     ((i++)) || true
   done
 
+  if [[ ! -f "$LOCK_DIR/${story_id}.lock" ]]; then
+    tmux kill-session -t "gaai-deliver-${story_id}" 2>/dev/null || true
+    [[ -z "$secrets_file" ]] || _attempt_file_cleanup "$secrets_file" || true
+    [[ -z "$attempt_launcher" ]] || _attempt_file_cleanup "$attempt_launcher" || true
+    log "${RED}[FORWARD-RECOVERY] story=${story_id} wrapper lock did not appear${NC}"
+    return 1
+  fi
+
   log "${GREEN}Launched 3phase: $story_id (tmux: gaai-deliver-${story_id})${NC}"
+  return 0
 }
 
 # ── Prevent macOS sleep ───────────────────────────────────────────────────
@@ -3371,6 +3933,7 @@ set -o errtrace
 _daemon_err_line=""
 _daemon_err_cmd=""
 _daemon_err_src=""
+_daemon_evidence_fatal=false
 # Capture the failing file too (basename via parameter expansion — no fork):
 # a fatal command may live in a sourced file where a bare line number would
 # misread as a delivery-daemon.sh line.
@@ -3378,6 +3941,9 @@ trap '_daemon_err_line=$LINENO; _daemon_err_cmd=$BASH_COMMAND; _daemon_err_src=$
 _daemon_on_exit() {
   local rc=$?
   [[ "$rc" -eq 0 ]] && return 0
+  # The failed evidence call is already the terminal observation. Never turn
+  # that failure into a crash marker, OS notification or webhook fallback.
+  [[ "${_daemon_evidence_fatal:-false}" == true ]] && return 0
   log "${RED}[DAEMON-CRASH] main process exited abnormally (rc=$rc) at ${_daemon_err_src:-?}:${_daemon_err_line:-?}: '${_daemon_err_cmd:-unknown}'. Delivery HALTED — restart via daemon-start.sh (in-flight wrappers continue independently).${NC}" 2>/dev/null || true
   printf '%s rc=%s src=%s line=%s cmd=%s\n' \
     "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo unknown-time)" \
@@ -3455,14 +4021,15 @@ fi
 # shellcheck disable=SC1090
 source "$(dirname "$0")/daemon-dispatch.sh"
 
-# ── OSS-5 : Crash-recovery scan (one-shot at daemon start) ───────────────
-# Lock cleanup first so is_locked accurately reports liveness inside the
-# scan. The scan classifies orphan in_progress stories (artefact + git +
-# .interrupted) and resumes / reverts / reconciles instead of brute-marking
-# failed (the historical check_stale_in_progress behaviour, which is now
-# a fallback for during-life orphans only).
+# ── Forward recovery scan (one-shot at daemon start) ─────────────────────
 clean_stale_locks
-crash_recovery_scan || true
+_startup_recovery_rc=0
+forward_recovery_scan || _startup_recovery_rc=$?
+if [[ "$_startup_recovery_rc" -ne 0 ]]; then
+  [[ "$_startup_recovery_rc" -eq 4 ]] && _daemon_evidence_fatal=true
+  log "${RED}[FORWARD-RECOVERY] startup scan blocked — daemon will not enter dispatch loop${NC}"
+  exit 1
+fi
 
 # ── Main loop ─────────────────────────────────────────────────────────────
 # Counter for consecutive polls where active=0 AND no ready stories. Resets to
@@ -3515,7 +4082,18 @@ while true; do
   # so dead-PID locks are detected and recovery invoked at cycle time.
   _orphan_scan_tick=$(( _orphan_scan_tick + 1 ))
   if (( _orphan_scan_tick >= ORPHAN_SCAN_INTERVAL_TICKS )); then
-    cycle_orphan_lock_scan || true
+    _orphan_scan_rc=0
+    cycle_orphan_lock_scan || _orphan_scan_rc=$?
+    if [[ "$_orphan_scan_rc" -ne 0 ]]; then
+      if [[ "$_orphan_scan_rc" -eq 4 ]]; then
+        _daemon_evidence_fatal=true
+        log "${RED}[FORWARD-RECOVERY] orphan evidence sink unavailable — stopping daemon${NC}"
+        exit 1
+      fi
+      log "${RED}[FORWARD-RECOVERY] orphan scan blocked — skipping downstream cycle${NC}"
+      sleep "$POLL_INTERVAL"
+      continue
+    fi
     _orphan_scan_tick=0
   fi
 
@@ -3523,7 +4101,11 @@ while true; do
   check_heartbeats || true
   watch_pr_merge_status || true
 
-  active=$(active_count)
+  if ! active=$(active_count); then
+    log "${RED}[FORWARD-RECOVERY] capacity ownership is ambiguous — skipping cycle${NC}"
+    sleep "$POLL_INTERVAL"
+    continue
+  fi
 
   if (( active >= MAX_CONCURRENT )); then
     empty_idle_polls=0  # not idle — slots full means deliveries are running
@@ -3531,9 +4113,6 @@ while true; do
     sleep "$POLL_INTERVAL"
     continue
   fi
-
-  # Detect stale in_progress stories (orphaned by crashed sessions)
-  check_stale_in_progress || true
 
   # Detect agent-hang: wrapper alive (heartbeat fresh) but claude -p stalled
   check_agent_activity_stale || true
@@ -3548,12 +4127,41 @@ while true; do
   _now_ts=$(date +%s)
   if (( _now_ts - last_recovery_scan_ts >= RECOVERY_SCAN_INTERVAL )); then
     log "${CYAN}[RECOVERY] periodic-scan triggered (interval=${RECOVERY_SCAN_INTERVAL}s)${NC}"
-    crash_recovery_scan || true
+    _periodic_recovery_rc=0
+    forward_recovery_scan || _periodic_recovery_rc=$?
+    if [[ "$_periodic_recovery_rc" -ne 0 ]]; then
+      if [[ "$_periodic_recovery_rc" -eq 4 ]]; then
+        _daemon_evidence_fatal=true
+        log "${RED}[FORWARD-RECOVERY] periodic evidence sink unavailable — stopping daemon${NC}"
+        exit 1
+      fi
+      log "${RED}[FORWARD-RECOVERY] periodic scan blocked — skipping downstream cycle${NC}"
+      last_recovery_scan_ts=$(date +%s)
+      sleep "$POLL_INTERVAL"
+      continue
+    fi
     last_recovery_scan_ts=$(date +%s)
   fi
 
   # Find stories ready for delivery (via git fetch + scheduler)
   ready_stories=$(find_ready_stories || true)
+
+  if [[ -n "$ready_stories" ]]; then
+    if ! ready_stories=$(python3 -c '
+import re, sys
+values = sys.stdin.read().splitlines()
+seen = set()
+for value in values:
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", value) or value in seen:
+        raise SystemExit(1)
+    seen.add(value)
+print("\n".join(values))
+' <<< "$ready_stories"); then
+      log "${RED}[FORWARD-RECOVERY] scheduler returned invalid or duplicate Story identity — skipping cycle${NC}"
+      sleep "$POLL_INTERVAL"
+      continue
+    fi
+  fi
 
   if [[ -z "$ready_stories" ]]; then
     if (( active > 0 )); then
@@ -3617,46 +4225,304 @@ while true; do
       log "${GREEN}Ready story: $story_id — launching delivery...${NC}"
     fi
 
-    # Pre-launch: mark in_progress on staging (cross-device coordination)
+    # Fresh pre-claim admission from the configured target.
+    # It happens before any potentially mutating worktree repair. The second classification grants
+    # claim authority only after the fresh typed integrity result is known.
+    if ! _pre_wt=$(_forward_resolve_worktree "$story_id"); then
+      if ! _forward_main_hold "$story_id" integrity_unverified; then
+        exit 1
+      fi
+      continue
+    fi
+    _pre_plan=false
+    _forward_plan_present "$story_id" "$_pre_wt" && _pre_plan=true
+    if ! _forward_classify "$story_id" main unknown "$_pre_plan"; then
+      if ! _forward_main_hold "$story_id" source_unavailable; then
+        exit 1
+      fi
+      continue
+    fi
+    if ! _forward_main_record_admitted pre; then
+      if ! _forward_evidence "$story_id" blocked invalid_record none \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none; then
+        exit 1
+      fi
+      rm -f "$_FORWARD_SNAPSHOT"
+      continue
+    fi
+    _pre_source="$_FORWARD_SOURCE"
+    _pre_blob="$_FORWARD_BLOB"
+    _pre_record="$_FORWARD_RECORD_DIGEST"
+    _pre_source_digest="$_FORWARD_SOURCE_DIGEST"
+    rm -f "$_FORWARD_SNAPSHOT"
+    if ! _pre_integrity=$(_forward_prepare_worktree "$story_id" \
+        "$_pre_source" true); then
+      if ! _forward_main_hold "$story_id" integrity_unverified \
+          "$_pre_source_digest" "$_pre_record"; then
+        exit 1
+      fi
+      continue
+    fi
+    if ! _forward_classify "$story_id" main "$_pre_integrity" "$_pre_plan"; then
+      if ! _forward_main_hold "$story_id" source_unavailable \
+          "$_pre_source_digest" "$_pre_record"; then
+        exit 1
+      fi
+      continue
+    fi
+    if [[ "$_FORWARD_SOURCE" != "$_pre_source" || "$_FORWARD_BLOB" != "$_pre_blob" \
+        || "$_FORWARD_RECORD_DIGEST" != "$_pre_record" \
+        || "$_FORWARD_ACTION" != claim_candidate || "$_FORWARD_REASON" != ready ]]; then
+      if ! _forward_evidence "$story_id" blocked remote_changed none \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none; then
+        exit 1
+      fi
+      rm -f "$_FORWARD_SNAPSHOT"
+      continue
+    fi
+    rm -f "$_FORWARD_SNAPSHOT"
+
+    # The existing claim is the only lifecycle effect in this path.
+    _claim_epoch=$(date +%s)
     if ! pre_launch_mark_in_progress "$story_id"; then
-      log "${RED}Skipping $story_id — failed to mark in_progress${NC}"
+      if ! _forward_main_hold "$story_id" projection_failed \
+          "$_pre_source_digest" "$_pre_record"; then
+        exit 1
+      fi
       continue
     fi
 
-    increment_retry "$story_id"
-
-    # ── Pre-spawn worktree integrity check ──────────────────────────
-    # Run only when a worktree already exists (resumption path). First-spawn
-    # worktrees don't exist yet — _check_worktree_integrity returns 0 immediately.
-    _wt_pre_path="$(_recovery_resolve_worktree "$story_id")"
-    if [[ -d "$_wt_pre_path" ]] && declare -f _check_worktree_integrity >/dev/null 2>&1; then
-      _check_worktree_integrity "$_wt_pre_path" "$TARGET_BRANCH" "$story_id"
-      _wt_check_rc=$?
-      if [[ "$_wt_check_rc" -ge 1 ]]; then
-        if [[ "$_wt_check_rc" -eq 1 ]] && declare -f _recover_worktree_safe_base >/dev/null 2>&1; then
-          log "${YELLOW}$story_id — worktree corruption suspected, attempting safe-base recovery...${NC}"
-          _recover_worktree_safe_base "$story_id" "$_wt_pre_path" "$TARGET_BRANCH"
-          _wt_check_rc=$?
-        fi
-        if [[ "$_wt_check_rc" -ne 0 ]]; then
-          _wt_recover_type="unrecoverable"
-          [[ "$_wt_check_rc" -eq 1 ]] && _wt_recover_type="conflicts"
-          chore_commit_field "$story_id" phase_status worktree_recovery_failed \
-            "chore($story_id): worktree_recovery_failed [daemon]" 2>/dev/null || true
-          notify_escalation "$story_id" \
-            "worktree_corruption_${_wt_recover_type}" \
-            "Inspect worktree at ${_wt_pre_path}; legitimate commits in stash; manual cherry-pick may be required"
-          continue
-        fi
-        log "${GREEN}$story_id — worktree recovery succeeded, proceeding with spawn${NC}"
+    # The claim changes target authority. Pin and admit that new object before
+    # probing or repairing the post-claim worktree.
+    _post_plan=false
+    _forward_plan_present "$story_id" "$_pre_wt" && _post_plan=true
+    if ! _forward_classify "$story_id" postclaim unknown "$_post_plan"; then
+      if ! _forward_main_hold "$story_id" source_unavailable \
+          "$_pre_source_digest" "$_pre_record"; then
+        exit 1
       fi
+      continue
+    fi
+    if ! _forward_main_record_admitted post; then
+      if ! _forward_evidence "$story_id" blocked invalid_record none \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none; then
+        exit 1
+      fi
+      rm -f "$_FORWARD_SNAPSHOT"
+      continue
+    fi
+    _post_source="$_FORWARD_SOURCE"
+    _post_blob="$_FORWARD_BLOB"
+    _post_record="$_FORWARD_RECORD_DIGEST"
+    _post_source_digest="$_FORWARD_SOURCE_DIGEST"
+    _post_started="$_FORWARD_STARTED"
+    rm -f "$_FORWARD_SNAPSHOT"
+    _post_allow_absent=false
+    [[ "$_pre_integrity" == absent_new && ! -d "$_pre_wt" ]] \
+      && _post_allow_absent=true
+    if ! _post_integrity=$(_forward_prepare_worktree "$story_id" \
+        "$_post_source" "$_post_allow_absent"); then
+      if ! _forward_main_hold "$story_id" integrity_unverified \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
+    fi
+    if ! _forward_classify "$story_id" postclaim "$_post_integrity" \
+        "$_post_plan"; then
+      if ! _forward_main_hold "$story_id" source_unavailable \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
+    fi
+    if [[ "$_FORWARD_SOURCE" != "$_post_source" || "$_FORWARD_BLOB" != "$_post_blob" \
+        || "$_FORWARD_RECORD_DIGEST" != "$_post_record" \
+        || "$_FORWARD_ACTION" != resume || "$_FORWARD_REASON" != resumable ]]; then
+      if ! _forward_evidence "$story_id" blocked remote_changed none \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none; then
+        exit 1
+      fi
+      rm -f "$_FORWARD_SNAPSHOT"
+      continue
+    fi
+    if ! python3 - "$_post_started" "$_claim_epoch" <<'PY' >/dev/null 2>&1
+import datetime, sys
+try:
+    started = datetime.datetime.strptime(
+        sys.argv[1], "%Y-%m-%dT%H:%M:%SZ"
+    ).replace(tzinfo=datetime.timezone.utc).timestamp()
+    if started < int(sys.argv[2]):
+        raise ValueError
+except (OverflowError, ValueError):
+    raise SystemExit(1)
+PY
+    then
+      if ! _forward_evidence "$story_id" blocked remote_changed none \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none; then
+        exit 1
+      fi
+      rm -f "$_FORWARD_SNAPSHOT"
+      continue
+    fi
+
+    rm -f "$_FORWARD_SNAPSHOT"
+
+    # Settle retained lifecycle authority before temporary execution checks.
+    _pending_rc=0
+    _journal_inspect_pending_lifecycle "$story_id" recovery.scan >/dev/null 2>&1 || _pending_rc=$?
+    if [[ "$_pending_rc" -eq 0 ]]; then
+      if ! _forward_main_hold "$story_id" pending_run \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
+    elif [[ "$_pending_rc" -ne 2 ]]; then
+      if ! _forward_evidence "$story_id" blocked invalid_record none \
+          "$_post_source_digest" "$_post_record" none; then
+        exit 1
+      fi
+      continue
+    fi
+    _story_reconcile_rc=0
+    _reconcile_story_file_from_staging "$story_id" "$_pre_wt" "$_post_source" \
+      "$_post_allow_absent" \
+      || _story_reconcile_rc=$?
+    if [[ "$_story_reconcile_rc" -gt 1 ]]; then
+      if ! _forward_main_hold "$story_id" source_unavailable \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
+    fi
+
+    # Re-pin immediately after reconciliation. Any A-to-B advance invalidates
+    # every context, retry and spawn effect from this cycle.
+    if ! _forward_revalidate_after_reconcile "$story_id" "$_post_source" \
+        "$_post_blob" "$_post_record" postclaim "$_post_allow_absent"; then
+      if ! _forward_evidence "$story_id" blocked remote_changed none \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none; then
+        exit 1
+      fi
+      continue
+    fi
+    _post_integrity="$_FORWARD_FINAL_INTEGRITY"
+    if ! _claim_context=$(_forward_context_path "$story_id"); then
+      if ! _forward_main_hold "$story_id" context_invalid \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      rm -f "$_FORWARD_SNAPSHOT"
+      continue
+    fi
+    _claim_row=$(_forward_bind_context "$_claim_context" "$story_id" \
+      "$_FORWARD_SOURCE" "$_FORWARD_BLOB" "$_FORWARD_RECORD_DIGEST" \
+      none none none none none none "$_post_integrity" resume resumable none) || {
+      if ! _forward_evidence "$story_id" blocked context_invalid none \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none; then
+        exit 1
+      fi
+      rm -f "$_FORWARD_SNAPSHOT"
+      continue
+    }
+    _claim_context_digest=${_claim_row##*$'\t'}
+    _claim_source="$_FORWARD_SOURCE"
+    _claim_blob="$_FORWARD_BLOB"
+    _claim_record="$_FORWARD_RECORD_DIGEST"
+    rm -f "$_FORWARD_SNAPSHOT"
+
+    if ! _forward_active_markers_clear "$story_id"; then
+      if ! _forward_main_hold "$story_id" effect_inhibited \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
+    fi
+    if ! _forward_runner_clear "$story_id"; then
+      if ! _forward_main_hold "$story_id" effect_inhibited \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
+    fi
+    if tmux has-session -t "gaai-deliver-${story_id}" 2>/dev/null; then
+      if ! _forward_main_hold "$story_id" runner_live \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
+    fi
+    if ! _live_active=$(active_count); then
+      if ! _forward_main_hold "$story_id" effect_inhibited \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
+    fi
+    if (( _live_active >= MAX_CONCURRENT )); then
+      if ! _forward_main_hold "$story_id" effect_inhibited \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
+    fi
+    if ! _trace_id=$(node -e \
+        "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" \
+        2>/dev/null || python3 -c \
+        "import uuid; print(str(uuid.uuid4()),end='')"); then
+      if ! _forward_main_hold "$story_id" effect_inhibited \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
+    fi
+
+    # The checks above may perform filesystem and process observations after
+    # the first post-reconcile fetch. Re-pin once more at the actual effect
+    # boundary so an A-to-B target advance cannot consume A's context, retry
+    # budget or spawn authority. Failure preserves the bound context for a
+    # later exact-cycle recovery.
+    if ! _forward_last_edge_guard "$story_id" "$_claim_source" \
+        "$_claim_blob" "$_claim_record" postclaim "$_post_allow_absent"; then
+      if ! _forward_evidence "$story_id" blocked remote_changed none \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none; then
+        exit 1
+      fi
+      rm -f "${_FORWARD_SNAPSHOT:-}"
+      continue
+    fi
+    rm -f "$_FORWARD_SNAPSHOT"
+    if ! forward_context_remove "$_claim_context" "$_claim_context_digest"; then
+      if ! _forward_main_hold "$story_id" context_invalid \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
     fi
 
     # ── Route: 3phase (sole delivery path post-cutover) ─────────────────────
-    _trace_id=$(node -e "import('node:crypto').then(m=>process.stdout.write(m.randomUUID()))" 2>/dev/null \
-      || python3 -c "import uuid; print(str(uuid.uuid4()),end='')" 2>/dev/null \
-      || echo "$(date +%s)-$$-$RANDOM")
-    launch_3phase_in_tmux "$story_id" "$_trace_id"
+    if ! increment_retry "$story_id"; then
+      if ! _forward_restore_context_row "$_claim_context" "$_claim_row"; then
+        if ! _forward_evidence "$story_id" blocked context_invalid none \
+            "$_post_source_digest" "$_post_record" none; then
+          exit 1
+        fi
+        exit 1
+      fi
+      if ! _forward_main_hold "$story_id" effect_inhibited \
+          "$_post_source_digest" "$_post_record"; then
+        exit 1
+      fi
+      continue
+    fi
+    if ! launch_3phase_in_tmux "$story_id" "$_trace_id" "$_claim_source" \
+        "$_claim_blob" "$_claim_record"; then
+      if ! _forward_evidence "$story_id" failure effect_inhibited none \
+          "$_FORWARD_SOURCE_DIGEST" "$_FORWARD_RECORD_DIGEST" none; then
+        exit 1
+      fi
+      continue
+    fi
     # Under set -e, a post-increment returns status 1 when its initial value is 0.
     # The counter side effect is still required; only the control-flow status is ignored.
     ((launched++)) || true

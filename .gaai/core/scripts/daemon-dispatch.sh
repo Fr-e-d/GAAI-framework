@@ -20,6 +20,17 @@ _GAAI_DISPATCH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
   && source "${_GAAI_DISPATCH_LIB_DIR}/delivery-routing.sh"
 # shellcheck source=lib/commit-retry-containment.sh
 source "${_GAAI_DISPATCH_LIB_DIR}/commit-retry-containment.sh"
+# The PLAN target guard is owned by this library and must remain available in
+# the fresh wrapper shell, which sources daemon-dispatch directly rather than
+# inheriting delivery-daemon functions.
+# shellcheck source=lib/stuck-classifier.sh
+if [[ -z "${_STUCK_CLASSIFIER_SH_SOURCED:-}" ]]; then
+  if ! source "${_GAAI_DISPATCH_LIB_DIR}/stuck-classifier.sh"; then
+    printf '%s\n' '[ERROR] daemon-dispatch: canonical target classifier unavailable' >&2
+    return 1 2>/dev/null || exit 1
+  fi
+  _STUCK_CLASSIFIER_SH_SOURCED=1
+fi
 
 # ── Durable lifecycle persistence boundary ───────────────────────────────
 #
@@ -288,7 +299,10 @@ _lifecycle_assert_base_held_assets() {
     .gaai/core/scripts/lib/chore-commit.sh
   )
   if [[ -n "${GAAI_LIFECYCLE_CALLER_ASSET:-}" ]]; then
-    [[ "$GAAI_LIFECYCLE_CALLER_ASSET" == ".gaai/core/scripts/post-delivery-hook.sh" ]] || return 1
+    case "$GAAI_LIFECYCLE_CALLER_ASSET" in
+      .gaai/core/scripts/post-delivery-hook.sh|.gaai/core/scripts/delivery-daemon.sh) ;;
+      *) return 1 ;;
+    esac
     assets+=("$GAAI_LIFECYCLE_CALLER_ASSET")
   fi
 
@@ -309,24 +323,418 @@ PY
   done
 }
 
+_lifecycle_recovery_caller_authenticated() {
+  [[ "${GAAI_LIFECYCLE_CALLER_ASSET:-}" == ".gaai/core/scripts/delivery-daemon.sh" ]] \
+    || return 1
+  local expected dispatch source resolved index
+  expected=$(cd "${PROJECT_DIR:?}" 2>/dev/null && pwd -P) || return 1
+  expected="$expected/.gaai/core/scripts/delivery-daemon.sh"
+  source="${BASH_SOURCE[0]:-}"
+  [[ -f "$source" ]] || return 1
+  dispatch=$(cd "$(dirname "$source")" 2>/dev/null && pwd -P) || return 1
+  dispatch="$dispatch/$(basename "$source")"
+
+  # The dispatch library legitimately contributes several adjacent frames.
+  # Authenticate only the first real caller beyond that boundary: a later
+  # trusted frame must never bless an untrusted intermediary.
+  index=1
+  while (( index < ${#BASH_SOURCE[@]} )); do
+    source="${BASH_SOURCE[$index]:-}"
+    [[ -f "$source" ]] || return 1
+    resolved=$(cd "$(dirname "$source")" 2>/dev/null && pwd -P) || return 1
+    resolved="$resolved/$(basename "$source")"
+    if [[ "$resolved" != "$dispatch" ]]; then
+      [[ "$resolved" == "$expected" ]]
+      return $?
+    fi
+    index=$(( index + 1 ))
+  done
+  return 1
+}
+
+# Read one private run state and all referenced records without reopening any
+# accepted path. The emitted manifest contains only validated, canonical facts.
+_lifecycle_run_manifest() {
+  local state_path="$1" journal_root="$2" story_id="$3" writer="$4"
+  python3 - "$state_path" "$journal_root" "$story_id" "$writer" <<'PY'
+import datetime
+import decimal
+import hashlib
+import json
+import os
+import re
+import stat
+import sys
+
+state_path, journal_root, story, writer = sys.argv[1:]
+token_re = re.compile(r"[0-9a-f]{64}")
+object_re = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+basename_re = re.compile(r"[0-9]{20}-[0-9a-f]{16}\.json")
+timestamp_re = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+allowed_fields = {
+    "status", "phase_status", "started_at", "completed_at", "blocked_reason",
+    "pr_url", "pr_number", "pr_status", "cost_usd",
+}
+status_edges = {
+    "draft": {"refined", "cancelled", "superseded"},
+    "refined": {"in_progress", "blocked", "cancelled", "superseded"},
+    "in_progress": {"done", "failed", "blocked", "escalated", "cancelled", "superseded"},
+    "failed": {"blocked", "cancelled", "superseded"},
+    "escalated": {"blocked", "cancelled", "superseded"},
+    "blocked": {"draft", "refined", "in_progress", "done", "cancelled", "superseded"},
+    "done": {"cancelled", "superseded"},
+    "deferred": {"cancelled", "superseded"},
+    "cancelled": set(),
+    "superseded": set(),
+}
+phase_edges = {
+    "not_started": {"planned", "failed"},
+    "planned": {"implemented", "failed"},
+    "implemented": {"qa_passed", "qa_failed", "qa_escalated", "failed"},
+    "qa_failed": {"not_started", "planned", "implemented", "qa_escalated", "failed"},
+    "qa_passed": {"implemented", "commit_stalled", "done", "failed", "escalated"},
+    "qa_escalated": set(),
+    "commit_stalled": set(),
+    "done": set(),
+    "failed": set(),
+    "escalated": set(),
+}
+pr_statuses = {
+    "merged", "pending_review", "open", "closed", "closed_superseded",
+    "not_created_superseded", "created", "none",
+}
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+def canonical_timestamp(value):
+    if value is None:
+        return None
+    if not isinstance(value, str) or not timestamp_re.fullmatch(value):
+        raise ValueError
+    datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    return value
+
+def validate_value(field, value):
+    if field in {"started_at", "completed_at"}:
+        return canonical_timestamp(value)
+    if field == "blocked_reason":
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value:
+            raise ValueError
+        if any(
+            ord(char) <= 31
+            or 127 <= ord(char) <= 159
+            or 0xD800 <= ord(char) <= 0xDFFF
+            or ord(char) in {0x2028, 0x2029}
+            for char in value
+        ):
+            raise ValueError
+        return value
+    if field == "pr_url":
+        if value is None:
+            return None
+        if not isinstance(value, str) or not re.fullmatch(
+            r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*",
+            value,
+        ):
+            raise ValueError
+        return value
+    if field == "pr_number":
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError
+        return value
+    if field == "pr_status":
+        if value is None:
+            return None
+        if not isinstance(value, str) or value not in pr_statuses:
+            raise ValueError
+        return value
+    if field == "cost_usd":
+        if value is None:
+            return None
+        if not isinstance(value, str) or not re.fullmatch(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?", value):
+            raise ValueError
+        parsed = decimal.Decimal(value)
+        canonical_cost = format(parsed, "f")
+        if "." in canonical_cost:
+            canonical_cost = canonical_cost.rstrip("0").rstrip(".")
+        if canonical_cost != value:
+            raise ValueError
+        return value
+    raise ValueError
+
+def validate_policy(field, old_value, new_value):
+    if field not in allowed_fields:
+        raise ValueError
+    if field == "status":
+        if old_value not in status_edges or new_value not in status_edges[old_value]:
+            raise ValueError
+    elif field == "phase_status":
+        if old_value not in phase_edges or new_value not in phase_edges[old_value]:
+            raise ValueError
+    else:
+        if validate_value(field, old_value) != old_value:
+            raise ValueError
+        if validate_value(field, new_value) != new_value:
+            raise ValueError
+
+def read_private(path):
+    fd = None
+    try:
+        before = os.lstat(path)
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        opened = os.fstat(fd)
+        after = os.lstat(path)
+        identity = (opened.st_dev, opened.st_ino)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError
+        if opened.st_uid != os.geteuid() or opened.st_mode & 0o077:
+            raise ValueError
+        if identity != (before.st_dev, before.st_ino):
+            raise ValueError
+        if identity != (after.st_dev, after.st_ino):
+            raise ValueError
+        chunks = []
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+try:
+    state_bytes = read_private(state_path)
+    state_text = state_bytes.decode("ascii")
+    lines = state_text.splitlines()
+    if not lines or len(lines[0].split("\t")) != 2:
+        raise ValueError
+    token, source = lines[0].split("\t")
+    if not token_re.fullmatch(token) or not object_re.fullmatch(source):
+        raise ValueError
+    seen = set()
+    rows = []
+    writer_key = hashlib.sha256(writer.encode("ascii")).hexdigest()
+    registration_path = os.path.join(journal_root, "registrations", token + ".json")
+    registration_bytes = read_private(registration_path)
+    registration_wrapper = json.loads(registration_bytes.decode("utf-8"))
+    registration = registration_wrapper["registration"]
+    if set(registration_wrapper) != {"registration", "digest"}:
+        raise ValueError
+    if set(registration) != {"schema_version", "run_token", "writer_context", "issued_at"}:
+        raise ValueError
+    if registration.get("schema_version") != "1.0.0":
+        raise ValueError
+    if registration.get("run_token") != token or registration.get("writer_context") != writer:
+        raise ValueError
+    if canonical_timestamp(registration.get("issued_at")) != registration.get("issued_at"):
+        raise ValueError
+    registration_digest = hashlib.sha256(canonical(registration).encode("utf-8")).hexdigest()
+    if registration_wrapper.get("digest") != registration_digest:
+        raise ValueError
+    if registration_bytes != (canonical(registration_wrapper) + "\n").encode("utf-8"):
+        raise ValueError
+    record_digests = []
+    for line in lines[1:]:
+        parts = line.split("\t")
+        if len(parts) != 3:
+            raise ValueError
+        field, basename, expected_digest = parts
+        if field in seen or not basename_re.fullmatch(basename):
+            raise ValueError
+        if not token_re.fullmatch(expected_digest):
+            raise ValueError
+        seen.add(field)
+        roots = ("records", "applied")
+        candidates = [
+            os.path.join(journal_root, "writers", writer_key, root, basename)
+            for root in roots
+        ]
+        existing = [path for path in candidates if os.path.lexists(path)]
+        if len(existing) != 1:
+            raise ValueError
+        record_bytes = read_private(existing[0])
+        wrapper = json.loads(record_bytes.decode("utf-8"))
+        record = wrapper["record"]
+        digest = wrapper["digest"]
+        if set(wrapper) != {"record", "intent_digest", "digest"}:
+            raise ValueError
+        expected_record_keys = {
+            "schema_version", "story_id", "field", "old_value", "new_value",
+            "source_commit", "source_blob", "writer_context", "run_token",
+            "intent_digest", "sequence", "emitted_at",
+        }
+        if set(record) != expected_record_keys or record.get("schema_version") != "1.0.0":
+            raise ValueError
+        if record_bytes != (canonical(wrapper) + "\n").encode("utf-8"):
+            raise ValueError
+        if digest != expected_digest:
+            raise ValueError
+        if hashlib.sha256(canonical(record).encode("utf-8")).hexdigest() != digest:
+            raise ValueError
+        if record.get("story_id") != story or record.get("field") != field:
+            raise ValueError
+        if record.get("writer_context") != writer or record.get("run_token") != token:
+            raise ValueError
+        if record.get("source_commit") != source:
+            raise ValueError
+        if not object_re.fullmatch(record.get("source_blob") or ""):
+            raise ValueError
+        if not isinstance(record.get("sequence"), int) or isinstance(record.get("sequence"), bool):
+            raise ValueError
+        if record["sequence"] < 1:
+            raise ValueError
+        if canonical_timestamp(record.get("emitted_at")) != record.get("emitted_at"):
+            raise ValueError
+        intent_digest = wrapper.get("intent_digest")
+        if not token_re.fullmatch(intent_digest or ""):
+            raise ValueError
+        if record.get("intent_digest") != intent_digest:
+            raise ValueError
+        intent = {key: record[key] for key in (
+            "schema_version", "story_id", "field", "old_value", "new_value",
+            "source_commit", "source_blob", "writer_context", "run_token",
+        )}
+        if hashlib.sha256(canonical(intent).encode("utf-8")).hexdigest() != intent_digest:
+            raise ValueError
+        expected_name = "%020d-%s.json" % (record["sequence"], intent_digest[:16])
+        if basename != expected_name:
+            raise ValueError
+        validate_policy(field, record.get("old_value"), record.get("new_value"))
+        value = record.get("new_value")
+        if field == "blocked_reason":
+            if not isinstance(value, str):
+                raise ValueError
+            wire = "json:" + canonical(value)
+        elif value is None:
+            wire = "null"
+        elif field == "pr_number":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError
+            wire = str(value)
+        elif field == "cost_usd":
+            if not isinstance(value, str):
+                raise ValueError
+            wire = format(decimal.Decimal(value), "f")
+            if "." in wire:
+                wire = wire.rstrip("0").rstrip(".")
+        elif isinstance(value, str):
+            wire = value
+        else:
+            raise ValueError
+        if any("\t" in item or "\n" in item for item in (field, basename, digest, wire)):
+            raise ValueError
+        record_digests.append(basename + ":" + digest)
+        location = os.path.basename(os.path.dirname(existing[0]))
+        rows.append((field, basename, digest, wire, location))
+    state_digest = hashlib.sha256(state_bytes).hexdigest()
+    records_digest = hashlib.sha256("\n".join(record_digests).encode("ascii")).hexdigest()
+    token_digest = hashlib.sha256(token.encode("ascii")).hexdigest()
+    print("\t".join((token, source, token_digest, state_digest, records_digest)))
+    for row in rows:
+        print("\t".join(row))
+except (
+    OSError, ValueError, KeyError, TypeError, UnicodeError,
+    json.JSONDecodeError, decimal.InvalidOperation,
+):
+    raise SystemExit(1)
+PY
+}
+
+_journal_inspect_pending_lifecycle() {
+  local story_id="$1" writer="$2"
+  local state_file="${LOCK_DIR:?}/.journal-runs/${writer}.${story_id}.state"
+  if [[ ! -e "$state_file" ]]; then
+    [[ -L "$state_file" ]] && return 1
+    return 2
+  fi
+  local writer_key journal_root
+  writer_key=$(python3 - "$writer" <<'PY'
+import hashlib, sys
+print(hashlib.sha256(sys.argv[1].encode("ascii")).hexdigest())
+PY
+  ) || return 1
+  journal_root="${GAAI_BACKLOG_JOURNAL_DIR:-$(dirname "$BACKLOG_FILE")/.delivery-locks/journal}"
+  _lifecycle_run_manifest "$state_file" "$journal_root" "$story_id" "$writer"
+}
+
+_journal_retire_accepted_lifecycle_locked() {
+  local story_id="$1" writer="$2" expected_state_digest="$3"
+  local manifest token source token_digest state_digest records_digest rows=""
+  manifest=$(_journal_inspect_pending_lifecycle "$story_id" "$writer") || return 1
+  IFS=$'\t' read -r token source token_digest state_digest records_digest \
+    <<< "${manifest%%$'\n'*}" || return 1
+  [[ "$state_digest" == "$expected_state_digest" ]] || return 1
+  [[ "$manifest" == *$'\n'* ]] && rows="${manifest#*$'\n'}"
+  local args=() field basename digest value location
+  while IFS=$'\t' read -r field basename digest value location; do
+    [[ -n "$field" && "$location" == applied ]] || return 1
+    args+=("$field" "$value")
+  done <<< "$rows"
+  (( ${#args[@]} >= 2 )) || return 1
+  local target_branch="${TARGET_BRANCH:-staging}" remote_sha snapshot
+  snapshot=$(mktemp "${LOCK_DIR:?}/.accepted-snapshot-XXXXXX" 2>/dev/null) || return 1
+  if ! git -C "$PROJECT_DIR" fetch origin "$target_branch" --quiet 2>/dev/null \
+      || ! remote_sha=$(git -C "$PROJECT_DIR" rev-parse "origin/$target_branch" 2>/dev/null) \
+      || ! git -C "$PROJECT_DIR" show "${remote_sha}:${BACKLOG_REL}" > "$snapshot" 2>/dev/null \
+      || ! _lifecycle_snapshot_matches "$snapshot" "$story_id" "${args[@]}"; then
+    rm -f "$snapshot"
+    return 1
+  fi
+  rm -f "$snapshot"
+  _lifecycle_write_run_state \
+    "${LOCK_DIR}/.journal-runs/${writer}.${story_id}.state" remove
+}
+
+_journal_retire_accepted_lifecycle() {
+  _lifecycle_with_staging_lock _journal_retire_accepted_lifecycle_locked "$@"
+}
+
 _lifecycle_record_matches() {
   local record_path="$1" story_id="$2" field="$3" writer="$4" token="$5"
   local expected="$6" digest="$7"
   python3 - "$record_path" "$story_id" "$field" "$writer" "$token" \
     "$expected" "$digest" <<'PY'
-import decimal, json, os, stat, sys
+import decimal, hashlib, json, os, stat, sys
 
 path, story, field, writer, token, raw, digest = sys.argv[1:]
 try:
-    mode = os.lstat(path).st_mode
-    if not stat.S_ISREG(mode) or mode & 0o077:
+    before = os.lstat(path)
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    opened = os.fstat(fd)
+    after = os.lstat(path)
+    if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.geteuid()
+            or opened.st_mode & 0o077
+            or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            or (opened.st_dev, opened.st_ino) != (after.st_dev, after.st_ino)):
         raise ValueError
-    with open(path, encoding="utf-8") as handle:
-        wrapper = json.load(handle)
+    chunks = []
+    while True:
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    os.close(fd)
+    fd = None
+    record_bytes = b"".join(chunks)
+    wrapper = json.loads(record_bytes.decode("utf-8"))
     record = wrapper["record"]
+    canonical_wrapper = json.dumps(
+        wrapper, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8") + b"\n"
+    if record_bytes != canonical_wrapper:
+        raise ValueError
     if (wrapper.get("digest") != digest or record.get("story_id") != story
             or record.get("field") != field or record.get("writer_context") != writer
-            or record.get("run_token") != token):
+            or record.get("run_token") != token
+            or hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":"),
+                              ensure_ascii=False).encode("utf-8")).hexdigest() != digest):
         raise ValueError
     if raw == "null":
         expected = None
@@ -344,8 +752,12 @@ try:
         expected = raw
     if record.get("new_value") != expected:
         raise ValueError
-except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, decimal.InvalidOperation):
+except (OSError, ValueError, KeyError, TypeError, UnicodeError,
+        json.JSONDecodeError, decimal.InvalidOperation):
     raise SystemExit(1)
+finally:
+    if 'fd' in locals() and fd is not None:
+        os.close(fd)
 PY
 }
 
@@ -529,6 +941,13 @@ _journal_persist_lifecycle_locked() {
   case "$writer" in
     dispatch.*) projector_context=dispatch ;;
     post-delivery-hook) projector_context=post-delivery-hook ;;
+    recovery.scan)
+      projector_context=recovery
+      if ! _lifecycle_recovery_caller_authenticated; then
+        echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=rejected reason=caller_untrusted" >&2
+        return 1
+      fi
+      ;;
     *) return 1 ;;
   esac
   declare -F chore_commit_project_journal >/dev/null 2>&1 || {
@@ -551,7 +970,7 @@ except (OSError, ValueError):
     raise SystemExit(1)
 PY
 
-  local snapshot tmp_snapshot projection_log="" remote_sha token source_sha
+  local snapshot tmp_snapshot projection_log="" remote_sha token source_sha manifest
   snapshot=$(mktemp "$LOCK_DIR/.lifecycle-snapshot-XXXXXX" 2>/dev/null) || return 1
   tmp_snapshot=$(mktemp "$LOCK_DIR/.lifecycle-reflect-XXXXXX" 2>/dev/null) || {
     rm -f "$snapshot"; return 1; }
@@ -589,23 +1008,14 @@ PY
   fi
 
   if [[ -e "$state_file" || -L "$state_file" ]]; then
-    if ! python3 - "$state_file" <<'PY'
-import os, stat, sys
-try:
-    mode = os.lstat(sys.argv[1]).st_mode
-    if not stat.S_ISREG(mode) or mode & 0o077:
-        raise ValueError
-except (OSError, ValueError):
-    raise SystemExit(1)
-PY
-    then
+    if ! manifest=$(_journal_inspect_pending_lifecycle "$story_id" "$writer"); then
       echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=rejected reason=run_state_invalid" >&2
       _lifecycle_cleanup
       return 1
     fi
-    IFS=$'\t' read -r token source_sha < "$state_file" || true
+    IFS=$'\t' read -r token source_sha _ _ _ <<< "${manifest%%$'\n'*}" || true
   else
-    token=""; source_sha=""
+    token=""; source_sha=""; manifest=""
   fi
   if [[ -z "$token" ]]; then
     if ! backlog_journal_begin_run "$BACKLOG_FILE" "$writer"; then
@@ -615,6 +1025,8 @@ PY
     fi
     token="$BACKLOG_JOURNAL_RUN_TOKEN"; source_sha="$remote_sha"
     _lifecycle_write_run_state "$state_file" create "$token" "$source_sha" || {
+      _lifecycle_cleanup; return 1; }
+    manifest=$(_journal_inspect_pending_lifecycle "$story_id" "$writer") || {
       _lifecycle_cleanup; return 1; }
   fi
   if [[ ! "$token" =~ ^[0-9a-f]{64}$ || ! "$source_sha" =~ ^[0-9a-f]{40}$ ]] \
@@ -635,9 +1047,10 @@ PY
   i=0
   while (( i < n )); do
     field="${args[$i]}"; value="${args[$(( i + 1 ))]}"; i=$(( i + 2 ))
-    line=$(awk -F '\t' -v wanted="$field" 'NR > 1 && $1 == wanted { print; exit }' "$state_file" 2>/dev/null || true)
+    line=$(printf '%s\n' "$manifest" \
+      | awk -F '\t' -v wanted="$field" 'NR > 1 && $1 == wanted { print; exit }')
     if [[ -n "$line" ]]; then
-      IFS=$'\t' read -r existing basename digest <<< "$line"
+      IFS=$'\t' read -r existing basename digest _ <<< "$line"
       record_path="$journal_root/writers/$writer_key/records/$basename"
       applied_path="$journal_root/writers/$writer_key/applied/$basename"
       [[ -f "$record_path" ]] || record_path="$applied_path"
@@ -666,6 +1079,8 @@ PY
       _lifecycle_cleanup
       return 1
     fi
+    manifest=$(_journal_inspect_pending_lifecycle "$story_id" "$writer") || {
+      _lifecycle_cleanup; return 1; }
   done
 
   rc=0
@@ -695,7 +1110,7 @@ PY
     return 1
   fi
 
-  while IFS=$'\t' read -r field basename digest; do
+  while IFS=$'\t' read -r field basename digest _; do
     [[ "$field" == "$token" ]] && continue
     applied_path="$journal_root/writers/$writer_key/applied/$basename"
     value=""
@@ -714,7 +1129,7 @@ PY
       _lifecycle_cleanup
       return 1
     fi
-  done < "$state_file"
+  done <<< "$manifest"
 
   if ! git -C "$PROJECT_DIR" fetch origin "$target_branch" --quiet 2>/dev/null \
       || ! remote_sha=$(git -C "$PROJECT_DIR" rev-parse "origin/$target_branch" 2>/dev/null) \
@@ -736,29 +1151,6 @@ _journal_persist_lifecycle() {
   _lifecycle_with_staging_lock _journal_persist_lifecycle_locked "$@"
 }
 
-_lifecycle_retire_empty_run_state_locked() {
-  local state_file="$1"
-  if [[ ! -e "$state_file" ]]; then
-    [[ -L "$state_file" ]] && return 1
-    return 0
-  fi
-  python3 - "$state_file" <<'PY' || return 1
-import os, stat, sys
-try:
-    mode = os.lstat(sys.argv[1]).st_mode
-    if not stat.S_ISREG(mode) or mode & 0o077:
-        raise ValueError
-except (OSError, ValueError):
-    raise SystemExit(1)
-PY
-  # Recheck under the shared staging lock. A concurrent owner that appended a
-  # record wins; only a header-only state can be retired as an empty attempt.
-  if ! awk 'NR > 1 && NF { found=1 } END { exit found ? 1 : 0 }' "$state_file"; then
-    return 2
-  fi
-  _lifecycle_write_run_state "$state_file" remove
-}
-
 # Resume an interrupted dispatch-owned transition before another phase model is
 # allowed to run.  The desired values come only from the exact journal records
 # already bound into the private run-state file; model output and the ambient
@@ -769,85 +1161,24 @@ _journal_resume_pending_lifecycle() {
   if [[ ! -e "$state_file" ]]; then
     [[ -L "$state_file" ]] || return 2
   fi
-  python3 - "$state_file" <<'PY' || return 1
-import os, stat, sys
-try:
-    mode = os.lstat(sys.argv[1]).st_mode
-    if not stat.S_ISREG(mode) or mode & 0o077:
-        raise ValueError
-except (OSError, ValueError):
-    raise SystemExit(1)
-PY
-
-  local token source_sha writer_key journal_root field basename digest record_path value
-  IFS=$'\t' read -r token source_sha < "$state_file" || return 1
+  local manifest token source_sha token_digest state_digest records_digest
+  manifest=$(_journal_inspect_pending_lifecycle "$story_id" "$writer") || return 1
+  IFS=$'\t' read -r token source_sha token_digest state_digest records_digest \
+    <<< "${manifest%%$'\n'*}" || return 1
   [[ "$token" =~ ^[0-9a-f]{64}$ && "$source_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
-  writer_key=$(python3 - "$writer" <<'PY'
-import hashlib, sys
-print(hashlib.sha256(sys.argv[1].encode("ascii")).hexdigest())
-PY
-  ) || return 1
-  journal_root="${GAAI_BACKLOG_JOURNAL_DIR:-$(dirname "$BACKLOG_FILE")/.delivery-locks/journal}"
+  [[ "$token_digest" =~ ^[0-9a-f]{64}$ && "$state_digest" =~ ^[0-9a-f]{64}$ \
+      && "$records_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  local field basename digest value location rows=""
+  [[ "$manifest" == *$'\n'* ]] && rows="${manifest#*$'\n'}"
   local args=()
-  while IFS=$'\t' read -r field basename digest; do
+  while IFS=$'\t' read -r field basename digest value location; do
     [[ -n "$field" ]] || continue
     [[ "$basename" =~ ^[0-9]{20}-[0-9a-f]{16}\.json$ && "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
-    record_path="$journal_root/writers/$writer_key/records/$basename"
-    [[ -f "$record_path" ]] || record_path="$journal_root/writers/$writer_key/applied/$basename"
-    python3 - "$record_path" <<'PY' || return 1
-import os, stat, sys
-try:
-    mode = os.lstat(sys.argv[1]).st_mode
-    if not stat.S_ISREG(mode) or mode & 0o077:
-        raise ValueError
-except (OSError, ValueError):
-    raise SystemExit(1)
-PY
-    value=$(python3 - "$record_path" "$field" <<'PY'
-import json, sys
-
-path, expected_field = sys.argv[1:]
-try:
-    with open(path, encoding="utf-8") as handle:
-        record = json.load(handle)["record"]
-    if record.get("field") != expected_field:
-        raise ValueError
-    value = record.get("new_value")
-    if expected_field == "blocked_reason":
-        if not isinstance(value, str):
-            raise ValueError
-        wire = "json:" + json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-    elif value is None:
-        wire = "null"
-    elif expected_field == "pr_number":
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError
-        wire = str(value)
-    elif expected_field == "cost_usd":
-        if not isinstance(value, str):
-            raise ValueError
-        wire = value
-    elif isinstance(value, str):
-        wire = value
-    else:
-        raise ValueError
-    sys.stdout.write(wire)
-except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-    raise SystemExit(1)
-PY
-    ) || return 1
-    _lifecycle_record_matches "$record_path" "$story_id" "$field" "$writer" \
-      "$token" "$value" "$digest" || return 1
+    [[ "$location" == records || "$location" == applied ]] || return 1
     args+=("$field" "$value")
-  done < <(tail -n +2 "$state_file")
+  done <<< "$rows"
   if (( ${#args[@]} < 2 )); then
-    local retire_rc=0
-    _lifecycle_with_staging_lock _lifecycle_retire_empty_run_state_locked "$state_file" \
-      || retire_rc=$?
-    if [[ "$retire_rc" -eq 0 ]]; then
-      echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=noop reason=empty_run_state" >&2
-      return 2
-    fi
+    echo "[LIFECYCLE-JOURNAL] story=$story_id writer=$writer outcome=rejected reason=empty_run_state" >&2
     return 1
   fi
 
@@ -1794,9 +2125,17 @@ _emit_commit_routing_record() {
   # Recovery consumes this one-shot observation after a failed commit phase.
   # It is daemon state, not candidate evidence, and never authorizes a merge.
   if [[ "$provider" == "error" ]]; then
-    _commit_retry_write_observation "$story_id" "$fallback_reason" || true
+    if ! _commit_retry_write_observation "$story_id" "$fallback_reason"; then
+      # The containment owner preserves any prior authenticated event/state.
+      # This caller cannot reopen or invalidate the path after a failed write.
+      echo "[COMMIT-RETRY] ${story_id} durable outcome write failed — recovery relaunch inhibited" >&2
+      return 1
+    fi
   else
-    _commit_retry_clear "$story_id"
+    if ! _commit_retry_clear "$story_id"; then
+      echo "[COMMIT-RETRY] ${story_id} durable state clear failed — terminal routing inhibited" >&2
+      return 1
+    fi
   fi
 
   local log_path_args=()
@@ -2121,11 +2460,253 @@ _ensure_worktree_deps_fresh() {
 
 # ── Phase handlers ────────────────────────────────────────────────────────
 
+# Re-pin the target object carried by the daemon wrapper before any phase can
+# inspect local state or invoke a lifecycle/currentness side effect.  This is
+# deliberately phase-agnostic: the typed classifier validates the record, but
+# only its immutable source/blob/record identity is consumed here.
+_dispatch_target_identity() {
+  local story_id="$1" target_branch="${TARGET_BRANCH:-staging}"
+  local snapshot source blob facts record
+  [[ "$target_branch" =~ ^[A-Za-z0-9._/-]+$ \
+      && "$target_branch" != -* \
+      && -n "${BACKLOG_REL:-}" \
+      && "$(type -t forward_classify_snapshot 2>/dev/null)" == function ]] \
+    || return 1
+  snapshot=$(mktemp "${LOCK_DIR:?}/.plan-target-XXXXXX" 2>/dev/null) || return 1
+  chmod 600 "$snapshot" 2>/dev/null || { rm -f "$snapshot"; return 1; }
+  if ! git -C "$PROJECT_DIR" fetch origin "$target_branch" --quiet \
+      || ! source=$(git -C "$PROJECT_DIR" rev-parse "origin/${target_branch}" 2>/dev/null) \
+      || ! blob=$(git -C "$PROJECT_DIR" rev-parse "${source}:${BACKLOG_REL}" 2>/dev/null) \
+      || ! git -C "$PROJECT_DIR" show "${source}:${BACKLOG_REL}" > "$snapshot" 2>/dev/null \
+      || ! facts=$(forward_classify_snapshot "$story_id" "$snapshot" "$source" \
+           "$blob" postclaim verified false); then
+    rm -f "$snapshot"
+    return 1
+  fi
+  IFS=$'\t' read -r _ _ _ _ _ record _ _ <<< "$facts"
+  rm -f "$snapshot"
+  [[ "$source" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ \
+      && "$blob" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ \
+      && "$record" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s\t%s\t%s\n' "$source" "$blob" "$record"
+}
+
+_dispatch_expected_target_guard() {
+  local story_id="$1" expected_source="$2" expected_blob="$3"
+  local expected_record="$4" actual source blob record
+  [[ "$expected_source" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ \
+      && "$expected_blob" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ \
+      && "$expected_record" =~ ^[0-9a-f]{64}$ ]] || return 1
+  actual=$(_dispatch_target_identity "$story_id") || return 1
+  IFS=$'\t' read -r source blob record <<< "$actual"
+  [[ "$source:$blob:$record" == \
+    "$expected_source:$expected_blob:$expected_record" ]]
+}
+
+# Return a canonical identity for exactly one Story as it exists in an exact
+# commit.  The backlog object is materialized into a private file, opened once
+# without following links, checked for duplicate YAML keys, and reduced to the
+# selected Story only.  Unrelated backlog rows therefore cannot change this
+# identity, while any semantic mutation of the selected Story does.
+_dispatch_story_record_at_commit() {
+  local story_id="$1" commit="$2" snapshot result blob backlog_entry
+  local story_root=".gaai/project/contexts/artefacts/stories"
+  local story_rel story_blob story_entry
+  [[ "$story_id" =~ ^[A-Za-z][A-Za-z0-9._-]{0,63}$ \
+      && "$commit" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ \
+      && -n "${BACKLOG_REL:-}" ]] || return 1
+  story_rel="${story_root}/${story_id}.story.md"
+  git -C "$PROJECT_DIR" cat-file -e "${commit}^{commit}" 2>/dev/null || return 1
+  blob=$(git -C "$PROJECT_DIR" rev-parse "${commit}:${BACKLOG_REL}" 2>/dev/null) \
+    || return 1
+  [[ "$blob" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || return 1
+  backlog_entry=$(git -C "$PROJECT_DIR" ls-tree "$commit" -- "$BACKLOG_REL" \
+    2>/dev/null) || return 1
+  [[ "$backlog_entry" == "100644 blob ${blob}"$'\t'"${BACKLOG_REL}" ]] \
+    || return 1
+  story_blob=$(git -C "$PROJECT_DIR" rev-parse "${commit}:${story_rel}" \
+    2>/dev/null) || return 1
+  [[ "$story_blob" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || return 1
+  story_entry=$(git -C "$PROJECT_DIR" ls-tree "$commit" -- "$story_rel" \
+    2>/dev/null) || return 1
+  [[ "$story_entry" == "100644 blob ${story_blob}"$'\t'"${story_rel}" ]] \
+    || return 1
+  snapshot=$(mktemp "${LOCK_DIR:?}/.dispatch-story-XXXXXX" 2>/dev/null) || return 1
+  chmod 600 "$snapshot" 2>/dev/null || { rm -f "$snapshot"; return 1; }
+  if ! git -C "$PROJECT_DIR" show "${commit}:${BACKLOG_REL}" > "$snapshot" 2>/dev/null; then
+    rm -f "$snapshot"
+    return 1
+  fi
+  result=$(python3 - "$snapshot" "$story_id" "$blob" "$story_blob" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+try:
+    import yaml
+except ImportError:
+    raise SystemExit(1)
+
+path, story, expected_blob, story_blob = sys.argv[1:]
+if not re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", story):
+    raise SystemExit(1)
+if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", expected_blob):
+    raise SystemExit(1)
+if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", story_blob):
+    raise SystemExit(1)
+
+class UniqueLoader(yaml.SafeLoader):
+    pass
+
+def construct_mapping(loader, node, deep=False):
+    result = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in result:
+            raise ValueError
+        result[key] = loader.construct_object(value_node, deep=deep)
+    return result
+
+UniqueLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping
+)
+
+fd = None
+try:
+    before = os.lstat(path)
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    opened = os.fstat(fd)
+    if (not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or opened.st_mode & 0o077
+            or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)):
+        raise ValueError
+    chunks = []
+    while True:
+        chunk = os.read(fd, 131072)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    after = os.lstat(path)
+    if (opened.st_dev, opened.st_ino) != (after.st_dev, after.st_ino):
+        raise ValueError
+    data = b"".join(chunks)
+except (OSError, ValueError):
+    raise SystemExit(1)
+finally:
+    if fd is not None:
+        os.close(fd)
+
+try:
+    hash_name = "sha1" if len(expected_blob) == 40 else "sha256"
+    object_bytes = b"blob " + str(len(data)).encode("ascii") + b"\0" + data
+    if hashlib.new(hash_name, object_bytes).hexdigest() != expected_blob:
+        raise ValueError
+    document = yaml.load(data.decode("utf-8"), Loader=UniqueLoader)
+    items = document["items"]
+    if not isinstance(items, list):
+        raise ValueError
+    by_id = {}
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError
+        item_id = item.get("id")
+        if (not isinstance(item_id, str)
+                or not re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", item_id)
+                or item_id in by_id):
+            raise ValueError
+        by_id[item_id] = item
+    selected = [by_id[story]] if story in by_id else []
+    if len(selected) != 1:
+        raise ValueError
+    item = selected[0]
+    status = item.get("status")
+    phase = item.get("phase_status")
+    if (not isinstance(status, str) or not isinstance(phase, str)
+            or not re.fullmatch(r"[a-z][a-z0-9_]*", status)
+            or not re.fullmatch(r"[a-z][a-z0-9_]*", phase)):
+        raise ValueError
+    canonical = yaml.safe_dump(
+        item, sort_keys=True, allow_unicode=True,
+        default_flow_style=False, width=4096,
+    ).encode("utf-8")
+except (KeyError, TypeError, UnicodeDecodeError, ValueError, yaml.YAMLError):
+    raise SystemExit(1)
+
+digest = hashlib.sha256(canonical).hexdigest()
+sys.stdout.write("\t".join((digest, status, phase, story_blob)))
+PY
+  ) || { rm -f "$snapshot"; return 1; }
+  rm -f "$snapshot" || return 1
+  [[ "$result" =~ ^[0-9a-f]{64}$'\t'[a-z][a-z0-9_]*$'\t'[a-z][a-z0-9_]*$'\t'([0-9a-f]{40}|[0-9a-f]{64})$ ]] \
+    || return 1
+  printf '%s\n' "$result"
+}
+
+# The generated wrapper invokes this only after it observes a durable phase
+# change.  Direct unit callers therefore cannot accidentally manufacture a
+# multi-phase identity refresh without the real wrapper loop.
+_dispatch_rebind_expected_target_identity() {
+  local story_id="$1" applied_commit="${CHORE_JOURNAL_COMMIT:-}"
+  local actual source blob record applied_story current_story
+  [[ "${CHORE_JOURNAL_OUTCOME:-}" == applied \
+      && "$applied_commit" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || return 1
+  actual=$(_dispatch_target_identity "$story_id") || return 1
+  IFS=$'\t' read -r source blob record <<< "$actual"
+  git -C "$PROJECT_DIR" merge-base --is-ancestor "$applied_commit" "$source" \
+    2>/dev/null || return 1
+  # Concurrent descendant commits may contain another Story's delivery code.
+  # Authority remains bound to this Story by comparing both its canonical
+  # backlog row and its exact contract blob at B and D below.
+  applied_story=$(_dispatch_story_record_at_commit "$story_id" "$applied_commit") \
+    || return 1
+  current_story=$(_dispatch_story_record_at_commit "$story_id" "$source") \
+    || return 1
+  [[ "$applied_story" == "$current_story" ]] || return 1
+  export GAAI_EXPECTED_TARGET_SOURCE="$source"
+  export GAAI_EXPECTED_TARGET_BLOB="$blob"
+  export GAAI_EXPECTED_TARGET_RECORD="$record"
+}
+
+_plan_expected_target_guard() {
+  _dispatch_expected_target_guard "$@"
+}
+
+_plan_story_worktree_owned() {
+  local story_id="$1" worktree_path="$2"
+  local branch="refs/heads/story/${story_id}"
+  local worktree_head branch_head
+  git -C "$PROJECT_DIR" worktree list --porcelain 2>/dev/null | awk \
+    -v path="$worktree_path" -v branch="$branch" '
+      $0 == "worktree " path { matched = 1; next }
+      matched && $0 == "branch " branch { found = 1 }
+      matched && /^$/ { matched = 0 }
+      END { exit(found ? 0 : 1) }
+    ' || return 1
+  [[ "$(git -C "$worktree_path" symbolic-ref -q HEAD 2>/dev/null)" == "$branch" ]] \
+    || return 1
+  worktree_head=$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null) || return 1
+  branch_head=$(git -C "$PROJECT_DIR" rev-parse "$branch" 2>/dev/null) || return 1
+  [[ "$worktree_head" == "$branch_head" ]]
+}
+
 handle_plan_phase() {
   local story_id="$1" trace_id="$2"
+  local expected_source="${3:-${GAAI_EXPECTED_TARGET_SOURCE:-}}"
+  local expected_blob="${4:-${GAAI_EXPECTED_TARGET_BLOB:-}}"
+  local expected_record="${5:-${GAAI_EXPECTED_TARGET_RECORD:-}}"
   local ts t_start_ms t_end_ms duration_ms
   ts=$(date '+%H:%M:%S')
   echo "[${ts}] ${story_id} phase=plan starting"
+
+  if ! _plan_expected_target_guard "$story_id" "$expected_source" \
+      "$expected_blob" "$expected_record"; then
+    echo "[ERROR] ${story_id} handle_plan_phase: expected target identity is unavailable or changed" >&2
+    _emit_plan_routing_record "$story_id" "$trace_id" "error" "TARGET_IDENTITY_CHANGED" "0"
+    return 1
+  fi
 
   # ── Resolve worktree path (GAAI_WORKTREES_BASE override or default formula) ──
   # Aligned with handle_impl_phase + handle_qa_phase canonical formula.
@@ -2138,11 +2719,48 @@ handle_plan_phase() {
     worktree_path="$(cd "${REPO_ROOT:-$PROJECT_DIR}/.." && pwd)/.gaai-worktrees/${repo_name}/${story_id}-workspace"
   fi
 
+  # A prior interrupted attempt may have left a branch or worktree behind.
+  # Reuse is allowed only when its HEAD is still the exact launch source; an
+  # object from another target cycle must never reach the planning model.
+  local _existing_head _qa_replan=false
+  [[ "${GAAI_QA_INJECT_PHASE:-}" == plan ]] && _qa_replan=true
+  if git -C "$PROJECT_DIR" rev-parse --verify "story/${story_id}" >/dev/null 2>&1; then
+    _existing_head=$(git -C "$PROJECT_DIR" rev-parse "story/${story_id}" 2>/dev/null) \
+      || return 1
+    if [[ "$_qa_replan" == true ]]; then
+      if ! _plan_story_worktree_owned "$story_id" "$worktree_path"; then
+        echo "[ERROR] ${story_id} handle_plan_phase: replan worktree is not owned by story/${story_id}" >&2
+        _emit_plan_routing_record "$story_id" "$trace_id" "error" "TARGET_IDENTITY_CHANGED" "0"
+        return 1
+      fi
+    elif [[ "$_existing_head" != "$expected_source" ]]; then
+      echo "[ERROR] ${story_id} handle_plan_phase: existing branch is not bound to expected target" >&2
+      _emit_plan_routing_record "$story_id" "$trace_id" "error" "TARGET_IDENTITY_CHANGED" "0"
+      return 1
+    fi
+  fi
+  if git -C "$PROJECT_DIR" worktree list --porcelain 2>/dev/null \
+      | grep -Fqx "worktree ${worktree_path}"; then
+    _existing_head=$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null) || return 1
+    if [[ "$_qa_replan" == true ]]; then
+      if ! _plan_story_worktree_owned "$story_id" "$worktree_path"; then
+        echo "[ERROR] ${story_id} handle_plan_phase: replan worktree identity changed" >&2
+        _emit_plan_routing_record "$story_id" "$trace_id" "error" "TARGET_IDENTITY_CHANGED" "0"
+        return 1
+      fi
+    elif [[ "$_existing_head" != "$expected_source" ]]; then
+      echo "[ERROR] ${story_id} handle_plan_phase: existing worktree is not bound to expected target" >&2
+      _emit_plan_routing_record "$story_id" "$trace_id" "error" "TARGET_IDENTITY_CHANGED" "0"
+      return 1
+    fi
+  fi
+
   # ── Ensure worktree + story branch exist (idempotent) ─────────────────────
   # Plan is the first phase — worktree must be created here before plan agent
   # writes its execution-plan.md inside it. Subsequent phases (impl/qa/commit)
   # reuse the same worktree.
-  if ! git -C "$PROJECT_DIR" worktree list --porcelain 2>/dev/null | grep -qE "^worktree ${worktree_path}$"; then
+  if ! git -C "$PROJECT_DIR" worktree list --porcelain 2>/dev/null \
+      | grep -Fqx "worktree ${worktree_path}"; then
     # Create the story branch from the freshly-fetched REMOTE tip (origin/<branch>),
     # NOT the local `staging` ref. The local ref is never advanced during a long
     # daemon run (only origin/<branch> is fetched each poll), so branching from it
@@ -2151,10 +2769,9 @@ handle_plan_phase() {
     # origin/<branch> means each new story starts from the latest merged tip.
     # (No checkout — main stays on the daemon-home branch per orchestration.rules.md INVARIANT.)
     local _base_branch="${TARGET_BRANCH:-staging}"
-    git -C "$PROJECT_DIR" fetch origin "$_base_branch" --quiet 2>/dev/null || true
     if ! git -C "$PROJECT_DIR" rev-parse --verify "story/${story_id}" >/dev/null 2>&1; then
-      if ! git -C "$PROJECT_DIR" branch "story/${story_id}" "origin/${_base_branch}" 2>/dev/null; then
-        echo "[ERROR] ${story_id} handle_plan_phase: git branch story/${story_id} origin/${_base_branch} failed"
+      if ! git -C "$PROJECT_DIR" branch "story/${story_id}" "$expected_source" 2>/dev/null; then
+        echo "[ERROR] ${story_id} handle_plan_phase: git branch story/${story_id} expected target failed"
         _emit_plan_routing_record "$story_id" "$trace_id" "error" "WORKTREE_BRANCH_FAILED" "0"
         return 1
       fi
@@ -4931,7 +5548,11 @@ ${qa_snippet}"
   duration_ms=$(( t_end_ms - t_start_ms ))
 
   # ── Emit success routing record ────────────────────────────────────────────
-  _emit_commit_routing_record "$story_id" "$trace_id" "daemon-bash" "$commit_outcome" "$duration_ms" "$pr_url" "$auto_merge_applied"
+  if ! _emit_commit_routing_record "$story_id" "$trace_id" "daemon-bash" \
+      "$commit_outcome" "$duration_ms" "$pr_url" "$auto_merge_applied"; then
+    echo "[ERROR] $story_id handle_commit_phase: terminal routing persistence failed [class=ROUTING_PERSISTENCE_FAILED]"
+    return 1
+  fi
 
   ts=$(date '+%H:%M:%S')
   echo "[${ts}] ${story_id} phase=commit DONE (${duration_ms}ms) pr=${pr_url:-none} auto_merge=${auto_merge_applied}"
@@ -4949,6 +5570,15 @@ ${qa_snippet}"
 dispatch_3phase_story() {
   local story_id="$1"
   local trace_id="${2:-$(python3 -c 'import uuid; print(str(uuid.uuid4()))' 2>/dev/null || echo "stub-$(date +%s)-$$")}"
+
+  if [[ "${GAAI_DISPATCH_IDENTITY_GUARD:-legacy_direct}" == required ]]; then
+    if ! _dispatch_expected_target_guard "$story_id" \
+        "${GAAI_EXPECTED_TARGET_SOURCE:-}" "${GAAI_EXPECTED_TARGET_BLOB:-}" \
+        "${GAAI_EXPECTED_TARGET_RECORD:-}"; then
+      echo "[ERROR] ${story_id} dispatch_3phase_story: target identity changed" >&2
+      return 3
+    fi
+  fi
 
   # Read phase_status (AC1 — awk extractor)
   local ps
