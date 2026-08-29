@@ -1,6 +1,704 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Targeted external-merge reconciliation is dispatched before project-root
+# discovery, repo-local sources, launcher selection, executor checks, signal
+# traps, recovery and the Delivery loop. Until every proof and settlement edge
+# succeeds, this entrypoint is fail-closed and has no lifecycle authority.
+_gaai_watch_once_result() {
+  local sid="$1" reason="$2" fields="${3:-}"
+  # Usage errors can be reached before the Story identifier is validated.
+  # Never reflect arbitrary argv into the public diagnostic channel: a newline
+  # or control-bearing value could forge an additional lifecycle-looking line.
+  [[ "$sid" =~ ^[A-Za-z][A-Za-z0-9._-]{0,63}$ ]] || sid="invalid"
+  if [[ -n "$fields" ]]; then
+    printf 'watch_once story=%s outcome=%s fields=%s\n' "$sid" "$reason" "$fields"
+  else
+    printf 'watch_once story=%s outcome=%s\n' "$sid" "$reason"
+  fi
+}
+
+_gaai_watch_once_entry() {
+  local sid="" state_root="" seen_sid=0 seen_root=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --watch-once-story)
+        (( seen_sid == 0 )) || { _gaai_watch_once_result "${sid:-invalid}" usage_invalid; return 64; }
+        [[ $# -ge 2 && -n "$2" ]] || { _gaai_watch_once_result invalid usage_invalid; return 64; }
+        sid="$2"; seen_sid=1; shift 2
+        ;;
+      --operator-state-root)
+        (( seen_root == 0 )) || { _gaai_watch_once_result "${sid:-invalid}" usage_invalid; return 64; }
+        [[ $# -ge 2 && -n "$2" ]] || { _gaai_watch_once_result "${sid:-invalid}" usage_invalid; return 64; }
+        state_root="$2"; seen_root=1; shift 2
+        ;;
+      *)
+        _gaai_watch_once_result "${sid:-invalid}" usage_invalid
+        return 64
+        ;;
+    esac
+  done
+  if (( seen_sid != 1 || seen_root != 1 )) \
+      || [[ ! "$sid" =~ ^[A-Za-z][A-Za-z0-9._-]{0,63}$ ]] \
+      || [[ "$state_root" != /* || "$state_root" == / || "$state_root" == *$'\n'* ]]; then
+    _gaai_watch_once_result "${sid:-invalid}" usage_invalid
+    return 64
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    _gaai_watch_once_result "$sid" authority_unavailable
+    return 4
+  fi
+
+  # Python isolation ignores ambient PYTHON* configuration. Every subprocess
+  # below receives an allowlisted environment and has stdout/stderr captured.
+  # No receipt or GitHub value is ever copied into the public diagnostic.
+  python3 -I - "$sid" "$state_root" "$0" "${GAAI_TARGET_BRANCH:-staging}" \
+    "${GAAI_WATCH_ONCE_LOCK_TIMEOUT:-60}" "${GAAI_GITHUB_API_TIMEOUT:-30}" <<'PY'
+import fcntl, hashlib, json, os, re, shutil, stat, subprocess, sys, tempfile, time
+from datetime import datetime
+from pathlib import Path
+
+sid, state_arg, entry_arg, target, lock_raw, api_raw = sys.argv[1:]
+BACKLOG = '.gaai/project/contexts/backlog/active.backlog.yaml'
+POLICY = '.gaai/project/ci/local-admission.json'
+SCHEDULER = '.gaai/core/scripts/backlog-scheduler.sh'
+CANON = '.gaai/core/scripts/lib/local-admission-executor.mjs'
+DAEMON = '.gaai/core/scripts/delivery-daemon.sh'
+HEX40 = re.compile(r'^[0-9a-f]{40}$')
+HEX64 = re.compile(r'^[0-9a-f]{64}$')
+MAX_SAFE_INTEGER = (1 << 53) - 1
+RECEIPT_KEYS = {'schema_version','boundary','story_id','candidate','binding_digest',
+  'selected_surface_ids','selected_command_ids','results','outcome','publication_admitted',
+  'created_at','receipt_digest'}
+BINDING_KEYS = {'project_id','repository_digest','base_ref','base_sha','head_sha',
+  'normalized_diff_digest','dependency_digest','risk_digest','policy_version','policy_digest',
+  'selector_digest','environment_digest','command_digests'}
+RESULT_KEYS = {'command_id','descriptor_digest','configuration_digest','outcome','exit_code',
+  'signal','duration_ms','stdout_bytes','stderr_bytes','stdout_truncated','stderr_truncated'}
+SETTLEMENT_KEYS = {'schema_version','story_id','target_ref','parent_sha','tree_sha','commit_sha',
+  'backlog_blob','backlog_bytes_b64','commit_object_b64','story_delta_digest','receipt_digest',
+  'pr_tuple_digest','origin_endpoint_digest','settlement_digest'}
+
+class Halt(Exception):
+  def __init__(self, rc, reason, fields=''):
+    self.rc, self.reason, self.fields = rc, reason, fields
+
+def halt(rc, reason, fields=''):
+  raise Halt(rc, reason, fields)
+
+def canonical(value):
+  if isinstance(value, list): return '[' + ','.join(canonical(v) for v in value) + ']'
+  if isinstance(value, dict):
+    return '{' + ','.join(json.dumps(k,ensure_ascii=False,separators=(',',':')) + ':' + canonical(value[k]) for k in sorted(value)) + '}'
+  if value is True: return 'true'
+  if value is False: return 'false'
+  if value is None: return 'null'
+  return json.dumps(value,ensure_ascii=False,separators=(',',':'))
+
+def digest(value):
+  if isinstance(value,str): value=value.encode()
+  return hashlib.sha256(value).hexdigest()
+
+SAFE_ENV = {k:v for k,v in os.environ.items() if not (k.startswith('GIT_') or k.startswith('PYTHON')
+  or k in ('GH_DEBUG','NODE_OPTIONS','BASH_ENV','ENV','CDPATH'))}
+SAFE_ENV['LC_ALL']='C'; SAFE_ENV['LANG']='C'
+SAFE_ENV['GIT_TERMINAL_PROMPT']='0'; SAFE_ENV['GCM_INTERACTIVE']='never'
+SAFE_ENV['SSH_ASKPASS_REQUIRE']='never'
+
+# Every Git process in watcher-only mode crosses the same non-interactive,
+# no-hook boundary.  Repository/global configuration remains available for
+# transport basics, but executable config surfaces are overridden explicitly.
+GIT_HARDENED=['git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null',
+  '-c','credential.helper=','-c','credential.helper=!gh auth git-credential',
+  '-c','credential.interactive=never','-c','core.askPass=',
+  '-c','push.followTags=false','-c','push.gpgSign=false','-c','push.autoSetupRemote=false',
+  '-c','remote.origin.mirror=false']
+
+def git_argv(repo,*args):
+  return [*GIT_HARDENED,'-C',str(repo),*args]
+
+def command(argv,cwd=None,input_bytes=None,timeout=30,rc=4,env=None):
+  try:
+    result=subprocess.run(argv,cwd=cwd,input=input_bytes,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+      timeout=timeout,check=False,env=env or SAFE_ENV)
+  except (OSError,subprocess.TimeoutExpired): halt(rc,'authority_unavailable')
+  if result.returncode: halt(rc,'authority_unavailable')
+  return result.stdout
+
+def git(repo,*args,input_bytes=None,timeout=30,rc=4,env=None):
+  return command(git_argv(repo,*args),cwd=repo,input_bytes=input_bytes,
+    timeout=timeout,rc=rc,env=env).decode().strip()
+
+transport_dir=None
+transport_git_dir=None
+transport_env=None
+bound_endpoint=None
+
+def config_values(repo,key):
+  try:
+    result=subprocess.run(git_argv(repo,'config','--get-all',key),cwd=repo,stdout=subprocess.PIPE,
+      stderr=subprocess.PIPE,timeout=api_timeout,check=False,env=SAFE_ENV)
+  except (OSError,subprocess.TimeoutExpired): halt(4,'authority_unavailable')
+  if result.returncode==1: return []
+  if result.returncode: halt(4,'authority_unavailable')
+  try: values=result.stdout.decode().splitlines()
+  except UnicodeDecodeError: halt(3,'proof_invalid')
+  if not values or any(not value or '\x00' in value or '\n' in value for value in values): halt(3,'proof_invalid')
+  return values
+
+def bind_origin(repo):
+  fetch_urls=config_values(repo,'remote.origin.url')
+  push_urls=config_values(repo,'remote.origin.pushurl')
+  if len(fetch_urls)!=1 or len(push_urls)>1: halt(3,'proof_invalid')
+  endpoint=fetch_urls[0]
+  if push_urls and push_urls[0]!=endpoint: halt(3,'proof_invalid')
+  # Bind every local filesystem spelling to one strict physical endpoint.
+  # The raw spelling remains receipt/policy authority, while re-resolving the
+  # physical endpoint at each effect-edge rebind detects symlink replacement.
+  # URI/scp-like spellings stay literal.  file:// is rejected rather than
+  # partially parsed, and '~' is never shell-expanded.
+  if endpoint.startswith('~') or endpoint.lower().startswith('file://'): halt(3,'proof_invalid')
+  is_uri=bool(re.fullmatch(r'[A-Za-z][A-Za-z0-9+.-]*://[^\s]+',endpoint))
+  is_scp=bool(re.fullmatch(r'(?:[^@/\s]+@)?[^:/\s]+:[^\s]+',endpoint))
+  if is_uri or is_scp: effect_endpoint=endpoint
+  else:
+    local_path=Path(endpoint) if Path(endpoint).is_absolute() else repo/endpoint
+    try: effect_endpoint=str(local_path.resolve(strict=True))
+    except OSError: halt(3,'proof_invalid')
+  return endpoint,effect_endpoint
+
+def init_transport(repo,state_root):
+  global transport_dir,transport_git_dir,transport_env
+  transport_dir=Path(tempfile.mkdtemp(prefix='.watch-transport-',dir=state_root/'external-merge-settlements'))
+  os.chmod(transport_dir,0o700); transport_git_dir=transport_dir/'transport.git'
+  isolated=dict(SAFE_ENV); isolated['GIT_CONFIG_NOSYSTEM']='1'; isolated['GIT_CONFIG_GLOBAL']='/dev/null'
+  # Preserve HOME/XDG for the fixed gh credential helper and SSH transport.
+  # Git configuration remains isolated independently by the two overrides.
+  command([*GIT_HARDENED,'init','--bare',str(transport_git_dir),'--quiet'],cwd=repo,timeout=api_timeout,env=isolated)
+  objects=Path(git(repo,'rev-parse','--git-path','objects'))
+  if not objects.is_absolute(): objects=(repo/objects).resolve(strict=True)
+  else: objects=objects.resolve(strict=True)
+  transport_env=dict(isolated); transport_env['GIT_OBJECT_DIRECTORY']=str(objects)
+
+def transport_git(*args,input_bytes=None,timeout=None,rc=4):
+  if transport_git_dir is None or transport_env is None: halt(4,'authority_unavailable')
+  return command([*GIT_HARDENED,'--git-dir',str(transport_git_dir),*args],cwd=transport_dir,
+    input_bytes=input_bytes,timeout=timeout or api_timeout,rc=rc,env=transport_env).decode().strip()
+
+def ensure_commit(repo,oid):
+  present=subprocess.run(git_argv(repo,'cat-file','-e',f'{oid}^{{commit}}'),cwd=repo,
+    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=api_timeout,check=False,env=SAFE_ENV)
+  if present.returncode:
+    transport_git('fetch','--upload-pack=git-upload-pack',bound_endpoint,oid,'--quiet',rc=3)
+  if git(repo,'cat-file','-t',oid,rc=3)!='commit': halt(3,'proof_invalid')
+
+def secure_dir(path):
+  try: st=os.lstat(path)
+  except OSError: halt(4,'authority_unavailable')
+  if not stat.S_ISDIR(st.st_mode) or stat.S_ISLNK(st.st_mode) or st.st_uid!=os.geteuid() or stat.S_IMODE(st.st_mode)!=0o700:
+    halt(4,'authority_unavailable')
+
+def secure_state(root):
+  secure_dir(root); secure_dir(root/'local-admission-receipts'); secure_dir(root/'external-merge-settlements')
+
+def lock_identity(path,fd):
+  try: opened=os.fstat(fd); named=os.lstat(path)
+  except OSError: halt(4,'authority_unavailable')
+  identity=(opened.st_dev,opened.st_ino,opened.st_uid,stat.S_IMODE(opened.st_mode),opened.st_nlink)
+  named_identity=(named.st_dev,named.st_ino,named.st_uid,stat.S_IMODE(named.st_mode),named.st_nlink)
+  if identity!=named_identity or not stat.S_ISREG(opened.st_mode) or stat.S_ISLNK(named.st_mode) \
+      or opened.st_uid!=os.geteuid() or stat.S_IMODE(opened.st_mode)!=0o600 or opened.st_nlink!=1:
+    halt(4,'authority_unavailable')
+  return identity
+
+def revalidate_lock(path,fd,identity):
+  if lock_identity(path,fd)!=identity: halt(4,'authority_unavailable')
+
+def read_bound(path,max_bytes):
+  try:
+    before=os.lstat(path)
+    fd=os.open(path,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_CLOEXEC',0))
+  except OSError: halt(3,'proof_invalid')
+  try:
+    opened=os.fstat(fd)
+    identity=(opened.st_dev,opened.st_ino,opened.st_size,opened.st_uid,stat.S_IMODE(opened.st_mode),opened.st_mtime_ns)
+    if not stat.S_ISREG(opened.st_mode) or (before.st_dev,before.st_ino)!=(opened.st_dev,opened.st_ino) \
+        or opened.st_uid!=os.geteuid() or stat.S_IMODE(opened.st_mode)!=0o600 or opened.st_nlink!=1 \
+        or opened.st_size<2 or opened.st_size>max_bytes:
+      halt(3,'proof_invalid')
+    chunks=[]; total=0
+    while True:
+      part=os.read(fd,min(65536,max_bytes+1-total))
+      if not part: break
+      chunks.append(part); total+=len(part)
+      if total>max_bytes: halt(3,'proof_invalid')
+    after=os.fstat(fd); named=os.lstat(path)
+    after_id=(after.st_dev,after.st_ino,after.st_size,after.st_uid,stat.S_IMODE(after.st_mode),after.st_mtime_ns)
+    if after_id!=identity or (named.st_dev,named.st_ino,named.st_size,named.st_uid,stat.S_IMODE(named.st_mode),named.st_mtime_ns)!=identity:
+      halt(3,'proof_invalid')
+    return b''.join(chunks),identity
+  finally: os.close(fd)
+
+def revalidate_name(path,identity):
+  try: st=os.lstat(path)
+  except OSError: halt(3,'proof_invalid')
+  current=(st.st_dev,st.st_ino,st.st_size,st.st_uid,stat.S_IMODE(st.st_mode),st.st_mtime_ns)
+  if current!=identity or not stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode): halt(3,'proof_invalid')
+
+def parse_time(value):
+  if not isinstance(value,str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})',value):
+    halt(3,'proof_invalid')
+  try: parsed=datetime.fromisoformat(value[:-1]+'+00:00' if value.endswith('Z') else value)
+  except ValueError: halt(3,'proof_invalid')
+  if parsed.tzinfo is None: halt(3,'proof_invalid')
+  return parsed
+
+def fetch(repo,endpoint):
+  transport_git('fetch','--upload-pack=git-upload-pack',endpoint,
+    f'+refs/heads/{target}:refs/heads/{target}','--quiet')
+  return transport_git('rev-parse',f'refs/heads/{target}')
+
+def in_progress(repo):
+  for marker in ('MERGE_HEAD','CHERRY_PICK_HEAD','REVERT_HEAD','BISECT_LOG','rebase-merge','rebase-apply'):
+    marker_path=Path(git(repo,'rev-parse','--git-path',marker))
+    if not marker_path.is_absolute(): marker_path=repo/marker_path
+    if marker_path.exists(): return True
+  return False
+
+def target_blob(repo,revision,rel):
+  return command(git_argv(repo,'show',f'{revision}:{rel}'),cwd=repo,timeout=api_timeout,rc=3)
+
+def prove_checkout(repo,endpoint,expected=None):
+  remote=fetch(repo,endpoint)
+  if expected and remote!=expected: halt(4,'authority_changed')
+  if git(repo,'rev-parse','HEAD')!=remote or in_progress(repo) or git(repo,'status','--porcelain=v1','--untracked-files=all'):
+    halt(4,'authority_unavailable')
+  for rel in (DAEMON,SCHEDULER,CANON):
+    path=repo/rel
+    try: fs=os.lstat(path)
+    except OSError: halt(4,'authority_unavailable')
+    row=git(repo,'ls-tree',remote,'--',rel).split()
+    if not stat.S_ISREG(fs.st_mode) or stat.S_ISLNK(fs.st_mode) or len(row)<3 or row[1]!='blob' or row[0] not in ('100644','100755'):
+      halt(4,'authority_unavailable')
+    if bool(fs.st_mode&0o111)!=(row[0]=='100755') or git(repo,'hash-object','--no-filters','--',str(path))!=row[2]:
+      halt(4,'authority_unavailable')
+  return remote
+
+def policy_from(repo,revision):
+  try: value=json.loads(target_blob(repo,revision,POLICY))
+  except Exception: halt(3,'proof_invalid')
+  if not isinstance(value,dict) or not isinstance(value.get('repository'),dict) or not isinstance(value.get('limits'),dict):
+    halt(3,'proof_invalid')
+  return value
+
+def immutable_helpers(repo,revision,state_root):
+  directory=Path(tempfile.mkdtemp(prefix='.watch-once-',dir=state_root/'external-merge-settlements'))
+  os.chmod(directory,0o700)
+  result={}
+  for rel,name in ((SCHEDULER,'scheduler.sh'),(CANON,'canonicalizer.mjs')):
+    data=target_blob(repo,revision,rel); path=directory/name
+    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o700 if rel==SCHEDULER else 0o600)
+    try: os.write(fd,data); os.fsync(fd)
+    finally: os.close(fd)
+    result[rel]=path
+  return directory,result
+
+def node_canonical(helper,raw):
+  code="""import fs from'node:fs';import{pathToFileURL}from'node:url';const m=await import(pathToFileURL(process.argv[2]).href);const r=JSON.parse(fs.readFileSync(0,'utf8'));const d=r.receipt_digest;delete r.receipt_digest;process.stdout.write(m.canonicalJson(r)+'\\n'+d);"""
+  # Keep the imported module out of process.argv[1]; its direct-invocation guard
+  # uses that slot to decide whether to run its CLI main().
+  out=command(['node','--input-type=module','-e',code,'watch-once',str(helper)],input_bytes=raw,timeout=api_timeout,rc=3).decode()
+  try: return out.rsplit('\n',1)
+  except ValueError: halt(3,'proof_invalid')
+
+def validate_receipt(repo,raw,remote_url,canon_helper):
+  try: receipt=json.loads(raw.decode())
+  except Exception: halt(3,'proof_invalid')
+  if not isinstance(receipt,dict) or set(receipt)!=RECEIPT_KEYS: halt(3,'proof_invalid')
+  body,claimed=node_canonical(canon_helper,raw)
+  if not HEX64.fullmatch(claimed or '') or digest(body)!=claimed or receipt['receipt_digest']!=claimed \
+      or raw!=(canonical(receipt)+'\n').encode(): halt(3,'proof_invalid')
+  candidate=receipt.get('candidate')
+  if not isinstance(candidate,dict) or set(candidate)!=BINDING_KEYS or receipt['schema_version']!='1.0.0' \
+      or receipt['boundary']!='final' or receipt['story_id']!=sid or receipt['outcome']!='pass' \
+      or receipt['publication_admitted'] is not True or receipt['binding_digest']!=digest(canonical(candidate)):
+    halt(3,'proof_invalid')
+  if candidate['base_ref']!=target or not HEX40.fullmatch(candidate['base_sha']) or not HEX40.fullmatch(candidate['head_sha']) \
+      or candidate['base_sha']==candidate['head_sha'] or not isinstance(candidate.get('project_id'),str) \
+      or not isinstance(candidate.get('policy_version'),str) or not candidate['policy_version'] \
+      or candidate['repository_digest']!=digest(remote_url): halt(3,'proof_invalid')
+  for key in ('normalized_diff_digest','dependency_digest','risk_digest','policy_digest','selector_digest','environment_digest'):
+    if not HEX64.fullmatch(candidate.get(key,'')): halt(3,'proof_invalid')
+  commands=candidate.get('command_digests'); surfaces=receipt.get('selected_surface_ids'); selected=receipt.get('selected_command_ids'); results=receipt.get('results')
+  if not isinstance(commands,list) or not commands or not all(isinstance(x,list) for x in (surfaces,selected,results)) \
+      or not surfaces or not selected \
+      or len(surfaces)!=len(set(surfaces)) or len(selected)!=len(set(selected)) \
+      or not all(isinstance(x,str) and x for x in surfaces+selected) \
+      or any(set(c or {})!={'id','descriptor_digest','configuration_digest'} for c in commands) \
+      or any(not isinstance(c.get('id'),str) or not c['id'] or not HEX64.fullmatch(c.get('descriptor_digest','')) \
+        or not HEX64.fullmatch(c.get('configuration_digest','')) for c in commands) \
+      or selected!=[c['id'] for c in commands] or selected!=[r.get('command_id') for r in results]: halt(3,'proof_invalid')
+  for index,result in enumerate(results):
+    command_entry=commands[index]
+    if set(result or {})!=RESULT_KEYS or result.get('outcome')!='passed' \
+        or result.get('command_id')!=command_entry['id'] \
+        or result.get('descriptor_digest')!=command_entry['descriptor_digest'] \
+        or result.get('configuration_digest')!=command_entry['configuration_digest'] \
+        or result.get('exit_code')!=0 or result.get('signal') is not None \
+        or not isinstance(result.get('duration_ms'),int) or isinstance(result.get('duration_ms'),bool) \
+        or not 0<=result['duration_ms']<=MAX_SAFE_INTEGER \
+        or any(not isinstance(result.get(name),int) or isinstance(result.get(name),bool) or result[name]<0 \
+          or result[name]>MAX_SAFE_INTEGER for name in ('stdout_bytes','stderr_bytes')) \
+        or any(not isinstance(result.get(name),bool) for name in ('stdout_truncated','stderr_truncated')):
+      halt(3,'proof_invalid')
+  created=parse_time(receipt['created_at']); base=candidate['base_sha']; head=candidate['head_sha']
+  base_policy=policy_from(repo,base); configured=base_policy['repository']
+  if configured.get('project_id')!=candidate.get('project_id') or configured.get('remote')!=remote_url \
+      or configured.get('base_ref')!=target or base_policy.get('policy_version')!=candidate.get('policy_version') \
+      or digest(canonical(base_policy))!=candidate['policy_digest']:
+    halt(3,'proof_invalid')
+  ensure_commit(repo,base); ensure_commit(repo,head)
+  git(repo,'merge-base','--is-ancestor',base,head,rc=3)
+  return receipt,candidate,claimed,created,base_policy
+
+def story_block(raw):
+  try: text=raw.decode()
+  except UnicodeDecodeError: halt(3,'proof_invalid')
+  starts=list(re.finditer(r'(?m)^\s*- id:\s*["\']?'+re.escape(sid)+r'["\']?\s*$',text))
+  if len(starts)!=1: halt(3,'proof_invalid')
+  start=starts[0].start(); following=re.search(r'(?m)^\s*- id:\s*',text[starts[0].end():]); end=starts[0].end()+(following.start() if following else len(text)-starts[0].end())
+  return text,start,end,text[start:end]
+
+def field(block,name):
+  values=re.findall(r'(?m)^\s+'+re.escape(name)+r':\s*(.*?)\s*$',block)
+  if len(values)!=1: halt(3,'proof_invalid',name)
+  value=values[0].strip()
+  if len(value)>=2 and value[0]==value[-1] and value[0] in "'\"": value=value[1:-1]
+  return value
+
+def backlog_state(raw):
+  block=story_block(raw)[3]
+  return {name:field(block,name) for name in ('status','phase_status','pr_status','pr_url','started_at')}
+
+def github(repo_id,pr_url):
+  query='url,number,state,createdAt,mergedAt,baseRefName,headRefOid,headRepository,isCrossRepository,mergeCommit'
+  try: result=subprocess.run(['gh','pr','view',pr_url,'--repo',repo_id,'--json',query],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=api_timeout,env=SAFE_ENV,check=False)
+  except (OSError,subprocess.TimeoutExpired): halt(4,'authority_unavailable')
+  if result.returncode: halt(4,'authority_unavailable')
+  try: value=json.loads(result.stdout)
+  except Exception: halt(3,'proof_invalid')
+  return value
+
+def validate_github(repo,value,repo_id,pr_url,candidate,started,receipt_created):
+  if value.get('state') in ('OPEN','CLOSED') and not value.get('mergedAt'): halt(2,'not_merged')
+  url=re.fullmatch(r'https://github\.com/([^/]+/[^/]+)/pull/([1-9][0-9]*)',pr_url)
+  merge=value.get('mergeCommit') or {}; head_repo=value.get('headRepository') or {}
+  if not url or url.group(1).lower()!=repo_id.lower() or value.get('url')!=pr_url \
+      or value.get('number')!=int(url.group(2)) or value.get('state')!='MERGED' \
+      or value.get('baseRefName')!=target or value.get('headRefOid')!=candidate['head_sha'] \
+      or value.get('isCrossRepository') is not False or head_repo.get('nameWithOwner','').lower()!=repo_id.lower() \
+      or not HEX40.fullmatch(merge.get('oid','')): halt(3,'proof_invalid')
+  created=parse_time(value.get('createdAt')); merged=parse_time(value.get('mergedAt'))
+  if not (started<=receipt_created<=merged and created<=merged): halt(3,'proof_invalid')
+  merge_sha=merge['oid']; parents=git(repo,'show','-s','--format=%P',merge_sha,rc=3).split()
+  if parents!=[candidate['base_sha']] or git(repo,'rev-parse',f'{merge_sha}^{{tree}}',rc=3)!=git(repo,'rev-parse',f"{candidate['head_sha']}^{{tree}}",rc=3):
+    halt(3,'proof_invalid')
+  return merge_sha,canonical({k:value.get(k) for k in ('url','number','state','createdAt','mergedAt','baseRefName','headRefOid','headRepository','isCrossRepository','mergeCommit')})
+
+def decode_b64(value):
+  import base64
+  if not isinstance(value,str) or not re.fullmatch(r'[A-Za-z0-9+/]*={0,2}',value): halt(3,'proof_invalid')
+  try: return base64.b64decode(value,validate=True)
+  except Exception: halt(3,'proof_invalid')
+
+def encode_b64(value):
+  import base64
+  return base64.b64encode(value).decode()
+
+def read_settlement(path):
+  raw,identity=read_bound(path,4*1024*1024)
+  try: value=json.loads(raw.decode())
+  except Exception: halt(3,'proof_invalid')
+  if not isinstance(value,dict) or set(value)!=SETTLEMENT_KEYS: halt(3,'proof_invalid')
+  claimed=value.get('settlement_digest'); unsigned=dict(value); unsigned.pop('settlement_digest',None)
+  if not HEX64.fullmatch(claimed or '') or claimed!=digest(canonical(unsigned)) or raw!=(canonical(value)+'\n').encode():
+    halt(3,'proof_invalid')
+  for name in ('parent_sha','tree_sha','commit_sha','backlog_blob'):
+    if not HEX40.fullmatch(value.get(name,'')): halt(3,'proof_invalid')
+  for name in ('story_delta_digest','receipt_digest','pr_tuple_digest'):
+    if not HEX64.fullmatch(value.get(name,'')): halt(3,'proof_invalid')
+  return value,identity
+
+def install_settlement(path,payload):
+  directory=path.parent
+  tmp=directory/('.settlement-'+digest(payload+os.urandom(16))[:24])
+  flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_CLOEXEC',0)
+  fd=os.open(tmp,flags,0o600)
+  try:
+    view=memoryview(payload); offset=0
+    while offset<len(view):
+      written=os.write(fd,view[offset:])
+      if written<=0: halt(4,'authority_unavailable')
+      offset+=written
+    os.fsync(fd)
+  finally: os.close(fd)
+  installed=False
+  try:
+    os.link(tmp,path,follow_symlinks=False); installed=True
+    dirfd=os.open(directory,os.O_RDONLY|getattr(os,'O_DIRECTORY',0))
+    try: os.fsync(dirfd)
+    finally: os.close(dirfd)
+  except FileExistsError: pass
+  finally:
+    try: os.unlink(tmp)
+    except OSError: pass
+  return installed
+
+def field_optional(block,name):
+  values=re.findall(r'(?m)^\s+'+re.escape(name)+r':\s*(.*?)\s*$',block)
+  if len(values)>1: halt(3,'proof_invalid',name)
+  if not values: return None
+  value=values[0].strip()
+  if len(value)>=2 and value[0]==value[-1] and value[0] in "'\"": value=value[1:-1]
+  return value
+
+def is_terminal(raw,merged_at,story_digest=None):
+  try: block=story_block(raw)[3]
+  except Halt: return False
+  values={name:field_optional(block,name) for name in ('status','phase_status','pr_status','completed_at')}
+  if values!={'status':'done','phase_status':'done','pr_status':'merged','completed_at':merged_at}: return False
+  return story_digest is None or digest(block)==story_digest
+
+def validate_projection(before,after,merged_at,story_digest=None):
+  old_text,old_start,old_end,old_block=story_block(before)
+  new_text,new_start,new_end,new_block=story_block(after)
+  if field_optional(old_block,'completed_at') is not None: halt(3,'proof_invalid','completed_at')
+  if old_text[:old_start]!=new_text[:new_start] or old_text[old_end:]!=new_text[new_end:]: halt(3,'proof_invalid')
+  strip=lambda block: re.sub(r'(?m)^\s+(?:status|phase_status|pr_status|completed_at):.*(?:\n|$)','',block)
+  if strip(old_block)!=strip(new_block) or not is_terminal(after,merged_at): halt(3,'proof_invalid')
+  projected=digest(new_block)
+  if story_digest is not None and projected!=story_digest: halt(3,'proof_invalid')
+  return projected
+
+def materialize_objects(repo,settlement,merged_at=None):
+  backlog_bytes=decode_b64(settlement['backlog_bytes_b64'])
+  commit_object=decode_b64(settlement['commit_object_b64'])
+  if merged_at is not None:
+    parent_backlog=target_blob(repo,settlement['parent_sha'],BACKLOG)
+    validate_projection(parent_backlog,backlog_bytes,merged_at,settlement['story_delta_digest'])
+  blob=git(repo,'hash-object','-w','--stdin',input_bytes=backlog_bytes)
+  if blob!=settlement['backlog_blob']: halt(3,'proof_invalid')
+  with tempfile.TemporaryDirectory(prefix='gaai-watch-index-') as tmp:
+    env=dict(SAFE_ENV); env['GIT_INDEX_FILE']=str(Path(tmp)/'index')
+    git(repo,'read-tree',settlement['parent_sha'],env=env,rc=3)
+    git(repo,'update-index','--add','--cacheinfo','100644',blob,BACKLOG,env=env,rc=3)
+    tree=git(repo,'write-tree',env=env,rc=3)
+  if tree!=settlement['tree_sha']: halt(3,'proof_invalid')
+  commit=git(repo,'hash-object','-t','commit','-w','--stdin',input_bytes=commit_object,rc=3)
+  if commit!=settlement['commit_sha']: halt(3,'proof_invalid')
+  if git(repo,'show','-s','--format=%P',commit,rc=3)!=settlement['parent_sha'] \
+      or git(repo,'rev-parse',f'{commit}^{{tree}}',rc=3)!=tree: halt(3,'proof_invalid')
+  if merged_at is not None:
+    epoch=int(parse_time(merged_at).timestamp())
+    expected=(f'tree {tree}\nparent {settlement["parent_sha"]}\nauthor GAAI Framework <delivery@gaai.local> {epoch} +0000\n'
+      f'committer GAAI Framework <delivery@gaai.local> {epoch} +0000\n\nchore({sid}): reconcile external merge\n').encode()
+    if commit_object!=expected: halt(3,'proof_invalid')
+  changed=git(repo,'diff-tree','--no-commit-id','--name-only','-r',commit,rc=3).splitlines()
+  if changed!=[BACKLOG]: halt(3,'proof_invalid')
+  return backlog_bytes
+
+def make_settlement(repo,scheduler,parent,before,merged_at,receipt_digest,tuple_digest,endpoint):
+  with tempfile.TemporaryDirectory(prefix='gaai-watch-project-') as tmp:
+    snapshot=Path(tmp)/'active.backlog.yaml'; snapshot.write_bytes(before)
+    for name,value in (('status','done'),('phase_status','done'),('pr_status','merged'),('completed_at',merged_at)):
+      command(['/bin/bash',str(scheduler),'--set-field',sid,name,value,str(snapshot)],cwd=repo,timeout=api_timeout,rc=4)
+    after=snapshot.read_bytes()
+  try: story_delta=validate_projection(before,after,merged_at)
+  except Halt: halt(4,'authority_unavailable')
+  blob=git(repo,'hash-object','-w','--stdin',input_bytes=after)
+  with tempfile.TemporaryDirectory(prefix='gaai-watch-index-') as tmp:
+    env=dict(SAFE_ENV); env['GIT_INDEX_FILE']=str(Path(tmp)/'index')
+    git(repo,'read-tree',parent,env=env); git(repo,'update-index','--add','--cacheinfo','100644',blob,BACKLOG,env=env)
+    tree=git(repo,'write-tree',env=env)
+  epoch=int(parse_time(merged_at).timestamp())
+  message=f'chore({sid}): reconcile external merge\n'
+  raw=(f'tree {tree}\nparent {parent}\nauthor GAAI Framework <delivery@gaai.local> {epoch} +0000\n'
+       f'committer GAAI Framework <delivery@gaai.local> {epoch} +0000\n\n{message}').encode()
+  commit=git(repo,'hash-object','-t','commit','-w','--stdin',input_bytes=raw)
+  settlement={'schema_version':'1.0.0','story_id':sid,'target_ref':target,'parent_sha':parent,
+    'tree_sha':tree,'commit_sha':commit,'backlog_blob':blob,'backlog_bytes_b64':encode_b64(after),
+    'commit_object_b64':encode_b64(raw),'story_delta_digest':story_delta,
+    'receipt_digest':receipt_digest,'pr_tuple_digest':tuple_digest,
+    'origin_endpoint_digest':digest(endpoint)}
+  settlement['settlement_digest']=digest(canonical(settlement))
+  materialize_objects(repo,settlement,merged_at)
+  return settlement
+
+def settlement_matches(settlement,receipt_digest,tuple_digest,endpoint):
+  return settlement.get('schema_version')=='1.0.0' and settlement.get('story_id')==sid \
+    and settlement.get('target_ref')==target and settlement.get('receipt_digest')==receipt_digest \
+    and settlement.get('pr_tuple_digest')==tuple_digest \
+    and settlement.get('origin_endpoint_digest')==digest(endpoint)
+
+def observe_target(repo,settlement,merged_at,endpoint):
+  observed=fetch(repo,endpoint); commit=settlement['commit_sha']
+  try: landed=(git(repo,'merge-base','--is-ancestor',commit,observed,rc=4)=='')
+  except Halt: landed=False
+  if landed:
+    target_backlog=target_blob(repo,observed,BACKLOG)
+    if not is_terminal(target_backlog,merged_at,settlement['story_delta_digest']): halt(3,'proof_invalid')
+    return 0
+  return 4
+
+def push_settlement(repo,settlement,merged_at,endpoint):
+  # The settlement is already durable before this function is entered.  Always
+  # rematerialize its exact objects so a later invocation from a fresh target
+  # clone retries the identical commit rather than regenerating ambient state.
+  materialize_objects(repo,settlement,merged_at)
+  ref=f'refs/heads/{target}'
+  argv=[*GIT_HARDENED,'--git-dir',str(transport_git_dir),'push','--no-verify','--porcelain',
+    '--receive-pack=git-receive-pack',
+    f'--force-with-lease={ref}:{settlement["parent_sha"]}',endpoint,f'{settlement["commit_sha"]}:{ref}']
+  try:
+    attempted=subprocess.run(argv,cwd=transport_dir,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+      timeout=api_timeout,check=False,env=transport_env)
+  except (OSError,subprocess.TimeoutExpired):
+    # Once a push was attempted, lack of an authoritative observation is an
+    # unknown settlement, never a known failure or success.
+    halt(75,'settlement_unknown')
+  try:
+    observed=observe_target(repo,settlement,merged_at,endpoint)
+  except Halt as stopped:
+    if stopped.rc==4: halt(75,'settlement_unknown')
+    raise
+  if observed==0: return
+  # A reliable fetch which does not contain the exact generated commit closes
+  # the uncertainty.  This covers a rejected lease, rejected push, and a
+  # concurrent unrelated target advance without rebasing or rewriting.
+  halt(4,'authority_changed')
+
+helper_dir=None
+try:
+  if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}',target) or '..' in target: halt(64,'usage_invalid')
+  try: lock_timeout=int(lock_raw); api_timeout=int(api_raw)
+  except ValueError: halt(64,'usage_invalid')
+  if not 1<=lock_timeout<=3600 or not 1<=api_timeout<=600: halt(64,'usage_invalid')
+  entry=Path(entry_arg)
+  if entry.is_symlink(): halt(4,'authority_unavailable')
+  entry=entry.resolve(strict=True); repo=Path(git(entry.parent,'rev-parse','--show-toplevel')).resolve(strict=True)
+  state_input=Path(state_arg)
+  try: state_input_stat=os.lstat(state_input)
+  except OSError: halt(4,'authority_unavailable')
+  if stat.S_ISLNK(state_input_stat.st_mode): halt(64,'usage_invalid')
+  state_root=state_input.resolve(strict=True)
+  common=os.path.commonpath((str(repo),str(state_root)))
+  if common in (str(repo),str(state_root)): halt(64,'usage_invalid')
+  secure_state(state_root); bound_remote_url,bound_endpoint=bind_origin(repo); init_transport(repo,state_root)
+  outer=prove_checkout(repo,bound_endpoint)
+  lock_path=state_root/'.staging.lock'; lock_fd=os.open(lock_path,os.O_RDWR|os.O_CREAT|getattr(os,'O_NOFOLLOW',0),0o600)
+  try:
+    lock_bound=lock_identity(lock_path,lock_fd)
+    deadline=time.monotonic()+lock_timeout
+    while True:
+      try: fcntl.flock(lock_fd,fcntl.LOCK_EX|fcntl.LOCK_NB); break
+      except BlockingIOError:
+        if time.monotonic()>=deadline: halt(4,'authority_unavailable')
+        time.sleep(.05)
+    revalidate_lock(lock_path,lock_fd,lock_bound)
+    if bind_origin(repo)!=(bound_remote_url,bound_endpoint): halt(3,'proof_invalid')
+    current=prove_checkout(repo,bound_endpoint,outer); remote_url=bound_remote_url
+    current_policy=policy_from(repo,current); max_bytes=current_policy['limits'].get('max_receipt_bytes')
+    if not isinstance(max_bytes,int) or isinstance(max_bytes,bool) or max_bytes<1: halt(3,'proof_invalid')
+    helper_dir,helpers=immutable_helpers(repo,current,state_root)
+    receipt_path=state_root/'local-admission-receipts'/f'.local-admission-{sid}-final.json'
+    receipt_raw,receipt_identity=read_bound(receipt_path,max_bytes)
+    receipt,candidate,receipt_digest,receipt_created,base_policy=validate_receipt(repo,receipt_raw,remote_url,helpers[CANON])
+    backlog=target_blob(repo,current,BACKLOG); state=backlog_state(backlog)
+    pending=(state['status'],state['phase_status'],state['pr_status'])==('in_progress','qa_passed','pending_review')
+    terminal=(state['status'],state['phase_status'],state['pr_status'])==('done','done','merged')
+    if not pending and not terminal: halt(3,'proof_invalid','status,phase_status,pr_status')
+    started=parse_time(state['started_at']); repo_id=base_policy['repository']['project_id']; pr_url=state['pr_url']
+    gh1=github(repo_id,pr_url); merge_sha,gh_tuple=validate_github(repo,gh1,repo_id,pr_url,candidate,started,receipt_created)
+    git(repo,'merge-base','--is-ancestor',merge_sha,current,rc=3)
+    # Effect-edge revalidation binds the retained descriptor read, target-held
+    # helpers, backlog bytes and GitHub tuple immediately before settlement.
+    if bind_origin(repo)!=(bound_remote_url,bound_endpoint): halt(3,'proof_invalid')
+    edge=prove_checkout(repo,bound_endpoint,current); revalidate_name(receipt_path,receipt_identity)
+    gh2=github(repo_id,pr_url); merge2,tuple2=validate_github(repo,gh2,repo_id,pr_url,candidate,started,receipt_created)
+    if bind_origin(repo)!=(bound_remote_url,bound_endpoint): halt(3,'proof_invalid')
+    final_edge=prove_checkout(repo,bound_endpoint,current); edge_backlog=target_blob(repo,final_edge,BACKLOG)
+    revalidate_name(receipt_path,receipt_identity)
+    revalidate_lock(lock_path,lock_fd,lock_bound)
+    if edge!=current or final_edge!=current or edge_backlog!=backlog or merge2!=merge_sha or tuple2!=gh_tuple:
+      halt(3,'proof_invalid')
+
+    settlement_path=state_root/'external-merge-settlements'/f'.external-merge-{sid}.json'
+    settlement_identity=None
+    try: settlement,settlement_identity=read_settlement(settlement_path)
+    except Halt as missing:
+      if missing.rc!=3 or settlement_path.exists() or settlement_path.is_symlink(): raise
+      if not pending: halt(3,'proof_invalid','status,phase_status,pr_status')
+      settlement=make_settlement(repo,helpers[SCHEDULER],current,backlog,gh2['mergedAt'],receipt_digest,digest(gh_tuple),bound_endpoint)
+      payload=(canonical(settlement)+'\n').encode()
+      if install_settlement(settlement_path,payload):
+        settlement,settlement_identity=read_settlement(settlement_path)
+      else:
+        settlement,settlement_identity=read_settlement(settlement_path)
+
+    if not settlement_matches(settlement,receipt_digest,digest(gh_tuple),bound_endpoint) or settlement['story_id']!=sid:
+      halt(3,'proof_invalid')
+    git(repo,'merge-base','--is-ancestor',merge_sha,settlement['parent_sha'],rc=3)
+    revalidate_name(settlement_path,settlement_identity)
+    materialize_objects(repo,settlement,gh2['mergedAt'])
+
+    # An already-landed exact settlement is idempotent, including when unrelated
+    # later target commits exist.  Otherwise only the exact recorded parent may
+    # be retried; no target advance is rebased or regenerated.
+    observed=observe_target(repo,settlement,gh2['mergedAt'],bound_endpoint)
+    if observed==0:
+      print(f'watch_once story={sid} outcome=reconciled fields=status,phase_status,pr_status,completed_at')
+      sys.exit(0)
+    if bind_origin(repo)!=(bound_remote_url,bound_endpoint): halt(3,'proof_invalid')
+    latest=fetch(repo,bound_endpoint)
+    if latest!=settlement['parent_sha']: halt(4,'authority_changed')
+    revalidate_lock(lock_path,lock_fd,lock_bound)
+    if bind_origin(repo)!=(bound_remote_url,bound_endpoint): halt(3,'proof_invalid')
+    push_settlement(repo,settlement,gh2['mergedAt'],bound_endpoint)
+    print(f'watch_once story={sid} outcome=reconciled fields=status,phase_status,pr_status,completed_at')
+    sys.exit(0)
+  finally: os.close(lock_fd)
+except Halt as stopped:
+  suffix=f' fields={stopped.fields}' if stopped.fields else ''
+  print(f'watch_once story={sid} outcome={stopped.reason}{suffix}')
+  sys.exit(stopped.rc)
+except Exception:
+  print(f'watch_once story={sid} outcome=authority_unavailable')
+  sys.exit(4)
+finally:
+  if helper_dir:
+    try:
+      for child in helper_dir.iterdir(): child.unlink()
+      helper_dir.rmdir()
+    except Exception: pass
+  if transport_dir:
+    try: shutil.rmtree(transport_dir)
+    except Exception: pass
+PY
+}
+
+_gaai_watch_requested=false
+for _gaai_arg in "$@"; do
+  case "$_gaai_arg" in
+    --watch-once-story|--operator-state-root) _gaai_watch_requested=true ;;
+  esac
+done
+if $_gaai_watch_requested; then
+  _gaai_watch_rc=0
+  _gaai_watch_once_entry "$@" || _gaai_watch_rc=$?
+  exit "$_gaai_watch_rc"
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════
 # GAAI Delivery Daemon — Autonomous story delivery loop
 # ═══════════════════════════════════════════════════════════════════════════
