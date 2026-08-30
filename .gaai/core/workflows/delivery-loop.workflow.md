@@ -24,7 +24,7 @@ Daemon (bash)
   ├─ Local pre-QA  → seal + reconcile + project checks        → pre_qa receipt      → QA spend admitted
   ├─ Phase 3 QA    → claude -p (qa.daemon-prompt.md)           → qa-report.md        → phase_status: qa_passed
   ├─ Local final   → commit + reconcile + project checks       → final receipt       → publication admitted
-  └─ Commit phase  → exact-SHA push + hosted authority         → PR merged           → phase_status: done
+  └─ Publish/hold  → exact-SHA PR + pending_review             → external merge      → watcher projects done
 ```
 
 Each phase has an isolated context window: cumulative-context risk is bounded per phase, not accumulated across the full story lifecycle.
@@ -44,8 +44,9 @@ reconciles and re-runs final admission. Missing, stale, skipped, timed-out or fa
 the downstream model or remote call and routes to implementation or human attention.
 
 Local receipts authorize only the named spend/publication boundary. They never emit QA authority,
-authorize acceptance or replace the hosted exact-candidate gate. Hosted CI remains the independent
-merge authority for the exact PR/head/base/run tuple.
+authorize acceptance or replace the hosted exact-candidate gate. Hosted CI qualifies or remediates
+the exact PR/head/base/run tuple; it never selects merge policy or authorizes merge. Terminal state
+belongs only to watcher verification of an externally authorized exact-current merge.
 
 ---
 
@@ -282,28 +283,41 @@ Deterministic bash only — no `claude -p` invocation. Implemented in `handle_co
 
 **Sequence:**
 
-1. Git add + commit delivery artefacts to story branch
-2. Push story branch with retry-rebase pattern (3 attempts, backoff 2s / 4s / 6s)
-3. `gh pr create --base staging --head story/{id}`
-4. CI watch (advisory mode if no branch protection)
-5. `gh pr merge <pr> --repo <owner/repo> --squash --match-head-commit <sha>` — by number, never `--delete-branch` (see the API-only merge invariant in the rules file)
-6. Backlog status → `done` (flock-serialized push to staging)
-7. Worktree removal via `git -C <primary working tree> worktree remove`, never from inside the worktree being removed; the local branch ref is dropped by the landed-or-preserved guard. No step here deletes the *remote* branch: it is removed by the forge's delete-on-merge setting where that is enabled, and left in place where it is not.
+1. Git add + commit delivery artefacts to the story branch.
+2. Push the exact locally admitted SHA with the existing retry/reconcile pattern; every changed head
+   requires fresh final admission.
+3. Create or reuse the PR against the configured target and verify its current head equals that exact
+   admitted SHA.
+4. Immediately persist `status: in_progress`, `phase_status: qa_passed`,
+   `pr_status: pending_review` before any hosted observation.
+5. Observe the authoritative greatest-current hosted run/attempt. Queued/running waits; completed
+   success qualifies; completed failure alone enters bounded remediation; every other or unavailable
+   result is typed BLOCKED without mutation, rerun, republish or push.
+6. Hold. The daemon does not enable auto-merge, invoke a provider merge mutation, use admin fallback
+   or turn hosted PASS into merge permission.
+7. After an external merge action, the configured-target watcher verifies that the exact current
+   admitted head landed and projects `done / done / merged` plus `completed_at`.
+8. Only after that projection, remove the worktree and local branch through the
+   landed-or-preserved guard.
 
 **Normative authority:** the worktree + PR + cleanup invariants are defined in `orchestration.rules.md §Branch Rules → Worktree lifecycle & cleanup`. This sequence is the procedure; the rules file is the authority. The procedure restates only hard safety boundaries (see **Safety boundary** below); it does not define invariants.
 
 **Base-source invariant:** Story and repair branches must be created from `origin/staging` after a fresh fetch, or from a local `staging` ref that has just been verified byte-equal to `origin/staging`. Do not commit or push Delivery code/content directly on `staging`; use a worktree branch, open a PR to `staging`, then squash-merge it.
 
-**Cleanup backstop:** step 7 is the happy-path removal. If it does not run (crash, dirty tree), the daemon's periodic orphan reaper (`reap_orphaned_worktrees` in `daemon-dispatch.sh`) is the eventually-consistent backstop. Orphan removal is therefore convergent, not synchronous.
+**Cleanup backstop:** step 8 is the happy-path removal. If it does not run (crash, dirty tree), the
+periodic orphan reaper is the eventually-consistent backstop, but it requires the same exact terminal
+projection and preserves on unavailable or ambiguous evidence.
 
-**Data-safety refusal:** a dirty or still-active worktree is never force-removed at step 7 or by the reaper — the reaper refuses removal and defers it (skip-and-retry next cycle) rather than risking data loss (see `orchestration.rules.md §Branch Rules`).
+**Data-safety refusal:** a dirty or still-active worktree is never force-removed at step 8 or by the reaper — the reaper refuses removal and defers it (skip-and-retry next cycle) rather than risking data loss (see `orchestration.rules.md §Branch Rules`).
 
-**Safety boundary:** `gh pr merge` targeting `main` or `production` is FORBIDDEN. Self-merge to `staging` is permitted after diff-sanity passes.
+**Safety boundary:** Delivery never invokes a provider merge mutation. `production` remains
+human-only, and an external merge to the configured Delivery target is not terminal until the
+watcher verifies the exact current head.
 
 **Diff-sanity check:** Spawn sub-agent reviewer when `NON_GAAI_DELETIONS > 0` OR `CHANGED_COUNT > 30`. Reviewer verdicts PROCEED or ESCALATE (base.rules.md Rule 5). Reviewer runs in an isolated context window — it receives only Story ACs and the file list, not the daemon's self-assessment.
 
 **Audit emit:** `_emit_commit_routing_record` writes to `runtime-routing.jsonl`:
-`trace_id, story_id, phase=commit, pr_url, auto_merge_applied, pipeline=3phase`.
+`trace_id, story_id, phase=commit, pr_url, publication_held, pipeline=3phase`.
 
 ---
 
@@ -378,6 +392,8 @@ action; no daemon code auto-halts on these triggers.
 
 **Durable human-reversal record:** every human overturn of a dual-axis QA outcome during the window
 is recorded (per existing GAAI memory conventions — an operator/founder process artefact, not a new
-code path or schema) with: QA review ID, Story ID, reviewed and decided timestamps, the original
-classification and materiality, the reversal reason, the operator identity, and safe evidence/report
-locators. Report or evidence bodies and secrets are never included in the record.
+code path or schema) with an opaque QA review ID and Story ID; the lifecycle field names `status`,
+`phase_status`, `pr_status` and `completed_at`, never their values; a journal digest, projection digest
+and governed-evidence digest; and exactly one closed reason:
+`unsupported_false_pass`, `security_miss` or `second_evidence_invalid_overturn`. No additional fields,
+report or evidence bodies, or secrets are included.

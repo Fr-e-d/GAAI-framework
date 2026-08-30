@@ -51,7 +51,7 @@ Human reviews:
 - What changed since then?
 - Is the change reversible via git?
 
-### 2b. Clean Up Active Worktrees
+### 2b. Preserve Active Worktrees
 
 If the affected story was running in an isolated worktree:
 
@@ -59,14 +59,16 @@ If the affected story was running in an isolated worktree:
 # List active worktrees
 git worktree list
 
-# Remove worktrees for affected stories
-git worktree remove "$WORKTREE_PATH"    # absolute path resolved at delivery start
-
-# Delete story branches if no longer needed
-git branch -d story/{id}
+# Inspect without mutating or deleting
+git -C "$WORKTREE_PATH" status --short
+git -C "$WORKTREE_PATH" rev-parse HEAD
 ```
 
-Worktree cleanup prevents ghost worktrees from interfering with subsequent deliveries.
+Dirty or non-terminal worktrees and branches are preserved. `CLOSED`, local ancestry, hosted PASS
+and daemon-home state are not cleanup authority. Removal is permitted only after watcher projection
+of an externally authorized exact-current merge, or through an explicit human-approved, recoverable
+preservation path that retains the branch tip and audit digest. Rollback never re-enables the retired
+daemon merge path.
 
 ### 3. Revert if Possible
 

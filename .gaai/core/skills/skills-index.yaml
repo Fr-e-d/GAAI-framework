@@ -2,7 +2,7 @@
 # Source of truth: .gaai/core/skills/*/SKILL.md — core framework skills only
 # Regenerate: invoke build-skills-index skill
 
-generated_at: 2026-08-22
+generated_at: 2026-08-30
 total: 61
 
 discovery:
@@ -92,7 +92,7 @@ delivery:
   - id: SKILL-DELIVERY-CI-WATCH-001
     name: ci-watch-and-fix
     source: core
-    description: "Watch GitHub Actions CI after PR creation, detect failures, extract logs, apply minimal fixes, and re-push — keeping the delivery session alive until CI resolves or escalating after 3 cycles. Activate immediately after gh pr create and before marking the story done."
+    description: "Observe the authoritative exact PR/head/base workflow attempt, wait without mutation while it runs, and enter bounded remediation only after its aggregate job has completed with failure."
     category: delivery
     track: delivery
     tags: []

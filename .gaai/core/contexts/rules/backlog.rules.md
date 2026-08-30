@@ -40,7 +40,8 @@ No other agent or skill has this authority.
 
 The **Delivery Agent** may:
 - consume items marked `refined`
-- update execution status (`in_progress`, `done`, `failed`)
+- update execution status (`in_progress`, `failed`), and request watcher-owned terminal projection
+  after an externally authorized exact-current merge
 - attach execution artefacts or notes
 
 Delivery MUST NOT:
@@ -68,7 +69,7 @@ there arose.
 | `draft` | Item is being shaped by Discovery; acceptance criteria incomplete |
 | `refined` | Story is validated, acceptance criteria present and unambiguous, ready for Delivery |
 | `in_progress` | Delivery is actively executing |
-| `done` | Acceptance criteria PASS; moved to `done/` archive |
+| `done` | Terminal work. For Delivery code/content this requires configured-target watcher projection of an externally authorized exact-current merge; QA or acceptance-criteria PASS alone is non-terminal. |
 | `failed` | Execution failed; requires human intervention |
 | `blocked` | The item is held out of the ready pool under a recorded reason — dependency unmet, skill missing, external blocker, an unmet precondition, or work in flight outside the loop. A holding state, not a terminal one: the item returns to the chain at the point matching its actual progress. |
 | `cancelled` | Deliberately removed from backlog by Discovery. Terminal state. |
@@ -88,13 +89,14 @@ why the exit edge differs by case and why none of them skips work that was not d
 | `blocked` → `refined` | Discovery | Blocker cleared, contract intact; item re-enters the ready pool |
 | `blocked` → `draft` | Discovery | Blocker cleared but the contract needs reshaping first |
 | `blocked` → `in_progress` | Discovery | Execution was already under way when the item was held, and resumes |
-| `blocked` → `done` | Discovery | The item **was dispatched before being held** — its record carries a start timestamp — and its own work then passed acceptance and merged while it waited |
+| `blocked` → `done` | Discovery | The item **was dispatched before being held**, its record carries a start timestamp, and its exact-current external merge was verified and projected while it waited |
 | any → `cancelled` | Discovery | Deliberate removal; must include rationale |
 | any → `superseded` | Discovery | Replaced by newer item; must reference replacement ID |
 
 `blocked` → `done` is the narrowest edge here and is **not** a way to close work that never ran.
 It is a resumption, not a shortcut: the item must already have been dispatched — a start timestamp on
-the record is the evidence — and closes because the work it was holding then completed. An item held
+the record is the evidence — and closes because the work it was holding then received its verified
+terminal projection. An item held
 before it was ever dispatched has no such history and leaves through `refined`, whatever the state of
 any change produced for it outside the loop.
 
