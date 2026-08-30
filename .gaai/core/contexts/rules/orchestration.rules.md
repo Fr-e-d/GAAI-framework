@@ -186,7 +186,8 @@ All AI-driven execution targets the **`staging`** branch. The `production` branc
 - Delivery creates story branches from the remote staging baseline: `git fetch origin staging` then `git branch story/{id} origin/staging` (no checkout — main stays on staging). Using a stale local `staging` ref as the branch source is forbidden unless it has just been verified to equal `origin/staging`.
 - All implementation happens in worktrees: `git worktree add "$WORKTREE_PATH" story/{id}` (absolute path resolved once at Step 0 — see `delivery-loop.workflow.md`)
 - Sub-agents work exclusively inside their worktree — never in the main repo directory
-- Squash merges back to staging are serialized via `flock`
+- Publication bookkeeping and watcher projection writes to `staging` are serialized via the
+  staging lock; the daemon does not own merge policy or a provider merge mutation.
 - Delivery code/content changes, including human repairs after escalation, MUST NOT be committed or pushed directly to `staging`. They must use an isolated worktree sourced from `origin/staging`, a dedicated branch, a PR targeting `staging`, and a squash merge.
 - Promotion staging → production is a human action via GitHub PR
 - Before creating a story branch, verify that the **previous story's PR is merged** into staging.
@@ -194,21 +195,44 @@ All AI-driven execution targets the **`staging`** branch. The `production` branc
   This prevents chained branch conflicts and ensures each story builds on a clean staging base.
 
 > **Concurrent mode note:** This sequential constraint applies in `--max-concurrent 1` mode (default). In concurrent delivery (`--max-concurrent > 1`), each session manages its own branch independently from staging HEAD; conflicts are resolved at PR merge time via the retry-with-rebase pattern (see delivery-loop.workflow.md §Staging Push Retry Pattern).
-- After creating a PR, immediately enable GitHub auto-merge: `gh pr merge --auto --squash story/{id}`.
-  This ensures PRs merge automatically when CI passes, without human intervention.
+- After creating or reusing the PR, bind its current head to the exact locally admitted SHA and
+  immediately persist `status: in_progress`, `phase_status: qa_passed`,
+  `pr_status: pending_review`. Hosted checks are observed only after that durable hold exists.
+- The daemon and Delivery agents MUST NOT select merge policy, enable auto-merge, invoke a provider
+  merge mutation, use an administrative fallback or infer merge permission from QA, acceptance
+  criteria or hosted CI. Merge authorization and execution are external to the OSS daemon.
 
 A pre-push hook (`.githooks/pre-push`) enforces this rule at the git level.
 
 ### Worktree lifecycle & cleanup
 
-Scope: **worktree-isolated delivery of code/content** — daemon-spawned story delivery and any manual session making an isolated change in a worktree. The merge path here is the same one the `production`-prohibition and auto-merge clauses above already govern; this subsection does not re-assert them, it adds the lifecycle clauses those clauses omit. The mechanism (idempotent creation, throttled reaping, retries, locks) lives in the daemon scripts; the procedure lives in `delivery-loop.workflow.md §Commit Phase`. This section is the normative authority both implement.
+Scope: **worktree-isolated delivery of code/content** — daemon-spawned story delivery and any manual session making an isolated change in a worktree. The daemon owns exact candidate publication and observation, not merge. The mechanism (idempotent creation, throttled reaping, retries, locks) lives in the daemon scripts; the procedure lives in `delivery-loop.workflow.md §Commit Phase`. This section is the normative authority both implement.
 
-- **Governed merge path.** Worktree-originated code/content reaches `staging` only via `gh pr create --base staging --head story/{id}` then squash merge (auto-merge per the clause above). Manual Delivery repairs follow the same path with a dedicated branch name if no story branch is active. **Exempt:** Discovery's backlog/governance mutations push directly to `origin/staging` under the daemon staging lock per §Claim Protocol — that path has no story PR and is unaffected by this clause.
-- **Post-merge cleanup.** After a story's PR merges, its worktree is removed and its local branch ref is dropped through the landed-or-preserved guard below. No worktree may persist past its story's terminal state. The merge *command* does **not** delete the remote branch. Where the forge is configured to delete head branches on merge it disappears on its own; where it is not, removing it is a separate step (`git push origin --delete <branch>`). Either way it is never a flag on the merge.
-- **The merge is an API-only operation (INVARIANT).** `gh pr merge` MUST target the PR by number with `--repo`, and MUST NOT be given `--delete-branch`. That flag deletes the *local* branch too, which forces `gh` to switch the current checkout onto the base branch first. Run from inside a worktree it makes that worktree squat the shared target-branch ref — which mechanically breaks the main-working-tree invariant above, since a branch can be checked out in only one tree — and it silently attempts a fast-forward of the local target branch. Every local teardown (`worktree remove`, `worktree prune`, `branch -D`) runs against the primary working tree with `git -C`, never from inside the worktree being removed. Pass `--match-head-commit <sha>` so a head that moved after review cannot be merged unseen.
-- **Orphan reaping is eventually-consistent.** A worktree whose story PR is MERGED/CLOSED, or whose HEAD is an ancestor of `origin/staging`, is an orphan and MUST be reaped. Reaping is periodic/convergent, **not** synchronous — "no orphan subsists" is a convergence guarantee, not an instantaneous one. Do not assert or rely on synchronous orphan removal.
+- **Governed publication path.** Worktree-originated code/content may reach `staging` only through a
+  PR published from its isolated branch and an externally authorized merge. Manual Delivery repairs
+  use the same path. **Exempt:** Discovery's backlog/governance mutations push directly to
+  `origin/staging` under the daemon staging lock per §Claim Protocol.
+- **Exact pending-review hold.** Publication or reuse is valid only when the PR head equals the
+  locally admitted SHA. The hold is durably recorded before hosted observation. An open PR and
+  hosted PASS are non-terminal and leave the Story at
+  `in_progress / qa_passed / pending_review`.
+- **External exact-current terminal authority.** Only the configured-target watcher may project
+  `status: done`, `phase_status: done`, `pr_status: merged` and `completed_at`, and only after it
+  verifies that an externally authorized merge landed the exact current admitted head. A closed PR,
+  local ancestry, worktree state or daemon-home drift is non-authorizing.
+- **Post-merge cleanup.** Worktree and branch cleanup is permitted only after that exact terminal
+  projection. The daemon never performs cleanup merely because a PR is closed, a branch appears
+  ancestral or hosted checks pass.
+- **Orphan reaping is eventually-consistent.** A worktree becomes reapable only from verified
+  external exact-current merge evidence and the corresponding terminal projection. Reaping is
+  periodic/convergent, not synchronous.
 - **Data-safety refusal (INVARIANT).** A dirty or still-active worktree is NEVER force-removed. The reaper refuses removal and defers it (skip-and-retry next cycle); committed work is never lost because removal frees only the working dir, never a branch ref. Data safety dominates cleanup.
-- **Landed-or-preserved branch deletion (INVARIANT).** A story branch is deletable ONLY IF its work is verifiably landed — its PR is MERGED, or the story is `status: done` on the remote backlog, or the branch's local tip matches a remote ref (pushed-but-not-yet-merged) — or it is preserved, never destroyed. Because squash-merges are never reachable from `origin/staging` by commit-SHA ancestry, ancestry-on-staging alone is NEVER a valid landed test. A verification failure (network, `gh`, or unreadable remote state) does not affirm landed and fails closed to preserve. Every story-branch deletion site (recovery, cleanup sweeps, reconcile, orphan reaping) routes through this single guard. When the guard refuses deletion, the branch is preserved by rename (`story/{id}-preserved-<timestamp>`) — never left in place under its original name, so the retry path still gets a fresh `story/{id}` — with an append-only audit entry recording the branch tip; the operator-facing log line is throttled per story id so periodic sweeps do not re-emit every cycle.
+- **Landed-or-preserved branch deletion (INVARIANT).** A story branch is deletable only after the
+  remote backlog carries the watcher-owned terminal projection bound to verified external
+  exact-current merge evidence. Local ancestry, a matching remote branch, `CLOSED`, unavailable
+  provider state or any non-terminal Story state never affirms landing. Failure to verify fails
+  closed to preserve. Every deletion site routes through this guard; refusal preserves the branch
+  under a collision-free name with an append-only digest record and throttled diagnostic.
 
 ---
 

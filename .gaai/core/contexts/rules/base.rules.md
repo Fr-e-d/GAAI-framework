@@ -91,7 +91,8 @@ Auxiliary states: `deferred`, `blocked`, `cancelled`, `superseded`, `escalated`.
 - `draft` — Story created but not yet validated or acceptance-criteria complete
 - `refined` — Story is validated, acceptance criteria are present and unambiguous, ready for Delivery
 - `in_progress` — Delivery is actively executing the Story
-- `done` — Story passed QA
+- `done` — for Delivery code/content, the configured-target watcher verified and projected an
+  externally authorized exact-current merge; QA or acceptance-criteria PASS alone is non-terminal
 - `failed` — Story failed and cannot be retried without human intervention
 - `deferred` — Story is intentionally held back by a business gate (phase gate, data threshold, go-live prerequisite) — not a technical dependency
 
@@ -100,7 +101,10 @@ Auxiliary states: `deferred`, `blocked`, `cancelled`, `superseded`, `escalated`.
 - Only Discovery may move items from `draft` to `refined`
 - Only Discovery may set `deferred` status (business decision, not technical)
 - Delivery may only consume items in `refined` or `in_progress`
-- Delivery must update status to `in_progress` when execution begins, then `done` on PASS
+- Delivery must update status to `in_progress` when execution begins. For Delivery code/content,
+  QA PASS keeps `status: in_progress`, `phase_status: qa_passed` and, after exact publication,
+  `pr_status: pending_review`; only the configured-target watcher may project `done` after an
+  externally authorized exact-current merge.
 - Failed executions must be marked `failed` with artefact notes
 - No agent may skip states (e.g., `draft` directly to `in_progress` is forbidden)
 

@@ -1,6 +1,6 @@
 ---
 name: ci-watch-and-fix
-description: Watch GitHub Actions CI after PR creation, detect failures, extract logs, apply minimal fixes, and re-push — keeping the delivery session alive until CI resolves or escalating after 3 cycles. Activate immediately after gh pr create and before marking the story done.
+description: Observe the authoritative exact PR/head/base workflow attempt, wait without mutation while it runs, and enter bounded remediation only after its aggregate job has completed with failure.
 license: ELv2
 compatibility: Works with any filesystem-based AI coding agent using GitHub Actions CI
 metadata:
@@ -13,15 +13,18 @@ metadata:
   owner: Delivery Orchestrator
   status: stable
 inputs:
-  - pr_number          (integer — from gh pr create output)
-  - story_id           (string — e.g. E18S01)
-  - story_branch       (string — e.g. story/E18S01)
-  - repo               (string — e.g. your-org/your-repo)
-  - worktree_path      (string — absolute path to story worktree)
-  - log_dir            (string — absolute path to daemon log directory, for heartbeat lines)
+  - repository_id
+  - pr_number
+  - story_id
+  - story_branch
+  - admitted_head_sha
+  - admitted_base_ref
+  - configured_workflow_identity
+  - configured_event
+  - worktree_path
+  - log_dir
 outputs:
-  - CI verdict: PASS | FAIL
-  - ci_remediation_report (on FAIL — committed to docs/ci-failures/<story-id>-<timestamp>.md)
+  - closed CI observation tuple with state WAIT | QUALIFIED | REMEDIATE | BLOCKED
 dependencies:
   - gh CLI authenticated with repo + actions:read scopes
 ---
@@ -32,250 +35,169 @@ dependencies:
 
 **Owner: Delivery Orchestrator.**
 
-Activate **immediately after `gh pr create`** and **before marking the story `done`**.
+Activate only after the exact locally admitted head has been published, the PR repository/head/base
+identity has been bound, and `status: in_progress`, `phase_status: qa_passed`,
+`pr_status: pending_review` has been durably persisted. Hosted observation does not authorize a
+merge or a terminal lifecycle transition.
 
-This skill keeps the delivery session alive through GitHub Actions CI execution. It detects failures, fetches logs, applies minimal fixes, and re-pushes — up to 3 remediation cycles. If CI does not converge within 3 cycles, it escalates without marking the story `done`.
+This skill resolves one authoritative current workflow attempt, waits without mutation while that
+attempt is queued or running, and enters the existing bounded remediation loop only when the
+selected attempt has completed with a failed aggregate authority job. It never enables auto-merge,
+invokes a provider merge mutation, uses an admin fallback or treats hosted success as merge
+permission.
 
-Do NOT use `gh pr checks --watch`. Active polling is mandatory to ensure the log file receives periodic output and the daemon heartbeat monitor does not falsely kill the session. See AC7.
+Do not use `gh pr checks --watch`. Poll deterministic provider metadata so each observation can be
+rebound to the exact candidate and the durable output stays closed and privacy-safe.
 
 ---
 
 ## External Dependencies
 
-- `gh` CLI authenticated with `repo` + `actions:read` scopes (already present in the project environment — no additional setup required).
+- `gh` CLI authenticated with `repo` + `actions:read` scopes.
 
 ---
 
-## Process
+## Preconditions
 
-### Initialization
+Fail closed before observation unless the PR repository, number, head SHA and base ref exactly match
+the locally admitted tuple; the configured workflow has one exact stable ID plus path/name; the
+configured event is known; the pending-review receipt names the same candidate; and provider run
+and job metadata are available. Missing, stale, ambiguous or contradictory identity returns
+`BLOCKED` with no retry, push, remediation or lifecycle mutation.
 
-```
-cycle = 0
-flaky_retry_used = false
-previous_failure_signatures = {}   # map: check_name → error_message_hash
-```
+## Authoritative Attempt Selection
 
-### Step 0 — Branch Protection Check (once, before loop)
+For every poll:
 
-```
-# Determine if CI is a hard gate or advisory
-# gh api returns 403 on repos without branch protection (free/private)
-bp_status = gh api repos/<repo>/branches/staging/protection --jq '.required_status_checks' 2>&1
-if bp_status contains "403" OR bp_status contains "404" OR bp_status is empty:
-    ci_is_advisory = true
-    echo "[ci-watch-and-fix] No branch protection on staging — CI is advisory" >> $LOG_DIR/<story-id>.log
-else:
-    ci_is_advisory = false
-    echo "[ci-watch-and-fix] Branch protection active — CI is a hard gate" >> $LOG_DIR/<story-id>.log
-```
+1. Re-read the PR and verify its exact repository, number, head and base association.
+2. Build the authoritative run subset using exact repository, configured workflow ID and matching
+   path/name, configured event, and unique PR/head/base association. Apply every filter before
+   inspecting a job.
+3. Select the lexicographic maximum `(run_number, run_attempt)` across the complete matching subset.
+   Never fall back to an older successful run because the greatest current run is queued, running,
+   incomplete or has no aggregate job yet.
+4. If the selected run is queued or running, return `WAIT` without requiring a job. If it is
+   completed, inspect jobs and require exactly one same-attempt job named `PR Authority`. A completed
+   run with zero jobs, multiple jobs, attempt mismatch or unavailable job metadata is `BLOCKED`.
+5. Re-resolve the subset and greatest-current attempt on every poll.
 
-### Main Loop (max 3 cycles)
+Required falsifiers include a higher matching run queued without jobs over an older success; a
+higher attempt of the same run queued without jobs; a completed selected attempt with zero or
+multiple aggregate jobs; and a numerically newer foreign workflow/event/PR/head/base run that must
+be filtered before selection.
 
-```
-while cycle < 3:
-    cycle += 1
+## State Partition
 
-    # Heartbeat — always write a log line at the start of each cycle
-    echo "[ci-watch-and-fix] cycle ${cycle}/3 — polling PR #<pr-number> checks" >> $LOG_DIR/<story-id>.log
+| Provider observation | State | Closed reason | Permitted action |
+|---|---|---|---|
+| selected run queued | `WAIT` | `run_queued` | observe again; no mutation |
+| selected run running | `WAIT` | `run_running` | observe again; no mutation |
+| completed run and aggregate succeeded | `QUALIFIED` | `aggregate_succeeded` | preserve pending-review hold |
+| completed run and aggregate failed | `REMEDIATE` | `aggregate_failed` | enter one bounded remediation cycle |
+| cancelled | `BLOCKED` | `run_cancelled` | preserve and escalate |
+| skipped | `BLOCKED` | `run_skipped` | preserve and escalate |
+| neutral | `BLOCKED` | `run_neutral` | preserve and escalate |
+| timed out | `BLOCKED` | `run_timed_out` | preserve and escalate |
+| action required | `BLOCKED` | `action_required` | preserve and escalate |
+| unavailable observation | `BLOCKED` | `observation_unavailable` | preserve and escalate |
+| no matching run | `BLOCKED` | `run_set_empty` | preserve and escalate |
+| ambiguous matching run identity | `BLOCKED` | `run_set_ambiguous` | preserve and escalate |
+| PR/head/base/workflow/event mismatch | `BLOCKED` | `identity_mismatch` | preserve and escalate |
+| unknown provider state | `BLOCKED` | `run_state_unknown` | preserve and escalate |
+| aggregate job absent | `BLOCKED` | `aggregate_missing` | preserve and escalate |
+| aggregate job duplicated | `BLOCKED` | `aggregate_multiple` | preserve and escalate |
+| aggregate job from another attempt | `BLOCKED` | `aggregate_mismatch` | preserve and escalate |
 
-    # Step 1 — Poll PR checks
-    run: gh pr checks <pr-number> --repo <repo>
+`WAIT`, `QUALIFIED` and `BLOCKED` never consume a remediation cycle, rerun a workflow, create an
+empty commit, republish a candidate, push a branch or mutate lifecycle state. A repository without
+branch protection, an empty check set or infrastructure failure never becomes an advisory PASS.
 
-    # Step 1b — No checks registered?
-    # If no CI checks are registered on the PR (no workflows triggered),
-    # treat as advisory pass — nothing to wait for.
-    if no checks exist:
-        echo "[ci-watch-and-fix] No CI checks registered — CI PASS (no checks)" >> $LOG_DIR/<story-id>.log
-        exit loop → return CI PASS
+## Remediation
 
-    # Step 2 — All passing?
-    if all checks pass:
-        echo "[ci-watch-and-fix] CI PASS — all checks green" >> $LOG_DIR/<story-id>.log
-        exit loop → return CI PASS
+Only `REMEDIATE` may enter the existing maximum-three-cycle remediation policy. For each admitted
+cycle, inspect the selected failed aggregate's raw logs ephemerally in memory, apply only a
+cause-based Story-scoped correction, run deterministic local validation, obtain fresh final
+admission, publish and bind the new exact candidate, persist `pending_review`, then resolve a fresh
+authoritative attempt. Raw logs may not be copied into emitted or durable output. Scope or contract
+drift returns `BLOCKED`. Exhaustion preserves the branch, PR, worktree and closed evidence.
 
-    # Step 3 — Identify failed checks and their run IDs
-    for each failed check:
-        get run_id from check
+## Heartbeat
 
-        # Step 4 — Fetch failure logs (truncated to last 3000 chars per job)
-        raw_log = gh run view <run-id> --repo <repo> --log-failed
-        failure_log = last 3000 chars of raw_log
+During `WAIT`, emit only the closed durable tuple below at the configured heartbeat cadence. Waiting
+and polling are deterministic operations and must not invoke fresh model inference. The heartbeat
+must not contain provider messages, log excerpts, timestamps, paths, actor identities or candidate
+content.
 
-        # Step 4b — Pre-existing infra failure detection (fast-path)
-        # Detect infrastructure-level failures that code changes cannot fix.
-        # These are pre-existing conditions unrelated to the story's changes.
-        INFRA_PATTERNS = [
-            "recent account payments have failed",
-            "spending limit needs to be increased",
-            "Actions minutes",
-            "Actions quota",
-            "not started because",       # job queuing failure (billing gate)
-            "out of Actions minutes",
-        ]
-        if any(pattern matches failure_log) for any failed job:
-            if ci_is_advisory:
-                echo "[ci-watch-and-fix] Infra failure detected but CI is advisory (no branch protection) — CI PASS (advisory skip)" >> $LOG_DIR/<story-id>.log
-                exit loop → return CI PASS (advisory)
-            else:
-                echo "[ci-watch-and-fix] Infra failure detected AND branch protection active — ESCALATE (cannot merge)" >> $LOG_DIR/<story-id>.log
-                convergence_failure_reason = "Pre-existing infrastructure failure: GitHub Actions billing/quota limit. Branch protection prevents merge without CI PASS."
-                goto ESCALATE
+## Closed Durable CI Tuple
 
-        # Step 5 — Flaky test detection
-        signature = hash(check_name + first_100_chars_of_failure_log)
-        if signature in previous_failure_signatures:
-            # Same failure seen in a previous cycle → suspected flaky
-            if flaky_retry_used:
-                # Already used the one flaky retry → escalate
-                goto ESCALATE
-            else:
-                flaky_retry_used = true
-                echo "[ci-watch-and-fix] suspected flaky test in <check_name> — pushing empty commit retry" >> $LOG_DIR/<story-id>.log
-                git commit --allow-empty -m "ci: retry (suspected flaky)" (in worktree)
-                git push origin <story_branch> (in worktree)
-                sleep 60
-                continue  # next cycle without applying code changes
-        else:
-            previous_failure_signatures[signature] = true
-
-        # Step 6 — Analyze and fix (non-flaky failures)
-        analyze failure_log to identify root cause
-        apply minimal corrective code changes (in worktree — do not expand scope)
-        git add → git commit -m "fix(ci/<story-id>): <description>" (in worktree)
-
-    # Push all fixes
-    git push origin <story_branch> (in worktree)
-
-    # Step 7 — Wait then re-poll
-    echo "[ci-watch-and-fix] fixes pushed — waiting 60s before re-poll" >> $LOG_DIR/<story-id>.log
-    sleep 60
-
-# Exhausted 3 cycles without CI PASS
-goto ESCALATE
-```
-
-### Heartbeat Rule
-
-The daemon heartbeat monitor kills sessions silent for >30 minutes. This skill MUST emit at least one line to `$LOG_DIR/<story-id>.log` **every 5 minutes** during CI wait time. During the 60-second sleep between cycles, this is not an issue. If a single CI run takes >5 minutes to complete, emit periodic heartbeat lines:
+Every persisted or emitted CI observation contains exactly these fields:
 
 ```
-# During long CI waits, poll every 60s and emit a heartbeat line each time
-while ci_running:
-    sleep 60
-    echo "[ci-watch-and-fix] waiting for CI — elapsed: <N>s" >> $LOG_DIR/<story-id>.log
-    check if checks are still in_progress
+schema_version
+story_id
+repository_id
+pull_request_id
+head_sha_digest
+base_ref_digest
+workflow_id
+workflow_definition_digest
+event
+run_id
+run_number
+run_attempt
+aggregate_job_id
+state
+reason
+evidence_digest
 ```
 
----
+`state` is exactly one of `WAIT`, `QUALIFIED`, `REMEDIATE`, `BLOCKED`. `reason` is exactly one of the
+closed reasons in the State Partition. Identifiers and candidate references that could expose raw
+values are represented by stable opaque identifiers or digests. No additional field or free-form
+text is allowed. Durable output must not contain raw log text, error excerpts, filesystem paths,
+timestamps, operator identities, candidate bodies, environment values, command output or provider
+messages.
 
-## Escalation Path (AC3)
+## Privacy-Safety Census
 
-Trigger when: (cycle > 3 AND CI not passing, OR flaky retries exhausted) AND `ci_is_advisory == false`.
-
-When `ci_is_advisory == true`, infra failures and exhausted retries produce `CI PASS (advisory)` — never `CI FAIL`. The merge proceeds. The escalation path below only applies when branch protection is active.
-
-```
-ESCALATE:
-    # 1. Produce ci_remediation_report
-    report_path = docs/ci-failures/<story-id>-<timestamp>.md
-    write report containing:
-        - story_id
-        - pr_number
-        - total_cycles_attempted
-        - flaky_retry_used
-        - per-cycle summary:
-            - cycle number
-            - checks that failed
-            - failure log excerpt (last 500 chars)
-            - fix attempted (or "flaky retry" / "none")
-        - convergence_failure_reason: why CI did not converge
-
-    # 2. Commit the report to the PR branch (in worktree)
-    git add <report_path>
-    git commit -m "ci(<story-id>): CI remediation report — convergence failed"
-    git push origin <story_branch>
-
-    # 3. Return CI FAIL — do NOT mark story done
-    # The delivery wrapper's on_exit trap will mark the story failed (non-zero exit)
-    return CI FAIL
-```
-
-**NEVER mark the story `done` when returning CI FAIL.**
-
----
-
-## Flaky Test Detection Heuristic (AC4)
-
-A CI failure is classified as **likely flaky** if:
-1. The same CI check fails in the current cycle AND
-2. A previous cycle saw a failure in that same check with an **identical error message** (matched via the first 100 characters of the failure log for that check)
-
-When a likely-flaky failure is detected:
-- Do **NOT** apply code changes
-- Push an empty commit to re-trigger CI: `git commit --allow-empty -m "ci: retry (suspected flaky)"`
-- Count this as consuming the **flaky retry slot** (max 1 flaky retry total per story)
-- If the flaky retry slot is already used and the same failure recurs → escalate
-
----
-
-## Fix Principles
-
-When applying corrective code changes for non-flaky failures:
-- **Minimal change only** — fix what CI identifies, nothing more
-- **No scope expansion** — do not refactor, add features, or change behavior beyond the CI failure
-- **Commit message convention:** `fix(ci/<story-id>): <description>` — distinguishable from feature commits
-- **Truncate logs:** analyze only the last 3000 chars of each failed job log to stay within context limits
-
----
+Verify the positive closed tuple and the negative exclusions across stdout and stderr; delivery and
+daemon reports; journals and lifecycle projections; QA or evidence artefacts; commit subjects and
+bodies; and heartbeat or completion output. Falsify raw-log, free-form, path, timestamp, operator
+and candidate-body leakage independently. Raw failed logs are allowed only in ephemeral memory
+during an admitted `REMEDIATE` cycle and must be discarded before any durable write or output.
 
 ## Outputs
 
-**CI PASS:**
-```
-status: CI PASS
-cycles_used: <n>
-flaky_retry_used: <true|false>
-```
+Return exactly one closed durable CI tuple:
 
-**CI PASS (advisory):**
-```
-status: CI PASS
-advisory: true
-reason: <"no_checks" | "infra_failure_advisory">
-note: "CI failed but branch protection is not active — merge permitted"
-```
-
-The Delivery Orchestrator treats `CI PASS (advisory)` identically to `CI PASS` — it proceeds to merge. The advisory flag is logged for traceability but does not block the delivery.
-
-**CI FAIL:**
-```
-status: CI FAIL
-cycles_used: 3
-flaky_retry_used: <true|false>
-escalation_reason: <why convergence failed>
-remediation_report: docs/ci-failures/<story-id>-<timestamp>.md
-```
-
-`CI FAIL` is only returned when branch protection is active AND CI cannot pass. When branch protection is absent, infra failures produce `CI PASS (advisory)` instead.
-
----
+- `WAIT`: the authoritative greatest-current attempt is queued or running.
+- `QUALIFIED`: the exact selected completed attempt and unique aggregate succeeded; remain
+  `pending_review` until an external exact-current merge is watcher-verified.
+- `REMEDIATE`: the exact selected completed attempt and unique aggregate failed; the bounded
+  remediation path may run.
+- `BLOCKED`: observation or identity is unsafe, ambiguous, unavailable or otherwise terminal;
+  preserve all recoverable state and escalate.
 
 ## Non-Goals
 
-This skill must NOT:
-- Modify acceptance criteria or product scope
-- Apply fixes to pre-existing CI failures unrelated to this story's changes
-- Attempt to fix infrastructure failures (missing secrets, missing bindings, quota limits, billing limits) — these are detected via Step 4b fast-path (do NOT burn retry cycles). When `ci_is_advisory`, they produce CI PASS (advisory). When branch protection is active, they produce ESCALATE.
-- Merge the PR (that is the Orchestrator's responsibility after CI PASS)
-- Use `gh pr checks --watch` (heartbeat requirement — see AC7)
+This skill must not:
 
----
+- authorize or execute a merge, enable auto-merge or use admin fallback;
+- mark a Story `done`, `merged` or terminal;
+- downgrade absent checks, provider failure or infrastructure failure to advisory success;
+- fall back from a newer authoritative attempt to an older successful one;
+- retry or mutate on any observation other than completed aggregate failure;
+- persist raw CI logs or free-form remediation evidence;
+- expand Story scope or alter acceptance criteria.
 
 ## Quality Checks
 
-- Every cycle emits at least one heartbeat line to `$LOG_DIR/<story-id>.log`
-- Flaky detection compares against previous cycle signatures, not just the current cycle
-- Escalation report is committed before returning CI FAIL
-- Story is never marked `done` on CI FAIL
-- Log truncation is applied before analysis (max 3000 chars per job)
+- Pending-review persistence precedes hosted observation for every exact candidate.
+- The authoritative subset is filtered before greatest-current selection.
+- Job inspection occurs only for the selected completed attempt and yields exactly one aggregate
+  authority job; queued or running attempts wait without requiring one.
+- The state partition is exhaustive, closed and fail-closed.
+- Only a selected completed aggregate failure enters remediation.
+- Hosted qualification never becomes merge permission.
+- The closed tuple and privacy-safety census cover every durable and visible sink.
+- External exact-current merge verification remains the watcher's sole terminal authority.

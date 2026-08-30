@@ -3400,16 +3400,39 @@ else
   grep -qF "continuation to a human" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("defer-route-human")
   grep -qF "weakened to advisory-only or silently accepted" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("defer-route-no-advisory-downgrade")
 
-  # Durable human-reversal record — required field list
-  grep -qF "Durable human-reversal record" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-heading")
-  grep -qF "QA review ID" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-qa-review-id")
-  grep -qF "Story ID" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-story-id")
-  grep -qF "reviewed and decided timestamps" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-timestamps")
-  grep -qF "classification and materiality" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-classification")
-  grep -qF "reversal reason" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-reason")
-  grep -qF "operator identity" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-operator")
-  grep -qF "safe evidence/report" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-safe-locators")
-  grep -qF "Report or evidence bodies and secrets are never included" "$RUNBOOK_DOC" || RUNBOOK_MISSING+=("reversal-record-no-bodies-secrets")
+  # Durable human-reversal record — closed allowlist, scoped to this paragraph only.
+  # The paragraph is flattened to one line so phrase checks cannot be defeated by
+  # markdown line wrapping (positive phrases split across lines, or a stale phrase
+  # reintroduced with a wrap in the middle).
+  RUNBOOK_REVERSAL=$(
+    awk '
+      /^\*\*Durable human-reversal record:/ { capture=1 }
+      capture && seen && /^$/ { exit }
+      capture { print; seen=1 }
+    ' "$RUNBOOK_DOC" | tr '\n' ' '
+  )
+  printf '%s\n' "$RUNBOOK_REVERSAL" | grep -qF "Durable human-reversal record" || RUNBOOK_MISSING+=("reversal-record-heading")
+  printf '%s\n' "$RUNBOOK_REVERSAL" | grep -qF "opaque QA review ID and Story ID" || RUNBOOK_MISSING+=("reversal-record-opaque-identifiers")
+  for _runbook_field in status phase_status pr_status completed_at; do
+    printf '%s\n' "$RUNBOOK_REVERSAL" | grep -qF "\`$_runbook_field\`" || RUNBOOK_MISSING+=("reversal-record-field-$_runbook_field")
+  done
+  printf '%s\n' "$RUNBOOK_REVERSAL" | grep -qF "never their values" || RUNBOOK_MISSING+=("reversal-record-field-names-only")
+  printf '%s\n' "$RUNBOOK_REVERSAL" | grep -qF "journal digest" || RUNBOOK_MISSING+=("reversal-record-journal-digest")
+  printf '%s\n' "$RUNBOOK_REVERSAL" | grep -qF "projection digest" || RUNBOOK_MISSING+=("reversal-record-projection-digest")
+  printf '%s\n' "$RUNBOOK_REVERSAL" | grep -qF "governed-evidence digest" || RUNBOOK_MISSING+=("reversal-record-governed-evidence-digest")
+  for _runbook_reason in unsupported_false_pass security_miss second_evidence_invalid_overturn; do
+    printf '%s\n' "$RUNBOOK_REVERSAL" | grep -qF "\`$_runbook_reason\`" || RUNBOOK_MISSING+=("reversal-record-reason-$_runbook_reason")
+  done
+  printf '%s\n' "$RUNBOOK_REVERSAL" | grep -qF "No additional fields" || RUNBOOK_MISSING+=("reversal-record-closed-fields")
+  printf '%s\n' "$RUNBOOK_REVERSAL" | grep -qF "report or evidence bodies, or secrets" || RUNBOOK_MISSING+=("reversal-record-no-bodies-secrets")
+
+  # The former eight durable fields are forbidden only in the reversal paragraph.
+  for _runbook_stale in reviewed decided classification materiality "reversal reason" "operator identity" "evidence.*locator" "report.*locator"; do
+    if printf '%s\n' "$RUNBOOK_REVERSAL" | grep -qiE "$_runbook_stale"; then
+      RUNBOOK_MISSING+=("reversal-record-stale-$_runbook_stale")
+    fi
+  done
+  unset RUNBOOK_REVERSAL _runbook_field _runbook_reason _runbook_stale
 
   if [[ ${#RUNBOOK_MISSING[@]} -eq 0 ]]; then
     pass "RUNBOOK-1: D8 runbook doc names both stop thresholds, the human-reversal record and the defer/human route"

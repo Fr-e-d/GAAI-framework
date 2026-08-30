@@ -49,12 +49,16 @@ Each track has its own workflow, agents, rules, and artefacts.
 All AI-driven delivery targets the **`staging`** branch. AI agents never interact with `production`.
 
 ```
-staging  ←── AI works here (backlog, worktrees, squash merge, push)
+staging  ←── AI publishes exact PR candidates; external authority merges
    │
    PR staging → production  ←── Human review on GitHub
    │
 production  ←── Never touched by AI. Deploy via GitHub Actions on merge/tag.
 ```
+
+An open PR or hosted PASS is non-terminal. Delivery holds the Story at
+`in_progress / qa_passed / pending_review`; only configured-target watcher verification of an
+externally authorized exact-current merge projects terminal state and permits cleanup.
 
 The `delivery-daemon.sh` script automates backlog polling and session launch. See `scripts/README.scripts.md`.
 

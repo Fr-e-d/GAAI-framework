@@ -58,7 +58,7 @@ The Orchestrator cannot proceed to the next phase until it has validated the cur
 ### After QA Sub-Agent terminates
 
 1. Read verdict from `{id}.qa-report.md`:
-   - **PASS**: → **INTEGRATE, MERGE & COMPLETE Story**:
+   - **PASS**: → **PUBLISH, HOLD & OBSERVE Story**:
      1. **Rebase on staging** (in worktree): `git merge staging` into story branch
      2. **Verify build**: `npx tsc --noEmit` in worktree
         - If fails with errors **introduced by this story** → fix and re-commit
@@ -74,21 +74,30 @@ The Orchestrator cannot proceed to the next phase until it has validated the cur
            - Failure **pre-existing** (reproducible on staging HEAD without this story's changes) → proceed without blocking. To verify: stash the story's changes, re-run the validation commands from the same worker directory, then pop the stash. If staging HEAD also fails → pre-existing; if only story HEAD fails → story-introduced.
            - Failure where provenance is **unclear** → **ESCALATE** with full error output; do not proceed to step 4.
          - **Credential requirement**: the project-defined validation commands MUST NOT require external API credentials. If any validation command requests credentials at runtime, **ESCALATE** immediately (project deploy-credential boundary); do not supply the credential.
-     4. Push story branch to origin
-     5. `gh pr create --base staging --head story/{id}`
-     6. Wait for PR CI check to reach a terminal state (`gh run watch`)
-        - If CI fails → diagnose: same triage as steps 2–3 (fix story issues, ignore pre-existing)
-        - If CI fails on infra (missing secrets, missing bindings) → **ESCALATE** with logs
-     7. `gh pr merge --squash` — immediate merge to staging
-        - If merge fails (conflict): merge staging into branch, resolve, push, retry merge
-        - If merge still fails after 2 attempts: **ESCALATE** with conflict details
-        - If merge rejected (branch protection / checks required): wait for checks, then retry
-     8. After successful merge: verify staging deploy CI (`gh run list --branch staging --limit 1`)
-        - If staging deploy fails → **ESCALATE** with deploy logs (do not attempt infra fixes)
+     4. Push the exact locally admitted Story head to origin.
+     5. Create or reuse the PR to the configured Delivery target, then bind its repository, PR,
+        head and base identities to that exact admitted candidate.
+     6. Immediately persist `status: in_progress`, `phase_status: qa_passed` and
+        `pr_status: pending_review`, before any hosted observation.
+     7. Invoke `ci-watch-and-fix` against the exact bound PR/head/base/run identity.
+        - `WAIT` → keep the pending-review hold and continue deterministic observation.
+        - `QUALIFIED` → preserve the pending-review hold; hosted success is evidence, not merge
+          authority.
+        - `REMEDIATE` → apply only the bounded remediation path, then obtain fresh local admission,
+          publication binding and pending-review persistence for the new exact head.
+        - `BLOCKED` → preserve the branch, PR, worktree and typed evidence, then **ESCALATE** without
+          a retry, push or lifecycle mutation.
+     8. Wait for an external authority to merge the exact current admitted head. Delivery must not
+        enable auto-merge, invoke a provider merge mutation or use an admin fallback.
+     8b. The configured-target watcher verifies that the exact current head landed, then projects
+         `status: done`, `phase_status: done`, `pr_status: merged` and `completed_at`. An open or
+         closed PR, a hosted PASS, local ancestry or remote-branch absence is not terminal evidence.
      9. If `{id}.memory-delta.md` exists in `contexts/artefacts/memory-deltas/`, validate that the file contains `artefact_type: memory-delta` in YAML frontmatter AND at least one of the canonical structural sections `## Confirmed Entries`, `## Contradicted Entries`, `## New Knowledge Candidates`. If any check fails: **SCHEMA_INVALID** — RE-SPAWN QA Sub-Agent with the schema failure appended to the context bundle, up to 2 attempts, then ESCALATE. On ESCALATE after 2 RE-SPAWN attempts: the ESCALATE message MUST include (a) delta path `contexts/artefacts/memory-deltas/{id}.memory-delta.md`, (b) which check(s) failed — missing `artefact_type: memory-delta` frontmatter and/or which of the three canonical sections (`## Confirmed Entries`, `## Contradicted Entries`, `## New Knowledge Candidates`) were absent, (c) a reference to `memory-alignment-check/SKILL.md` Outputs section as the canonical schema authority. On PASS: flag the delta in the completion report for Discovery to action via `memory-ingest`.
      9b. (Autonomous triage — daemon wrapper) The daemon wrapper also spawns a bounded Discovery subprocess in draft mode to pre-triage the delta. A new section `Memory-Delta Triage (autonomous draft mode)` is appended to the wrapper completion output (visible in the delivery log). Fields: `drafts_produced`, `escalated_in_draft`, `circuit_breaker_tripped` (boolean), `autonomous_triage_failed` (count). If no delta exists or circuit breaker is tripped, the section shows `no triage — reason: {no_delta | circuit_breaker_tripped}`. This section is additive — it does not replace step 9.
-    10. Update backlog (push with retry-rebase pattern), cleanup worktree + delete remote branch
-     **NEVER leave a PR open. NEVER merge to production (staging only).**
+    10. Only after the watcher has durably projected the terminal merge may cleanup remove the
+        worktree or branch. Before then, preserve all resumable state.
+
+     **NEVER invoke a merge mutation. NEVER treat hosted PASS as merge permission.**
    - **FAIL**: spawn count < 2? → **RE-SPAWN** Implementation Sub-Agent with qa-report, then re-spawn QA Sub-Agent
    - **FAIL** after 2 cycles: → **ESCALATE**
    - **ESCALATE**: → **ESCALATE** (pass QA's escalation reason to human)
