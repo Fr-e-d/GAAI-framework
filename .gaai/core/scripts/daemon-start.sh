@@ -1,185 +1,773 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
+#!/bin/bash -p
 # ═══════════════════════════════════════════════════════════════════════════
-# GAAI Daemon Launcher — unified start/stop/status wrapper
+# GAAI Daemon Launcher — privileged, verify-only start/stop/status entry
 # ═══════════════════════════════════════════════════════════════════════════
 #
 # Description:
-#   Simple wrapper around delivery-daemon.sh that handles platform
-#   detection, PID management, and daemon lifecycle.
+#   The sole runtime lifecycle entry for the standalone GAAI delivery daemon.
+#   It is VERIFY-ONLY with respect to the daemon home worktree: it proves one
+#   clean, registered, exact-current home and one exact-target executable before
+#   any launch effect, and it never creates, moves, removes, prunes, resets,
+#   cleans or repairs that home. Provisioning belongs to `daemon-setup.sh` alone.
 #
-# Usage:
-#   daemon-start.sh [options]          Start the daemon
-#   daemon-start.sh --stop             Graceful shutdown (drains in-flight wrappers)
-#   daemon-start.sh --stop --no-drain  Stop daemon, leave wrappers running
-#   daemon-start.sh --status           Live monitoring dashboard (tmux) or static status
-#   daemon-start.sh --monitor          Alias for --status
-#   daemon-start.sh --restart          Stop + start
+# Usage (direct privileged entry — this file is executable):
+#   .gaai/core/scripts/daemon-start.sh [options]     Start the daemon
+#   .gaai/core/scripts/daemon-start.sh --stop        Graceful shutdown (drains wrappers)
+#   .gaai/core/scripts/daemon-start.sh --stop --no-drain
+#   .gaai/core/scripts/daemon-start.sh --status      Read-only lifecycle status
+#   .gaai/core/scripts/daemon-start.sh --monitor     Presentation UI (after status)
+#   .gaai/core/scripts/daemon-start.sh --restart     Stop + start
 #
-# Options (passed through to delivery-daemon.sh):
-#   --max-concurrent N     Parallel delivery slots (default: 3)
-#   --interval N           Poll interval in seconds (default: 30)
-#   --exit-when-idle [N]   Auto-stop daemon after N consecutive idle polls
-#                          (no ready stories + zero in-flight). N optional,
-#                          default 5. Useful for one-shot batches that should
-#                          drain the backlog and then exit cleanly.
+#   Prefixing that path with a plain `bash` interpreter is NOT supported and is refused:
+#   a non-privileged interpreter has already applied BASH_ENV and imported
+#   exported functions before this script's first instruction. An absolute,
+#   verified Bash invoked `--noprofile --norc -p <script>` is the only alternative.
+#
+# Options (recorded in the launch tuple, consumed by the daemon child):
+#   --max-concurrent N     Parallel delivery slots
+#   --interval N           Poll interval in seconds
+#   --exit-when-idle [N]   Auto-stop after N consecutive idle polls
 #   --dry-run              Show what would launch, don't execute
 #
-# Stop options:
-#   --no-drain             Skip wrapper drain (legacy behaviour ; in-flight
-#                          deliveries continue independently after daemon
-#                          exits). Default is graceful drain : SIGTERM
-#                          wrappers via lock files, wait STOP_DRAIN_TIMEOUT
-#                          (default 600s, override via GAAI_STOP_DRAIN_TIMEOUT),
-#                          then SIGTERM tmux sessions, +30s grace, SIGKILL.
-#
 # Exit codes:
-#   0 — success
-#   1 — error (daemon already running, not found, etc.)
+#   0  — success
+#   1  — typed lifecycle refusal (reason + canonical action on stderr)
+#   78 — entry_authority_invalid (contaminated or unsupported entry)
 # ═══════════════════════════════════════════════════════════════════════════
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CORE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-GAAI_DIR="$(cd "$CORE_DIR/.." && pwd)"
-PROJECT_ROOT="$(cd "$GAAI_DIR/.." && pwd)"
+GAAI_ENTRY_NAME="daemon-start"
+
+# BEGIN GAAI-ENTRY-AUTHORITY (byte-identical in daemon-start.sh and daemon-setup.sh)
+# ═══════════════════════════════════════════════════════════════════════════
+# Privileged entry authority (E1003S07 AC2) — FIRST INSTRUCTIONS
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# This block is deliberately inlined rather than sourced. A sourced helper runs
+# only after the interpreter has already applied BASH_ENV, ENV, SHELLOPTS and
+# exported-function import — by then an "exact" script is already contaminated.
+# Only the privileged shebang plus these first instructions close that window, so
+# `daemon-start.sh` and `daemon-setup.sh` each carry their own copy. Keep the two
+# copies identical; `daemon-asset-home.test.sh` proves they have not drifted.
+#
+# This closes the pre-interpreter contamination path. It does NOT claim protection
+# against a malicious principal running under the same OS UID, which can replace a
+# user-owned file before the privileged interpreter opens it.
+
+_gaai_entry_refuse() {
+  printf '%s: reason=entry_authority_invalid action=none evidence=%s\n' \
+    "$GAAI_ENTRY_NAME" "${1:-unspecified}" >&2
+  exit 78
+}
+
+# 1. Privileged mode must be provably ON at the first instruction.
+case "$-" in
+  *p*) ;;
+  *)   _gaai_entry_refuse "entry_role=privileged_mode_absent" ;;
+esac
+if [[ "$(set -o 2>/dev/null | while read -r _o _v; do [[ "$_o" == "privileged" ]] && printf '%s' "$_v"; done)" != "on" ]]; then
+  _gaai_entry_refuse "entry_role=privileged_mode_unconfirmed"
+fi
+
+# 2. Builtin-only normalization. No external command has run yet, by construction.
+set -euo pipefail
+set +x +v
+IFS=$' \t\n'
+umask 022
+LC_ALL=C; LANG=C; export LC_ALL LANG
+unset -v CDPATH GLOBIGNORE BASH_XTRACEFD PS4 2>/dev/null || true
+shopt -u expand_aliases 2>/dev/null || true
+
+# 3. Hostile inherited entries. Privileged Bash already refuses to EXECUTE
+#    BASH_ENV/ENV and refuses to IMPORT exported functions, but both remain
+#    OBSERVABLE in the environment at this instruction — and an observable entry
+#    must be refused, not merely neutralised.
+_GAAI_HOSTILE_EXACT='BASH_ENV ENV SHELLOPTS BASHOPTS BASH_COMPAT BASH_XTRACEFD PS4
+GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+GIT_CONFIG_NOSYSTEM GIT_CONFIG_COUNT GIT_SSH GIT_SSH_COMMAND GIT_ASKPASS
+GIT_EDITOR GIT_SEQUENCE_EDITOR GIT_PAGER GIT_EXTERNAL_DIFF GIT_DIFF_OPTS
+GIT_PROXY_COMMAND GIT_TEMPLATE_DIR GIT_NAMESPACE GIT_ATTR_NOSYSTEM
+GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM GIT_ALLOW_PROTOCOL
+GIT_PROTOCOL_FROM_USER GIT_TRACE GIT_TRACE2 GIT_TRACE_PACKET GIT_TERMINAL_PROMPT
+GIT_EXEC_PATH GIT_HOOKS_PATH GIT_INDEX_VERSION GIT_REPLACE_REF_BASE
+PYTHONSTARTUP PYTHONPATH PYTHONHOME PYTHONEXECUTABLE PYTHONWARNINGS
+PERL5LIB PERL5OPT PERLLIB PERL5DB
+LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_ORIGIN_PATH
+DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH DYLD_ROOT_PATH'
+# Ambient tmux entries are IGNORED rather than refused: the daemon child legitimately
+# runs inside a pane of the private server, where tmux sets TMUX and TMUX_PANE itself.
+# Dropping them means no ambient or inherited tmux context can ever select a server,
+# a socket root or a pane for this lifecycle — those come from the digest-bound
+# derivation alone.
+unset -v TMUX TMUX_PANE TMUX_TMPDIR 2>/dev/null || true
+export -n TMUX TMUX_PANE TMUX_TMPDIR 2>/dev/null || true
+#    The test is INHERITANCE, not mere presence: `SHELLOPTS`, `BASHOPTS` and `PS4`
+#    are maintained by every Bash whether or not anyone passed them, so only an
+#    entry that arrived in the environment is hostile. At the first instruction the
+#    exported set is exactly the inherited set.
+#
+# 4. The families are closed, not the list: any inherited member of them is equally
+#    disqualifying even when it is not named above.
+_GAAI_HOSTILE_FLAT=" ${_GAAI_HOSTILE_EXACT//$'\n'/ } "
+for _gaai_name in $(compgen -e 2>/dev/null || true); do
+  case "$_gaai_name" in
+    GIT_*|LD_*|DYLD_*|PYTHON*|PERL5*|BASH_FUNC_*)
+      _gaai_entry_refuse "entry_role=hostile_variable:${_gaai_name}" ;;
+  esac
+  case "$_GAAI_HOSTILE_FLAT" in
+    *" $_gaai_name "*) _gaai_entry_refuse "entry_role=hostile_variable:${_gaai_name}" ;;
+  esac
+done
+unset -v _gaai_name _gaai_bad
+
+# 5. Exported-function entries. Privileged Bash did not import them, so
+#    `declare -F` is clean; what still has to be proven is that the encoded
+#    environment entry is absent too, and stays absent from every descendant.
+for _gaai_fn in exec unset builtin command source eval export read printf cd set trap kill git tmux; do
+  if declare -F "$_gaai_fn" >/dev/null 2>&1; then
+    _gaai_entry_refuse "entry_role=hostile_function:${_gaai_fn}"
+  fi
+done
+unset -v _gaai_fn
+if [[ -r /proc/self/environ ]]; then
+  while IFS= read -r -d '' _gaai_kv; do
+    case "$_gaai_kv" in
+      BASH_FUNC_*) _gaai_entry_refuse "entry_role=hostile_function_entry" ;;
+    esac
+  done < /proc/self/environ
+  unset -v _gaai_kv
+fi
+
+# 6. Attested absolute-command allowlist. Resolution never consults the inherited
+#    PATH or the current directory: only this closed set of roots is searched, and
+#    every candidate plus each of its parent components must be owned by root or
+#    this UID and be unwritable by anyone else.
+_GAAI_CMD_ROOTS='/usr/bin /bin /usr/sbin /sbin /usr/local/bin /opt/homebrew/bin'
+_GAAI_REQUIRED_CMDS='git tmux env stat id uname mkdir rmdir rm mv cp ln cat sed awk cut tr head wc ps sync sleep mkfifo chmod grep dirname basename date'
+
+# Owner must be root or this UID; group/other write bits are disqualifying.
+_gaai_safe_owner_mode() {
+  local _p="$1" _uid="${UID:-0}" _own _mode
+  # -L: GNU stat lstat()s by default, and a symlink's own mode is always 0777. The
+  # link itself cannot be hijacked by an untrusted principal because its containing
+  # directory is attested in the same walk, so following to the target is the proof
+  # that matters.
+  _own="$(stat -L -c '%u' "$_p" 2>/dev/null || stat -L -f '%u' "$_p" 2>/dev/null || echo "")"
+  _mode="$(stat -L -c '%a' "$_p" 2>/dev/null || stat -L -f '%Lp' "$_p" 2>/dev/null || echo "")"
+  [[ -n "$_own" && -n "$_mode" ]] || return 1
+  [[ "$_own" == "0" || "$_own" == "$_uid" ]] || return 1
+  while [[ "${#_mode}" -lt 4 ]]; do _mode="0$_mode"; done
+  local _grp="${_mode:2:1}" _oth="${_mode:3:1}"
+  case "$_grp" in 2|3|6|7) return 1 ;; esac
+  case "$_oth" in 2|3|6|7) return 1 ;; esac
+  return 0
+}
+
+# Every component of the literal path, so a hijacked intermediate directory is
+# caught even when the leaf looks correct.
+_gaai_attest_path() {
+  local _p="$1" _acc="" _part
+  [[ "$_p" == /* ]] || return 1
+  local _saved_ifs="$IFS"; IFS='/'
+  for _part in $_p; do
+    [[ -z "$_part" ]] && continue
+    _acc="$_acc/$_part"
+    if [[ ! -e "$_acc" ]]; then IFS="$_saved_ifs"; return 1; fi
+    if ! _gaai_safe_owner_mode "$_acc"; then IFS="$_saved_ifs"; return 1; fi
+  done
+  IFS="$_saved_ifs"
+  return 0
+}
+
+# The operator's inherited PATH is preserved for ADVISORY presence checks only
+# (`claude`, `jq`, `python3`, `timeout` — operator tooling, never lifecycle
+# authority). No authority-bearing command is ever resolved through it.
+GAAI_OPERATOR_PATH="${PATH:-}"
+export GAAI_OPERATOR_PATH
+
+# `stat` bootstraps the attestation, so it is located with builtin tests only and
+# then re-attested with itself once available.
+_gaai_stat_bootstrap=""
+for _gaai_dir in $_GAAI_CMD_ROOTS; do
+  if [[ -f "$_gaai_dir/stat" && -x "$_gaai_dir/stat" ]]; then _gaai_stat_bootstrap="$_gaai_dir/stat"; break; fi
+done
+[[ -n "$_gaai_stat_bootstrap" ]] || _gaai_entry_refuse "entry_role=tool_absent:stat"
+PATH="${_gaai_stat_bootstrap%/stat}"
+export PATH
+_gaai_attest_path "$_gaai_stat_bootstrap" || _gaai_entry_refuse "entry_role=tool_untrusted:stat"
+
+_GAAI_ATTESTED_ROOTS=""
+for _gaai_dir in $_GAAI_CMD_ROOTS; do
+  [[ -d "$_gaai_dir" ]] || continue
+  _gaai_attest_path "$_gaai_dir" || continue
+  _GAAI_ATTESTED_ROOTS="${_GAAI_ATTESTED_ROOTS}${_GAAI_ATTESTED_ROOTS:+ }$_gaai_dir"
+done
+[[ -n "$_GAAI_ATTESTED_ROOTS" ]] || _gaai_entry_refuse "entry_role=no_attested_command_root"
+
+for _gaai_cmd in $_GAAI_REQUIRED_CMDS; do
+  _gaai_found=""
+  for _gaai_dir in $_GAAI_ATTESTED_ROOTS; do
+    if [[ -f "$_gaai_dir/$_gaai_cmd" && -x "$_gaai_dir/$_gaai_cmd" ]] \
+        && _gaai_attest_path "$_gaai_dir/$_gaai_cmd"; then
+      _gaai_found="$_gaai_dir/$_gaai_cmd"; break
+    fi
+  done
+  if [[ -z "$_gaai_found" ]]; then
+    case "$_gaai_cmd" in
+      # Optional on some hosts; their absence degrades a diagnostic, never authority.
+      sync|grep) continue ;;
+      *) _gaai_entry_refuse "entry_role=tool_absent_or_untrusted:${_gaai_cmd}" ;;
+    esac
+  fi
+done
+unset -v _gaai_cmd _gaai_dir _gaai_found _gaai_stat_bootstrap
+
+# One digest tool is mandatory; either spelling is accepted, deterministically.
+GAAI_DIGEST_CMD=""
+for _gaai_dir in $_GAAI_ATTESTED_ROOTS; do
+  if [[ -z "$GAAI_DIGEST_CMD" && -f "$_gaai_dir/shasum" && -x "$_gaai_dir/shasum" ]] \
+      && _gaai_attest_path "$_gaai_dir/shasum"; then GAAI_DIGEST_CMD="$_gaai_dir/shasum"; fi
+done
+if [[ -z "$GAAI_DIGEST_CMD" ]]; then
+  for _gaai_dir in $_GAAI_ATTESTED_ROOTS; do
+    if [[ -z "$GAAI_DIGEST_CMD" && -f "$_gaai_dir/sha256sum" && -x "$_gaai_dir/sha256sum" ]] \
+        && _gaai_attest_path "$_gaai_dir/sha256sum"; then GAAI_DIGEST_CMD="$_gaai_dir/sha256sum"; fi
+  done
+fi
+[[ -n "$GAAI_DIGEST_CMD" ]] || _gaai_entry_refuse "entry_role=tool_absent_or_untrusted:sha256"
+unset -v _gaai_dir
+
+# The attested roots become the ONLY search path. No current directory, no
+# inherited entry, no user-writable directory participates in a lookup.
+PATH="$(printf '%s' "$_GAAI_ATTESTED_ROOTS" | sed 's/ /:/g')"
+export PATH
+GAAI_ENV_CMD=""
+for _gaai_dir in $_GAAI_ATTESTED_ROOTS; do
+  if [[ -z "$GAAI_ENV_CMD" && -x "$_gaai_dir/env" ]]; then GAAI_ENV_CMD="$_gaai_dir/env"; fi
+done
+unset -v _gaai_dir
+
+# On a host without /proc, the function-import entries are proven absent with the
+# attested `env` instead — the same refusal, one bootstrap step later.
+if [[ ! -r /proc/self/environ ]]; then
+  if "$GAAI_ENV_CMD" | sed -n 's/^\(BASH_FUNC_[^=]*\)=.*/\1/p' | head -1 | grep -q . 2>/dev/null; then
+    _gaai_entry_refuse "entry_role=hostile_function_entry"
+  fi
+fi
+
+# 7. Verified private HOME/XDG/TMP roots. No inherited root may redirect a tool's
+#    config, cache or temporary state. These are also what every descendant gets.
+GAAI_PRIVATE_ROOT="/tmp/.gaai-p-${UID:-0}"
+mkdir -p "$GAAI_PRIVATE_ROOT" 2>/dev/null || _gaai_entry_refuse "entry_role=private_root_uncreatable"
+chmod 0700 "$GAAI_PRIVATE_ROOT" 2>/dev/null || true
+if [[ -L "$GAAI_PRIVATE_ROOT" ]] || ! _gaai_safe_owner_mode "$GAAI_PRIVATE_ROOT"; then
+  _gaai_entry_refuse "entry_role=private_root_untrusted"
+fi
+for _gaai_sub in home xdg-config xdg-cache xdg-data tmp; do
+  mkdir -p "$GAAI_PRIVATE_ROOT/$_gaai_sub" 2>/dev/null \
+    || _gaai_entry_refuse "entry_role=private_root_uncreatable"
+  chmod 0700 "$GAAI_PRIVATE_ROOT/$_gaai_sub" 2>/dev/null || true
+done
+unset -v _gaai_sub
+GAAI_OPERATOR_HOME="${HOME:-}"
+HOME="$GAAI_PRIVATE_ROOT/home"
+XDG_CONFIG_HOME="$GAAI_PRIVATE_ROOT/xdg-config"
+XDG_CACHE_HOME="$GAAI_PRIVATE_ROOT/xdg-cache"
+XDG_DATA_HOME="$GAAI_PRIVATE_ROOT/xdg-data"
+TMPDIR="$GAAI_PRIVATE_ROOT/tmp"
+export HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME TMPDIR
+
+# 8. Positive allowlist: every other exported configuration entry is dropped and
+#    the survivors are rebuilt from validated scalar values. A value that is not a
+#    single safe scalar is not "sanitised" — it is refused.
+_GAAI_CONFIG_ALLOW='GAAI_TARGET_BRANCH GAAI_DAEMON_HOME GAAI_REPO_ROOT GAAI_STOP_DRAIN_TIMEOUT
+GAAI_DAEMON_NO_MONITOR GAAI_CLAUDE_PROXY_BASE_URL GAAI_IMPL_BASE_URL GAAI_IMPL_MODEL
+GAAI_IMPL_MODEL_FALLBACK GAAI_AUTO_MERGE_POLICY GAAI_AUTO_MERGE_ADMIN_FALLBACK
+GAAI_DAEMON_EXECUTOR GAAI_CODEX_MODEL GAAI_CODEX_SANDBOX GAAI_CODEX_EPHEMERAL
+GAAI_CODEX_IGNORE_USER_CONFIG GAAI_CI_TEST_GATE_TIMEOUT_SEC GAAI_CI_TEST_GATE_MATERIALIZE_SEC
+GAAI_WORKTREES_BASE
+GAAI_NOTIFICATION_WEBHOOK GAAI_DAEMON_WEBHOOK_SECRET GAAI_IMPL_AUTH_TOKEN'
+for _gaai_key in $_GAAI_CONFIG_ALLOW; do
+  [[ -n "${!_gaai_key+set}" ]] || continue
+  _gaai_val="${!_gaai_key}"
+  # A validated scalar: no newline, no NUL, no control character, bounded length.
+  case "$_gaai_val" in
+    *$'\n'*|*$'\r'*|*$'\t'*) _gaai_entry_refuse "entry_role=config_not_scalar:${_gaai_key}" ;;
+  esac
+  if [[ "${#_gaai_val}" -gt 4096 ]]; then
+    _gaai_entry_refuse "entry_role=config_oversized:${_gaai_key}"
+  fi
+done
+unset -v _gaai_key _gaai_val
+for _gaai_name in $(compgen -e 2>/dev/null || true); do
+  case " $_GAAI_CONFIG_ALLOW PATH HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME TMPDIR LC_ALL LANG SHELL TERM USER LOGNAME UID EUID PWD SHLVL " in
+    *" $_gaai_name "*) ;;
+    *) export -n "$_gaai_name" 2>/dev/null || true ;;
+  esac
+done
+unset -v _gaai_name
+# END GAAI-ENTRY-AUTHORITY
+
+# ── Roots ─────────────────────────────────────────────────────────────────
+#
+# In child mode the launcher is a private copy living in the attempt directory, so
+# its own location says nothing about where the framework assets are. The verified
+# asset root is transmitted immutably in the attempt manifest and EVERY child-mode
+# asset read is re-rooted there — never at the launcher's own path and never at the
+# mutable main checkout.
+
+_GAAI_CHILD_MODE=0
+_GAAI_CHILD_ATTEMPT_DIR=""
+if [[ "${1:-}" == "--daemon-child" ]]; then
+  _GAAI_CHILD_MODE=1
+  _GAAI_CHILD_ATTEMPT_DIR="${2:-}"
+fi
+
+if [[ "$_GAAI_CHILD_MODE" -eq 1 ]]; then
+  if [[ -z "$_GAAI_CHILD_ATTEMPT_DIR" || ! -r "$_GAAI_CHILD_ATTEMPT_DIR/manifest" ]]; then
+    printf 'daemon-start[child]: reason=process_authority_invalid action=operator_disposition_required evidence=manifest_absent\n' >&2
+    exit 1
+  fi
+  _GAAI_CHILD_HOME="$(sed -n 's/^home=//p' "$_GAAI_CHILD_ATTEMPT_DIR/manifest" 2>/dev/null | head -1)"
+  _GAAI_CHILD_REPO="$(sed -n 's/^repo_root=//p' "$_GAAI_CHILD_ATTEMPT_DIR/manifest" 2>/dev/null | head -1)"
+  if [[ -z "$_GAAI_CHILD_HOME" || ! -d "$_GAAI_CHILD_HOME/.gaai/core/scripts" ]]; then
+    printf 'daemon-start[child]: reason=home_asset_invalid action=operator_disposition_required evidence=asset_root_unresolved\n' >&2
+    exit 1
+  fi
+  SCRIPT_DIR="$_GAAI_CHILD_HOME/.gaai/core/scripts"
+  CORE_DIR="$_GAAI_CHILD_HOME/.gaai/core"
+  GAAI_DIR="$_GAAI_CHILD_HOME/.gaai"
+  PROJECT_ROOT="${_GAAI_CHILD_REPO:-$_GAAI_CHILD_HOME}"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  CORE_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+  GAAI_DIR="$(cd "$CORE_DIR/.." && pwd -P)"
+  PROJECT_ROOT="$(cd "$GAAI_DIR/.." && pwd -P)"
+fi
 # The operator's real repo checkout. Exported so the daemon — even when its binary runs from
 # GAAI_DAEMON_HOME (the dedicated daemon home worktree) — anchors BOTH the per-story worktree base
 # (delivery-daemon.sh REPO_ROOT, else it falls back to PROJECT_DIR=home and nests) AND its
 # operator-facing state (logs/locks/retry/drift), so the monitor + `--logs` keep working.
 export GAAI_REPO_ROOT="$PROJECT_ROOT"
 
-# Repository-scoped worktree root. Operators can keep worktrees outside the
-# canonical checkout (and outside synchronized folders) by setting this once.
+# Repository-scoped worktree root (#3176). Operators can keep worktrees outside the
+# canonical checkout — and outside a synchronized folder — by setting this once. It
+# is an allowlisted configuration entry, so an operator value survives the entry
+# normalization above and is validated as a scalar like every other one.
 if [[ -z "${GAAI_WORKTREES_BASE:-}" ]]; then
-  GAAI_WORKTREES_BASE="$(cd "$PROJECT_ROOT/.." && pwd)/.gaai-worktrees/$(basename "$PROJECT_ROOT")"
+  GAAI_WORKTREES_BASE="$(cd "$PROJECT_ROOT/.." && pwd -P)/.gaai-worktrees/$(basename "$PROJECT_ROOT")"
 fi
 export GAAI_WORKTREES_BASE
 
-# ── Platform guard ────────────────────────────────────────────────────
 case "$(uname -s)" in
   Darwin|Linux) ;;
-  MINGW*|MSYS*|CYGWIN*)
-    echo "ERROR: Native Windows is not supported. Use WSL instead."
-    exit 1
-    ;;
+  *) printf 'daemon-start: reason=process_authority_invalid action=none evidence=platform_unsupported\n' >&2; exit 1 ;;
 esac
 
-DAEMON_SCRIPT="$SCRIPT_DIR/delivery-daemon.sh"
+# Operator-facing state stays in the operator's REAL checkout even when the daemon
+# binary and assets come from the home, so the monitor and `--logs` keep working.
+_STATE_GAAI_DIR="$PROJECT_ROOT/.gaai"
+LOCK_DIR="$_STATE_GAAI_DIR/project/contexts/backlog/.delivery-locks"
+PID_FILE="$LOCK_DIR/.daemon.pid"
+LOG_FILE="$_STATE_GAAI_DIR/project/contexts/backlog/.delivery-daemon.log"
+LOG_DIR="$_STATE_GAAI_DIR/project/contexts/backlog/.delivery-logs"
 MONITOR_TOP="$SCRIPT_DIR/daemon-monitor-top.sh"
 MONITOR_TAIL="$SCRIPT_DIR/daemon-monitor-tail.sh"
-LOCK_DIR="$GAAI_DIR/project/contexts/backlog/.delivery-locks"
-PID_FILE="$LOCK_DIR/.daemon.pid"
-LOG_FILE="$GAAI_DIR/project/contexts/backlog/.delivery-daemon.log"
-LOG_DIR="$GAAI_DIR/project/contexts/backlog/.delivery-logs"
 
-# OSS-3 : drain timeout for daemon-start.sh --stop graceful shutdown. Wrappers may be in
-# the middle of a long phase (impl up to 90 min per OSS-7 timeout) ; the drain
-# is a best-effort grace period after which we escalate to tmux kill-session.
+# Drain timeout for --stop. Wrappers may be mid-phase; the drain is a grace period
+# after which we escalate to an exact, persisted-identity tmux kill.
 STOP_DRAIN_TIMEOUT="${GAAI_STOP_DRAIN_TIMEOUT:-600}"
+TARGET_BRANCH="${GAAI_TARGET_BRANCH:-staging}"
+DAEMON_REL=".gaai/core/scripts/delivery-daemon.sh"
+START_REL=".gaai/core/scripts/daemon-start.sh"
 
 # shellcheck source=lib/home-branch-guard.sh
 [[ -z "${_GAAI_HOME_BRANCH_GUARD_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/home-branch-guard.sh" && _GAAI_HOME_BRANCH_GUARD_SH_SOURCED=1
 # shellcheck source=lib/daemon-home.sh
 [[ -z "${_GAAI_DAEMON_HOME_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/daemon-home.sh" && _GAAI_DAEMON_HOME_SH_SOURCED=1
 
-# ── Helpers ───────────────────────────────────────────────────────────────
+if ! declare -F _gaai_home_verify >/dev/null 2>&1 \
+    || ! declare -F _gaai_home_lock_acquire >/dev/null 2>&1; then
+  printf 'daemon-start: reason=process_authority_invalid action=operator_disposition_required evidence=home_library_unavailable\n' >&2
+  exit 1
+fi
+# The pre-E1003S07 runtime provisioner must not exist in this process. Its presence
+# would mean a stale library is loaded and startup could still repair the home.
+if declare -F _gaai_provision_daemon_home >/dev/null 2>&1; then
+  printf 'daemon-start: reason=process_authority_invalid action=operator_disposition_required evidence=runtime_provisioner_present\n' >&2
+  exit 1
+fi
 
-daemon_is_running() {
-  if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-    return 0
-  fi
-  if command -v tmux &>/dev/null && tmux has-session -t gaai-daemon 2>/dev/null; then
-    local tmux_pid
-    tmux_pid=$(tmux list-panes -t gaai-daemon -F '#{pane_pid}' 2>/dev/null | head -1 || echo "")
-    [[ -n "$tmux_pid" ]] && kill -0 "$tmux_pid" 2>/dev/null
-    return $?
-  fi
-  return 1
+refuse() { _gaai_home_refuse "$@" || exit 1; }
+
+# ── Durable lifecycle state ───────────────────────────────────────────────
+#
+# One owner record per physical repository, under the physical Git common
+# directory, so a second checkout can never join or clobber this lifecycle. State
+# advances pending -> bound -> running; every transition is written durably and
+# reread before it is treated as fact.
+
+LIFECYCLE_ROOT=""
+OWNER_FILE=""
+LAUNCH_ROOT=""
+
+_lifecycle_init() {
+  local _common_dir="$1"
+  LIFECYCLE_ROOT="$_common_dir/gaai-daemon-lifecycle"
+  OWNER_FILE="$LIFECYCLE_ROOT/owner"
+  LAUNCH_ROOT="$LIFECYCLE_ROOT/launch"
 }
 
-get_pid() {
-  if [[ -f "$PID_FILE" ]]; then
-    cat "$PID_FILE"
-    return
-  fi
-  if command -v tmux &>/dev/null && tmux has-session -t gaai-daemon 2>/dev/null; then
-    tmux list-panes -t gaai-daemon -F '#{pane_pid}' 2>/dev/null | head -1 || echo ""
-    return
-  fi
-  echo ""
+_owner_field() {
+  local _file="$1" _key="$2"
+  [[ -r "$_file" ]] || return 1
+  sed -n "s/^${_key}=//p" "$_file" 2>/dev/null | head -1
 }
 
-# ── Parse action ──────────────────────────────────────────────────────────
+# A record is well-formed only with the current schema and a known state. Anything
+# else is corrupt evidence, never an absent owner.
+_owner_state() {
+  local _schema _state
+  [[ -r "$OWNER_FILE" ]] || { printf 'none'; return 0; }
+  _schema="$(_owner_field "$OWNER_FILE" schema)"
+  _state="$(_owner_field "$OWNER_FILE" state)"
+  if [[ "$_schema" != "$GAAI_HOME_SCHEMA" ]]; then printf 'corrupt'; return 0; fi
+  case "$_state" in
+    pending|bound|running) printf '%s' "$_state" ;;
+    *) printf 'corrupt' ;;
+  esac
+}
+
+_owner_write() {
+  _gaai_home_write_durable "$OWNER_FILE" "$1"
+}
+
+# ── Private tmux process authority ────────────────────────────────────────
+#
+# The ONLY authoritative process backend on macOS and Linux. The socket lives in a
+# short, physical, host-stable root owned by this UID at mode 0700, derived from
+# the physical common directory — never from the normalized child TMPDIR — and its
+# complete physical path is length-checked before any tmux effect. Ambient TMUX,
+# TMUX_PANE and TMUX_TMPDIR were already refused at entry.
+
+TMUX_SOCKET=""
+TMUX_SESSION=""
+
+_tmux() { tmux -f /dev/null -S "$TMUX_SOCKET" "$@"; }
+
+_socket_prepare() {
+  local _common_dir="$1" _root
+  _root="$(_gaai_home_socket_root)"
+  if [[ -e "$_root" && -L "$_root" ]]; then
+    _gaai_home_refuse process_authority_invalid 1 "socket_role=root_symlink"; return 1
+  fi
+  mkdir -p "$_root" 2>/dev/null || { _gaai_home_refuse process_authority_invalid 1 "socket_role=root_uncreatable"; return 1; }
+  chmod 0700 "$_root" 2>/dev/null || true
+  _gaai_home_socket_root_ok "$_root" || return 1
+  TMUX_SOCKET="$(_gaai_home_socket_path "$_common_dir")" || return 1
+  TMUX_SESSION="gaai-daemon-$(_gaai_home_label "$_common_dir")"
+  return 0
+}
+
+# The required options must hold on the private server BEFORE any session exists,
+# and a server started empty with the default `exit-empty on` exits immediately —
+# so the options cannot be applied after `start-server`. They are supplied as a
+# fixed, private, non-injectable server config read at server start instead.
+GAAI_TMUX_CONF_BODY='set -g exit-empty off
+set -wg remain-on-exit on'
+
+_tmux_write_conf() {
+  local _path="$1"
+  ( umask 077; printf '%s\n' "$GAAI_TMUX_CONF_BODY" > "$_path" ) 2>/dev/null || return 1
+  chmod 0600 "$_path" 2>/dev/null || true
+  return 0
+}
+
+# Start the private server and prove the required options hold on it, before any
+# session is created. Returns non-zero without leaving a usable server otherwise.
+_tmux_start_server_verified() {
+  local _sock="$1" _conf="$2" _waited=0
+  tmux -f "$_conf" -S "$_sock" start-server 2>/dev/null || return 1
+  while [[ ! -S "$_sock" && "$_waited" -lt 10 ]]; do sleep 1; _waited=$(( _waited + 1 )); done
+  [[ -S "$_sock" ]] || return 1
+  [[ "$(tmux -f /dev/null -S "$_sock" show-options -g -v exit-empty 2>/dev/null)" == "off" ]] || return 1
+  [[ "$(tmux -f /dev/null -S "$_sock" show-options -g -v remain-on-exit 2>/dev/null)" == "on" ]] || return 1
+  return 0
+}
+
+# Real capability probe. The 3.2 floor is nominal; what admits the backend is that
+# this tmux actually supports the options and formats the lifecycle depends on. The
+# probe runs in an isolated namespace and leaves no production lifecycle artifact.
+_tmux_capability_ok() {
+  local _v _probe_sock _conf _rc=0
+  _v="$(tmux -V 2>/dev/null || echo "")"
+  [[ -n "$_v" ]] || { _gaai_home_refuse process_authority_invalid 0 "tmux_role=absent"; return 1; }
+  _probe_sock="$GAAI_PRIVATE_ROOT/tmp/probe.$$"
+  if [[ "${#_probe_sock}" -ge "$(_gaai_home_socket_limit)" ]]; then
+    _gaai_home_refuse process_authority_invalid 0 "tmux_role=probe_path_too_long"; return 1
+  fi
+  _conf="$GAAI_PRIVATE_ROOT/tmp/probe-conf.$$"
+  _tmux_write_conf "$_conf" || _rc=1
+  [[ "$_rc" -eq 0 ]] && { _tmux_start_server_verified "$_probe_sock" "$_conf" || _rc=1; }
+  if [[ "$_rc" -eq 0 ]]; then
+    tmux -f /dev/null -S "$_probe_sock" new-session -d -s gaai-probe -e GAAI_PROBE=1 \
+      'exec /bin/sh -c "exit 0"' 2>/dev/null || _rc=1
+    tmux -f /dev/null -S "$_probe_sock" list-panes -t '=gaai-probe' \
+      -F '#{pane_id} #{pane_pid} #{pane_dead}' >/dev/null 2>&1 || _rc=1
+    tmux -f /dev/null -S "$_probe_sock" display-message -p '#{pid}' >/dev/null 2>&1 || _rc=1
+  fi
+  tmux -f /dev/null -S "$_probe_sock" kill-server 2>/dev/null || true
+  rm -f "$_probe_sock" "$_conf" 2>/dev/null || true
+  if [[ "$_rc" -ne 0 ]]; then
+    _gaai_home_refuse process_authority_invalid 0 "tmux_role=capability_probe_failed"
+    return 1
+  fi
+  return 0
+}
+
+_server_pid() {
+  local _p
+  _p="$(_tmux display-message -p '#{pid}' 2>/dev/null || echo "")"
+  [[ -n "$_p" ]] || return 1
+  printf '%s' "$_p"
+}
+
+# Exhaustive, no-create enumeration of the private server. `has-session` would
+# create nothing but also tells us nothing about foreign sessions; the reconciler
+# needs the whole list.
+_server_sessions() {
+  _tmux list-sessions -F '#{session_name}' 2>/dev/null || true
+}
+
+_pane_field() {
+  local _field="$1"
+  _tmux list-panes -t "=$TMUX_SESSION" -F "#{${_field}}" 2>/dev/null | head -1 || true
+}
+
+# ── Daemon child mode ─────────────────────────────────────────────────────
+#
+# Entered as `exec <launcher> --daemon-child <attempt_dir>` from the fixed pane
+# command. The launcher is a private, byte-exact materialization of the fetched
+# target's own `daemon-start.sh`, so this code path is never sourced from mutable
+# main-checkout bytes. `exec` preserves the PID, which is why
+# pane_pid == launcher_ack.pid == ready_ack.pid holds all the way to the daemon.
+
+_child_refuse() {
+  local _attempt_dir="$1" _evidence="$2"
+  printf 'daemon-start[child]: reason=process_authority_invalid action=operator_disposition_required evidence=%s\n' \
+    "$_evidence" >&2
+  _gaai_home_write_durable "$_attempt_dir/ack.child_failed" "evidence=$_evidence" 2>/dev/null || true
+  exit 1
+}
+
+do_daemon_child() {
+  local _attempt_dir="${1:-}"
+  [[ -n "$_attempt_dir" && -d "$_attempt_dir" ]] || _child_refuse "${_attempt_dir:-/nonexistent}" "attempt_dir_absent"
+
+  local _manifest="$_attempt_dir/manifest"
+  [[ -r "$_manifest" ]] || _child_refuse "$_attempt_dir" "manifest_absent"
+
+  local _schema _attempt _home _daemon_digest _cred_mode _release _repo_root _target_sha
+  _schema="$(_owner_field "$_manifest" schema)"
+  _attempt="$(_owner_field "$_manifest" attempt)"
+  _home="$(_owner_field "$_manifest" home)"
+  _daemon_digest="$(_owner_field "$_manifest" daemon_digest)"
+  _cred_mode="$(_owner_field "$_manifest" credential_mode)"
+  _release="$(_owner_field "$_manifest" release_digest)"
+  _repo_root="$(_owner_field "$_manifest" repo_root)"
+  _target_sha="$(_owner_field "$_manifest" target_sha)"
+  [[ "$_schema" == "$GAAI_HOME_SCHEMA" ]] || _child_refuse "$_attempt_dir" "manifest_schema_mismatch"
+  [[ -n "$_attempt" && -n "$_home" && -n "$_daemon_digest" && -n "$_release" ]] \
+    || _child_refuse "$_attempt_dir" "manifest_incomplete"
+  case "$_cred_mode" in absent|present) ;; *) _child_refuse "$_attempt_dir" "credential_mode_invalid" ;; esac
+
+  local _pid=$$ _inc
+  _inc="$(_gaai_home_incarnation "$_pid" 2>/dev/null || echo "")"
+  [[ -n "$_inc" ]] || _child_refuse "$_attempt_dir" "incarnation_unprovable"
+
+  # 1. Bind the long-running executable to a descriptor, refusing a symlink before
+  #    the open so the descriptor can only ever be the proven regular file. The
+  #    descriptor is low-numbered, so it survives the final exec by construction —
+  #    bash does not set close-on-exec on fds it is told to open explicitly.
+  local _daemon_path="$_home/$DAEMON_REL"
+  [[ -L "$_daemon_path" ]] && _child_refuse "$_attempt_dir" "daemon_role=symlink"
+  [[ -f "$_daemon_path" ]] || _child_refuse "$_attempt_dir" "daemon_role=absent"
+  local _p_ino _p_dev
+  _p_ino="$(_gaai_home_stat_field '%i' "$_daemon_path")" || _child_refuse "$_attempt_dir" "daemon_role=stat_unavailable"
+  _p_dev="$(_gaai_home_stat_field '%d' "$_daemon_path")" || _child_refuse "$_attempt_dir" "daemon_role=stat_unavailable"
+  exec 9< "$_daemon_path" || _child_refuse "$_attempt_dir" "daemon_role=unopenable"
+
+  local _fd_path="/dev/fd/9"
+  [[ -r "/proc/self/fd/9" ]] && _fd_path="/proc/self/fd/9"
+  local _f_ino _f_dev _f_digest
+  _f_ino="$(_gaai_home_stat_field '%i' "$_fd_path")" || _child_refuse "$_attempt_dir" "daemon_role=fd_stat_unavailable"
+  _f_dev="$(_gaai_home_stat_field '%d' "$_fd_path")" || _child_refuse "$_attempt_dir" "daemon_role=fd_stat_unavailable"
+  [[ "$_f_ino" == "$_p_ino" && "$_f_dev" == "$_p_dev" ]] \
+    || _child_refuse "$_attempt_dir" "daemon_role=fd_identity_mismatch"
+  _f_digest="$(_gaai_home_digest_file "$_fd_path")" || _child_refuse "$_attempt_dir" "daemon_role=fd_digest_unavailable"
+  [[ "$_f_digest" == "$_daemon_digest" ]] || _child_refuse "$_attempt_dir" "daemon_role=fd_blob_mismatch"
+
+  # 2. Credential mode is explicit and immutable for the attempt.
+  local _secret_ino="" _secret_dev="" _secret_bound=0 _secret_expected_word=""
+  if [[ "$_cred_mode" == "present" ]]; then
+    local _secret_path
+    _secret_path="$(_owner_field "$_manifest" secret)"
+    [[ -n "$_secret_path" ]] || _child_refuse "$_attempt_dir" "secret_path_absent"
+    [[ -L "$_secret_path" ]] && _child_refuse "$_attempt_dir" "secret_role=symlink"
+    [[ -f "$_secret_path" ]] || _child_refuse "$_attempt_dir" "secret_role=absent"
+    local _s_ino _s_dev _s_mode
+    _s_ino="$(_gaai_home_stat_field '%i' "$_secret_path")" || _child_refuse "$_attempt_dir" "secret_role=stat_unavailable"
+    _s_dev="$(_gaai_home_stat_field '%d' "$_secret_path")" || _child_refuse "$_attempt_dir" "secret_role=stat_unavailable"
+    _s_mode="$(_gaai_home_stat_field '%a' "$_secret_path")" || _child_refuse "$_attempt_dir" "secret_role=stat_unavailable"
+    [[ "$_s_mode" == "600" ]] || _child_refuse "$_attempt_dir" "secret_role=mode_open"
+    # Grammar-validate through the PATH before binding, so the bound descriptor is
+    # never read here and its offset stays at zero for the later source. A source
+    # that reads nothing cannot be mistaken for a successful one.
+    local _lines _first
+    _lines="$(wc -l < "$_secret_path" 2>/dev/null | tr -d ' ')"
+    [[ "$_lines" == "1" ]] || _child_refuse "$_attempt_dir" "secret_role=grammar_line_count"
+    _first="$(head -1 "$_secret_path" 2>/dev/null || echo "")"
+    case "$_first" in
+      "export GAAI_IMPL_AUTH_TOKEN="?*) ;;
+      *) _child_refuse "$_attempt_dir" "secret_role=grammar_assignment" ;;
+    esac
+    # A raw-metacharacter scan would be WRONG here: the fixed encoder is
+    # `printf %q`, whose output legitimately contains backslash-escaped `;`, `$(`
+    # and backticks. What must be proven is that the remainder is exactly that
+    # encoder's output for the value it assigns — which step 6 does exactly, after
+    # the source, by re-encoding the sourced scalar and requiring byte equality.
+    # Here we only reject what no %q output can ever contain.
+    case "$_first" in
+      *$'\x01'*|*$'\x02'*|*$'\x1b'*|*$'\r'*) _child_refuse "$_attempt_dir" "secret_role=grammar_control_character" ;;
+    esac
+    _secret_expected_word="${_first#export GAAI_IMPL_AUTH_TOKEN=}"
+    [[ -n "$_secret_expected_word" ]] || _child_refuse "$_attempt_dir" "secret_role=grammar_empty_word"
+    exec 8< "$_secret_path" || _child_refuse "$_attempt_dir" "secret_role=unopenable"
+    local _sfd_path="/dev/fd/8"
+    [[ -r "/proc/self/fd/8" ]] && _sfd_path="/proc/self/fd/8"
+    local _sf_ino _sf_dev
+    _sf_ino="$(_gaai_home_stat_field '%i' "$_sfd_path")" || _child_refuse "$_attempt_dir" "secret_role=fd_stat_unavailable"
+    _sf_dev="$(_gaai_home_stat_field '%d' "$_sfd_path")" || _child_refuse "$_attempt_dir" "secret_role=fd_stat_unavailable"
+    [[ "$_sf_ino" == "$_s_ino" && "$_sf_dev" == "$_s_dev" ]] \
+      || _child_refuse "$_attempt_dir" "secret_role=fd_identity_mismatch"
+    # Unlink the pathname and fsync the parent: from here the token exists only as
+    # this descriptor. Unlinked bytes are not claimed to be forensically erased.
+    rm -f "$_secret_path" 2>/dev/null || _child_refuse "$_attempt_dir" "secret_role=unlink_failed"
+    _gaai_home_fsync "$(dirname "$_secret_path")"
+    [[ -e "$_secret_path" ]] && _child_refuse "$_attempt_dir" "secret_role=still_linked"
+    _secret_ino="$_sf_ino"; _secret_dev="$_sf_dev"; _secret_bound=1
+  else
+    # Canonical absent mode: prove no credential entered this child at all.
+    [[ -n "${GAAI_IMPL_AUTH_TOKEN+set}" ]] && _child_refuse "$_attempt_dir" "credential_role=absent_mode_variable_present"
+    [[ -e "$_attempt_dir/secret.env" ]] && _child_refuse "$_attempt_dir" "credential_role=absent_mode_artefact_present"
+  fi
+
+  # 3. Open the release barrier BEFORE acknowledging, so the controller's write can
+  #    never be lost between the ack and the wait.
+  exec 7< "$_attempt_dir/release.fifo" || _child_refuse "$_attempt_dir" "release_role=fifo_unopenable"
+
+  # 4. Acknowledge the exact identities. Only now may the controller record `bound`.
+  _gaai_home_write_durable "$_attempt_dir/ack.launcher" \
+"schema=$GAAI_HOME_SCHEMA
+attempt=$_attempt
+pid=$_pid
+incarnation=$_inc
+credential_mode=$_cred_mode
+daemon_ino=$_f_ino
+daemon_dev=$_f_dev
+daemon_digest=$_f_digest
+secret_ino=$_secret_ino
+secret_dev=$_secret_dev" \
+    || _child_refuse "$_attempt_dir" "ack_launcher_undurable"
+
+  # 5. Block on the barrier. Invalid, partial, oversized or EOF data never releases.
+  local _record=""
+  IFS= read -r -t 300 _record <&7 || _child_refuse "$_attempt_dir" "release_role=read_failed_or_eof"
+  exec 7<&-
+  [[ "$_record" == "release attempt=$_attempt digest=$_release" ]] \
+    || _child_refuse "$_attempt_dir" "release_role=record_mismatch"
+
+  # 6. Source the bound secret descriptor — its first and only read, at offset zero.
+  if [[ "$_secret_bound" -eq 1 ]]; then
+    local _sfd_path="/dev/fd/8"
+    [[ -r "/proc/self/fd/8" ]] && _sfd_path="/proc/self/fd/8"
+    . "$_sfd_path" || _child_refuse "$_attempt_dir" "secret_role=source_failed"
+    # A no-op source cannot pass: the variable must now hold a non-empty scalar.
+    [[ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ]] || _child_refuse "$_attempt_dir" "secret_role=source_noop"
+    # Exactly-one-assignment proof: re-encoding the sourced scalar with the same
+    # fixed encoder must reproduce the validated word byte for byte. A file holding
+    # a second statement, an unquoted expansion or a different scalar cannot satisfy
+    # this, so the assignment that ran is provably the one that was validated.
+    if [[ "$(printf '%q' "$GAAI_IMPL_AUTH_TOKEN")" != "$_secret_expected_word" ]]; then
+      unset -v GAAI_IMPL_AUTH_TOKEN
+      _child_refuse "$_attempt_dir" "secret_role=encoder_round_trip_mismatch"
+    fi
+    export GAAI_IMPL_AUTH_TOKEN
+    exec 8<&-
+  fi
+
+  # 7. Hand the exact identities to the daemon and execute the ALREADY-BOUND
+  #    descriptor. No pathname is reopened: on Linux /proc/self/fd/9 resolves to the
+  #    open description's inode, on Darwin /dev/fd/9 duplicates the descriptor, so a
+  #    pathname replaced after step 1 cannot be what runs.
+  export GAAI_DAEMON_LAUNCH_ATTEMPT="$_attempt_dir"
+  export GAAI_DAEMON_LAUNCH_PID="$_pid"
+  export GAAI_DAEMON_LAUNCH_INCARNATION="$_inc"
+  export GAAI_DAEMON_CREDENTIAL_MODE="$_cred_mode"
+  export GAAI_DAEMON_HOME="$_home"
+  export GAAI_REPO_ROOT="$_repo_root"
+  export GAAI_TARGET_SHA="$_target_sha"
+
+  local _args_file="$_attempt_dir/args" _dargs=()
+  if [[ -r "$_args_file" ]]; then
+    while IFS= read -r _a; do [[ -n "$_a" ]] && _dargs+=("$_a"); done < "$_args_file"
+  fi
+
+  local _bash_abs="${BASH:-/bin/bash}"
+  [[ -x "$_bash_abs" ]] || _child_refuse "$_attempt_dir" "daemon_role=interpreter_unavailable"
+  exec "$_bash_abs" "$_fd_path" ${_dargs[@]+"${_dargs[@]}"}
+}
+
+if [[ "${1:-}" == "--daemon-child" ]]; then
+  shift
+  do_daemon_child "${1:-}"
+  exit 1
+fi
+
+# ── Argument parsing ──────────────────────────────────────────────────────
 
 ACTION="start"
 NO_DRAIN=false
+NO_MONITOR="${GAAI_DAEMON_NO_MONITOR:-}"
 PASSTHROUGH_ARGS=()
 
-_print_help() {
-  sed -n '/^# Description:/,/^# ═══.*═══$/{ /^# ═══.*═══$/d; p; }' "$0"
-}
+_print_help() { sed -n '/^# Description:/,/^# ═══.*═══$/{ /^# ═══.*═══$/d; p; }' "$0"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --start)      ACTION="start";   shift ;;
     --stop)       ACTION="stop";    shift ;;
     --status)     ACTION="status";  shift ;;
-    --monitor)    ACTION="status";  shift ;;
+    --monitor)    ACTION="monitor"; shift ;;
     --restart)    ACTION="restart"; shift ;;
     --no-drain)   NO_DRAIN=true;    shift ;;
-    --no-monitor) NO_MONITOR=true;  shift ;;
+    --no-monitor) NO_MONITOR=1;     shift ;;
     --help|-h)    _print_help; exit 0 ;;
-    *)            PASSTHROUGH_ARGS+=("$1"); shift ;;
+    # A closed, validated passthrough grammar. These reach the daemon through the
+    # attempt's `args` file, never through the fixed pane command, so no operator
+    # input can extend or reshape what tmux executes.
+    --max-concurrent|--interval|--exit-when-idle)
+      case "${2:-}" in
+        ''|*[!0-9]*) refuse process_authority_invalid 0 "arg_role=non_numeric:${1#--}" ;;
+      esac
+      PASSTHROUGH_ARGS+=("$1" "$2"); shift 2 ;;
+    --dry-run)    PASSTHROUGH_ARGS+=("$1"); shift ;;
+    *) refuse process_authority_invalid 0 "arg_role=unsupported" ;;
   esac
 done
 
-# ── Auto-launch monitoring terminal ────────────────────────────────────────
+# ── Wrapper drain (unchanged authority; orthogonal to the home boundary) ──
 
-_launch_monitor() {
-  local daemon_start_path="$SCRIPT_DIR/daemon-start.sh"
-
-  # Skip auto-launch when the operator has opted out — either by flag
-  # (--no-monitor) or env var (GAAI_DAEMON_NO_MONITOR=1). The default behaviour
-  # auto-opens a Terminal window which steals keyboard focus if the operator
-  # was mid-typing in another app — a real interruption cost for daemon
-  # restarts that happen frequently during dev. Operator can still attach
-  # manually via `bash daemon-start.sh --status` when needed.
-  if [[ "${NO_MONITOR:-}" == "true" || "${GAAI_DAEMON_NO_MONITOR:-}" == "1" ]]; then
-    echo "  Monitor: (auto-launch skipped — bash $daemon_start_path --status to attach manually)"
-    return 0
-  fi
-
-  case "$(uname -s)" in
-    Darwin)
-      # Uses `open -a Terminal -g` (LaunchServices, -g = background, no focus
-      # steal) instead of osascript Apple Events (requires explicit Automation
-      # permission that headless contexts like Claude Code typically lack).
-      # The -g flag is the key fix : without it, the Terminal window jumps to
-      # the foreground on every daemon restart, hijacking the operator's
-      # keyboard if they were typing elsewhere.
-      local monitor_cmd="$SCRIPT_DIR/open-monitor.command"
-      open -g -a Terminal "$monitor_cmd" 2>/dev/null \
-        && echo "  Monitor: opened in new Terminal.app window (background — focus preserved)" \
-        || echo "  Monitor: bash $daemon_start_path --status"
-      ;;
-    *)
-      # On Linux: create the monitor tmux session detached (user can attach)
-      if command -v tmux &>/dev/null; then
-        bash "$daemon_start_path" --status &
-        disown 2>/dev/null || true
-        echo "  Monitor: tmux attach -t gaai-monitor"
-      else
-        echo "  Monitor: bash $daemon_start_path --status"
-      fi
-      ;;
-  esac
-}
-
-# ── Actions ───────────────────────────────────────────────────────────────
-
-# OSS-3 : enumerate live wrapper PIDs from $LOCK_DIR/*.lock files.
-# Returns lines "<sid>|<pid>". Skips placeholder ("pending") locks and dead PIDs.
 _list_live_wrappers() {
   local lock pid sid
   [[ -d "$LOCK_DIR" ]] || return 0
@@ -193,12 +781,6 @@ _list_live_wrappers() {
   done
 }
 
-# OSS-3 : graceful drain of in-flight wrappers.
-#   1. SIGTERM each wrapper PID (NOT the tmux session — the wrapper's trap
-#      sets _INTERRUPT_REQUESTED and lets claude -p finish current phase).
-#   2. Poll for lock files to disappear (wrapper exit) up to STOP_DRAIN_TIMEOUT.
-#   3. For wrappers still alive after timeout, SIGTERM their tmux sessions
-#      (kills claude -p too), grace 30s, then SIGKILL.
 _drain_wrappers() {
   local entries
   entries=$(_list_live_wrappers)
@@ -206,47 +788,33 @@ _drain_wrappers() {
     echo "  No live wrappers to drain."
     return 0
   fi
-
   local count
   count=$(echo "$entries" | wc -l | tr -d ' ')
-  echo "Draining $count in-flight wrapper(s) — SIGTERM, will wait up to ${STOP_DRAIN_TIMEOUT}s for graceful exit..."
-
-  # Phase 1 : SIGTERM each wrapper PID directly (not the tmux session).
+  echo "Draining $count in-flight wrapper(s) — SIGTERM, waiting up to ${STOP_DRAIN_TIMEOUT}s..."
   while IFS='|' read -r sid pid; do
     [[ -z "$sid" || -z "$pid" ]] && continue
     echo "  SIGTERM $sid (PID $pid)"
     kill -TERM "$pid" 2>/dev/null || true
   done <<< "$entries"
-
-  # Phase 2 : poll for wrapper exits up to STOP_DRAIN_TIMEOUT.
   local waited=0 step=5
   while (( waited < STOP_DRAIN_TIMEOUT )); do
-    local remaining
-    remaining=$(_list_live_wrappers)
-    if [[ -z "$remaining" ]]; then
-      echo "  All wrappers exited cleanly after ${waited}s."
-      return 0
-    fi
+    [[ -z "$(_list_live_wrappers)" ]] && { echo "  All wrappers exited cleanly after ${waited}s."; return 0; }
     sleep "$step"
     waited=$(( waited + step ))
   done
-
-  # Phase 3 : escalate — SIGTERM tmux sessions of wrappers still alive.
-  echo "  Drain timeout (${STOP_DRAIN_TIMEOUT}s) reached. Escalating to tmux kill-session..."
+  echo "  Drain timeout (${STOP_DRAIN_TIMEOUT}s) reached. Escalating to exact tmux kill-session..."
   local stragglers
   stragglers=$(_list_live_wrappers)
   while IFS='|' read -r sid pid; do
     [[ -z "$sid" || -z "$pid" ]] && continue
-    if command -v tmux &>/dev/null && tmux has-session -t "gaai-deliver-${sid}" 2>/dev/null; then
+    if [[ -n "$TMUX_SOCKET" ]] && _tmux has-session -t "=gaai-deliver-${sid}" 2>/dev/null; then
       echo "  tmux kill-session gaai-deliver-${sid} (PID $pid)"
-      tmux kill-session -t "gaai-deliver-${sid}" 2>/dev/null || true
+      _tmux kill-session -t "=gaai-deliver-${sid}" 2>/dev/null || true
     else
-      echo "  SIGTERM PID $pid (no tmux session for $sid)"
+      echo "  SIGTERM PID $pid (no session for $sid on the private server)"
       kill -TERM "$pid" 2>/dev/null || true
     fi
   done <<< "$stragglers"
-
-  # Phase 4 : grace then SIGKILL anything still alive.
   sleep 30
   local final
   final=$(_list_live_wrappers)
@@ -259,256 +827,570 @@ _drain_wrappers() {
   fi
 }
 
-do_stop() {
-  if ! daemon_is_running; then
-    echo "No daemon running."
-    [[ -f "$PID_FILE" ]] && rm -f "$PID_FILE"
-    # Still drain stale wrappers (daemon dead, wrappers may have survived).
-    if ! $NO_DRAIN; then
-      _drain_wrappers
-    fi
-    return 0
-  fi
+# ── Shared bootstrap: identity, lock, socket ──────────────────────────────
+#
+# A short-lived, read-only main-checkout bootstrap is explicitly permitted here —
+# resolving the common directory, acquiring authority and materializing the
+# exact-target child is all it does. It never coordinates, claims or invokes models.
 
-  local pid
-  pid=$(get_pid)
-
-  # OSS-3 : drain in-flight wrappers BEFORE stopping the daemon. The daemon
-  # itself only manages dispatch ; wrappers run independently in their own
-  # tmux sessions and survive a daemon kill. Default behaviour drains them
-  # gracefully ; --no-drain preserves the legacy "wrappers continue
-  # independently" behaviour.
-  if ! $NO_DRAIN; then
-    _drain_wrappers
-  else
-    echo "Skipping wrapper drain (--no-drain) — in-flight deliveries continue independently."
-  fi
-
-  echo "Stopping daemon (PID $pid)..."
-  kill "$pid" 2>/dev/null || true
-
-  # Wait up to 10 seconds for graceful shutdown
-  local waited=0
-  while kill -0 "$pid" 2>/dev/null && [[ $waited -lt 10 ]]; do
-    sleep 1
-    waited=$((waited + 1))
-  done
-
-  if kill -0 "$pid" 2>/dev/null; then
-    echo "Force-killing daemon (PID $pid)..."
-    kill -9 "$pid" 2>/dev/null || true
-  fi
-
-  rm -f "$PID_FILE"
-
-  # Kill the monitoring session if it exists
-  if command -v tmux &>/dev/null && tmux has-session -t gaai-monitor 2>/dev/null; then
-    tmux kill-session -t gaai-monitor 2>/dev/null || true
-    echo "  Monitor session (gaai-monitor) closed."
-  fi
-
-  # Kill the daemon tmux session if it's still around
-  if command -v tmux &>/dev/null && tmux has-session -t gaai-daemon 2>/dev/null; then
-    tmux kill-session -t gaai-daemon 2>/dev/null || true
-  fi
-
-  # Truncate daemon log to avoid unbounded growth
-  [[ -f "$LOG_FILE" ]] && : > "$LOG_FILE"
-
-  echo "✅ Daemon stopped. Log truncated."
+COMMON_DIR=""
+_bootstrap_identity() {
+  COMMON_DIR="$(_gaai_home_common_dir "$PROJECT_ROOT" 2>/dev/null || echo "")"
+  [[ -n "$COMMON_DIR" ]] || refuse home_identity_invalid 1 "common_dir_unresolved"
+  _lifecycle_init "$COMMON_DIR"
+  _socket_prepare "$COMMON_DIR" || exit 1
 }
 
-do_status() {
-  if ! daemon_is_running; then
-    echo "⏹  Daemon is not running."
-    [[ -f "$PID_FILE" ]] && rm -f "$PID_FILE" || true
-    return 0
+_release_and_exit() { _gaai_home_lock_release; exit "${1:-1}"; }
+
+# Revalidate a recorded owner from durable evidence alone. Prints the verdict:
+#   live      — the exact socket/server/session/pane/incarnation all still hold
+#   settled   — the record describes a lifecycle that provably ended
+#   ambiguous — evidence is missing, partial or contradictory
+_owner_verdict() {
+  local _state _sock _sess _pane_pid _pane_inc _srv_pid _srv_inc
+  _state="$(_owner_state)"
+  case "$_state" in
+    none)    printf 'settled'; return 0 ;;
+    corrupt) printf 'ambiguous'; return 0 ;;
+  esac
+  _sock="$(_owner_field "$OWNER_FILE" socket)"
+  _sess="$(_owner_field "$OWNER_FILE" session)"
+  [[ "$_sock" == "$TMUX_SOCKET" && "$_sess" == "$TMUX_SESSION" ]] || { printf 'ambiguous'; return 0; }
+  if [[ ! -S "$_sock" ]]; then
+    # No server socket. A `pending` record with no server is a controller that died
+    # before the first tmux effect — settled, and safely re-attemptable.
+    [[ "$_state" == "pending" ]] && { printf 'settled'; return 0; }
+    printf 'ambiguous'; return 0
   fi
-
-  local pid
-  pid=$(get_pid)
-
-  # If tmux is available and we're in a real terminal, launch live dashboard
-  if command -v tmux &>/dev/null && [[ -t 1 ]]; then
-    local monitor_session="gaai-monitor"
-
-    # If monitor already exists, just attach
-    if tmux has-session -t "$monitor_session" 2>/dev/null; then
-      exec tmux attach -t "$monitor_session"
-    fi
-
-    local config_file="$GAAI_DIR/project/contexts/backlog/.delivery-locks/.daemon-config"
-    mkdir -p "$LOG_DIR"
-
-    local monitor_daemon_home="${GAAI_DAEMON_HOME:-}"
-    if [[ -z "$monitor_daemon_home" ]]; then
-      local wt_base
-      wt_base="$GAAI_WORKTREES_BASE"
-      if [[ -d "$wt_base/__daemon-home/.gaai/project/contexts/backlog" ]]; then
-        monitor_daemon_home="$wt_base/__daemon-home"
-      fi
-    fi
-
-    # Top pane: fixed banner (from config) + scrolling daemon logs
-    tmux new-session -d -s "$monitor_session" \
-      "bash '$MONITOR_TOP' '$config_file' '$LOG_FILE'"
-
-    # Bottom pane: active deliveries summary (60% height — fits title + 3 concurrent slots).
-    # Pass GAAI_DAEMON_HOME so the pane reads the LIVE backlog from the daemon's home
-    # worktree (where in_progress marks are written), not the operator's stale main checkout.
-    tmux split-window -t "${monitor_session}:0" -v -p 60 \
-      "bash '$MONITOR_TAIL' '$LOG_DIR' '$monitor_daemon_home'"
-
-    # Enable mouse mode (allows scroll in panes when content exceeds pane height)
-    tmux set-option -t "$monitor_session" mouse on
-
-    # Status bar
-    tmux set-option -t "$monitor_session" status-style "bg=colour236,fg=colour248"
-    tmux set-option -t "$monitor_session" status-left-length 40
-    tmux set-option -t "$monitor_session" status-left "#[fg=colour214,bold] GAAI Delivery Monitor "
-    tmux set-option -t "$monitor_session" status-right "#[fg=colour248] Ctrl+C to exit │ %H:%M "
-    tmux set-option -t "$monitor_session" status-right-length 40
-    tmux set-window-option -t "$monitor_session" window-status-format ""
-    tmux set-window-option -t "$monitor_session" window-status-current-format ""
-    tmux select-pane -t "${monitor_session}:0.0"
-
-    exec tmux attach -t "$monitor_session"
-  else
-    # Fallback: static status (no tmux or non-interactive)
-    echo "✅ Daemon is running (PID $pid)"
-    echo "   Log: $LOG_FILE"
-    echo ""
-    if [[ -f "$DAEMON_SCRIPT" ]]; then
-      bash "$DAEMON_SCRIPT" --status 2>/dev/null || true
-    fi
+  _srv_pid="$(_server_pid 2>/dev/null || echo "")"
+  [[ -n "$_srv_pid" ]] || { printf 'ambiguous'; return 0; }
+  _srv_inc="$(_owner_field "$OWNER_FILE" server_incarnation)"
+  if [[ -n "$_srv_inc" ]]; then
+    local _now_inc
+    _now_inc="$(_gaai_home_incarnation "$_srv_pid" 2>/dev/null || echo "")"
+    [[ -n "$_now_inc" && "$_now_inc" == "$_srv_inc" ]] || { printf 'ambiguous'; return 0; }
   fi
+  local _sessions
+  _sessions="$(_server_sessions)"
+  if [[ -z "$_sessions" ]]; then
+    # An EMPTY private server is admissible only once its exact socket, server
+    # identity and required options have been validated.
+    local _ee _re
+    _ee="$(_tmux show-options -g -v exit-empty 2>/dev/null || echo "")"
+    _re="$(_tmux show-options -g -v remain-on-exit 2>/dev/null || echo "")"
+    [[ "$_ee" == "off" && "$_re" == "on" ]] || { printf 'ambiguous'; return 0; }
+    printf 'settled'; return 0
+  fi
+  # The session set on the private server must be EXACTLY ours. This socket is
+  # digest-bound to this physical repository and only this controller ever creates a
+  # session on it, so an extra session is unexplained evidence — checking merely that
+  # ours is present would let a foreign session sit alongside it unnoticed.
+  local _seen_ours=0 _extra=0 _line
+  while IFS= read -r _line; do
+    [[ -n "$_line" ]] || continue
+    if [[ "$_line" == "$_sess" ]]; then _seen_ours=1; else _extra=1; fi
+  done <<< "$_sessions"
+  if [[ "$_seen_ours" -ne 1 || "$_extra" -ne 0 ]]; then
+    printf 'ambiguous'; return 0
+  fi
+  _pane_pid="$(_pane_field pane_pid)"
+  [[ -n "$_pane_pid" ]] || { printf 'ambiguous'; return 0; }
+  kill -0 "$_pane_pid" 2>/dev/null || { printf 'ambiguous'; return 0; }
+  _pane_inc="$(_owner_field "$OWNER_FILE" pane_incarnation)"
+  if [[ -n "$_pane_inc" ]]; then
+    local _now_pane
+    _now_pane="$(_gaai_home_incarnation "$_pane_pid" 2>/dev/null || echo "")"
+    [[ -n "$_now_pane" && "$_now_pane" == "$_pane_inc" ]] || { printf 'ambiguous'; return 0; }
+  fi
+  printf 'live'
 }
+
+# ── Start ─────────────────────────────────────────────────────────────────
 
 do_start() {
-  # Pre-flight checks
-  if daemon_is_running; then
-    local pid
-    pid=$(get_pid)
-    echo "❌ Daemon is already running (PID $pid)."
-    echo "   Use --restart to restart, or --stop first."
-    exit 1
-  fi
+  _bootstrap_identity
+  _gaai_home_lock_acquire "$COMMON_DIR" || exit 1
+  trap '_gaai_home_lock_release' EXIT INT TERM
 
-  if [[ ! -f "$DAEMON_SCRIPT" ]]; then
-    echo "❌ delivery-daemon.sh not found at $DAEMON_SCRIPT"
-    echo "   Run daemon-setup.sh first."
-    exit 1
-  fi
+  # A second start under the same lock revalidates the persisted identities and
+  # returns `already_running` without mutating the home or launching anything.
+  local _verdict
+  _verdict="$(_owner_verdict)"
+  case "$_verdict" in
+    live)
+      _gaai_home_refuse already_running 0 "session_role=live" || true
+      _release_and_exit 1 ;;
+    ambiguous)
+      _gaai_home_refuse process_authority_invalid 1 "owner_role=ambiguous" || true
+      _release_and_exit 1 ;;
+  esac
 
-  # Provision the daemon home worktree (provision-only step; the coordination
-  # flip is a separate subsequent step).  Non-fatal: failure logs a warning
-  # and daemon startup proceeds — the home is unused until the flip lands.
-  local _wt_base
-  _wt_base="$GAAI_WORKTREES_BASE"
-  GAAI_DAEMON_HOME="${GAAI_DAEMON_HOME:-${_wt_base}/__daemon-home}"
+  _tmux_capability_ok || _release_and_exit 1
+
+  GAAI_DAEMON_HOME="${GAAI_DAEMON_HOME:-${GAAI_WORKTREES_BASE}/__daemon-home}"
   export GAAI_DAEMON_HOME
-  local _target_branch="${GAAI_TARGET_BRANCH:-staging}"
-  local _dhome_rc=0
-  _gaai_provision_daemon_home "$GAAI_DAEMON_HOME" "$_target_branch" "$PROJECT_ROOT" \
-    || _dhome_rc=$?
-  if [[ "$_dhome_rc" -ne 0 ]]; then
-    echo "⚠️  GAAI_DAEMON_HOME provisioning failed (rc=$_dhome_rc) — proceeding without home worktree."
-    echo "   Home: $GAAI_DAEMON_HOME"
+
+  # Observation 1 — the target SHA observed during provisioning (AC1/AC3). This is
+  # runtime observation evidence only; it grants no provision or update authority.
+  local _sha1
+  _sha1="$(_gaai_home_fetch_target "$PROJECT_ROOT" "$TARGET_BRANCH")" || _release_and_exit 1
+
+  _gaai_home_verify "$GAAI_DAEMON_HOME" "$TARGET_BRANCH" "$PROJECT_ROOT" "$_sha1" || _release_and_exit 1
+
+  local _daemon_digest _launcher_digest
+  _daemon_digest="$(_gaai_home_verify_asset "$GAAI_DAEMON_HOME" "$DAEMON_REL" "$_sha1")" || _release_and_exit 1
+  _launcher_digest="$(_gaai_home_verify_asset "$GAAI_DAEMON_HOME" "$START_REL" "$_sha1")" || _release_and_exit 1
+
+  # Observation 2 — immediately before the first new runtime effect for this
+  # attempt. A target that advanced between the two reads is a race, not a
+  # refresh: nothing is launched against a home that is no longer exact-current.
+  local _sha2
+  _sha2="$(_gaai_home_fetch_target "$PROJECT_ROOT" "$TARGET_BRANCH")" || _release_and_exit 1
+  if [[ "$_sha2" != "$_sha1" ]]; then
+    _gaai_home_refuse target_advanced 0 "target_role=advanced_between_observations" || true
+    _release_and_exit 1
+  fi
+  _gaai_home_verify "$GAAI_DAEMON_HOME" "$TARGET_BRANCH" "$PROJECT_ROOT" "$_sha1" || _release_and_exit 1
+  _gaai_home_verify_asset "$GAAI_DAEMON_HOME" "$DAEMON_REL" "$_sha1" >/dev/null || _release_and_exit 1
+
+  # Credential mode: explicit, immutable for the attempt, and canonical when the
+  # token is absent — the public OSS default creates no secret path, file,
+  # descriptor or assignment and leaves the variable unset in every descendant.
+  local _cred_mode="absent"
+  [[ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ]] && _cred_mode="present"
+
+  local _attempt _attempt_dir
+  _attempt="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  _attempt_dir="$LAUNCH_ROOT/$_attempt"
+  local _release_digest
+  _release_digest="$(_gaai_home_digest_string "${GAAI_HOME_SCHEMA}|${_attempt}|${_daemon_digest}|${_cred_mode}")"
+
+  # `pending` is durable BEFORE any launch directory, credential file or launcher
+  # exists, so a controller crash here can never leave an unexplained artefact.
+  mkdir -p "$LIFECYCLE_ROOT" 2>/dev/null || refuse home_lock_failed 1 "lifecycle_root_uncreatable"
+  chmod 0700 "$LIFECYCLE_ROOT" 2>/dev/null || true
+  if [[ -e "$_attempt_dir" ]]; then
+    _gaai_home_refuse process_authority_invalid 1 "attempt_role=directory_present" || true
+    _release_and_exit 1
+  fi
+  _owner_write "schema=$GAAI_HOME_SCHEMA
+state=pending
+attempt=$_attempt
+label=$(_gaai_home_label "$COMMON_DIR")
+socket=$TMUX_SOCKET
+session=$TMUX_SESSION
+target_sha=$_sha1
+home=$GAAI_DAEMON_HOME
+daemon_digest=$_daemon_digest
+launcher_digest=$_launcher_digest
+credential_mode=$_cred_mode" || { _gaai_home_refuse home_lock_failed 1 "pending_undurable" || true; _release_and_exit 1; }
+  [[ "$(_owner_state)" == "pending" ]] || { _gaai_home_refuse home_lock_failed 1 "pending_reread_failed" || true; _release_and_exit 1; }
+
+  # Only now: the private 0700 launch directory and the exact-target launcher.
+  ( umask 077; mkdir -p "$_attempt_dir" ) 2>/dev/null \
+    || { _gaai_home_refuse process_authority_invalid 1 "attempt_role=uncreatable" || true; _release_and_exit 1; }
+  chmod 0700 "$_attempt_dir" 2>/dev/null || true
+
+  local _launcher="$_attempt_dir/launcher.sh"
+  local _blob
+  _blob="$(git -C "$GAAI_DAEMON_HOME" rev-parse "$_sha1:$START_REL" 2>/dev/null || echo "")"
+  [[ -n "$_blob" ]] || { _gaai_home_refuse home_asset_invalid 0 "launcher_role=blob_unresolved" || true; _release_and_exit 1; }
+  ( umask 077; git -C "$GAAI_DAEMON_HOME" cat-file blob "$_blob" > "$_launcher" ) 2>/dev/null \
+    || { _gaai_home_refuse home_asset_invalid 1 "launcher_role=materialization_failed" || true; _release_and_exit 1; }
+  chmod 0500 "$_launcher" 2>/dev/null || true
+  local _have
+  _have="$(_gaai_home_digest_file "$_launcher")" || { _gaai_home_refuse home_asset_invalid 1 "launcher_role=digest_unavailable" || true; _release_and_exit 1; }
+  if [[ "$_have" != "$_launcher_digest" ]]; then
+    _gaai_home_refuse home_asset_invalid 1 "launcher_role=materialized_mismatch" || true
+    _release_and_exit 1
   fi
 
-  # Re-resolve DAEMON_SCRIPT to the home copy when provisioning succeeded.
-  # The daemon then runs only committed-on-<target> framework code (binary + assets).
-  # Falls back to the main-checkout script when the home is absent or provisioning failed.
-  local _home_daemon="$GAAI_DAEMON_HOME/.gaai/core/scripts/delivery-daemon.sh"
-  if [[ "$_dhome_rc" -eq 0 && -f "$_home_daemon" ]]; then
-    DAEMON_SCRIPT="$_home_daemon"
+  mkfifo -m 0600 "$_attempt_dir/release.fifo" 2>/dev/null \
+    || { _gaai_home_refuse process_authority_invalid 1 "release_role=fifo_uncreatable" || true; _release_and_exit 1; }
+  # Read-write open never blocks, so the child's own open succeeds immediately and
+  # the barrier is the child's `read`, not its `open`.
+  exec 6<> "$_attempt_dir/release.fifo" \
+    || { _gaai_home_refuse process_authority_invalid 1 "release_role=fifo_unopenable" || true; _release_and_exit 1; }
+
+  local _secret_path=""
+  if [[ "$_cred_mode" == "present" ]]; then
+    _secret_path="$_attempt_dir/secret.env"
+    # O_EXCL via noclobber, 0600 via umask, no-follow because the private 0700
+    # directory was just created empty and nothing else may write into it.
+    ( set -C; umask 077; printf 'export GAAI_IMPL_AUTH_TOKEN=%q\n' "$GAAI_IMPL_AUTH_TOKEN" > "$_secret_path" ) 2>/dev/null \
+      || { _gaai_home_refuse process_authority_invalid 1 "secret_role=uncreatable" || true; _release_and_exit 1; }
+    chmod 0600 "$_secret_path" 2>/dev/null || true
   fi
 
-  # Clean stale PID file
-  [[ -f "$PID_FILE" ]] && rm -f "$PID_FILE"
+  printf '%s\n' "schema=$GAAI_HOME_SCHEMA
+attempt=$_attempt
+home=$GAAI_DAEMON_HOME
+repo_root=$PROJECT_ROOT
+target_sha=$_sha1
+daemon_digest=$_daemon_digest
+launcher_digest=$_launcher_digest
+credential_mode=$_cred_mode
+secret=$_secret_path
+release_digest=$_release_digest" > "$_attempt_dir/manifest"
+  : > "$_attempt_dir/args"
+  local _a
+  for _a in ${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}; do printf '%s\n' "$_a" >> "$_attempt_dir/args"; done
+  _gaai_home_fsync "$_attempt_dir"
 
-  # Ensure log directory exists
-  mkdir -p "$(dirname "$LOG_FILE")"
+  _owner_write "schema=$GAAI_HOME_SCHEMA
+state=pending
+attempt=$_attempt
+label=$(_gaai_home_label "$COMMON_DIR")
+socket=$TMUX_SOCKET
+session=$TMUX_SESSION
+target_sha=$_sha1
+home=$GAAI_DAEMON_HOME
+daemon_digest=$_daemon_digest
+launcher_digest=$_launcher_digest
+credential_mode=$_cred_mode
+attempt_dir=$_attempt_dir
+launcher=$_launcher" || { _gaai_home_refuse home_lock_failed 1 "pending_enrich_undurable" || true; _release_and_exit 1; }
+  [[ "$(_owner_field "$OWNER_FILE" attempt_dir)" == "$_attempt_dir" ]] \
+    || { _gaai_home_refuse home_lock_failed 1 "pending_enrich_reread_failed" || true; _release_and_exit 1; }
 
   echo "Starting GAAI Delivery Daemon..."
-  echo "  Log: $LOG_FILE"
+  echo "  Home:   $GAAI_DAEMON_HOME (exact at ${_sha1:0:12})"
+  echo "  Log:    $LOG_FILE"
+  mkdir -p "$LOG_DIR" "$LOCK_DIR" 2>/dev/null || true
 
-  # Platform detection: prefer tmux, fallback to nohup
-  if command -v tmux &>/dev/null; then
-    # Build tmux command string (args are simple flags, safe to join).
-    # SECRET HANDLING: GAAI_IMPL_AUTH_TOKEN is written to a 0600 env-file and SOURCED inside
-    # the tmux session, NOT passed via `tmux -e KEY=VALUE`. `-e` places the value in the tmux
-    # process argv, exposing the token to `ps` / any local user. Non-secret vars stay on -e.
-    local secrets_file="$LOCK_DIR/.daemon-secrets.env"
-    local secrets_prefix=""
-    if [[ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ]]; then
-      ( umask 077; printf 'export GAAI_IMPL_AUTH_TOKEN=%q\n' "${GAAI_IMPL_AUTH_TOKEN}" > "$secrets_file" )
-      secrets_prefix=". '$secrets_file'; "
-    fi
-    local daemon_cmd="${secrets_prefix}bash '${DAEMON_SCRIPT}' ${PASSTHROUGH_ARGS[*]+${PASSTHROUGH_ARGS[*]}}"
-    # Forward daemon-scoped env vars into the tmux session (tmux strips parent env by default).
-    # GAAI_CLAUDE_PROXY_BASE_URL controls Claude CLI transport only. GAAI_IMPL_* keeps its
-    # existing role for Impl provider routing.
-    local tmux_env_args=()
-    [[ -n "${GAAI_CLAUDE_PROXY_BASE_URL:-}" ]] && tmux_env_args+=(-e "GAAI_CLAUDE_PROXY_BASE_URL=${GAAI_CLAUDE_PROXY_BASE_URL}")
-    [[ -n "${GAAI_IMPL_BASE_URL:-}"   ]] && tmux_env_args+=(-e "GAAI_IMPL_BASE_URL=${GAAI_IMPL_BASE_URL}")
-    # GAAI_IMPL_AUTH_TOKEN intentionally NOT forwarded via -e — sourced from secrets_file (above).
-    [[ -n "${GAAI_IMPL_MODEL:-}"      ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL=${GAAI_IMPL_MODEL}")
-    [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
-    # Auto-merge policy (DEC-76 v5 §11 amended 2026-05-14) — values : on / staging_only / off (default staging_only).
-    # Default flipped from off → staging_only because autonomous multi-story delivery (DEC-105 Wave 2)
-    # requires staging tip to advance between dependent story claims — otherwise daemon wrappers branch
-    # from stale staging baseline and produce divergent codebases. See E155 retrospective.
-    # Trust-arc preserved : staging_only NEVER auto-merges to main/prod. Per-PR override via
-    # `gaai:no-auto-merge` commit trailer + per-story `auto_merge: false` backlog field.
-    [[ -n "${GAAI_AUTO_MERGE_POLICY:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_POLICY=${GAAI_AUTO_MERGE_POLICY}")
-    # Admin fallback (free-tier opt-in) — when --auto fails branch_protection_missing,
-    # fall back to gh pr merge --admin --squash. Trust-arc opt-in, default off.
-    [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
-    [[ -n "${GAAI_DAEMON_EXECUTOR:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_EXECUTOR=${GAAI_DAEMON_EXECUTOR}")
-    [[ -n "${GAAI_CODEX_MODEL:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_MODEL=${GAAI_CODEX_MODEL}")
-    [[ -n "${GAAI_CODEX_SANDBOX:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_SANDBOX=${GAAI_CODEX_SANDBOX}")
-    [[ -n "${GAAI_CODEX_EPHEMERAL:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_EPHEMERAL=${GAAI_CODEX_EPHEMERAL}")
-    [[ -n "${GAAI_CODEX_IGNORE_USER_CONFIG:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_IGNORE_USER_CONFIG=${GAAI_CODEX_IGNORE_USER_CONFIG}")
-    [[ -n "${GAAI_DAEMON_HOME:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_HOME=${GAAI_DAEMON_HOME}")
-    [[ -n "${GAAI_REPO_ROOT:-}" ]] && tmux_env_args+=(-e "GAAI_REPO_ROOT=${GAAI_REPO_ROOT}")
-    [[ -n "${GAAI_WORKTREES_BASE:-}" ]] && tmux_env_args+=(-e "GAAI_WORKTREES_BASE=${GAAI_WORKTREES_BASE}")
-    [[ -n "${GAAI_CI_TEST_GATE_TIMEOUT_SEC:-}" ]] && tmux_env_args+=(-e "GAAI_CI_TEST_GATE_TIMEOUT_SEC=${GAAI_CI_TEST_GATE_TIMEOUT_SEC}")
-    [[ -n "${GAAI_CI_TEST_GATE_MATERIALIZE_SEC:-}" ]] && tmux_env_args+=(-e "GAAI_CI_TEST_GATE_MATERIALIZE_SEC=${GAAI_CI_TEST_GATE_MATERIALIZE_SEC}")
-    tmux new-session -d -s gaai-daemon ${tmux_env_args[@]+"${tmux_env_args[@]}"} "$daemon_cmd"
-
-    # Give it a moment to start, then grab the PID
-    sleep 1
-    local tmux_pid
-    tmux_pid=$(tmux list-panes -t gaai-daemon -F '#{pane_pid}' 2>/dev/null | head -1 || echo "")
-
-    if [[ -n "$tmux_pid" ]]; then
-      echo "$tmux_pid" > "$PID_FILE"
-      echo "  PID: $tmux_pid (tmux session: gaai-daemon)"
-      echo ""
-      echo "✅ Daemon started."
-      echo ""
-      echo "  Stop:    bash .gaai/core/scripts/daemon-start.sh --stop"
-
-      # Auto-launch monitoring in a new terminal
-      _launch_monitor
-    else
-      echo "⚠️  tmux session created but could not read PID."
-      echo "  Check:   tmux attach -t gaai-daemon"
-    fi
-  else
-    # Fallback: nohup
-    nohup bash "$DAEMON_SCRIPT" ${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"} >> "$LOG_FILE" 2>&1 &
-    local bg_pid=$!
-    echo "$bg_pid" > "$PID_FILE"
-    echo "  PID: $bg_pid (nohup)"
-    echo ""
-    echo "✅ Daemon started."
-    echo ""
-    echo "  Logs:    tail -f $LOG_FILE"
-    echo "  Status:  bash .gaai/core/scripts/daemon-start.sh --status"
-    echo "  Stop:    bash .gaai/core/scripts/daemon-start.sh --stop"
+  # First new tmux effect for this attempt. The required options are proven on the
+  # exact private server before a session exists.
+  local _tconf="$_attempt_dir/tmux.conf"
+  _tmux_write_conf "$_tconf" || { _gaai_home_refuse process_authority_invalid 1 "tmux_role=conf_uncreatable" || true; _release_and_exit 1; }
+  if ! _tmux_start_server_verified "$TMUX_SOCKET" "$_tconf"; then
+    _gaai_home_refuse process_authority_invalid 0 "tmux_role=server_unstartable_or_options_unset" || true
+    _release_and_exit 1
   fi
+  local _srv_pid _srv_inc
+  _srv_pid="$(_server_pid)" || { _gaai_home_refuse process_authority_invalid 1 "tmux_role=server_pid_unavailable" || true; _release_and_exit 1; }
+  _srv_inc="$(_gaai_home_incarnation "$_srv_pid" 2>/dev/null || echo "")"
+
+  # Non-secret session environment only. GAAI_IMPL_AUTH_TOKEN is never passed via
+  # `-e`: that would place the token in the tmux client argv, visible to `ps`.
+  local tmux_env_args=()
+  [[ -n "${GAAI_CLAUDE_PROXY_BASE_URL:-}" ]] && tmux_env_args+=(-e "GAAI_CLAUDE_PROXY_BASE_URL=${GAAI_CLAUDE_PROXY_BASE_URL}")
+  [[ -n "${GAAI_IMPL_BASE_URL:-}"   ]] && tmux_env_args+=(-e "GAAI_IMPL_BASE_URL=${GAAI_IMPL_BASE_URL}")
+  [[ -n "${GAAI_IMPL_MODEL:-}"      ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL=${GAAI_IMPL_MODEL}")
+  [[ -n "${GAAI_IMPL_MODEL_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_IMPL_MODEL_FALLBACK=${GAAI_IMPL_MODEL_FALLBACK}")
+  [[ -n "${GAAI_AUTO_MERGE_POLICY:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_POLICY=${GAAI_AUTO_MERGE_POLICY}")
+  [[ -n "${GAAI_AUTO_MERGE_ADMIN_FALLBACK:-}" ]] && tmux_env_args+=(-e "GAAI_AUTO_MERGE_ADMIN_FALLBACK=${GAAI_AUTO_MERGE_ADMIN_FALLBACK}")
+  [[ -n "${GAAI_DAEMON_EXECUTOR:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_EXECUTOR=${GAAI_DAEMON_EXECUTOR}")
+  [[ -n "${GAAI_CODEX_MODEL:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_MODEL=${GAAI_CODEX_MODEL}")
+  [[ -n "${GAAI_CODEX_SANDBOX:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_SANDBOX=${GAAI_CODEX_SANDBOX}")
+  [[ -n "${GAAI_CODEX_EPHEMERAL:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_EPHEMERAL=${GAAI_CODEX_EPHEMERAL}")
+  [[ -n "${GAAI_CODEX_IGNORE_USER_CONFIG:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_IGNORE_USER_CONFIG=${GAAI_CODEX_IGNORE_USER_CONFIG}")
+  [[ -n "${GAAI_DAEMON_HOME:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_HOME=${GAAI_DAEMON_HOME}")
+  [[ -n "${GAAI_REPO_ROOT:-}" ]] && tmux_env_args+=(-e "GAAI_REPO_ROOT=${GAAI_REPO_ROOT}")
+  [[ -n "${GAAI_WORKTREES_BASE:-}" ]] && tmux_env_args+=(-e "GAAI_WORKTREES_BASE=${GAAI_WORKTREES_BASE}")
+  [[ -n "${GAAI_CI_TEST_GATE_TIMEOUT_SEC:-}" ]] && tmux_env_args+=(-e "GAAI_CI_TEST_GATE_TIMEOUT_SEC=${GAAI_CI_TEST_GATE_TIMEOUT_SEC}")
+  [[ -n "${GAAI_CI_TEST_GATE_MATERIALIZE_SEC:-}" ]] && tmux_env_args+=(-e "GAAI_CI_TEST_GATE_MATERIALIZE_SEC=${GAAI_CI_TEST_GATE_MATERIALIZE_SEC}")
+
+  # The pane command is fixed. Operator input never reaches it.
+  if ! _tmux new-session -d -s "$TMUX_SESSION" ${tmux_env_args[@]+"${tmux_env_args[@]}"} \
+      "exec '$_launcher' --daemon-child '$_attempt_dir'" 2>/dev/null; then
+    _gaai_home_refuse process_authority_invalid 1 "tmux_role=session_uncreatable" || true
+    _release_and_exit 1
+  fi
+
+  local _pane_id _pane_pid
+  _pane_id="$(_pane_field pane_id)"
+  _pane_pid="$(_pane_field pane_pid)"
+  if [[ -z "$_pane_id" || -z "$_pane_pid" ]]; then
+    _gaai_home_refuse process_authority_invalid 1 "pane_role=identity_unavailable" || true
+    _release_and_exit 1
+  fi
+
+  # Wait for the child's exact acknowledgement. A missing or failed ack is never
+  # retried with a second spawn — the evidence is preserved for reconciliation.
+  local _waited=0 _ack="$_attempt_dir/ack.launcher"
+  while [[ ! -f "$_ack" && "$_waited" -lt 60 ]]; do
+    [[ -f "$_attempt_dir/ack.child_failed" ]] && break
+    sleep 1; _waited=$(( _waited + 1 ))
+  done
+  if [[ ! -f "$_ack" ]]; then
+    _gaai_home_refuse process_authority_invalid 1 "ack_role=launcher_absent" || true
+    _release_and_exit 1
+  fi
+  local _ack_pid _ack_inc _ack_mode _ack_digest
+  _ack_pid="$(_owner_field "$_ack" pid)"
+  _ack_inc="$(_owner_field "$_ack" incarnation)"
+  _ack_mode="$(_owner_field "$_ack" credential_mode)"
+  _ack_digest="$(_owner_field "$_ack" daemon_digest)"
+  if [[ "$_ack_pid" != "$_pane_pid" ]]; then
+    _gaai_home_refuse process_authority_invalid 1 "ack_role=pane_pid_mismatch" || true
+    _release_and_exit 1
+  fi
+  # Present-to-absent downgrade and absent-to-present fabrication both fail closed.
+  if [[ "$_ack_mode" != "$_cred_mode" ]]; then
+    _gaai_home_refuse process_authority_invalid 1 "ack_role=credential_mode_mismatch" || true
+    _release_and_exit 1
+  fi
+  if [[ "$_ack_digest" != "$_daemon_digest" ]]; then
+    _gaai_home_refuse process_authority_invalid 1 "ack_role=daemon_digest_mismatch" || true
+    _release_and_exit 1
+  fi
+
+  local _pane_inc
+  _pane_inc="$(_gaai_home_incarnation "$_pane_pid" 2>/dev/null || echo "")"
+  if [[ -n "$_pane_inc" && -n "$_ack_inc" && "$_pane_inc" != "$_ack_inc" ]]; then
+    _gaai_home_refuse process_authority_invalid 1 "ack_role=incarnation_mismatch" || true
+    _release_and_exit 1
+  fi
+
+  _owner_write "schema=$GAAI_HOME_SCHEMA
+state=bound
+attempt=$_attempt
+label=$(_gaai_home_label "$COMMON_DIR")
+socket=$TMUX_SOCKET
+session=$TMUX_SESSION
+target_sha=$_sha1
+home=$GAAI_DAEMON_HOME
+daemon_digest=$_daemon_digest
+launcher_digest=$_launcher_digest
+credential_mode=$_cred_mode
+attempt_dir=$_attempt_dir
+launcher=$_launcher
+server_pid=$_srv_pid
+server_incarnation=$_srv_inc
+pane_id=$_pane_id
+pane_pid=$_pane_pid
+pane_incarnation=$_pane_inc
+child_pid=$_ack_pid
+child_incarnation=$_ack_inc" || { _gaai_home_refuse home_lock_failed 1 "bound_undurable" || true; _release_and_exit 1; }
+  [[ "$(_owner_state)" == "bound" ]] || { _gaai_home_refuse home_lock_failed 1 "bound_reread_failed" || true; _release_and_exit 1; }
+
+  # One verified release record, no larger than PIPE_BUF, on the authenticated FIFO
+  # descriptor. FIFO durability is not claimed and the FIFO is never fsynced; the
+  # record may be re-emitted idempotently after a durable `bound`.
+  printf 'release attempt=%s digest=%s\n' "$_attempt" "$_release_digest" >&6
+  exec 6>&-
+
+  # `running` only after the daemon's own ready acknowledgement, from the same PID,
+  # incarnation and credential mode.
+  local _ready="$_attempt_dir/ack.ready"
+  _waited=0
+  while [[ ! -f "$_ready" && "$_waited" -lt 120 ]]; do
+    [[ -f "$_attempt_dir/ack.child_failed" ]] && break
+    sleep 1; _waited=$(( _waited + 1 ))
+  done
+  if [[ ! -f "$_ready" ]]; then
+    _gaai_home_refuse process_authority_invalid 1 "ack_role=ready_absent" || true
+    _release_and_exit 1
+  fi
+  local _r_pid _r_inc _r_mode
+  _r_pid="$(_owner_field "$_ready" pid)"
+  _r_inc="$(_owner_field "$_ready" incarnation)"
+  _r_mode="$(_owner_field "$_ready" credential_mode)"
+  if [[ "$_r_pid" != "$_ack_pid" || "$_r_mode" != "$_cred_mode" ]] \
+      || { [[ -n "$_ack_inc" && -n "$_r_inc" ]] && [[ "$_r_inc" != "$_ack_inc" ]]; }; then
+    _gaai_home_refuse process_authority_invalid 1 "ack_role=ready_identity_mismatch" || true
+    _release_and_exit 1
+  fi
+
+  _owner_write "$(sed 's/^state=bound$/state=running/' "$OWNER_FILE")" \
+    || { _gaai_home_refuse home_lock_failed 1 "running_undurable" || true; _release_and_exit 1; }
+  [[ "$(_owner_state)" == "running" ]] || { _gaai_home_refuse home_lock_failed 1 "running_reread_failed" || true; _release_and_exit 1; }
+
+  printf '%s\n' "$_ack_pid" > "$PID_FILE" 2>/dev/null || true
+  echo "  PID:    $_ack_pid (private tmux session: $TMUX_SESSION)"
+  echo "  Socket: $TMUX_SOCKET"
+  echo "  Creds:  $_cred_mode"
+  echo ""
+  echo "✅ Daemon started."
+  echo ""
+  echo "  Status:  $SCRIPT_DIR/daemon-start.sh --status"
+  echo "  Stop:    $SCRIPT_DIR/daemon-start.sh --stop"
+  _launch_monitor
+  _gaai_home_lock_release
+  trap - EXIT INT TERM
+  return 0
+}
+
+# ── Presentation UI (never authority, never evidence) ─────────────────────
+#
+# The monitor lives in a DISTINCT namespace — its own socket and session — so no
+# presentation surface can ever be mistaken for, or interfere with, the private
+# lifecycle server.
+
+_monitor_socket() { printf '%s/%s-mon' "$(_gaai_home_socket_root)" "$(_gaai_home_label "$COMMON_DIR")"; }
+_monitor_session() { printf 'gaai-monitor-%s' "$(_gaai_home_label "$COMMON_DIR")"; }
+
+_launch_monitor() {
+  if [[ "${NO_MONITOR:-}" == "true" || "${NO_MONITOR:-}" == "1" ]]; then
+    echo "  Monitor: (auto-launch skipped — $SCRIPT_DIR/daemon-start.sh --monitor to attach manually)"
+    return 0
+  fi
+  echo "  Monitor: $SCRIPT_DIR/daemon-start.sh --monitor"
+  return 0
+}
+
+do_monitor() {
+  _bootstrap_identity
+  # The read-only lifecycle subprotocol completes FIRST; only then may a
+  # presentation UI exist.
+  do_status || true
+  local _msock _msess
+  _msock="$(_monitor_socket)"
+  _msess="$(_monitor_session)"
+  if [[ "${#_msock}" -ge "$(_gaai_home_socket_limit)" ]]; then
+    refuse process_authority_invalid 0 "monitor_role=socket_path_too_long"
+  fi
+  if [[ ! -t 1 ]]; then
+    echo "  (no terminal attached — presentation UI not created)"
+    return 0
+  fi
+  if tmux -f /dev/null -S "$_msock" has-session -t "=$_msess" 2>/dev/null; then
+    exec tmux -f /dev/null -S "$_msock" attach -t "=$_msess"
+  fi
+  local _config_file="$LOCK_DIR/.daemon-config"
+  mkdir -p "$LOG_DIR" 2>/dev/null || true
+  tmux -f /dev/null -S "$_msock" new-session -d -s "$_msess" \
+    "'$MONITOR_TOP' '$_config_file' '$LOG_FILE'" 2>/dev/null || {
+      echo "  (presentation UI unavailable)"; return 0; }
+  # Resolve the home the pane should read from the same repository-scoped root, so
+  # `--monitor` without a running daemon still finds the live backlog (#3176).
+  local _monitor_home="${GAAI_DAEMON_HOME:-}"
+  if [[ -z "$_monitor_home" && -d "${GAAI_WORKTREES_BASE}/__daemon-home/.gaai/project/contexts/backlog" ]]; then
+    _monitor_home="${GAAI_WORKTREES_BASE}/__daemon-home"
+  fi
+  tmux -f /dev/null -S "$_msock" split-window -t "=${_msess}:0" -v -p 60 \
+    "'$MONITOR_TAIL' '$LOG_DIR' '$_monitor_home'" 2>/dev/null || true
+  tmux -f /dev/null -S "$_msock" set-option -t "=$_msess" mouse on >/dev/null 2>&1 || true
+  tmux -f /dev/null -S "$_msock" set-option -t "=$_msess" status-style "bg=colour236,fg=colour248" >/dev/null 2>&1 || true
+  tmux -f /dev/null -S "$_msock" set-option -t "=$_msess" status-left "#[fg=colour214,bold] GAAI Delivery Monitor " >/dev/null 2>&1 || true
+  exec tmux -f /dev/null -S "$_msock" attach -t "=$_msess"
+}
+
+# ── Status (read-only) ────────────────────────────────────────────────────
+
+do_status() {
+  [[ -n "$COMMON_DIR" ]] || _bootstrap_identity
+  local _state _verdict
+  _state="$(_owner_state)"
+  _verdict="$(_owner_verdict)"
+  echo "GAAI daemon lifecycle"
+  echo "  repository:  $PROJECT_ROOT"
+  echo "  socket:      $TMUX_SOCKET"
+  echo "  session:     $TMUX_SESSION"
+  echo "  state:       $_state"
+  echo "  verdict:     $_verdict"
+  if [[ "$_state" != "none" ]]; then
+    echo "  attempt:     $(_owner_field "$OWNER_FILE" attempt)"
+    echo "  target:      $(_owner_field "$OWNER_FILE" target_sha)"
+    echo "  home:        $(_owner_field "$OWNER_FILE" home)"
+    echo "  credentials: $(_owner_field "$OWNER_FILE" credential_mode)"
+    echo "  daemon pid:  $(_owner_field "$OWNER_FILE" child_pid)"
+  fi
+  case "$_verdict" in
+    live)      echo "  ✅ running" ;;
+    settled)   echo "  ⏹  not running" ;;
+    ambiguous) echo "  ⚠️  ambiguous — reason=process_authority_invalid action=operator_disposition_required" ;;
+  esac
+  return 0
+}
+
+# ── Stop ──────────────────────────────────────────────────────────────────
+#
+# Exact settlement. Cleanup targets ONLY the persisted socket/server/session and
+# path-role identities — never an ambient or default tmux server. Kill or
+# settlement uncertainty preserves the owner record, the session and the evidence,
+# and blocks another launch rather than guessing.
+
+do_stop() {
+  _bootstrap_identity
+  _gaai_home_lock_acquire "$COMMON_DIR" || exit 1
+  trap '_gaai_home_lock_release' EXIT INT TERM
+
+  local _state _verdict
+  _state="$(_owner_state)"
+  _verdict="$(_owner_verdict)"
+
+  # A corrupt record names no settlement target, so there is nothing bounded to act
+  # on; anything else — including an ambiguous or failed launch — is exactly what
+  # `--stop` exists to dispose of, bounded to the persisted identities checked below.
+  if [[ "$_state" == "corrupt" ]]; then
+    _gaai_home_refuse process_authority_invalid 1 "owner_role=corrupt_record" || true
+    _release_and_exit 1
+  fi
+
+  if [[ "$_state" == "none" || "$_verdict" == "settled" ]]; then
+    echo "No daemon running."
+    rm -f "$PID_FILE" 2>/dev/null || true
+    $NO_DRAIN || _drain_wrappers
+    _gaai_home_lock_release; trap - EXIT INT TERM
+    return 0
+  fi
+
+  local _sock _sess _pid
+  _sock="$(_owner_field "$OWNER_FILE" socket)"
+  _sess="$(_owner_field "$OWNER_FILE" session)"
+  _pid="$(_owner_field "$OWNER_FILE" child_pid)"
+  if [[ "$_sock" != "$TMUX_SOCKET" || "$_sess" != "$TMUX_SESSION" ]]; then
+    _gaai_home_refuse process_authority_invalid 1 "owner_role=identity_drift_at_stop" || true
+    _release_and_exit 1
+  fi
+
+  $NO_DRAIN || _drain_wrappers
+
+  echo "Stopping daemon (session $_sess)..."
+  # The exact persisted session is the settlement target. No failure path signals
+  # the daemon PID directly: the pane is the authority we recorded.
+  _tmux kill-session -t "=$_sess" 2>/dev/null || true
+
+  local _waited=0
+  while [[ "$_waited" -lt 30 ]]; do
+    _tmux has-session -t "=$_sess" 2>/dev/null || break
+    sleep 1; _waited=$(( _waited + 1 ))
+  done
+  if _tmux has-session -t "=$_sess" 2>/dev/null; then
+    _gaai_home_refuse process_authority_invalid 1 "settlement_role=session_persisted" || true
+    _release_and_exit 1
+  fi
+  if [[ -n "$_pid" ]] && kill -0 "$_pid" 2>/dev/null; then
+    _gaai_home_refuse process_authority_invalid 1 "settlement_role=child_persisted" || true
+    _release_and_exit 1
+  fi
+
+  local _attempt_dir
+  _attempt_dir="$(_owner_field "$OWNER_FILE" attempt_dir)"
+  # Only the exact persisted, proven-private attempt directory is removed. An
+  # unproven path is never cleaned.
+  if [[ -n "$_attempt_dir" && "$_attempt_dir" == "$LAUNCH_ROOT/"* && -d "$_attempt_dir" && ! -L "$_attempt_dir" ]]; then
+    # Exactly the artefacts this lifecycle is known to create, by name. A recursive
+    # removal is never used: anything else inside is unexplained evidence, and the
+    # `rmdir` below is what proves nothing unexplained was left behind.
+    rm -f "$_attempt_dir"/launcher.sh "$_attempt_dir"/release.fifo "$_attempt_dir"/secret.env \
+          "$_attempt_dir"/manifest "$_attempt_dir"/args "$_attempt_dir"/tmux.conf \
+          "$_attempt_dir"/ack.launcher "$_attempt_dir"/ack.ready "$_attempt_dir"/ack.child_failed \
+          2>/dev/null || true
+    if ! rmdir "$_attempt_dir" 2>/dev/null; then
+      echo "  note: $_attempt_dir still holds unrecognised content and is preserved for inspection"
+    fi
+  fi
+  rm -f "$OWNER_FILE" 2>/dev/null || true
+  rm -f "$PID_FILE" 2>/dev/null || true
+  _tmux kill-server 2>/dev/null || true
+  # Settlement is not complete while the socket file survives: a residual socket is
+  # unexplained process-authority evidence that correctly blocks the next setup, so
+  # exact settlement must remove the EXACT persisted socket path — never an ambient
+  # or default one.
+  if [[ "$_sock" == "$TMUX_SOCKET" && -e "$_sock" && ! -d "$_sock" ]]; then
+    rm -f "$_sock" 2>/dev/null || true
+  fi
+  # The launch root is only removed when it is provably empty; a leftover attempt
+  # from another failed launch stays as evidence.
+  rmdir "$LAUNCH_ROOT" 2>/dev/null || true
+  [[ -f "$LOG_FILE" ]] && : > "$LOG_FILE"
+  echo "✅ Daemon stopped. Log truncated."
+  _gaai_home_lock_release
+  trap - EXIT INT TERM
+  return 0
 }
 
 # ── Dispatch ──────────────────────────────────────────────────────────────
@@ -517,5 +1399,6 @@ case "$ACTION" in
   start)   do_start   ;;
   stop)    do_stop    ;;
   status)  do_status  ;;
+  monitor) do_monitor ;;
   restart) do_stop; do_start ;;
 esac

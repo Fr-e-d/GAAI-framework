@@ -46,7 +46,7 @@ Customization lives in `project/` — add your rules, skills, agents, and memory
 
 If your project uses git with a `staging` branch, the **Delivery Daemon** delivers refined Stories autonomously:
 
-1. One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`
+1. One-time setup: `.gaai/core/scripts/daemon-setup.sh` — invoke it **directly**; a plain `bash <script>` entry is refused (`entry_authority_invalid`). This is also the only command that may provision or update the daemon home worktree.
 2. `/gaai-daemon` — starts the daemon (default: 3 slots, auto-opens monitoring)
 3. `/gaai-daemon --stop` — graceful shutdown
 

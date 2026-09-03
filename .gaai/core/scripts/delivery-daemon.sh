@@ -893,7 +893,8 @@ fi
 #   git checkout staging
 #   git config core.hooksPath .githooks     # activate pre-push hook
 #   npm install                              # dependencies
-#   bash .gaai/core/scripts/daemon-setup.sh  # auto-creates secrets file
+#   .gaai/core/scripts/daemon-setup.sh       # privileged direct entry: prerequisites,
+#                                            # daemon home, secrets file
 #
 # Required: suppress the --dangerously-skip-permissions warning dialog:
 #   mkdir -p ~/.claude && cat > ~/.claude/settings.json << 'EOF'
@@ -1041,17 +1042,25 @@ fi
 # shellcheck source=lib/home-branch-guard.sh
 [[ -z "${_GAAI_HOME_BRANCH_GUARD_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/home-branch-guard.sh" && _GAAI_HOME_BRANCH_GUARD_SH_SOURCED=1
 # daemon-start.sh sources lib/daemon-home.sh too, but that is a separate process —
-# shell functions do not cross a process boundary, so _per_cycle_home_branch_check
-# (below) needs its own load here. The helper owns its own idempotent source guard.
+# shell functions do not cross a process boundary, so _per_cycle_home_check (below)
+# needs its own load here. The helper owns its own idempotent source guard.
 # Fail closed before any poll/coordination/spawn, instead of a repeated
-# "command not found" once _per_cycle_home_branch_check hits branch drift.
+# "command not found" once the per-cycle check hits home drift.
 # shellcheck source=lib/daemon-home.sh
 if [[ -r "$SCRIPT_DIR/lib/daemon-home.sh" ]]; then
   source "$SCRIPT_DIR/lib/daemon-home.sh"
 fi
-if ! declare -F _gaai_provision_daemon_home >/dev/null 2>&1; then
-  echo "ERROR: daemon-home provisioner unavailable in this process" >&2
-  echo "Expected lib/daemon-home.sh to define _gaai_provision_daemon_home — check it exists and is readable" >&2
+if ! declare -F _gaai_home_verify >/dev/null 2>&1; then
+  echo "ERROR: the verify-only daemon-home boundary is unavailable in this process" >&2
+  echo "Expected lib/daemon-home.sh to define _gaai_home_verify — check it exists and is readable" >&2
+  exit 1
+fi
+# E1003S07: the live daemon holds NO provisioning authority. A library still
+# carrying the retired runtime provisioner means a stale asset is loaded and this
+# process could repair the home mid-cycle — refuse before any coordination.
+if declare -F _gaai_provision_daemon_home >/dev/null 2>&1; then
+  echo "ERROR: a retired runtime home provisioner is present in this process" >&2
+  echo "reason=process_authority_invalid action=operator_disposition_required" >&2
   exit 1
 fi
 NOTIFICATION_WEBHOOK="${GAAI_NOTIFICATION_WEBHOOK:-}"
@@ -1408,42 +1417,52 @@ _clear_drift_marker_if_clean() {
   fi
 }
 
-# Per-cycle home-branch integrity check (re-aimed: home must be on gaai-daemon-home).
-# Post-flip, PROJECT_DIR = GAAI_DAEMON_HOME (on gaai-daemon-home branch).
-# Asserts the home is on 'gaai-daemon-home'; repairs via provisioner on mismatch.
-# Always returns 0 — home drift is unexpected and non-blocking (repair + proceed).
-_per_cycle_home_branch_check() {
-  # No coordination home set: daemon running direct (GAAI_DAEMON_HOME unset) — skip.
+# Per-cycle home verification (E1003S07). VERIFY-ONLY: the live daemon proves the
+# pre-provisioned home is still the exact-current, clean, registered tree its launch
+# tuple named, and fails closed before any coordination git-state operation. It never
+# creates, moves, removes, prunes, resets, cleans or repairs the home — that authority
+# belongs to the explicit offline `daemon-setup.sh` alone, and only while no lifecycle
+# owner exists. A cycle that cannot prove the home stops the cycle; it never converts
+# missing evidence into permission to continue.
+#
+# Returns 0 to continue the cycle, 1 to skip it.
+_per_cycle_home_check() {
+  # No coordination home set: daemon running direct (GAAI_DAEMON_HOME unset) — the
+  # home boundary does not apply and there is nothing to verify.
   [[ -z "${GAAI_DAEMON_HOME:-}" ]] && return 0
-  local _home_branch
-  _home_branch="$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || echo "")"
-  if [[ "$_home_branch" == "gaai-daemon-home" ]]; then
-    return 0
+
+  # The launch tuple is immutable for the life of this process. `GAAI_TARGET_SHA` is
+  # the exact commit `daemon-start.sh` proved twice before releasing this daemon, so
+  # the per-cycle test is equality with it — not with whatever origin says now. A
+  # target that advanced mid-run is picked up by the next authorized restart, exactly
+  # as the committed-on-target model has always required.
+  local _expected="${GAAI_TARGET_SHA:-}"
+  if [[ -z "$_expected" ]]; then
+    _expected="$(git -C "$PROJECT_DIR" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || echo "")"
+    if [[ -z "$_expected" ]]; then
+      log "${RED}[HOME-INTEGRITY] reason=home_identity_invalid action=operator_disposition_required evidence=home_role=head_unresolved${NC}"
+      return 1
+    fi
   fi
-  # Home is on wrong branch (e.g. detached residual or unexpected drift) — repair.
-  log "${YELLOW}[HOME-INTEGRITY] Home is on '${_home_branch:-<detached>}', not 'gaai-daemon-home' — repairing via provisioner${NC}"
+
   local _repo_root
   _repo_root="$(git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null || echo "$REPO_ROOT")"
-  _gaai_provision_daemon_home "$GAAI_DAEMON_HOME" "$TARGET_BRANCH" "$_repo_root" || true
-  # The provisioner re-materializes the home under whatever umask this process
-  # inherited. Under the operator's usual 022 this pair is a no-op that still
-  # re-verifies; under a restrictive one it is the repair. Either way no cycle
-  # continues against an unrepaired or unverifiable runtime tuple.
-  #
-  # The pair must be loaded in this very process. In the daemon it always is —
-  # the boundary presence check at startup exits otherwise — so this guard is
-  # unreachable there; it only replaces the bare "command not found" a process
-  # holding this function without the pair would emit. The outcome is the same
-  # fail-closed refusal either way, and the guard never skips the pair when it
-  # is present: a declared tuple is still normalized and verified here before
-  # the cycle continues to any consumer, retry or spawn.
+  if ! _gaai_home_verify "$GAAI_DAEMON_HOME" "$TARGET_BRANCH" "$_repo_root" "$_expected"; then
+    log "${RED}[HOME-INTEGRITY] reason=${GAAI_HOME_REASON} action=${GAAI_HOME_ACTION} evidence=${GAAI_HOME_EVIDENCE}${NC}"
+    log "${RED}[HOME-INTEGRITY] the home is preserved unchanged; this cycle is skipped${NC}"
+    return 1
+  fi
+
+  # The vendored YAML runtime tuple is verified — never repaired — from here. A tree
+  # that cannot present a verifiable tuple is not a tree this daemon may coordinate
+  # from, and repairing it would be exactly the runtime mutation this Story removes.
   if ! declare -F _daemon_repair_tuple >/dev/null 2>&1; then
-    log "${RED}[HOME-INTEGRITY] the vendored YAML runtime repair-and-verify pair is unavailable in this process${NC}"
+    log "${RED}[HOME-INTEGRITY] the vendored YAML runtime verification pair is unavailable in this process${NC}"
     exit 1
   fi
-  if ! _daemon_repair_tuple "re-provisioned daemon home" "$PROJECT_DIR"; then
-    log "${RED}[HOME-INTEGRITY] the vendored YAML runtime tuple in the daemon home could not be repaired and verified${NC}"
-    exit 1
+  if ! _daemon_repair_tuple "verified daemon home" "$PROJECT_DIR"; then
+    log "${RED}[HOME-INTEGRITY] reason=home_asset_invalid action=rerun_setup evidence=asset_role=yaml_runtime_tuple${NC}"
+    return 1
   fi
   return 0
 }
@@ -1489,6 +1508,49 @@ if ! _daemon_repair_tuple "daemon home" "$PROJECT_DIR"; then
   echo "Verify it with: bash .gaai/core/scripts/lib/yaml-runtime.sh --verify-tuple"
   echo "See the restrictive-umask checkout section of .gaai/core/README.md"
   exit 1
+fi
+
+# ── Launch-tuple validation + ready acknowledgement (E1003S07 AC3) ────────
+#
+# When this daemon was released by `daemon-start.sh`, it validates the immutable
+# launch tuple it was handed and acknowledges readiness from its OWN pid and
+# incarnation. `exec` preserved both across the launcher, so
+# pane_pid == launcher_ack.pid == ready_ack.pid is an identity the controller can
+# check rather than infer. Only after this acknowledgement may the controller
+# record `running`. A tuple that does not validate never acknowledges, so the
+# controller fails closed instead of promoting an unproven daemon.
+if [[ -n "${GAAI_DAEMON_LAUNCH_ATTEMPT:-}" ]]; then
+  _lt_dir="$GAAI_DAEMON_LAUNCH_ATTEMPT"
+  _lt_fail() {
+    echo -e "${RED}ERROR: launch tuple invalid — reason=process_authority_invalid action=operator_disposition_required evidence=$1${NC}" >&2
+    exit 1
+  }
+  [[ -d "$_lt_dir" && -r "$_lt_dir/manifest" ]] || _lt_fail "manifest_absent"
+  _lt_schema="$(sed -n 's/^schema=//p' "$_lt_dir/manifest" | head -1)"
+  _lt_home="$(sed -n 's/^home=//p' "$_lt_dir/manifest" | head -1)"
+  _lt_mode="$(sed -n 's/^credential_mode=//p' "$_lt_dir/manifest" | head -1)"
+  [[ "$_lt_schema" == "$GAAI_HOME_SCHEMA" ]] || _lt_fail "manifest_schema_mismatch"
+  [[ -n "${GAAI_DAEMON_HOME:-}" && "$_lt_home" == "$GAAI_DAEMON_HOME" ]] || _lt_fail "home_identity_mismatch"
+  [[ "$_lt_mode" == "${GAAI_DAEMON_CREDENTIAL_MODE:-}" ]] || _lt_fail "credential_mode_mismatch"
+  # Present-to-absent downgrade and absent-to-present fabrication both fail closed.
+  case "$_lt_mode" in
+    present) [[ -n "${GAAI_IMPL_AUTH_TOKEN:-}" ]] || _lt_fail "credential_downgrade" ;;
+    absent)  [[ -z "${GAAI_IMPL_AUTH_TOKEN:-}" ]] || _lt_fail "credential_fabrication" ;;
+    *)       _lt_fail "credential_mode_invalid" ;;
+  esac
+  [[ "$$" == "${GAAI_DAEMON_LAUNCH_PID:-}" ]] || _lt_fail "pid_identity_mismatch"
+  _lt_inc="$(_gaai_home_incarnation "$$" 2>/dev/null || echo "")"
+  if [[ -n "$_lt_inc" && -n "${GAAI_DAEMON_LAUNCH_INCARNATION:-}" \
+        && "$_lt_inc" != "$GAAI_DAEMON_LAUNCH_INCARNATION" ]]; then
+    _lt_fail "incarnation_mismatch"
+  fi
+  _gaai_home_write_durable "$_lt_dir/ack.ready" \
+"schema=$GAAI_HOME_SCHEMA
+pid=$$
+incarnation=${GAAI_DAEMON_LAUNCH_INCARNATION:-$_lt_inc}
+credential_mode=$_lt_mode" || _lt_fail "ready_ack_undurable"
+  unset -f _lt_fail
+  unset -v _lt_dir _lt_schema _lt_home _lt_mode _lt_inc
 fi
 
 if ! command -v python3 &>/dev/null; then
@@ -4953,10 +5015,11 @@ while true; do
   fi
   _last_loop_ts=$_loop_now
 
-  # Per-cycle home-branch guard: verify before any coordination git-state ops
-  # (mark in_progress, reconcile, status push). Clean drift → auto-restored;
-  # dirty drift → pause this cycle and alert; on-target+clean → no-op.
-  if ! _per_cycle_home_branch_check; then
+  # Per-cycle home guard: verify before any coordination git-state op (mark
+  # in_progress, reconcile, status push). Verify-only — any drift, dirt or
+  # unavailable proof skips the cycle with a typed reason and leaves the home
+  # byte-for-byte as it was.
+  if ! _per_cycle_home_check; then
     sleep "$POLL_INTERVAL"
     continue
   fi

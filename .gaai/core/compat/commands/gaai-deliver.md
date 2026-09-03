@@ -32,8 +32,14 @@ Parse the argument string passed to this command (may be empty).
 Then run the daemon launcher using the Bash tool:
 
 ```bash
-cd /path/to/project && bash .gaai/core/scripts/daemon-start.sh <args>
+cd /path/to/project && .gaai/core/scripts/daemon-start.sh <args>
 ```
+
+> **Privileged entry.** Invoke the script **directly** — it is an executable with a
+> `#!/bin/bash -p` shebang. Prefixing the path with a plain `bash` interpreter is refused
+> with `entry_authority_invalid`: a non-privileged interpreter has already applied
+> `BASH_ENV` and imported exported functions before the script's first instruction.
+> The only alternative is an absolute, verified Bash invoked `--noprofile --norc -p <script>`.
 
 Use the actual project root (the directory containing `.gaai/`). Pass all arguments as-is to the script.
 
@@ -46,7 +52,7 @@ Use the actual project root (the directory containing `.gaai/`). Pass all argume
 - Monitor opens automatically in a new Terminal.app window
 - Each delivery runs in its own tmux session `gaai-deliver-<STORY_ID>`
 - Logs: `.gaai/project/contexts/backlog/.delivery-logs/<STORY_ID>.log`
-- Stop: `/gaai-deliver --stop` or `bash .gaai/core/scripts/daemon-start.sh --stop`
+- Stop: `/gaai-deliver --stop` or `.gaai/core/scripts/daemon-start.sh --stop`
 - Active deliveries keep running independently after daemon stop
 
 **Prerequisite check:** before launching, verify `~/.claude/settings.json` contains `"skipDangerousModePermissionPrompt": true`. If missing, show the setup command and stop:
