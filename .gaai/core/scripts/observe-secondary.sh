@@ -17,7 +17,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
 LOGS_DIR="$PROJECT_DIR/.gaai/project/contexts/backlog/.delivery-logs"
 FAIL_LOG="$PROJECT_DIR/.gaai/project/contexts/logs/nested-fail-debug.jsonl"
 ROUTE_LOG="$PROJECT_DIR/.gaai/project/contexts/logs/runtime-routing.jsonl"
-WORKTREE_BASE="$(cd "$PROJECT_DIR/.." && pwd)/.gaai-worktrees/$(basename "$PROJECT_DIR")"
+WORKTREE_BASE="${GAAI_WORKTREES_BASE:-$(cd "$PROJECT_DIR/.." && pwd)/.gaai-worktrees/$(basename "$PROJECT_DIR")}"
 
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'

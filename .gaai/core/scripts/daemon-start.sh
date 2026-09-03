@@ -49,6 +49,13 @@ PROJECT_ROOT="$(cd "$GAAI_DIR/.." && pwd)"
 # operator-facing state (logs/locks/retry/drift), so the monitor + `--logs` keep working.
 export GAAI_REPO_ROOT="$PROJECT_ROOT"
 
+# Repository-scoped worktree root. Operators can keep worktrees outside the
+# canonical checkout (and outside synchronized folders) by setting this once.
+if [[ -z "${GAAI_WORKTREES_BASE:-}" ]]; then
+  GAAI_WORKTREES_BASE="$(cd "$PROJECT_ROOT/.." && pwd)/.gaai-worktrees/$(basename "$PROJECT_ROOT")"
+fi
+export GAAI_WORKTREES_BASE
+
 # ── Platform guard ────────────────────────────────────────────────────
 case "$(uname -s)" in
   Darwin|Linux) ;;
@@ -336,7 +343,7 @@ do_status() {
     local monitor_daemon_home="${GAAI_DAEMON_HOME:-}"
     if [[ -z "$monitor_daemon_home" ]]; then
       local wt_base
-      wt_base="$(cd "$PROJECT_ROOT/.." && pwd)/.gaai-worktrees/$(basename "$PROJECT_ROOT")"
+      wt_base="$GAAI_WORKTREES_BASE"
       if [[ -d "$wt_base/__daemon-home/.gaai/project/contexts/backlog" ]]; then
         monitor_daemon_home="$wt_base/__daemon-home"
       fi
@@ -397,7 +404,7 @@ do_start() {
   # flip is a separate subsequent step).  Non-fatal: failure logs a warning
   # and daemon startup proceeds — the home is unused until the flip lands.
   local _wt_base
-  _wt_base="$(cd "$PROJECT_ROOT/.." && pwd)/.gaai-worktrees/$(basename "$PROJECT_ROOT")"
+  _wt_base="$GAAI_WORKTREES_BASE"
   GAAI_DAEMON_HOME="${GAAI_DAEMON_HOME:-${_wt_base}/__daemon-home}"
   export GAAI_DAEMON_HOME
   local _target_branch="${GAAI_TARGET_BRANCH:-staging}"
@@ -465,6 +472,7 @@ do_start() {
     [[ -n "${GAAI_CODEX_IGNORE_USER_CONFIG:-}" ]] && tmux_env_args+=(-e "GAAI_CODEX_IGNORE_USER_CONFIG=${GAAI_CODEX_IGNORE_USER_CONFIG}")
     [[ -n "${GAAI_DAEMON_HOME:-}" ]] && tmux_env_args+=(-e "GAAI_DAEMON_HOME=${GAAI_DAEMON_HOME}")
     [[ -n "${GAAI_REPO_ROOT:-}" ]] && tmux_env_args+=(-e "GAAI_REPO_ROOT=${GAAI_REPO_ROOT}")
+    [[ -n "${GAAI_WORKTREES_BASE:-}" ]] && tmux_env_args+=(-e "GAAI_WORKTREES_BASE=${GAAI_WORKTREES_BASE}")
     [[ -n "${GAAI_CI_TEST_GATE_TIMEOUT_SEC:-}" ]] && tmux_env_args+=(-e "GAAI_CI_TEST_GATE_TIMEOUT_SEC=${GAAI_CI_TEST_GATE_TIMEOUT_SEC}")
     [[ -n "${GAAI_CI_TEST_GATE_MATERIALIZE_SEC:-}" ]] && tmux_env_args+=(-e "GAAI_CI_TEST_GATE_MATERIALIZE_SEC=${GAAI_CI_TEST_GATE_MATERIALIZE_SEC}")
     tmux new-session -d -s gaai-daemon ${tmux_env_args[@]+"${tmux_env_args[@]}"} "$daemon_cmd"

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- chore: honor external worktree roots
 -: ship an offline attested YAML runtime for public Framework paths
 -: align OSS Delivery with external merge authority
 -: bootstrap exact external-merge reconciliation

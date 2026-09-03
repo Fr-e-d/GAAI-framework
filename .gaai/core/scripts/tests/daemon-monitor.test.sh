@@ -26,10 +26,10 @@ LOCK_DIR="$FIXTURE_DIR/delivery-locks"
 LOG_DIR="$FIXTURE_DIR/delivery-logs"
 ROUTING_LOG="$FIXTURE_DIR/runtime-routing.jsonl"
 BACKLOG="$FIXTURE_DIR/active.backlog.yaml"
-WORKTREE_BASE="$FIXTURE_DIR/worktrees"
+EXPECTED_WORKTREE_BASE="$FIXTURE_DIR/worktrees"
 LOGS_DIR="$FIXTURE_DIR/delivery-logs"
 
-mkdir -p "$LOCK_DIR" "$LOG_DIR" "$WORKTREE_BASE"
+mkdir -p "$LOCK_DIR" "$LOG_DIR" "$EXPECTED_WORKTREE_BASE"
 touch "$ROUTING_LOG"
 
 cleanup() {
@@ -82,9 +82,16 @@ YAML_EOF
 LOG_DIR="$LOG_DIR" \
 BACKLOG="$BACKLOG" \
 LOCK_DIR="$LOCK_DIR" \
-WORKTREE_BASE="$WORKTREE_BASE" \
+GAAI_WORKTREES_BASE="$EXPECTED_WORKTREE_BASE" \
 PROJECT_DIR="$PROJECT_DIR" \
   source "$MONITOR_TAIL"
+
+echo ""
+echo "=== T0: Configured worktree root ==="
+echo "T0: GAAI_WORKTREES_BASE overrides the synchronized-folder fallback"
+[[ "$WORKTREE_BASE" == "$EXPECTED_WORKTREE_BASE" ]] \
+  && pass "T0" \
+  || fail "T0: expected $EXPECTED_WORKTREE_BASE, got '$WORKTREE_BASE'"
 
 # ── T1–T8: Phase detection (AC1) ─────────────────────────────────────────────
 
