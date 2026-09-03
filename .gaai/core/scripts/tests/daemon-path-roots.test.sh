@@ -4,7 +4,8 @@
 # T1: REPO_ROOT defaults to PROJECT_DIR when GAAI_REPO_ROOT unset (AC6a)
 # T2: completeness grep — no worktree-base derivation uses ${PROJECT_DIR}/.. (AC6b)
 # T3: overriding PROJECT_DIR alone (REPO_ROOT unchanged) leaves worktree base unchanged (AC6c)
-# T4: daemon-dispatch-reap-orphans.test.sh still passes (AC5 non-regression)
+# T4: launcher and observers honor GAAI_WORKTREES_BASE
+# T5: daemon-dispatch-reap-orphans.test.sh still passes (AC5 non-regression)
 #
 # Run: bash .gaai/core/scripts/tests/daemon-path-roots.test.sh
 # Exit 0 = all pass.
@@ -18,6 +19,9 @@ fail() { printf '  FAIL: %s\n' "$1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DD="$SCRIPT_DIR/../delivery-daemon.sh"
 DX="$SCRIPT_DIR/../daemon-dispatch.sh"
+START="$SCRIPT_DIR/../daemon-start.sh"
+MONITOR="$SCRIPT_DIR/../daemon-monitor-tail.sh"
+OBSERVE="$SCRIPT_DIR/../observe-secondary.sh"
 
 # ── T1: REPO_ROOT defaults to PROJECT_DIR when GAAI_REPO_ROOT unset ─────────
 unset GAAI_REPO_ROOT
@@ -69,11 +73,27 @@ else
   fail "T3b: worktree-base='$_new_base' should contain 'real-repo' and not 'other-proj'"
 fi
 
-# ── T4: existing reap-orphans test still passes (AC5 non-regression) ─────────
-if bash "$SCRIPT_DIR/daemon-dispatch-reap-orphans.test.sh" >/dev/null 2>&1; then
-  pass "T4: daemon-dispatch-reap-orphans.test.sh still passes (AC5 non-regression)"
+# ── T4: every launcher/observer honors the repository-scoped override ───────
+for script in "$START" "$MONITOR" "$OBSERVE"; do
+  script_name=$(basename "$script")
+  if grep -q 'GAAI_WORKTREES_BASE' "$script"; then
+    pass "T4: $script_name honors GAAI_WORKTREES_BASE"
+  else
+    fail "T4: $script_name ignores GAAI_WORKTREES_BASE"
+  fi
+done
+if grep -qE '^[[:space:]]*export GAAI_WORKTREES_BASE' "$START" \
+    && grep -qE 'tmux_env_args\+=\(-e "GAAI_WORKTREES_BASE=' "$START"; then
+  pass "T4b: daemon-start exports and forwards GAAI_WORKTREES_BASE"
 else
-  fail "T4: daemon-dispatch-reap-orphans.test.sh FAILED (regression introduced)"
+  fail "T4b: daemon-start does not export and forward GAAI_WORKTREES_BASE"
+fi
+
+# ── T5: existing reap-orphans test still passes (AC5 non-regression) ─────────
+if bash "$SCRIPT_DIR/daemon-dispatch-reap-orphans.test.sh" >/dev/null 2>&1; then
+  pass "T5: daemon-dispatch-reap-orphans.test.sh still passes (AC5 non-regression)"
+else
+  fail "T5: daemon-dispatch-reap-orphans.test.sh FAILED (regression introduced)"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────

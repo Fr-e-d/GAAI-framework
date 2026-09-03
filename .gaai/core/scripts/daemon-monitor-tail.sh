@@ -11,7 +11,7 @@ DAEMON_HOME="${2:-}"
 PROJECT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
 BACKLOG="${DAEMON_HOME:-$PROJECT_DIR}/.gaai/project/contexts/backlog/active.backlog.yaml"
 LOCK_DIR="${PROJECT_DIR}/.gaai/project/contexts/backlog/.delivery-locks"
-WORKTREE_BASE="${PROJECT_DIR}/../.gaai-worktrees/$(basename "$PROJECT_DIR")"
+WORKTREE_BASE="${GAAI_WORKTREES_BASE:-$(cd "$PROJECT_DIR/.." && pwd)/.gaai-worktrees/$(basename "$PROJECT_DIR")}"
 
 HAS_JQ=false
 command -v jq &>/dev/null && HAS_JQ=true
