@@ -160,7 +160,7 @@ Stories are the **contract between Discovery and Delivery**. They must be the ma
    **CRITICAL — Backlog YAML write safety (MUST follow):**
    - **Match native indentation.** Before appending, check the existing format: `grep -m1 "^- id:" <backlog>`. Use the same indent level (typically 0-space: `- id:` with 2-space properties).
    - **Never use `yaml.dump()`** to rewrite the file. It destroys comments, changes quotes, and alters indentation. Use line-by-line append or the scheduler (`backlog-scheduler.sh --set-status`, `--set-field`).
-   - **Validate YAML after every write:** `python3 -c "import yaml; yaml.safe_load(open('<backlog>'))"`. If validation fails, fix before committing.
+   - **Validate YAML after every write** with the repository-controlled runtime — never an ambient parser and nothing to install: `bash .gaai/core/scripts/lib/yaml-runtime.sh --validate .gaai/project/contexts/backlog/active.backlog.yaml`. If validation fails, fix before committing.
    - **Rationale (2026-04-04):** Mixed indentation from `cat >> heredoc` (2-space items appended to a 0-space file) + `yaml.dump()` reformatting broke the backlog YAML, blocked the daemon, and required manual cleanup. These rules prevent recurrence.
 
 13. **MANDATORY — Commit & push to staging (ATOMIC).** After all story files are written and registered in the backlog, commit all generated/modified files **and push to `staging` in the same step**. Commit without push is a violation — Delivery cannot pick up stories that exist only locally.

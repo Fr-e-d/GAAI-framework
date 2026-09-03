@@ -1358,16 +1358,27 @@ expect "RED-F3 unavailable target authority cannot mutate worktree" \
   git -C "$PROJECT_DIR" add "$BACKLOG_REL"
   git -C "$PROJECT_DIR" commit -qm populated
   git -C "$PROJECT_DIR" push -q origin HEAD:staging
-  red_f4_python=$(command -v python3)
+  # The seam is a redefinition of the boundary entry, not a `python3` shell
+  # function: a shell function cannot intercept a command word containing a
+  # slash, and the boundary invokes an absolute interpreter path.
+  #
+  # THE ARGV SHAPE CHANGED AND THE PREDICATE IS REWRITTEN, NOT PORTED. The base
+  # caller spelled `python3 - "$path"`, so the sentinel was $1 and the path $2.
+  # The boundary entry takes the caller program on stdin and NO `-` sentinel in
+  # argv, so the path arrives as $1 and every later argument shifts down by one.
+  # A predicate still keyed on $2 would silently stop matching, the swap would
+  # never fire, and this falsifier would report a false pass — which is why the
+  # expected result below is asserted as 1:0:0 and not merely "non-zero".
   RED_F4_SWAP=true
-  python3(){
-    if [[ "$RED_F4_SWAP" == true && "${1:-}" == - \
-        && "${2:-}" == "$LOCK_DIR"/.forward-index-* ]]; then
-      printf 'items: []\n' > "${2}.successor"
-      chmod 600 "${2}.successor"
-      mv "${2}.successor" "$2"
+  _red_f4_real=$(declare -f yaml_runtime_run)
+  yaml_runtime_run(){
+    if [[ "$RED_F4_SWAP" == true && "${1:-}" == "$LOCK_DIR"/.forward-index-* ]]; then
+      printf 'items: []\n' > "${1}.successor"
+      chmod 600 "${1}.successor"
+      mv "${1}.successor" "$1"
     fi
-    "$red_f4_python" "$@"
+    eval "${_red_f4_real/#yaml_runtime_run/_red_f4_orig}"
+    _red_f4_orig "$@"
   }
   _forward_recovery_one(){ : > "$TMP/red-f4-dispatched"; return 0; }
   f4_swap_rc=0
@@ -2703,7 +2714,7 @@ get_phase_status(){
   fi
 }
 _wrapper_set_story_field(){
-  python3 - "\$BACKLOG_FILE" "\$1" "\$2" "\$3" <<'PY'
+  yaml_runtime_run "\$BACKLOG_FILE" "\$1" "\$2" "\$3" <<'PY'
 import os, sys, yaml
 path, story, field, value = sys.argv[1:]
 with open(path, encoding="utf-8") as handle:
@@ -3024,10 +3035,14 @@ bound_swap_rc=0
   PROJECT_DIR=$BLOB_REPO
   LOCK_DIR=$BLOB_LOCKS
   source "$ROOT/.gaai/core/scripts/daemon-dispatch.sh" || exit 1
-  python3(){
-    cp "$BLOB_FORGED" "$2" || return 1
-    chmod 600 "$2" || return 1
-    command python3 "$@"
+  # Same argv shift as RED-F4: the snapshot is $1 under the boundary entry, not
+  # $2 as it was under the `python3 - <path>` spelling.
+  _bound_real=$(declare -f yaml_runtime_run)
+  yaml_runtime_run(){
+    cp "$BLOB_FORGED" "$1" || return 1
+    chmod 600 "$1" || return 1
+    eval "${_bound_real/#yaml_runtime_run/_bound_orig}"
+    _bound_orig "$@"
   }
   _dispatch_story_record_at_commit EBOUND "$bound_commit"
 ) > /dev/null 2> "$BLOB_ERROR" || bound_swap_rc=$?
@@ -3155,6 +3170,476 @@ BASH
 )
 expect "QA replan admits only the exact registered story branch without HEAD==target" \
   test "$own_result" = "0:1"
+
+printf '\nRestrictive-umask runtime-tuple repair on both authorized recovery callers\n'
+
+# A checkout made by a process with a restrictive umask materializes the three
+# vendored runtime files at 0600, which the runtime boundary refuses on its
+# exact-mode check. Both authorized callers of the shared recovery helper repair
+# exactly those three files and then re-verify the tuple against the worktree's
+# own HEAD tree, before admission, a retry, a spawn, a push or any consumer. The
+# helper itself is never edited and is never stubbed anywhere except where noted.
+
+D10_VENDOR="$ROOT/.gaai/core/vendor/pyyaml/6.0.3"
+
+d10_mode_of() {
+  if stat -f '%Lp' / >/dev/null 2>&1; then
+    stat -f '%Lp' -- "$1" 2>/dev/null
+  else
+    stat -c '%a' -- "$1" 2>/dev/null
+  fi
+}
+
+# d10_seed_tuple <tree-root> — the four tuple paths at 0644.
+d10_seed_tuple() {
+  local root="$1"
+  mkdir -p "$root/.gaai/core/scripts/lib" "$root/.gaai/core/vendor/pyyaml/6.0.3"
+  cp "$ROOT/.gaai/core/scripts/lib/yaml-runtime.sh" "$root/.gaai/core/scripts/lib/"
+  cp "$D10_VENDOR/pyyaml-runtime.pyz" "$D10_VENDOR/PROVENANCE.json" \
+     "$D10_VENDOR/LICENSE" "$root/.gaai/core/vendor/pyyaml/6.0.3/"
+  chmod 0644 "$root/.gaai/core/scripts/lib/yaml-runtime.sh" \
+             "$root/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz" \
+             "$root/.gaai/core/vendor/pyyaml/6.0.3/PROVENANCE.json" \
+             "$root/.gaai/core/vendor/pyyaml/6.0.3/LICENSE"
+}
+
+# d10_private_core <base> — a private copy of the core tree whose helper copy has
+# its descriptor mode change forced to fail. This is the only way to produce that
+# fault deterministically without root, and it never touches production.
+d10_private_core() {
+  local base="$1" helper
+  mkdir -p "$base/.gaai"
+  cp -R "$ROOT/.gaai/core" "$base/.gaai/core"
+  helper="$base/.gaai/core/scripts/lib/yaml-runtime.sh"
+  awk '{ if ($0 ~ /^                    os\.fchmod\(fd, EXACT_FILE_MODE\)$/) print "                    raise OSError(13, \"forced\")"; else print }' \
+    "$helper" > "$helper.tmp" && mv "$helper.tmp" "$helper"
+  grep -q 'raise OSError(13, "forced")' "$helper" || return 1
+  printf '%s\n' "$base"
+}
+
+# d10_make_repo <base> <sid> — a private repository with a bare origin carrying
+# origin/staging, and a story worktree holding one clean local commit that is not
+# reachable from that remote ref.
+d10_make_repo() {
+  local base="$1" sid="$2"
+  local origin="$base/origin.git" repo="$base/repo" wt="$base/worktrees/${sid}-workspace"
+  mkdir -p "$repo/.gaai/project/contexts/backlog" "$base/worktrees" "$base/locks"
+  chmod 700 "$base/locks"
+  d10_seed_tuple "$repo"
+  printf 'items:\n- id: %s\n  status: in_progress\n  phase_status: qa_passed\n  started_at: "1997-07-16T10:00:00Z"\n' \
+    "$sid" > "$repo/.gaai/project/contexts/backlog/active.backlog.yaml"
+  git init -q --bare "$origin" >/dev/null 2>&1
+  git init -q "$repo" >/dev/null 2>&1
+  git -C "$repo" config user.email test@example.invalid
+  git -C "$repo" config user.name test
+  git -C "$repo" add -A >/dev/null 2>&1
+  git -C "$repo" commit -qm base >/dev/null 2>&1
+  git -C "$repo" remote add origin "$origin"
+  git -C "$repo" push -q origin HEAD:refs/heads/staging >/dev/null 2>&1
+  git -C "$repo" fetch -q origin staging >/dev/null 2>&1
+  git -C "$repo" branch "story/${sid}" HEAD >/dev/null 2>&1
+  git -C "$repo" worktree add "$wt" "story/${sid}" >/dev/null 2>&1
+  printf 'ahead\n' > "$wt/ahead.txt"
+  git -C "$wt" add ahead.txt >/dev/null 2>&1
+  git -C "$wt" commit -qm 'story commit not reachable from the remote ref' >/dev/null 2>&1
+}
+
+# The stub body both rows install AFTER sourcing the real library. It is the ONLY
+# stub either row is allowed to use.
+D10_STUB_BODY='
+_recover_worktree_safe_base() {
+  local rsid="$1" rwt="$2"
+  if [ "${D10_FAULT}" != stillahead ]; then
+    git -C "$rwt" reset --hard origin/staging >/dev/null 2>&1 || return 1
+  fi
+  rm -f "$rwt/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz" \
+        "$rwt/.gaai/core/vendor/pyyaml/6.0.3/PROVENANCE.json" \
+        "$rwt/.gaai/core/vendor/pyyaml/6.0.3/LICENSE"
+  ( umask 077
+    cp "$D10_SOURCE_VENDOR/pyyaml-runtime.pyz" "$D10_SOURCE_VENDOR/PROVENANCE.json" \
+       "$D10_SOURCE_VENDOR/LICENSE" "$rwt/.gaai/core/vendor/pyyaml/6.0.3/" )
+  case "${D10_FAULT}" in
+    symlink)
+      rm -f "$rwt/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz"
+      ln -s "$D10_LINK_TARGET" "$rwt/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz"
+      ;;
+    swap)
+      printf "swapped\n" > "$rwt/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz"
+      chmod 0600 "$rwt/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz"
+      ;;
+  esac
+  return 0
+}
+'
+
+d10_link_target() {
+  local path="$TMP/d10-link-target.pyz"
+  if [[ ! -f "$path" ]]; then
+    cp "$D10_VENDOR/pyyaml-runtime.pyz" "$path"
+    chmod 0600 "$path"
+  fi
+  printf '%s\n' "$path"
+}
+
+# d10_expect_refusal_stage <label> <fault> <output> — the success-status rule, per
+# refusal stage. This is stage accuracy, not a softened refusal.
+#
+# The pair is ordered normalize -> worktree-local exact verification, and the
+# normalizer inspects no content by design: it opens no archive, digests nothing
+# and reads no blob. A symlinked path, a foreign owner and a failed descriptor
+# mode change are therefore refusals of the NORMALIZER itself, and on those runs
+# no success status may exist at all.
+#
+# A content swap is invisible to that program by construction — the file is
+# regular, owned by this uid and keeps its (st_dev, st_ino) across the repair — so
+# it is necessarily caught one stage later, by the worktree-local exact blob/mode
+# verification. Demanding "no code=ok" there would assert that normalization
+# failed, which the contract does not claim and which no correct implementation
+# can satisfy; it would test a harness artefact instead of the contract. What the
+# contract does say is asserted instead, and is strictly stronger for that stage:
+# the refusal carries the verification's own role and action, every success status
+# on the run is the normalizer's own, and none appears at or after the refusal.
+# The typed refusal, the fail-closed outcome and the ordering assertions around
+# this call are unchanged for every fault.
+d10_expect_refusal_stage() {
+  local label="$1" fault="$2" out="$3" refuse last_ok
+  if [[ "$fault" != swap ]]; then
+    expect "$label: the success status never appears on a refusal path" \
+      test "$(printf '%s\n' "$out" | grep -c 'code=ok')" -eq 0
+    return 0
+  fi
+  expect "$label: the refusal is the worktree-local verification, the stage after normalization" \
+    grep -q 'role=verify action=worktree_tuple code=yaml_runtime_asset_invalid' <<<"$out"
+  refuse=$(printf '%s\n' "$out" | grep -n 'code=yaml_runtime_asset_invalid' | head -1 | cut -d: -f1)
+  last_ok=$(printf '%s\n' "$out" | grep -n 'code=ok' | tail -1 | cut -d: -f1)
+  # The defaults keep the expression well-formed on a broken run; the -n term is
+  # what makes a missing refusal line fail the case rather than pass it.
+  expect "$label: every success status is the normalizer's own and none appears at or after the refusal" \
+    test "$(printf '%s\n' "$out" | grep -c 'code=ok')" \
+      -eq "$(printf '%s\n' "$out" | grep -c 'role=normalize action=vendor_modes code=ok')" \
+      -a -n "$refuse" -a "${last_ok:-0}" -lt "${refuse:-0}"
+}
+
+# ── Row 8: the real handle_commit_phase, pre-push recovery site ──────────────
+d10_row8() {
+  local fault="$1"
+  local base="$TMP/d10-row8-$fault" core="$ROOT"
+  local sid=ED10R8
+  mkdir -p "$base"
+  if [[ "$fault" == "fchmod" ]]; then
+    core=$(d10_private_core "$base/core") || { printf 'PRIVATE_CORE_FAILED\n'; return 0; }
+  fi
+  d10_make_repo "$base" "$sid"
+  D10_FAULT="$fault" D10_SOURCE_VENDOR="$D10_VENDOR" D10_LINK_TARGET="$(d10_link_target)" \
+  D10_STUB="$D10_STUB_BODY" \
+  "$TEST_BASH" -s -- "$core" "$base" "$sid" <<'BASH' 2>&1
+set -u
+core="$1"; base="$2"; sid="$3"
+PROJECT_DIR="$base/repo"; REPO_ROOT="$PROJECT_DIR"
+GAAI_WORKTREES_BASE="$base/worktrees"
+LOCK_DIR="$base/locks"
+TARGET_BRANCH=staging
+BACKLOG_REL=.gaai/project/contexts/backlog/active.backlog.yaml
+BACKLOG_FILE="$PROJECT_DIR/$BACKLOG_REL"
+export GAAI_WORKTREE_COMMITS_AHEAD_MAX=0
+# 1. Source the REAL dispatcher first. It sources the real lib/worktree-integrity.sh,
+#    which would otherwise overwrite a stub installed before it — so the order is
+#    load-bearing, and the suite's own top-level stub is NOT what this case lands on.
+source "$core/.gaai/core/scripts/daemon-dispatch.sh" || { echo "SOURCE_FAILED"; exit 1; }
+declare -f _check_worktree_integrity | grep -q 'WORKTREE-CHECK' \
+  || { echo "REAL_INTEGRITY_ABSENT"; exit 1; }
+# 2. THEN install the ONLY allowed stub.
+eval "$D10_STUB"
+handle_commit_phase "$sid" trace-d10-row8
+echo "RC=$?"
+for f in pyyaml-runtime.pyz PROVENANCE.json LICENSE; do
+  p="$GAAI_WORKTREES_BASE/${sid}-workspace/.gaai/core/vendor/pyyaml/6.0.3/$f"
+  if [ -L "$p" ]; then m=symlink
+  elif stat -f '%Lp' / >/dev/null 2>&1; then m=$(stat -f '%Lp' -- "$p" 2>/dev/null)
+  else m=$(stat -c '%a' -- "$p" 2>/dev/null); fi
+  echo "MODE $f=${m:-absent}"
+done
+p="$GAAI_WORKTREES_BASE/${sid}-workspace/.gaai/core/scripts/lib/yaml-runtime.sh"
+if stat -f '%Lp' / >/dev/null 2>&1; then echo "MODE helper=$(stat -f '%Lp' -- "$p")"
+else echo "MODE helper=$(stat -c '%a' -- "$p")"; fi
+BASH
+}
+
+D10_R8_OK=$(d10_row8 none)
+# The three vendor names are matched explicitly because this case also prints the
+# helper's mode, which must NOT be counted here. `grep -E` is required: `\|` is a
+# GNU BRE extension that the BSD grep on the macOS lanes matches literally, so a
+# BRE alternation would silently count zero lines on a correct tuple.
+expect "row 8: recovered tuple is at exact 0644 immediately before admission" \
+  test "$(printf '%s\n' "$D10_R8_OK" | grep -c -E '^MODE (pyyaml-runtime\.pyz|PROVENANCE\.json|LICENSE)=644$')" -eq 3
+expect "row 8: the normalizer reported completion before the caller verified" \
+  grep -q 'action=vendor_modes code=ok' <<<"$D10_R8_OK"
+D10_R8_L_RECOVERY=$(printf '%s\n' "$D10_R8_OK" | grep -n 'worktree recovery succeeded' | head -1 | cut -d: -f1)
+D10_R8_L_OK=$(printf '%s\n' "$D10_R8_OK" | grep -n 'action=vendor_modes code=ok' | head -1 | cut -d: -f1)
+D10_R8_L_ADMIT=$(printf '%s\n' "$D10_R8_OK" | grep -n 'LOCAL-ADMISSION' | head -1 | cut -d: -f1)
+expect "row 8: recovery success, then normalization, then admission — in that order" \
+  test -n "$D10_R8_L_RECOVERY" -a -n "$D10_R8_L_OK" -a -n "$D10_R8_L_ADMIT" \
+    -a "$D10_R8_L_RECOVERY" -lt "$D10_R8_L_OK" -a "$D10_R8_L_OK" -lt "$D10_R8_L_ADMIT"
+expect "row 8: no mode change reached any file outside the three vendor paths" \
+  grep -q '^MODE helper=644$' <<<"$D10_R8_OK"
+expect "row 8: admission began (the pre-admission sequence completed)" \
+  grep -q 'LOCAL-ADMISSION' <<<"$D10_R8_OK"
+
+for D10_R8_FAULT in symlink swap fchmod; do
+  D10_R8_OUT=$(d10_row8 "$D10_R8_FAULT")
+  expect "row 8/$D10_R8_FAULT: the helper refuses with the existing typed asset code" \
+    grep -q 'code=yaml_runtime_asset_invalid' <<<"$D10_R8_OUT"
+  expect "row 8/$D10_R8_FAULT: the caller classifies it as worktree corruption" \
+    grep -q '\[class=WORKTREE_CORRUPTION\]' <<<"$D10_R8_OUT"
+  expect "row 8/$D10_R8_FAULT: handle_commit_phase returns 1" \
+    grep -q '^RC=1$' <<<"$D10_R8_OUT"
+  # The distinguishing fact: the refusal landed BEFORE admission began. "no push"
+  # is corroborating only — the push loop is unreachable in this fixture either way.
+  expect "row 8/$D10_R8_FAULT: no admission-routing record at all" \
+    test "$(printf '%s\n' "$D10_R8_OUT" | grep -c 'LOCAL-ADMISSION')" -eq 0
+  d10_expect_refusal_stage "row 8/$D10_R8_FAULT" "$D10_R8_FAULT" "$D10_R8_OUT"
+done
+
+# ── Row 9: the real _forward_prepare_worktree, the caller that owns propagation ──
+# Entering at _forward_repair_worktree_exact alone would prove only that the repair
+# returns non-zero; it would prove nothing about propagation, which is the property
+# this depends on. None of the suite's four _forward_prepare_worktree redefinitions
+# is a drive of this path and none may be cited as one.
+d10_row9() {
+  local fault="$1" via="${2:-prepare}"
+  local base="$TMP/d10-row9-$fault-$via" core="$ROOT"
+  local sid=ED10R9
+  mkdir -p "$base"
+  if [[ "$fault" == "fchmod" ]]; then
+    core=$(d10_private_core "$base/core") || { printf 'PRIVATE_CORE_FAILED\n'; return 0; }
+  fi
+  d10_make_repo "$base" "$sid"
+  D10_FAULT="$fault" D10_SOURCE_VENDOR="$D10_VENDOR" D10_LINK_TARGET="$(d10_link_target)" \
+  D10_STUB="$D10_STUB_BODY" \
+  "$TEST_BASH" -s -- "$core" "$base" "$sid" "$via" <<'BASH' 2>&1
+set -u
+core="$1"; base="$2"; sid="$3"; via="$4"
+PROJECT_DIR="$base/repo"; REPO_ROOT="$PROJECT_DIR"
+GAAI_WORKTREES_BASE="$base/worktrees"
+LOCK_DIR="$base/locks"
+TARGET_BRANCH=staging
+BACKLOG_REL=.gaai/project/contexts/backlog/active.backlog.yaml
+BACKLOG_FILE="$PROJECT_DIR/$BACKLOG_REL"
+export GAAI_WORKTREE_COMMITS_AHEAD_MAX=0
+awk '/^_forward_sha256\(\)/{on=1} /^exceeded_stories\(\)/{on=0} on{print}' \
+  "$core/.gaai/core/scripts/delivery-daemon.sh" > "$base/coordinator.sh"
+# The coordinator window starts at _forward_sha256, but the caller-side wrapper of
+# the D10 pair, _daemon_repair_tuple, is defined earlier in the SAME production
+# file — in the startup region, which cannot be sourced here because it also runs
+# top-level preflight code. Its one real body is therefore extracted verbatim from
+# the same file, exactly as this suite already appends further real slices to its
+# own harness: the repair coordinator must call production's own wrapper, never a
+# re-implementation and never a stub. Left out, the wrapper is simply an undefined
+# command whose non-zero status would look like a fail-closed refusal while
+# proving nothing at all about the D10 pair — which is why the run below asserts
+# the real wrapper is in scope before any case executes.
+awk '$0 == "_daemon_repair_tuple() {" {on=1} on{print} on && $0 == "}" {on=0}' \
+  "$core/.gaai/core/scripts/delivery-daemon.sh" >> "$base/coordinator.sh"
+source "$core/.gaai/core/scripts/lib/stuck-classifier.sh" || { echo "SOURCE_FAILED"; exit 1; }
+source "$base/coordinator.sh" || { echo "SOURCE_FAILED"; exit 1; }
+declare -f _daemon_repair_tuple | grep -q 'yaml_runtime_repair_and_verify_tree' \
+  || { echo "REAL_REPAIR_WRAPPER_ABSENT"; exit 1; }
+echo "WRAPPER=real"
+# The awk harness re-sources no library and _forward_worktree_state calls the real
+# integrity check, so the real library is sourced FIRST — that is also what
+# displaces the suite's inherited top-level stubs, none of which a row-9 case may
+# land on — and only THEN is the one allowed stub installed.
+source "$core/.gaai/core/scripts/lib/worktree-integrity.sh" || { echo "SOURCE_FAILED"; exit 1; }
+declare -f _check_worktree_integrity | grep -q 'WORKTREE-CHECK' \
+  || { echo "REAL_INTEGRITY_ABSENT"; exit 1; }
+eval "$D10_STUB"
+log() { printf '%s\n' "$*"; }
+expected=$(git -C "$PROJECT_DIR" rev-parse origin/staging)
+# The first verdict is earned, not stubbed: the worktree holds one clean commit
+# that is not reachable from origin/staging, and the threshold is 0, so the real
+# check observes commits_ahead > 0 on a valid HEAD and returns 1:recoverable.
+first=$(_forward_worktree_state "$sid" false); first_rc=$?
+echo "FIRST=$first_rc:$first"
+if [ "$via" = revalidate ]; then
+  _forward_revalidate_after_reconcile "$sid" "$expected" \
+    0000000000000000000000000000000000000000 \
+    "$(printf '0%.0s' $(seq 1 64))" recovery false
+  echo "RC=$?"
+else
+  out=$(_forward_prepare_worktree "$sid" "$expected" false)
+  echo "RC=$?"
+  echo "OUT=$out"
+fi
+for f in pyyaml-runtime.pyz PROVENANCE.json LICENSE; do
+  p="$GAAI_WORKTREES_BASE/${sid}-workspace/.gaai/core/vendor/pyyaml/6.0.3/$f"
+  if [ -L "$p" ]; then m=symlink
+  elif stat -f '%Lp' / >/dev/null 2>&1; then m=$(stat -f '%Lp' -- "$p" 2>/dev/null)
+  else m=$(stat -c '%a' -- "$p" 2>/dev/null); fi
+  echo "MODE $f=${m:-absent}"
+done
+BASH
+}
+
+D10_R9_OK=$(d10_row9 none)
+expect "row 9: the D10 pair runs through production's own caller-side wrapper" \
+  grep -q '^WRAPPER=real$' <<<"$D10_R9_OK"
+expect "row 9: the first verdict is earned from the fixture, not from a stub" \
+  grep -q '^FIRST=1:recoverable$' <<<"$D10_R9_OK"
+expect "row 9: the real prepare path returns verified after repair and normalization" \
+  grep -q '^OUT=verified$' <<<"$D10_R9_OK"
+expect "row 9: the recovered tuple is at exact 0644 before the fresh verdict" \
+  test "$(printf '%s\n' "$D10_R9_OK" | grep -c '=644$')" -eq 3
+expect "row 9: the normalizer reported completion on this run" \
+  grep -q 'action=vendor_modes code=ok' <<<"$D10_R9_OK"
+
+D10_R9_AHEAD=$(d10_row9 stillahead)
+expect "row 9: a successful repair and a successful normalization still fail the fresh verdict" \
+  test "$(printf '%s\n' "$D10_R9_AHEAD" | grep -c '^OUT=verified$')" -eq 0
+expect "row 9: the fresh-verdict control proves the second state verdict really runs" \
+  grep -q 'action=vendor_modes code=ok' <<<"$D10_R9_AHEAD"
+
+for D10_R9_FAULT in symlink swap fchmod; do
+  D10_R9_OUT=$(d10_row9 "$D10_R9_FAULT")
+  expect "row 9/$D10_R9_FAULT: the helper refuses with the existing typed asset code" \
+    grep -q 'code=yaml_runtime_asset_invalid' <<<"$D10_R9_OUT"
+  expect "row 9/$D10_R9_FAULT: the non-zero return propagates out of the real prepare path" \
+    test "$(printf '%s\n' "$D10_R9_OUT" | grep -c '^RC=0$')" -eq 0
+  expect "row 9/$D10_R9_FAULT: no verified verdict is produced" \
+    test "$(printf '%s\n' "$D10_R9_OUT" | grep -c '^OUT=verified$')" -eq 0
+  d10_expect_refusal_stage "row 9/$D10_R9_FAULT" "$D10_R9_FAULT" "$D10_R9_OUT"
+done
+
+# The fchmod-failure fault is the strict ordering discriminator: it leaves the
+# worktree content clean and non-ahead, so had the refusal not preceded the fresh
+# state verdict, that verdict would have returned verified/0. Observing no
+# verified with a non-zero return therefore proves the refusal landed first.
+D10_R9_REVAL=$(d10_row9 fchmod revalidate)
+expect "row 9: the refusal reaches revalidation before classification, context, retry or spawn" \
+  test "$(printf '%s\n' "$D10_R9_REVAL" | grep -c '^RC=0$')" -eq 0
+
+printf '\nUnconditional startup normalization of the effective daemon home\n'
+
+# The startup step is otherwise evidenced only by an operator record and by a
+# static coverage census, which observes no execution. This is the durable proof,
+# driving the REAL daemon entrypoint. It never starts a daemon: --status only sets
+# the status flag during argument parsing and its handler runs far downstream of
+# the preflight region, exiting without launching, spawning or pushing anything.
+d10_startup() {
+  local fault="$1" mask="${2:-077}"
+  local base="$TMP/d10-startup-$fault-$mask"
+  local home="$base/home" state="$base/state" stub="$base/stubbin"
+  local core="$ROOT"
+  mkdir -p "$base" "$state" "$stub"
+  if [[ "$fault" == "fchmod" || "$fault" == "owner" ]]; then
+    core=$(d10_private_core "$base/core") || { printf 'PRIVATE_CORE_FAILED\n'; return 0; }
+  fi
+  # Recording stubs. `claude` exists only for a command lookup and is never
+  # executed; `tmux` is necessarily invoked once, as a version probe, by the
+  # pipe-pane capability detection that runs after the startup pair — so the
+  # no-start evidence is an argv contract, never an empty-log contract.
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s/tmux.log"\nif [ "$1" = "-V" ]; then echo "tmux 3.4"; fi\nexit 0\n' \
+    "$stub" > "$stub/tmux"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s/claude.log"\nexit 0\n' "$stub" > "$stub/claude"
+  chmod 0755 "$stub/tmux" "$stub/claude"
+
+  mkdir -p "$home/.gaai/project/contexts/backlog"
+  # The home library layout the entrypoint actually requires.
+  mkdir -p "$home/.gaai/core/scripts/lib"
+  cp "$core/.gaai/core/scripts/delivery-daemon.sh" \
+     "$core/.gaai/core/scripts/backlog-scheduler.sh" "$home/.gaai/core/scripts/"
+  cp "$core/.gaai/core/scripts/lib/chore-commit.sh" \
+     "$core/.gaai/core/scripts/lib/backlog-yaml.sh" \
+     "$core/.gaai/core/scripts/lib/worktree-integrity.sh" \
+     "$core/.gaai/core/scripts/lib/stuck-classifier.sh" \
+     "$core/.gaai/core/scripts/lib/home-branch-guard.sh" \
+     "$core/.gaai/core/scripts/lib/daemon-home.sh" "$home/.gaai/core/scripts/lib/"
+  printf 'items: []\n' > "$home/.gaai/project/contexts/backlog/active.backlog.yaml"
+  # The tuple is materialized under an EXPLICITLY SET umask. The restrictive
+  # condition is constructed here; it is never presented as an observed default.
+  ( umask "$mask"
+    mkdir -p "$home/.gaai/core/vendor/pyyaml/6.0.3"
+    cp "$core/.gaai/core/scripts/lib/yaml-runtime.sh" "$home/.gaai/core/scripts/lib/"
+    cp "$D10_VENDOR/pyyaml-runtime.pyz" "$D10_VENDOR/PROVENANCE.json" \
+       "$D10_VENDOR/LICENSE" "$home/.gaai/core/vendor/pyyaml/6.0.3/" )
+  if [[ "$mask" == "077" ]]; then
+    chmod 0600 "$home/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz" \
+               "$home/.gaai/core/vendor/pyyaml/6.0.3/PROVENANCE.json" \
+               "$home/.gaai/core/vendor/pyyaml/6.0.3/LICENSE"
+  else
+    chmod 0644 "$home/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz" \
+               "$home/.gaai/core/vendor/pyyaml/6.0.3/PROVENANCE.json" \
+               "$home/.gaai/core/vendor/pyyaml/6.0.3/LICENSE"
+  fi
+  git init -q "$home" >/dev/null 2>&1
+  git -C "$home" config user.email test@example.invalid
+  git -C "$home" config user.name test
+  git -C "$home" add -A >/dev/null 2>&1
+  git -C "$home" commit -qm home >/dev/null 2>&1
+  case "$fault" in
+    swap) printf 'swapped\n' > "$home/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz" ;;
+    symlink)
+      rm -f "$home/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz"
+      ln -s "$(d10_link_target)" "$home/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz" ;;
+    owner)
+      awk '{ if ($0 ~ /^                if before\.st_uid != os\.geteuid\(\):$/) print "                if before.st_uid != os.geteuid() + 1:"; else print }' \
+        "$home/.gaai/core/scripts/lib/yaml-runtime.sh" > "$home/helper.tmp" \
+        && mv "$home/helper.tmp" "$home/.gaai/core/scripts/lib/yaml-runtime.sh"
+      chmod 0600 "$home/.gaai/core/scripts/lib/yaml-runtime.sh" ;;
+  esac
+  env GAAI_DAEMON_HOME="$home" GAAI_REPO_ROOT="$base/state" \
+      PATH="$stub:$PATH" \
+      "$TEST_BASH" "$home/.gaai/core/scripts/delivery-daemon.sh" --status 2>&1
+  echo "RC=$?"
+  for f in pyyaml-runtime.pyz PROVENANCE.json LICENSE; do
+    p="$home/.gaai/core/vendor/pyyaml/6.0.3/$f"
+    if [ -L "$p" ]; then m=symlink
+    elif stat -f '%Lp' / >/dev/null 2>&1; then m=$(stat -f '%Lp' -- "$p" 2>/dev/null)
+    else m=$(stat -c '%a' -- "$p" 2>/dev/null); fi
+    echo "MODE $f=${m:-absent}"
+  done
+  echo "TMUX_RECORDS=$( [ -f "$stub/tmux.log" ] && wc -l < "$stub/tmux.log" | tr -d ' ' || echo 0)"
+  echo "TMUX_ARGV=$( [ -f "$stub/tmux.log" ] && tr '\n' ',' < "$stub/tmux.log" || true)"
+  echo "CLAUDE_LOG=$( [ -f "$stub/claude.log" ] && echo present || echo absent)"
+}
+
+D10_START_OK=$(d10_startup none 077)
+expect "startup: a 0600 daemon-home tuple is normalized to exact 0644" \
+  test "$(printf '%s\n' "$D10_START_OK" | grep -c '=644$')" -eq 3
+expect "startup: normalization and verification precede any status output" \
+  test "$(printf '%s\n' "$D10_START_OK" | grep -n 'code=ok' | head -1 | cut -d: -f1)" \
+       -lt "$(printf '%s\n' "$D10_START_OK" | grep -n 'GAAI Delivery Daemon' | head -1 | cut -d: -f1)"
+expect "startup: the run crosses the gate and reaches the status handler" \
+  grep -q 'GAAI Delivery Daemon' <<<"$D10_START_OK"
+expect "startup: exactly one tmux record" \
+  grep -q '^TMUX_RECORDS=1$' <<<"$D10_START_OK"
+expect "startup: that record is the version probe and carries no session or effect verb" \
+  grep -q '^TMUX_ARGV=-V,$' <<<"$D10_START_OK"
+expect "startup: the executor is never executed" \
+  grep -q '^CLAUDE_LOG=absent$' <<<"$D10_START_OK"
+
+D10_START_022=$(d10_startup none 022)
+expect "startup: under an ordinary umask the step is an idempotent no-op that still re-verifies" \
+  test "$(printf '%s\n' "$D10_START_022" | grep -c '=644$')" -eq 3
+expect "startup: the idempotent run still reaches the status handler" \
+  grep -q 'GAAI Delivery Daemon' <<<"$D10_START_022"
+
+for D10_START_FAULT in swap symlink owner fchmod; do
+  D10_START_OUT=$(d10_startup "$D10_START_FAULT" 077)
+  expect "startup/$D10_START_FAULT: the existing typed asset code is emitted" \
+    grep -q 'code=yaml_runtime_asset_invalid' <<<"$D10_START_OUT"
+  expect "startup/$D10_START_FAULT: startup takes the existing fail-closed exit" \
+    grep -q '^RC=1$' <<<"$D10_START_OUT"
+  expect "startup/$D10_START_FAULT: the status handler is never reached" \
+    test "$(printf '%s\n' "$D10_START_OUT" | grep -c 'GAAI Delivery Daemon')" -eq 0
+  d10_expect_refusal_stage "startup/$D10_START_FAULT" "$D10_START_FAULT" "$D10_START_OUT"
+  expect "startup/$D10_START_FAULT: the refusal precedes the version probe, so both stub logs stay absent" \
+    grep -q '^TMUX_RECORDS=0$' <<<"$D10_START_OUT"
+  expect "startup/$D10_START_FAULT: the executor is never executed" \
+    grep -q '^CLAUDE_LOG=absent$' <<<"$D10_START_OUT"
+done
+# Nothing outside the vendor directory is touched, including a symlink's target.
+expect "the symlink faults never changed the link target's mode" \
+  test "$(d10_mode_of "$(d10_link_target)")" = "600"
 
 printf '\nResults: %d passed, %d failed\n' "$PASS" "$FAIL"
 if (( FAIL > 0 )); then

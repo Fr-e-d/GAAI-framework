@@ -65,6 +65,14 @@ POLICY = '.gaai/project/ci/local-admission.json'
 SCHEDULER = '.gaai/core/scripts/backlog-scheduler.sh'
 CANON = '.gaai/core/scripts/lib/local-admission-executor.mjs'
 DAEMON = '.gaai/core/scripts/delivery-daemon.sh'
+YAML_BOUNDARY = '.gaai/core/scripts/lib/yaml-runtime.sh'
+VENDOR_DIR = '.gaai/core/vendor/pyyaml/6.0.3'
+VENDOR_ARCHIVE = VENDOR_DIR + '/pyyaml-runtime.pyz'
+VENDOR_MANIFEST = VENDOR_DIR + '/PROVENANCE.json'
+VENDOR_LICENCE = VENDOR_DIR + '/LICENSE'
+VENDOR_FILES = (VENDOR_ARCHIVE, VENDOR_MANIFEST, VENDOR_LICENCE)
+RUNTIME_TUPLE = (YAML_BOUNDARY,) + VENDOR_FILES
+EXACT_VENDOR_MODE = 0o644
 HEX40 = re.compile(r'^[0-9a-f]{40}$')
 HEX64 = re.compile(r'^[0-9a-f]{64}$')
 MAX_SAFE_INTEGER = (1 << 53) - 1
@@ -269,12 +277,52 @@ def in_progress(repo):
 def target_blob(repo,revision,rel):
   return command(git_argv(repo,'show',f'{revision}:{rel}'),cwd=repo,timeout=api_timeout,rc=3)
 
+def normalize_vendor_modes(repo):
+  # The same narrow, descriptor-bound repair the shell entry performs, inline
+  # because a closed program cannot call a shell function. A checkout made under
+  # a restrictive umask materializes the three vendor files at 0600, which the
+  # runtime boundary refuses on its exact-mode check; this moves exactly those
+  # three back to 0644 and touches nothing else. It reads no content and can
+  # never mask a swap, a symlink or a wrong owner — each is refused here, and
+  # independently by the blob verification that follows.
+  try:
+    parent_fd=os.open(str(repo/VENDOR_DIR),os.O_RDONLY|getattr(os,'O_DIRECTORY',0)|getattr(os,'O_NOFOLLOW',0))
+  except OSError: halt(4,'authority_unavailable')
+  try:
+    parent=os.fstat(parent_fd)
+    if not stat.S_ISDIR(parent.st_mode) or parent.st_uid!=os.geteuid(): halt(4,'authority_unavailable')
+    for name in ('pyyaml-runtime.pyz','PROVENANCE.json','LICENSE'):
+      try: fd=os.open(name,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0),dir_fd=parent_fd)
+      except OSError: halt(4,'authority_unavailable')
+      try:
+        before=os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid(): halt(4,'authority_unavailable')
+        try: os.fchmod(fd,EXACT_VENDOR_MODE)
+        except OSError: halt(4,'authority_unavailable')
+        after=os.fstat(fd)
+        if stat.S_IMODE(after.st_mode)!=EXACT_VENDOR_MODE \
+            or (after.st_dev,after.st_ino)!=(before.st_dev,before.st_ino):
+          halt(4,'authority_unavailable')
+        try: os.fsync(fd)
+        except OSError: pass
+      finally: os.close(fd)
+    try: os.fsync(parent_fd)
+    except OSError: pass
+  finally: os.close(parent_fd)
+
 def prove_checkout(repo,endpoint,expected=None):
   remote=fetch(repo,endpoint)
   if expected and remote!=expected: halt(4,'authority_changed')
   if git(repo,'rev-parse','HEAD')!=remote or in_progress(repo) or git(repo,'status','--porcelain=v1','--untracked-files=all'):
     halt(4,'authority_unavailable')
-  for rel in (DAEMON,SCHEDULER,CANON):
+  # A tree predating the vendored runtime declares none of the tuple and needs
+  # neither the repair nor the extra verification; one declaring some but not all
+  # of it is refused. Normalization runs BEFORE the verification below, so the
+  # verification always judges the final on-disk state.
+  declared=[rel for rel in RUNTIME_TUPLE if git(repo,'ls-tree','--name-only',remote,'--',rel)]
+  if declared and len(declared)!=len(RUNTIME_TUPLE): halt(4,'authority_unavailable')
+  if declared: normalize_vendor_modes(repo)
+  for rel in (DAEMON,SCHEDULER,CANON)+(RUNTIME_TUPLE if declared else ()):
     path=repo/rel
     try: fs=os.lstat(path)
     except OSError: halt(4,'authority_unavailable')
@@ -282,6 +330,8 @@ def prove_checkout(repo,endpoint,expected=None):
     if not stat.S_ISREG(fs.st_mode) or stat.S_ISLNK(fs.st_mode) or len(row)<3 or row[1]!='blob' or row[0] not in ('100644','100755'):
       halt(4,'authority_unavailable')
     if bool(fs.st_mode&0o111)!=(row[0]=='100755') or git(repo,'hash-object','--no-filters','--',str(path))!=row[2]:
+      halt(4,'authority_unavailable')
+    if rel in VENDOR_FILES and stat.S_IMODE(fs.st_mode)!=EXACT_VENDOR_MODE:
       halt(4,'authority_unavailable')
   return remote
 
@@ -293,16 +343,69 @@ def policy_from(repo,revision):
   return value
 
 def immutable_helpers(repo,revision,state_root):
+  # The complete tuple is materialized together, in the same relative shape as
+  # the repository, so the boundary's single vendor-resolution rule resolves from
+  # the materialized helper with no second candidate. The scheduler moves into
+  # that mirrored path for the same reason: it resolves its libraries relative to
+  # its own location, so a flat copy would look for a lib/ directory that the
+  # mirrored layout does not create there.
   directory=Path(tempfile.mkdtemp(prefix='.watch-once-',dir=state_root/'external-merge-settlements'))
   os.chmod(directory,0o700)
   result={}
-  for rel,name in ((SCHEDULER,'scheduler.sh'),(CANON,'canonicalizer.mjs')):
+  layout=((SCHEDULER,'core/scripts/backlog-scheduler.sh',0o700),
+          (CANON,'canonicalizer.mjs',0o600),
+          (YAML_BOUNDARY,'core/scripts/lib/yaml-runtime.sh',0o600),
+          (VENDOR_ARCHIVE,'core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz',EXACT_VENDOR_MODE),
+          (VENDOR_MANIFEST,'core/vendor/pyyaml/6.0.3/PROVENANCE.json',EXACT_VENDOR_MODE),
+          (VENDOR_LICENCE,'core/vendor/pyyaml/6.0.3/LICENSE',EXACT_VENDOR_MODE))
+  for rel,name,mode in layout:
     data=target_blob(repo,revision,rel); path=directory/name
-    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o700 if rel==SCHEDULER else 0o600)
-    try: os.write(fd,data); os.fsync(fd)
+    if path.parent!=directory:
+      path.parent.mkdir(parents=True,exist_ok=True)
+      current=path.parent
+      while current!=directory:
+        os.chmod(current,0o700); current=current.parent
+    fd=os.open(path,os.O_RDWR|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),mode)
+    try:
+      os.write(fd,data); os.fsync(fd)
+      # Mode is applied and re-read on the retained write descriptor, so the mode
+      # a caller later trusts is the mode of the object that was written and not
+      # of whatever a re-resolved pathname points at.
+      os.fchmod(fd,mode)
+      info=os.fstat(fd)
+      if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode)!=mode or info.st_size!=len(data):
+        halt(4,'authority_unavailable')
+      os.lseek(fd,0,0)
+      if os.read(fd,len(data)+1)!=data: halt(4,'authority_unavailable')
     finally: os.close(fd)
     result[rel]=path
   return directory,result
+
+def cleanup_helper_dir(root):
+  # Bounded, post-order, no-symlink-following removal scoped to exactly the
+  # mkdtemp root this run created. The mirrored layout introduces
+  # subdirectories, so a flat one-level unlink would raise, be swallowed, and
+  # leave every settlement directory behind. Entries are classified by lstat and
+  # never by which os.walk list they arrived in: followlinks=False stops the walk
+  # from descending into a symlinked directory but still reports it as a
+  # directory, and a dirnames-means-rmdir assumption reintroduces exactly the
+  # swallowed failure this replaces.
+  try: info=os.lstat(root)
+  except OSError: return
+  if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode): return
+  if not root.name.startswith('.watch-once-') or root.parent.name!='external-merge-settlements': return
+  entries=0
+  for current,dirnames,filenames in os.walk(root,topdown=False,followlinks=False):
+    if len(Path(current).relative_to(root).parts)>8: raise RuntimeError('settlement depth bound')
+    for name in list(dirnames)+list(filenames):
+      entries+=1
+      if entries>4096: raise RuntimeError('settlement entry bound')
+      target=os.path.join(current,name)
+      try: child=os.lstat(target)
+      except OSError: continue
+      if stat.S_ISLNK(child.st_mode) or not stat.S_ISDIR(child.st_mode): os.unlink(target)
+      else: os.rmdir(target)
+  os.rmdir(root)
 
 def node_canonical(helper,raw):
   code="""import fs from'node:fs';import{pathToFileURL}from'node:url';const m=await import(pathToFileURL(process.argv[2]).href);const r=JSON.parse(fs.readFileSync(0,'utf8'));const d=r.receipt_digest;delete r.receipt_digest;process.stdout.write(m.canonicalJson(r)+'\\n'+d);"""
@@ -677,10 +780,13 @@ except Exception:
   sys.exit(4)
 finally:
   if helper_dir:
+    # This runs after the exit code is already decided, so it never converts a
+    # successful settlement into a failure and never masks an earlier halt — it
+    # only makes an incomplete removal observable instead of invisible.
     try:
-      for child in helper_dir.iterdir(): child.unlink()
-      helper_dir.rmdir()
-    except Exception: pass
+      cleanup_helper_dir(helper_dir)
+    except Exception:
+      print(f'watch_once story={sid} outcome=settlement_cleanup_incomplete',file=sys.stderr)
   if transport_dir:
     try: shutil.rmtree(transport_dir)
     except Exception: pass
@@ -923,6 +1029,13 @@ source "$SCRIPT_DIR/lib/chore-commit.sh"
 [[ -z "${_BACKLOG_YAML_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/backlog-yaml.sh" && _BACKLOG_YAML_SH_SOURCED=1
 # shellcheck source=lib/worktree-integrity.sh
 [[ -z "${_WORKTREE_INTEGRITY_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/worktree-integrity.sh" && _WORKTREE_INTEGRITY_SH_SOURCED=1
+# shellcheck source=lib/yaml-runtime.sh
+[[ -z "${_YAML_RUNTIME_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/yaml-runtime.sh"
+if ! declare -F yaml_runtime_repair_and_verify_tree >/dev/null 2>&1; then
+  echo "ERROR: the repository-controlled YAML runtime boundary is unavailable in this process" >&2
+  echo "Expected lib/yaml-runtime.sh to define the runtime entries — check it exists and is readable" >&2
+  exit 1
+fi
 # shellcheck source=lib/stuck-classifier.sh
 [[ -z "${_STUCK_CLASSIFIER_SH_SOURCED:-}" ]] && source "$SCRIPT_DIR/lib/stuck-classifier.sh" && _STUCK_CLASSIFIER_SH_SOURCED=1
 # shellcheck source=lib/home-branch-guard.sh
@@ -1312,11 +1425,71 @@ _per_cycle_home_branch_check() {
   local _repo_root
   _repo_root="$(git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null || echo "$REPO_ROOT")"
   _gaai_provision_daemon_home "$GAAI_DAEMON_HOME" "$TARGET_BRANCH" "$_repo_root" || true
+  # The provisioner re-materializes the home under whatever umask this process
+  # inherited. Under the operator's usual 022 this pair is a no-op that still
+  # re-verifies; under a restrictive one it is the repair. Either way no cycle
+  # continues against an unrepaired or unverifiable runtime tuple.
+  #
+  # The pair must be loaded in this very process. In the daemon it always is —
+  # the boundary presence check at startup exits otherwise — so this guard is
+  # unreachable there; it only replaces the bare "command not found" a process
+  # holding this function without the pair would emit. The outcome is the same
+  # fail-closed refusal either way, and the guard never skips the pair when it
+  # is present: a declared tuple is still normalized and verified here before
+  # the cycle continues to any consumer, retry or spawn.
+  if ! declare -F _daemon_repair_tuple >/dev/null 2>&1; then
+    log "${RED}[HOME-INTEGRITY] the vendored YAML runtime repair-and-verify pair is unavailable in this process${NC}"
+    exit 1
+  fi
+  if ! _daemon_repair_tuple "re-provisioned daemon home" "$PROJECT_DIR"; then
+    log "${RED}[HOME-INTEGRITY] the vendored YAML runtime tuple in the daemon home could not be repaired and verified${NC}"
+    exit 1
+  fi
+  return 0
+}
+
+# The restrictive-umask repair and its verification, in the order the contract
+# requires: normalize, then the worktree-local exact blob/mode verification of the
+# four tuple paths against that tree's own HEAD tree, before any consumer,
+# admission, retry or spawn. A tree whose HEAD predates the tuple declares none of
+# it and needs neither step.
+_daemon_repair_tuple() {
+  local label="$1" root="$2" rc=0
+  local YAML_RUNTIME_ROLE=daemon
+  yaml_runtime_repair_and_verify_tree "$root" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    return "$rc"
+  fi
+  if [[ "${YAML_RUNTIME_TUPLE_STATE:-}" == "absent" ]]; then
+    echo "[INFO] ${label}: tree predates the vendored runtime tuple — nothing to normalize or verify"
+  fi
   return 0
 }
 
 # ── Preflight checks ─────────────────────────────────────────────────────
 mkdir -p "$LOCK_DIR" "$LOG_DIR"
+
+# Unconditional normalization + verification of the effective daemon home, ahead
+# of every other dependency check and before the first YAML boundary consumer,
+# the recovery scan, any wrapper launch, any retry and any spawn.
+#
+# It is unconditional because this process cannot observe which process
+# materialized the tree it is running from, nor under which umask: the normal
+# home provisioning happens in a separate starter process that then executes the
+# home copy of this file. Under a 022 umask this is a no-op that still
+# re-verifies; under a restrictive one (a service unit with a restrictive UMask,
+# a hardened service account, an operator who set one) it is the repair.
+#
+# Consequence, disclosed rather than discovered: an effective home that is not a
+# verifiable tree — for example an exported daemon home whose provisioning
+# failed — now takes this typed refusal instead of continuing in a degraded
+# state, and there is no fallback to the main checkout.
+if ! _daemon_repair_tuple "daemon home" "$PROJECT_DIR"; then
+  echo -e "${RED}ERROR: the vendored YAML runtime tuple of the effective daemon home could not be repaired and verified${NC}"
+  echo "Verify it with: bash .gaai/core/scripts/lib/yaml-runtime.sh --verify-tuple"
+  echo "See the restrictive-umask checkout section of .gaai/core/README.md"
+  exit 1
+fi
 
 if ! command -v python3 &>/dev/null; then
   echo -e "${RED}ERROR: python3 is required${NC}"
@@ -1921,6 +2094,18 @@ _forward_repair_worktree_exact() {
   live=$(git -C "$PROJECT_DIR" rev-parse "origin/${TARGET_BRANCH}" 2>/dev/null) \
     || return 1
   [[ "$live" == "$expected_source" ]] || return 1
+  # The shared recovery helper removes and re-creates the worktree with its own
+  # checkout under whatever umask this process inherited, so a successful repair
+  # hands back a tree whose vendored runtime is at 0600 again whenever that umask
+  # is restrictive — even if the pre-recovery tree had already been normalized.
+  # The helper itself is unchanged; the repair belongs here, before the fresh
+  # state verdict, before any admission, retry or spawn, and before any consumer
+  # reads that tree.
+  if [[ "$repair_rc" -eq 0 ]]; then
+    if ! _daemon_repair_tuple "$sid" "$wt"; then
+      return 1
+    fi
+  fi
   case "$repair_rc" in
     0) return 0 ;;
     2) return 2 ;;

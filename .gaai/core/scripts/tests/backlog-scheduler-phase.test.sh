@@ -15,6 +15,21 @@ fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCHEDULER="$SCRIPT_DIR/../backlog-scheduler.sh"
 
+# Every YAML oracle in this suite runs through the repository-controlled runtime
+# boundary, exactly like the code under test — never an ambient parser.
+# shellcheck source=../lib/yaml-runtime.sh
+. "$SCRIPT_DIR/../lib/yaml-runtime.sh"
+YAML_RUNTIME_ROLE=test
+
+yaml_type_of() {
+  # yaml_type_of <file> <item-index> <field> — the constructed Python type name.
+  yaml_runtime_run_c '
+import sys, yaml
+item = yaml.safe_load(open(sys.argv[1]))["items"][int(sys.argv[2])]
+print(type(item[sys.argv[3]]).__name__)
+' "$1" "$2" "$3"
+}
+
 # ── Create fixture in /tmp ────────────────────────────────────
 FIXTURE=$(mktemp)
 JOURNAL_REPO=$(mktemp -d "${TMPDIR:-/tmp}/scheduler-journal-test.XXXXXX")
@@ -51,7 +66,7 @@ else
   fail "T1a: phase_status not updated — file content: $(grep phase_status $FIXTURE)"
 fi
 # (b) YAML still parses
-if python3 -c "import yaml; yaml.safe_load(open('$FIXTURE'))" 2>/dev/null; then
+if yaml_runtime_validate_file "$FIXTURE" 2>/dev/null; then
   pass "T1b: YAML parses after set-phase-status"
 else
   fail "T1b: YAML parse failed after set-phase-status"
@@ -81,7 +96,7 @@ else
   fail "T3a: delivery_pipeline not updated — file content: $(grep delivery_pipeline $FIXTURE)"
 fi
 # (b) YAML still parses
-if python3 -c "import yaml; yaml.safe_load(open('$FIXTURE'))" 2>/dev/null; then
+if yaml_runtime_validate_file "$FIXTURE" 2>/dev/null; then
   pass "T3b: YAML parses after set-pipeline"
 else
   fail "T3b: YAML parse failed after set-pipeline"
@@ -111,11 +126,7 @@ else
 fi
 
 OUT=$(bash "$SCHEDULER" --set-field TST-REFINED blocked_reason true "$FIXTURE" 2>&1)
-DIRECT_REASON_TYPE=$(python3 -c '
-import sys, yaml
-item = yaml.safe_load(open(sys.argv[1]))["items"][0]
-print(type(item["blocked_reason"]).__name__)
-' "$FIXTURE")
+DIRECT_REASON_TYPE=$(yaml_type_of "$FIXTURE" 0 blocked_reason)
 if [[ "$DIRECT_REASON_TYPE" == bool ]] && grep -q 'blocked_reason: true' "$FIXTURE"; then
   pass "T5b: direct blocked_reason true keeps legacy YAML boolean behavior"
 else
@@ -157,11 +168,7 @@ fi
 
 OUT=$(GAAI_BACKLOG_JOURNAL_DIR="$JOURNAL_DIR" bash "$SCHEDULER" \
   --journal-set J-REFINED blocked_reason 'json:"true"' "$JOURNAL_BACKLOG" 2>&1)
-BLOCKED_REASON_TYPE=$(python3 -c '
-import sys, yaml
-item = yaml.safe_load(open(sys.argv[1]))["items"][0]
-print(type(item["blocked_reason"]).__name__)
-' "$JOURNAL_BACKLOG")
+BLOCKED_REASON_TYPE=$(yaml_type_of "$JOURNAL_BACKLOG" 0 blocked_reason)
 if [[ "$?" -eq 0 && "$BLOCKED_REASON_TYPE" == str ]] \
     && grep -q 'blocked_reason: "true"' "$JOURNAL_BACKLOG"; then
   pass "T6c: policy text remains YAML text after mutation"
@@ -173,11 +180,7 @@ git -C "$JOURNAL_REPO" add .gaai/project/contexts/backlog/active.backlog.yaml
 git -C "$JOURNAL_REPO" commit -qm typed-reason-source
 OUT=$(GAAI_BACKLOG_JOURNAL_DIR="$JOURNAL_DIR" bash "$SCHEDULER" \
   --journal-set J-REFINED blocked_reason 'json:"null"' "$JOURNAL_BACKLOG" 2>&1)
-EXACT_NULL_TYPE=$(python3 -c '
-import sys, yaml
-item = yaml.safe_load(open(sys.argv[1]))["items"][0]
-print(type(item["blocked_reason"]).__name__)
-' "$JOURNAL_BACKLOG")
+EXACT_NULL_TYPE=$(yaml_type_of "$JOURNAL_BACKLOG" 0 blocked_reason)
 if [[ "$?" -eq 0 && "$EXACT_NULL_TYPE" == str ]] \
     && grep -q 'blocked_reason: "null"' "$JOURNAL_BACKLOG"; then
   pass "T6d: exact text null remains distinct from YAML null"

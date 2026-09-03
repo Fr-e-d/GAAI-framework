@@ -29,8 +29,14 @@ items:
 YAML_EOF
 }
 
+# Every YAML oracle in this suite runs through the repository-controlled runtime
+# boundary, exactly like the code under test — never an ambient parser.
+# shellcheck source=../lib/yaml-runtime.sh
+. "$SCRIPT_DIR/../lib/yaml-runtime.sh"
+YAML_RUNTIME_ROLE=test
+
 yaml_field_is_list() {
-  python3 -c "
+  yaml_runtime_run_c "
 import yaml
 with open('$FIXTURE') as fh:
     data = yaml.safe_load(fh)
@@ -91,7 +97,7 @@ bash "$SCHEDULER" --set-field TST-TWO notes 'ordinary text]' "$FIXTURE" >/dev/nu
 if grep -q '^  notes: "contains: punctuation"$' "$FIXTURE" && \
    grep -q '^  status: refined$' "$FIXTURE" && \
    grep -q '^  notes: "ordinary text]"$' "$FIXTURE" && \
-   python3 -c "import yaml; yaml.safe_load(open('$FIXTURE'))"; then
+   yaml_runtime_validate_file "$FIXTURE"; then
   pass "T4: strings remain quoted and snake_case values remain bare"
 else
   fail "T4: scalar formatting regressed"
@@ -110,24 +116,57 @@ OUT=$(bash "$SCHEDULER" --set-field TST-ONE related_decs '[REF-3, REF-4]' "$FIXT
 AFTER=$(cksum "$FIXTURE")
 if [[ "$BEFORE" == "$AFTER" ]] && \
    echo "$OUT" | grep -q 'uses block-style YAML' && \
-   python3 -c "import yaml; yaml.safe_load(open('$FIXTURE'))"; then
+   yaml_runtime_validate_file "$FIXTURE"; then
   pass "T5a: same-indent block list fails at the explicit guard without corruption"
 else
   fail "T5a: same-indent block-list guard did not fail closed: $OUT"
 fi
 
-mkdir -p "$FIXTURE_DIR/no-yaml"
-cat > "$FIXTURE_DIR/no-yaml/yaml.py" << 'PY_EOF'
-raise ImportError("PyYAML intentionally unavailable for this test")
-PY_EOF
+# T5b used to simulate "no parser available" by shadowing the module through an
+# ambient PYTHONPATH. That is no longer a reachable condition: the runtime is
+# repository-controlled and the boundary runs isolated, so an ambient PYTHONPATH
+# cannot reach it. The two properties that matter are asserted directly instead.
+#
+# (a) Hostile ambient influence does not change the outcome — the run still
+#     succeeds through the attested runtime.
 BEFORE=$(cksum "$FIXTURE")
-OUT=$(PYTHONPATH="$FIXTURE_DIR/no-yaml" bash "$SCHEDULER" --set-field TST-ONE related_decs '[REF-3, REF-4]' "$FIXTURE" 2>&1 || true)
+mkdir -p "$FIXTURE_DIR/hostile"
+cat > "$FIXTURE_DIR/hostile/yaml.py" << 'PY_EOF'
+raise ImportError("an ambient parser must never be reachable from the boundary")
+PY_EOF
+OUT=$(PYTHONPATH="$FIXTURE_DIR/hostile" bash "$SCHEDULER" --set-field TST-ONE related_decs '[REF-3, REF-4]' "$FIXTURE" 2>&1 || true)
 AFTER=$(cksum "$FIXTURE")
 if [[ "$BEFORE" == "$AFTER" ]] && echo "$OUT" | grep -q 'uses block-style YAML'; then
-  pass "T5b: block-list guard remains fail-closed without PyYAML"
+  pass "T5b: the block-list guard holds under a hostile ambient PYTHONPATH"
 else
-  fail "T5b: no-PyYAML path modified the block list or missed the guard: $OUT"
+  fail "T5b: hostile PYTHONPATH changed the guard outcome: $OUT"
 fi
+
+# (b) A private core copy whose runtime tuple is corrupt fails CLOSED: the write
+#     never happens and the failure is typed, rather than being skipped the way
+#     the old optional-import path allowed.
+PRIVATE_CORE="$FIXTURE_DIR/private-core"
+mkdir -p "$PRIVATE_CORE/scripts/lib" "$PRIVATE_CORE/vendor/pyyaml/6.0.3"
+cp "$SCHEDULER" "$PRIVATE_CORE/scripts/backlog-scheduler.sh"
+cp "$SCRIPT_DIR/../lib/yaml-runtime.sh" "$SCRIPT_DIR/../lib/backlog-journal.sh" "$PRIVATE_CORE/scripts/lib/"
+cp "$SCRIPT_DIR/../../vendor/pyyaml/6.0.3/PROVENANCE.json" \
+   "$SCRIPT_DIR/../../vendor/pyyaml/6.0.3/LICENSE" "$PRIVATE_CORE/vendor/pyyaml/6.0.3/"
+printf 'corrupt\n' > "$PRIVATE_CORE/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz"
+chmod 0644 "$PRIVATE_CORE/vendor/pyyaml/6.0.3/"*
+write_fixture
+BEFORE=$(cksum "$FIXTURE")
+set +e
+OUT=$(bash "$PRIVATE_CORE/scripts/backlog-scheduler.sh" --set-field TST-ONE notes 'replacement' "$FIXTURE" 2>&1)
+T5C_RC=$?
+set -e
+AFTER=$(cksum "$FIXTURE")
+if [[ "$T5C_RC" -ne 0 ]] && [[ "$BEFORE" == "$AFTER" ]] \
+   && echo "$OUT" | grep -q 'code=yaml_runtime_asset_invalid'; then
+  pass "T5c: a corrupt runtime tuple fails closed before the write, with a typed diagnostic"
+else
+  fail "T5c: corrupt runtime tuple did not fail closed: rc=$T5C_RC out=$OUT"
+fi
+write_fixture
 
 echo "T6: refuses block-scalar rewrites before data can be orphaned"
 write_fixture

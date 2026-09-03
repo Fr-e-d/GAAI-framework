@@ -851,7 +851,10 @@ _test_gate_required_controller_paths() {
     ".gaai/core/scripts/lib/stuck-classifier.sh" \
     ".gaai/core/scripts/lib/worktree-integrity.sh" \
     ".gaai/core/scripts/lib/test-gate.sh" \
-    ".gaai/core/scripts/lib/delivery-routing.sh"
+    ".gaai/core/scripts/lib/delivery-routing.sh" \
+    ".gaai/core/scripts/lib/yaml-runtime.sh" \
+    ".gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz" \
+    ".gaai/core/vendor/pyyaml/6.0.3/PROVENANCE.json"
 }
 
 # Project identity stays in the base-held project policy. The generic

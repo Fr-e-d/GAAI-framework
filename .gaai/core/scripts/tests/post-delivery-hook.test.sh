@@ -13,10 +13,19 @@ pass() { echo "  PASS: $1"; PASS_COUNT=$(( PASS_COUNT + 1 )); }
 fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 
 SCRIPTS="$(cd "$(dirname "$0")/.." && pwd)"
+VENDOR_SRC="$(cd "$(dirname "$0")/../../vendor/pyyaml/6.0.3" && pwd)"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gaai-s14-hook-XXXXXX")"
 SANDBOX="$(cd "$SANDBOX" && pwd -P)"
 trap 'rm -rf "$SANDBOX"' EXIT
 BACKLOG_REL=".gaai/project/contexts/backlog/active.backlog.yaml"
+
+_mode_of() {
+  if stat -f '%Lp' / >/dev/null 2>&1; then
+    stat -f '%Lp' -- "$1" 2>/dev/null
+  else
+    stat -c '%a' -- "$1" 2>/dev/null
+  fi
+}
 
 setup_repo() {
   local repo="$1" remote="${1}.git"
@@ -30,6 +39,17 @@ setup_repo() {
   mkdir -p "$repo/.gaai/project/contexts/backlog"
   mkdir -p "$repo/.gaai/core"
   cp -R "$SCRIPTS" "$repo/.gaai/core/scripts"
+  # The lifecycle writer parses YAML through the vendored runtime, so the
+  # complete tuple has to exist AND be committed in this sandbox: the base-held
+  # assertion binds the parser to the exact remote blob before any lifecycle
+  # write, exactly as it binds the writer itself.
+  mkdir -p "$repo/.gaai/core/vendor/pyyaml/6.0.3"
+  cp "$VENDOR_SRC/pyyaml-runtime.pyz" "$VENDOR_SRC/PROVENANCE.json" \
+     "$VENDOR_SRC/LICENSE" "$repo/.gaai/core/vendor/pyyaml/6.0.3/"
+  # cp without -p applies the current umask; the runtime requires exactly 0644.
+  chmod 0644 "$repo/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz" \
+             "$repo/.gaai/core/vendor/pyyaml/6.0.3/PROVENANCE.json" \
+             "$repo/.gaai/core/vendor/pyyaml/6.0.3/LICENSE"
   cat > "$repo/$BACKLOG_REL" <<'YAML'
 items:
 - id: TST-S14
@@ -78,9 +98,23 @@ items:
   pr_number: null
   pr_status: null
 YAML
-  git -C "$repo" add "$BACKLOG_REL" .gaai/core/scripts
+  git -C "$repo" add "$BACKLOG_REL" .gaai/core/scripts .gaai/core/vendor/pyyaml/6.0.3
   git -C "$repo" commit -q -m initial
   git -C "$repo" push -q -u origin staging
+  # The tuple is verified against its own manifest inside the fixture before any
+  # case runs, so a mode or digest problem here is attributed to the fixture and
+  # not to the code under test.
+  local rel
+  for rel in pyyaml-runtime.pyz PROVENANCE.json LICENSE; do
+    if [[ "$(_mode_of "$repo/.gaai/core/vendor/pyyaml/6.0.3/$rel")" != "644" ]]; then
+      echo "  FAIL: fixture vendor file $rel is not at exact 0644" >&2
+      return 1
+    fi
+  done
+  ( cd "$repo" && "$TEST_BASH" .gaai/core/scripts/lib/yaml-runtime.sh --verify-tuple >/dev/null ) || {
+    echo "  FAIL: fixture runtime tuple did not verify against its manifest" >&2
+    return 1
+  }
 }
 
 echo "Lifecycle caller cutover tests"
@@ -731,6 +765,45 @@ if [[ "$T5_ASSET_RC" -ne 0 ]] \
   pass "T5a: candidate asset tamper cannot author lifecycle state"
 else
   fail "T5a: candidate asset tamper was not rejected before persistence"
+fi
+
+# T5d (the base-held runtime falsifier): replace the checked-out parser archive
+# with different bytes AND rewrite the manifest so the pair stays internally
+# consistent — matching size and digest. A self-consistency check alone would
+# accept this; only the base-held comparison against the exact remote blob
+# refuses it. Without that binding a candidate could leave the three original
+# assets pristine and swap the parser underneath them.
+T5D_ARCHIVE="$REPO/.gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz"
+T5D_MANIFEST="$REPO/.gaai/core/vendor/pyyaml/6.0.3/PROVENANCE.json"
+cp "$T5D_ARCHIVE" "$SANDBOX/t5d-archive.orig"
+cp "$T5D_MANIFEST" "$SANDBOX/t5d-manifest.orig"
+python3 - "$T5D_ARCHIVE" "$T5D_MANIFEST" <<'PY'
+import hashlib, json, sys
+
+archive_path, manifest_path = sys.argv[1:3]
+data = open(archive_path, "rb").read() + b"\n# consistent tamper\n"
+open(archive_path, "wb").write(data)
+manifest = json.loads(open(manifest_path, "rb").read().decode("utf-8"))
+manifest["output"]["size_bytes"] = len(data)
+manifest["output"]["sha256"] = hashlib.sha256(data).hexdigest()
+open(manifest_path, "w").write(
+    json.dumps(manifest, sort_keys=True, indent=2, separators=(",", ": "),
+               ensure_ascii=True) + "\n")
+PY
+chmod 0644 "$T5D_ARCHIVE" "$T5D_MANIFEST"
+T5D_RC=0
+( cd "$REPO" && _journal_persist_lifecycle TST-OTHER dispatch.plan status in_progress ) \
+  2>"$SANDBOX/t5d-runtime.log" || T5D_RC=$?
+cp "$SANDBOX/t5d-archive.orig" "$T5D_ARCHIVE"
+cp "$SANDBOX/t5d-manifest.orig" "$T5D_MANIFEST"
+chmod 0644 "$T5D_ARCHIVE" "$T5D_MANIFEST"
+T5D_REMOTE=$(git -C "$REPO" show "origin/staging:$BACKLOG_REL")
+if [[ "$T5D_RC" -ne 0 ]] \
+    && grep -q 'outcome=rejected reason=asset_untrusted' "$SANDBOX/t5d-runtime.log" \
+    && printf '%s\n' "$T5D_REMOTE" | awk '/TST-OTHER/{s=1} s&&/status: refined/{found=1} END{exit !found}'; then
+  pass "T5d: an internally consistent runtime tamper is still base-held-rejected"
+else
+  fail "T5d: consistent archive+manifest tamper was not rejected before persistence"
 fi
 
 mkdir -p "$LOCK_DIR/.journal-runs"

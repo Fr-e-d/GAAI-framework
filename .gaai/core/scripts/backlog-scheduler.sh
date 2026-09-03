@@ -199,10 +199,63 @@ elif ! $FROM_STDIN; then
   fi
 fi
 
+# This guard covers the stdlib-only Python modes (--list, --next, --ready-ids,
+# --graph, --conflicts, --set-status, archive handling). They import no YAML and
+# must keep working with nothing but python3, so neither the guard nor its exit
+# code changes here.
 if ! command -v python3 &>/dev/null; then
   >&2 echo "Error: python3 is required for backlog-scheduler.sh"
   exit 3
 fi
+
+# ── YAML-validating branches only ─────────────────────────────────────────────
+# The four branches that parse YAML use the repository-controlled runtime
+# boundary. The boundary is loaded inside those branches, never at file scope, so
+# the stdlib-only modes above acquire no runtime-tuple dependency.
+_scheduler_source_yaml_boundary() {
+  if [[ -z "${_YAML_RUNTIME_SH_SOURCED:-}" ]]; then
+    if ! source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/yaml-runtime.sh"; then
+      >&2 echo "Error: YAML runtime boundary unavailable"
+      return 30
+    fi
+  fi
+  return 0
+}
+
+# Post-write validation of the file that was just written. The parse-error
+# disposition is unchanged (a warning, existing exit code); an unavailable or
+# untrusted runtime is now a hard error instead of a silent skip.
+_scheduler_validate_after_write() {
+  # This runs AFTER the mutation is on disk, so its status must not be read as
+  # "the mutation failed". A caller that treats a non-zero exit that way will
+  # re-drive a write that already happened, or report to a human that nothing
+  # changed when something did.
+  #
+  # Two outcomes are therefore separated. A parse error (36) means the write
+  # produced a document the boundary refuses -- that is about the file, and it is
+  # already surfaced as a warning without claiming the write failed. Every other
+  # non-zero status means the boundary itself could not run (missing tuple,
+  # unusable interpreter, invalid manifest). The mutation still succeeded; only
+  # the post-write check is unavailable. Saying so, and returning 0, keeps the
+  # caller's contract honest: exit status describes the MUTATION, and a check
+  # that could not run is reported on stderr rather than impersonating a failure.
+  local file="$1" rc=0
+  local YAML_RUNTIME_ROLE=scheduler
+  if ! _scheduler_source_yaml_boundary; then
+    >&2 echo "Warning: the YAML runtime is unavailable — the write completed but was not re-validated"
+    return 0
+  fi
+  yaml_runtime_validate_file "$file" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "$rc" -eq 36 ]]; then
+    >&2 echo "Warning: YAML validation after write reported a parse error"
+    return 0
+  fi
+  >&2 echo "Warning: the YAML runtime could not validate after the write (code $rc) — the write itself completed"
+  return 0
+}
 
 # ── set-status mode: modify file in-place ────────────────────
 if [[ "$MODE" == "set-status" ]]; then
@@ -323,19 +376,13 @@ if not modified:
 with open(file_path, 'w') as f:
     f.writelines(lines)
 
-# Validate YAML after write
-try:
-    import yaml as _yaml
-    with open(file_path) as _f:
-        _yaml.safe_load(_f)
-except ImportError:
-    pass  # pyyaml not available — skip inline validation
-except Exception as e:
-    print(f'Warning: YAML validation after write: {e}', file=sys.stderr)
-
 print(f'{target_id} phase_status -> {new_value}')
 " "$BACKLOG_FILE" "$SET_PHASE_STATUS_ID" "$SET_PHASE_STATUS_VAL"
-  exit $?
+  _SCHED_RC=$?
+  if [[ "$_SCHED_RC" -eq 0 ]]; then
+    _scheduler_validate_after_write "$BACKLOG_FILE" || exit $?
+  fi
+  exit "$_SCHED_RC"
 fi
 
 # ── set-pipeline mode ─────────────────────────────────────────
@@ -379,19 +426,13 @@ if not modified:
 with open(file_path, 'w') as f:
     f.writelines(lines)
 
-# Validate YAML after write
-try:
-    import yaml as _yaml
-    with open(file_path) as _f:
-        _yaml.safe_load(_f)
-except ImportError:
-    pass  # pyyaml not available — skip inline validation
-except Exception as e:
-    print(f'Warning: YAML validation after write: {e}', file=sys.stderr)
-
 print(f'{target_id} pipeline -> {new_value}')
 " "$BACKLOG_FILE" "$SET_PIPELINE_ID" "$SET_PIPELINE_VAL"
-  exit $?
+  _SCHED_RC=$?
+  if [[ "$_SCHED_RC" -eq 0 ]]; then
+    _scheduler_validate_after_write "$BACKLOG_FILE" || exit $?
+  fi
+  exit "$_SCHED_RC"
 fi
 
 # ── reset mode: atomically reset status + phase_status + started_at ─────────
@@ -476,16 +517,6 @@ if not phase_done:
 with open(file_path, 'w') as f:
     f.writelines(new_lines)
 
-# Validate YAML after write
-try:
-    import yaml as _yaml
-    with open(file_path) as _f:
-        _yaml.safe_load(_f)
-except ImportError:
-    pass
-except Exception as e:
-    print(f'Warning: YAML validation after write: {e}', file=sys.stderr)
-
 # Handle --clear-retry-count
 if clear_retry:
     retry_file = os.path.join(os.path.dirname(file_path), '.delivery-locks', '.retry-counts')
@@ -503,7 +534,11 @@ if clear_retry:
 
 print(f'{target_id} reset: status->refined, phase_status->not_started, started_at removed')
 " "$BACKLOG_FILE" "$RESET_ID" "$RESET_CLEAR_RETRY"
-  exit $?
+  _SCHED_RC=$?
+  if [[ "$_SCHED_RC" -eq 0 ]]; then
+    _scheduler_validate_after_write "$BACKLOG_FILE" || exit $?
+  fi
+  exit "$_SCHED_RC"
 fi
 
 # ── journal-set mode: durable emission is required before mutation ──────────
@@ -586,8 +621,13 @@ PY
 fi
 
 # ── set-field mode: set any field on a backlog item ──────────
+# The validation here runs on the MODIFIED IN-MEMORY LINES before the file is
+# written, so a path-level pre-write call would validate the wrong bytes and
+# silently drop the guard. The whole program therefore runs through the boundary.
 if [[ "$MODE" == "set-field" ]]; then
-  python3 -c "
+  _scheduler_source_yaml_boundary || exit $?
+  YAML_RUNTIME_ROLE=scheduler
+  yaml_runtime_run_c "
 import sys, re
 
 file_path, target_id, field_name, field_value, force_string = sys.argv[1:6]
@@ -742,11 +782,9 @@ if not field_found:
     new_line = f'{indent}{field_name}: {formatted}\n'
     lines.insert(insert_after + 1, new_line)
 
+import yaml
 try:
-    import yaml
     yaml.safe_load(''.join(lines))
-except ImportError:
-    pass
 except Exception as exc:
     print(f'Error: --set-field would produce invalid YAML: {exc}', file=sys.stderr)
     sys.exit(1)

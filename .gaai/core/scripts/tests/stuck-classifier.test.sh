@@ -173,9 +173,22 @@ expect_action "unratified lifecycle value blocks" block_invalid_record invalid_l
 
 echo "Descriptor/path replacement is rejected"
 write_snapshot "$SNAP" in_progress implemented '"2026-08-25T10:00:00Z"'
-RACE_SITE="$SANDBOX/race-site"
-mkdir "$RACE_SITE"
-cat > "$RACE_SITE/sitecustomize.py" <<'PY'
+
+# WHY THE TRANSPORT CHANGED, AND WHAT DID NOT.
+# This falsifier used to reach the reader through an ambient PYTHONPATH plus a
+# sitecustomize module. That transport is deliberately unreachable now: the YAML
+# program runs through the repository-controlled boundary under isolated
+# interpreter flags, which is exactly the property the isolation proof further
+# down asserts. The FALSIFIER ITSELF is preserved, byte-for-byte in behaviour —
+# the identical os.open monkeypatch body moved into a test-only stdin prelude,
+# injected here by redefining the boundary entry inside this test subshell. The
+# prelude executes inside the runtime process after the archive has been opened,
+# verified and imported, so the swap still lands strictly AFTER the reader opens
+# the snapshot, and the assertion is unchanged: rejected, with zero stdout and
+# zero stderr leak. Production gains no seam. Do not "restore" the old transport,
+# and do not delete the coverage — the block immediately below is what it carried.
+RACE_PRELUDE="$SANDBOX/race-prelude.py"
+cat > "$RACE_PRELUDE" <<'PY'
 import os
 
 _real_open = os.open
@@ -199,15 +212,70 @@ PY
 cp "$SNAP" "$SANDBOX/replacement.yaml"
 chmod 600 "$SANDBOX/replacement.yaml"
 RACE_BLOB=$(blob_for "$SNAP")
-if PYTHONPATH="$RACE_SITE" GAAI_RACE_TARGET="$SNAP" \
-    GAAI_RACE_REPLACEMENT="$SANDBOX/replacement.yaml" \
+(
+  _yr_real=$(declare -f yaml_runtime_run)
+  yaml_runtime_run() {                    # test subshell only; production has no seam
+    { cat "$RACE_PRELUDE"; cat; } | { eval "${_yr_real/#yaml_runtime_run/_yr_orig}"; _yr_orig "$@"; }
+  }
+  GAAI_RACE_TARGET="$SNAP" GAAI_RACE_REPLACEMENT="$SANDBOX/replacement.yaml" \
     forward_classify_snapshot TST-FWD "$SNAP" "$SOURCE_SHA" "$RACE_BLOB" \
-      recovery verified true "$NOW" >"$SANDBOX/race.out" 2>"$SANDBOX/race.err"; then
+      recovery verified true "$NOW"
+) >"$SANDBOX/race.out" 2>"$SANDBOX/race.err"
+RACE_RC=$?
+if [[ "$RACE_RC" -eq 0 ]]; then
   fail "path replacement after open was accepted"
 elif [[ ! -s "$SANDBOX/race.out" && ! -s "$SANDBOX/race.err" ]]; then
   pass "path replacement after open is rejected"
 else
   fail "path replacement rejection leaked evidence"
+fi
+
+# Pre-call replacement is judged on CONTENT, not on inode number: the reader
+# binds (device, inode) across its own lstat/fstat/lstat and binds the bytes it
+# read to the pinned blob. These four cases pin that contract exactly.
+write_snapshot "$SNAP" in_progress implemented '"2026-08-25T10:00:00Z"'
+PINNED_BLOB=$(blob_for "$SNAP")
+printf 'items: []\n' > "$SANDBOX/different.yaml"
+chmod 600 "$SANDBOX/different.yaml"
+mv "$SANDBOX/different.yaml" "$SNAP"
+expect_rejected "pre-call replacement with different content at a different inode is rejected" \
+  forward_classify_snapshot TST-FWD "$SNAP" "$SOURCE_SHA" "$PINNED_BLOB" \
+    recovery verified true "$NOW"
+
+write_snapshot "$SNAP" in_progress implemented '"2026-08-25T10:00:00Z"'
+PINNED_BLOB=$(blob_for "$SNAP")
+mv "$SNAP" "$SANDBOX/renamed-away.yaml"
+expect_rejected "pre-call rename to absence is rejected" \
+  forward_classify_snapshot TST-FWD "$SNAP" "$SOURCE_SHA" "$PINNED_BLOB" \
+    recovery verified true "$NOW"
+
+write_snapshot "$SNAP" in_progress implemented '"2026-08-25T10:00:00Z"'
+PINNED_BLOB=$(blob_for "$SNAP")
+cp "$SNAP" "$SANDBOX/identical-twin.yaml"
+chmod 600 "$SANDBOX/identical-twin.yaml"
+mv "$SANDBOX/identical-twin.yaml" "$SNAP"
+expect_action "byte-identical replacement at a different inode is accepted" resume resumable \
+  forward_classify_snapshot TST-FWD "$SNAP" "$SOURCE_SHA" "$PINNED_BLOB" \
+    recovery verified true "$NOW"
+
+echo "Ambient influence cannot reach the runtime"
+HOSTILE_SITE="$SANDBOX/hostile-site"
+mkdir -p "$HOSTILE_SITE"
+cat > "$HOSTILE_SITE/sitecustomize.py" <<PY
+open("$SANDBOX/hostile-marker", "w").write("reached")
+PY
+cat > "$HOSTILE_SITE/yaml.py" <<'PY'
+raise ImportError("an ambient parser must never be reachable from the boundary")
+PY
+write_snapshot "$SNAP" in_progress implemented '"2026-08-25T10:00:00Z"'
+ISOLATION_OUT=$(PYTHONPATH="$HOSTILE_SITE" PYTHONSTARTUP="$HOSTILE_SITE/sitecustomize.py" \
+  classify "$SNAP" recovery verified true 2>"$SANDBOX/isolation.err")
+ISOLATION_RC=$?
+if [[ "$ISOLATION_RC" -eq 0 ]] && [[ "$ISOLATION_OUT" == resume$'\t'resumable* ]] \
+   && [[ ! -e "$SANDBOX/hostile-marker" ]]; then
+  pass "classification succeeds under a hostile PYTHONPATH and the ambient marker is never written"
+else
+  fail "ambient influence was observable (rc=$ISOLATION_RC out=$ISOLATION_OUT marker=$([[ -e "$SANDBOX/hostile-marker" ]] && echo present || echo absent))"
 fi
 
 echo "Immutable recovery contexts"
