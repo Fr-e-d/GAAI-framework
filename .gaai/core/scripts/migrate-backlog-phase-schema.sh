@@ -16,8 +16,9 @@ set -euo pipefail
 # Pre-condition:
 #   The delivery daemon MUST be stopped before running this
 #   script to ensure no concurrent writes to the backlog.
-#   Stop the daemon first:
-#     bash .gaai/core/scripts/daemon-start.sh --stop
+#   Stop the daemon first, through the privileged executable
+#   entry (a plain `bash <script>` entry is refused):
+#     .gaai/core/scripts/daemon-start.sh --stop
 #
 # Idempotency:
 #   Safe to run multiple times. Entries that already have
@@ -59,9 +60,16 @@ fi
 # The daemon writes to this same backlog file. Concurrent
 # writes during migration would corrupt the YAML. The backup
 # provides recovery but prevention is preferable.
+# NOTE: this ambient process scan is a migration PRECONDITION only. It is not, and
+# must never become, daemon ownership evidence: process ownership is proven by the
+# durable owner record and the private tmux server that `daemon-start.sh` maintains,
+# never inferred from a pgrep match. A false negative here costs a backup restore;
+# treating it as authority would reintroduce exactly the ambient-state inference
+# E1003S07 removed.
 if pgrep -f "delivery-daemon.sh" > /dev/null 2>&1; then
-  echo "ERROR: delivery-daemon.sh is running. Stop it first:" >&2
-  echo "  bash .gaai/core/scripts/daemon-start.sh --stop" >&2
+  echo "ERROR: delivery-daemon.sh is running. Stop it first, through the" >&2
+  echo "       privileged executable entry (a plain \`bash <script>\` entry is refused):" >&2
+  echo "  .gaai/core/scripts/daemon-start.sh --stop" >&2
   exit 1
 fi
 

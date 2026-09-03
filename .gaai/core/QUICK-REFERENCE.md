@@ -49,7 +49,21 @@ Nothing gets built that isn't in the backlog. Discovery decides *what*. Delivery
 /gaai-deliver --stop                   # graceful shutdown
 ```
 
-One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`
+One-time setup (invoke directly — a plain `bash <script>` entry is refused):
+
+```bash
+.gaai/core/scripts/daemon-setup.sh          # provision/update the daemon home + check prerequisites
+.gaai/core/scripts/daemon-setup.sh --verify-only   # report what setup would do, change nothing
+.gaai/core/scripts/daemon-start.sh          # start (verify-only: never provisions or repairs)
+.gaai/core/scripts/daemon-start.sh --status # read-only lifecycle status
+.gaai/core/scripts/daemon-start.sh --stop   # graceful shutdown
+.gaai/core/scripts/daemon-start.sh --monitor  # presentation UI (after the status subprotocol)
+```
+
+If startup refuses with `home_identity_invalid` / `rerun_setup`, run `daemon-setup.sh`.
+If it refuses with `operator_disposition_required`, the home or lifecycle carries evidence
+(dirty tree, foreign session, interrupted setup) that a human must dispose of first — nothing
+is repaired automatically.
 
 ---
 

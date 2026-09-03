@@ -109,7 +109,9 @@ The **Delivery Daemon** automates delivery end-to-end:
 
 **Runtime model:** Claude and Codex are both explicitly supported OSS autonomous delivery executors, under one governed Plan/Impl/QA phase contract. Claude remains the default (`GAAI_DAEMON_EXECUTOR` unset → `claude`, binary in PATH, local); set `GAAI_DAEMON_EXECUTOR=codex` to use the Codex headless adapter (`codex` binary in PATH, local). An unknown or unavailable executor stops before governed work begins with an actionable error — the daemon never silently crosses from one executor to the other. Both executors share identical isolation, backlog authority, QA gates, and PR lifecycle; adapter syntax differs, Story/AC/permission authority does not. Discovery and interactive Delivery work with any AI coding tool. See `core/compat/COMPAT.md` for the full 3-tier compatibility model.
 
-Usage: `/gaai-daemon` to start, `/gaai-daemon --stop` to stop. One-time setup: `bash .gaai/core/scripts/daemon-setup.sh`.
+Usage: `/gaai-daemon` to start, `/gaai-daemon --stop` to stop. One-time setup: `.gaai/core/scripts/daemon-setup.sh`.
+
+**Privileged entry (required).** `daemon-setup.sh` and `daemon-start.sh` are executables carrying a `#!/bin/bash -p` shebang and must be invoked *directly*. Prefixing either path with a plain `bash` interpreter is refused with `entry_authority_invalid`, because a non-privileged interpreter has already applied `BASH_ENV` and imported exported functions before the script's first instruction. The only alternative is an absolute, verified Bash invoked `--noprofile --norc -p <script>`. `daemon-setup.sh` is also the *only* thing that may create or update the daemon home worktree; startup and the running daemon verify it and never repair it.
 
 Git hooks are managed via dispatchers in `.githooks/` that delegate to scripts in `.gaai/core/hooks/<hook>.d/` (framework) and `.gaai/project/hooks/<hook>.d/` (project-specific). The installer (`install.sh`) sets up all dispatchers automatically.
 

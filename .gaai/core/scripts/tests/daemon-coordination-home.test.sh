@@ -1,574 +1,426 @@
 #!/usr/bin/env bash
-# daemon-coordination-home.test.sh — AC6 sandbox tests for E1003S03 + E1003S06
+# daemon-coordination-home.test.sh — E1003S07 AC6 live-coordination matrices
 #
-# Covers (E1003S03):
-#   TC1: coordination push from gaai-daemon-home lands on origin/staging (AC6a)
-#   TC2: dirty / branch-switched main checkout is INERT to daemon (AC6b — main-checkout-decoupled proof)
-#   TC3: completeness backstop — zero coordination push sites lack HEAD: refspec (AC6c)
-#   TC4: home is on gaai-daemon-home; main checkout's staging ref never modified (AC6d)
+# Covers the fail-closed live boundary: private-server lifecycle and races, the
+# durable pending -> bound -> running transitions and every crash point between
+# them, the descriptor-bound release barrier, exact settlement, and preservation
+# instead of repair. Also guards the orthogonal wrapper-drain authority against
+# regression, and proves `--status` is a completed read-only subprotocol.
 #
-# Covers (E1003S06 — daemon-process provisioner loading):
-#   TC5: _gaai_provision_daemon_home is defined in the daemon's OWN process, not inherited (AC1)
-#   TC6: wrong-branch home is repaired at the current target tip via the in-process provisioner (AC2)
-#   TC7: daemon startup fails closed, without leaking, when the capability is unavailable (AC3)
-#   TC8: direct mode (GAAI_DAEMON_HOME unset) stays inert — no git side effects (AC4)
-#   TC9: static neutrality guard rails — single SCRIPT_DIR-relative source, no product token (AC5)
-#
-# Usage: bash .gaai/core/scripts/tests/daemon-coordination-home.test.sh
+# Usage: .gaai/core/scripts/tests/daemon-coordination-home.test.sh
 
 set -uo pipefail
 
 PASS_COUNT=0
 FAIL_COUNT=0
-
 pass() { echo "  PASS: $1"; PASS_COUNT=$(( PASS_COUNT + 1 )); }
 fail() { echo "  FAIL: $1"; FAIL_COUNT=$(( FAIL_COUNT + 1 )); }
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SCRIPTS_DIR="$SCRIPT_DIR/.."
-DAEMON_HOME_LIB="$SCRIPTS_DIR/lib/daemon-home.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPTS_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 
-if [[ ! -f "$DAEMON_HOME_LIB" ]]; then
-  echo "ERROR: daemon-home lib not found at $DAEMON_HOME_LIB"
-  exit 1
-fi
+# shellcheck source=daemon-home-provision.test.sh
+GAAI_HOME_FIXTURE_ONLY=1 source "$SCRIPT_DIR/daemon-home-provision.test.sh"
 
-# Source the provisioner under test
-# shellcheck source=../lib/daemon-home.sh
-source "$DAEMON_HOME_LIB"
+for _tool in git tmux; do
+  command -v "$_tool" >/dev/null 2>&1 || { echo "ERROR: $_tool required"; exit 1; }
+done
 
-# Resolve to physical path — git canonicalises worktree paths via realpath()
-# so /tmp (macOS symlink → /private/tmp) would cause grep mismatches.
-_FIXTURE_RAW="/tmp/gaai-coord-home-test-$$"
-mkdir -p "$_FIXTURE_RAW"
-FIXTURE_DIR="$(cd "$_FIXTURE_RAW" && pwd -P 2>/dev/null || echo "$_FIXTURE_RAW")"
+ROOT="$(mktemp -d "${TMPDIR:-/tmp}/gaai-coord-XXXXXX")"
+ROOT="$(cd "$ROOT" && pwd -P)"
+PROJ="$ROOT/proj"
+trap 'gaai_teardown "$ROOT" "$PROJ"' EXIT
+gaai_build_fixture "$ROOT" "$SCRIPTS_DIR"
+START="$PROJ/.gaai/core/scripts/daemon-start.sh"
+SETUP="$PROJ/.gaai/core/scripts/daemon-setup.sh"
+HOME_WT="$(gaai_home_path "$PROJ")"
+LIFECYCLE="$(gaai_lifecycle_root "$PROJ")"
+OWNER="$LIFECYCLE/owner"
 
-cleanup() { rm -rf "$FIXTURE_DIR"; }
-trap cleanup EXIT
-
-# Sets up a bare remote + local clone with one commit on 'staging'.
-# Clone's main checkout is left on 'staging'.
-# The bare remote is at "${project_dir}_remote.git"; the clone's origin points there.
-setup_git_repo() {
-  local project_dir="$1"
-  local remote_dir="${project_dir}_remote.git"
-  rm -rf "$project_dir" "$remote_dir"
-  git init --bare "$remote_dir" -q
-  git clone "$remote_dir" "$project_dir" -q
-  git -C "$project_dir" config user.email "test@gaai.local"
-  git -C "$project_dir" config user.name "GAAI Test"
-  git -C "$project_dir" checkout -b staging -q
-  touch "$project_dir/.keep"
-  git -C "$project_dir" add .
-  git -C "$project_dir" commit -m "initial" -q
-  git -C "$project_dir" push origin staging -q
+fresh_home() {
+  gaai_run "$ROOT" "$START" --stop >/dev/null 2>&1
+  gaai_reset_home
+  rm -rf "$LIFECYCLE" 2>/dev/null
+  gaai_run "$ROOT" "$SETUP" >/dev/null 2>&1
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TC1: coordination push from gaai-daemon-home lands on origin/staging (AC6a)
-# ═══════════════════════════════════════════════════════════════════════════════
-# Structure: bare_remote ← origin ← main checkout (TC1_DIR) ← worktree (TC1_HOME)
-# Push from home uses "push origin HEAD:staging" (same refspec as post-flip daemon).
-# Verifies the bare remote's staging tip == home HEAD.
+socket_of() { sed -n 's/^socket=//p' "$OWNER" 2>/dev/null | head -1; }
+session_of() { sed -n 's/^session=//p' "$OWNER" 2>/dev/null | head -1; }
+state_of() { sed -n 's/^state=//p' "$OWNER" 2>/dev/null | head -1; }
+attempt_of() { sed -n 's/^attempt_dir=//p' "$OWNER" 2>/dev/null | head -1; }
+
 echo ""
-echo "=== TC1: coordination push from gaai-daemon-home lands on origin/staging ==="
+echo "=== TC1: private socket root ownership, mode, type and path length ==="
+fresh_home
+gaai_run "$ROOT" "$START" >/dev/null 2>&1
+SOCK="$(socket_of)"
+SROOT="$(dirname "$SOCK")"
+[[ -S "$SOCK" ]] && pass "TC1-1: the private server socket exists and is a socket" \
+                 || fail "TC1-1: no socket at the derived path"
+[[ "$(stat -L -c '%a' "$SROOT" 2>/dev/null || stat -L -f '%Lp' "$SROOT")" == "700" ]] \
+  && pass "TC1-2: the socket root is mode 0700" || fail "TC1-2: the socket root is not 0700"
+[[ "$(stat -L -c '%u' "$SROOT" 2>/dev/null || stat -L -f '%u' "$SROOT")" == "$(id -u)" ]] \
+  && pass "TC1-3: the socket root is owned by the current UID" || fail "TC1-3: foreign socket-root owner"
+[[ ! -L "$SROOT" ]] && pass "TC1-4: the socket root is not a symlink" || fail "TC1-4: the socket root is a symlink"
+LIMIT=108; [[ "$(uname -s)" == "Darwin" ]] && LIMIT=104
+[[ "${#SOCK}" -lt "$LIMIT" ]] \
+  && pass "TC1-5: the complete physical socket path (${#SOCK}) is under the platform limit ($LIMIT)" \
+  || fail "TC1-5: the socket path exceeds the platform limit"
+# Derived from the common directory and the schema, never from TMPDIR.
+case "$SOCK" in
+  "${TMPDIR:-/nonexistent-tmpdir}"*) fail "TC1-6: the socket root followed TMPDIR" ;;
+  *) pass "TC1-6: the socket root is independent of TMPDIR" ;;
+esac
 
-TC1_DIR="$FIXTURE_DIR/tc1-project"
-TC1_HOME="$FIXTURE_DIR/tc1-home"
-TC1_BARE="${TC1_DIR}_remote.git"
-setup_git_repo "$TC1_DIR"
-
-_gaai_provision_daemon_home "$TC1_HOME" "staging" "$TC1_DIR" >/dev/null 2>&1
-
-# Make a coordination commit in the home (mirroring daemon chore-commit)
-touch "$TC1_HOME/coord.txt"
-git -C "$TC1_HOME" add coord.txt
-git -C "$TC1_HOME" config user.email "test@gaai.local"
-git -C "$TC1_HOME" config user.name "GAAI Test"
-git -C "$TC1_HOME" commit -m "coord-commit-from-home" -q
-
-TC1_HOME_HEAD="$(git -C "$TC1_HOME" rev-parse HEAD 2>/dev/null || echo "?")"
-
-# Push via origin with explicit HEAD:staging refspec — the post-flip coordination pattern.
-# The home is on gaai-daemon-home; "HEAD:staging" pushes HEAD to origin's staging ref.
-TC1_PUSH_RC=0
-git -C "$TC1_HOME" push origin "HEAD:staging" --quiet 2>/dev/null || TC1_PUSH_RC=$?
-
-if [[ "$TC1_PUSH_RC" -eq 0 ]]; then
-  pass "TC1-1: push from home with HEAD:staging refspec succeeded (rc=0)"
-else
-  fail "TC1-1: push from home with HEAD:staging failed (rc=$TC1_PUSH_RC)"
-fi
-
-# Verify bare remote's staging tip == home HEAD (push went to origin/staging correctly)
-TC1_BARE_TIP="$(git -C "$TC1_BARE" rev-parse "staging" 2>/dev/null || echo "!")"
-if [[ "$TC1_BARE_TIP" == "$TC1_HOME_HEAD" ]]; then
-  pass "TC1-2: bare remote's staging tip == home HEAD after push ($TC1_HOME_HEAD)"
-else
-  fail "TC1-2: bare remote staging ($TC1_BARE_TIP) != home HEAD ($TC1_HOME_HEAD)"
-fi
-
-TC1_BRANCH_AFTER="$(git -C "$TC1_HOME" branch --show-current 2>/dev/null || echo "")"
-if [[ "$TC1_BRANCH_AFTER" == "gaai-daemon-home" ]]; then
-  pass "TC1-3: home remains on gaai-daemon-home after push"
-else
-  fail "TC1-3: home is on '${TC1_BRANCH_AFTER:-<detached>}' after push (expected gaai-daemon-home)"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TC2: dirty / branch-switched main checkout is INERT (AC6b — main-checkout-decoupled proof)
-# ═══════════════════════════════════════════════════════════════════════════════
-# The daemon's home is a separate worktree sharing the same .git as the main checkout.
-# When the home pushes to "origin HEAD:staging", it goes to the bare remote.
-# The main checkout's LOCAL staging branch ref (refs/heads/staging) must NOT advance —
-# only refs/remotes/origin/staging is updated by the push (tracking branch auto-update).
 echo ""
-echo "=== TC2: dirty / branch-switched main checkout is INERT to daemon coordination ==="
+echo "=== TC2: required options hold on the private server before any session ==="
+[[ "$(tmux -f /dev/null -S "$SOCK" show-options -g -v exit-empty 2>/dev/null)" == "off" ]] \
+  && pass "TC2-1: exit-empty is off on the private server" || fail "TC2-1: exit-empty is not off"
+[[ "$(tmux -f /dev/null -S "$SOCK" show-options -g -v remain-on-exit 2>/dev/null)" == "on" ]] \
+  && pass "TC2-2: remain-on-exit is on" || fail "TC2-2: remain-on-exit is not on"
 
-TC2_DIR="$FIXTURE_DIR/tc2-project"
-TC2_HOME="$FIXTURE_DIR/tc2-home"
-TC2_BARE="${TC2_DIR}_remote.git"
-setup_git_repo "$TC2_DIR"
-
-_gaai_provision_daemon_home "$TC2_HOME" "staging" "$TC2_DIR" >/dev/null 2>&1
-
-# Record main checkout's LOCAL staging branch SHA before daemon coordination.
-# This is refs/heads/staging in the shared .git, NOT refs/remotes/origin/staging.
-TC2_LOCAL_STAGING_BEFORE="$(git -C "$TC2_DIR" rev-parse "staging" 2>/dev/null || echo "?")"
-
-# Dirty the main checkout: checkout a new branch + leave uncommitted changes
-git -C "$TC2_DIR" checkout -b "feature/dirty-interference" -q 2>/dev/null
-echo "dirty" > "$TC2_DIR/dirty.txt"
-
-# Make a coordination commit from the home and push to origin with HEAD:staging
-touch "$TC2_HOME/daemon-op.txt"
-git -C "$TC2_HOME" add daemon-op.txt
-git -C "$TC2_HOME" config user.email "test@gaai.local"
-git -C "$TC2_HOME" config user.name "GAAI Test"
-git -C "$TC2_HOME" commit -m "chore(daemon): mark in_progress [from-home]" -q
-
-TC2_HOME_HEAD="$(git -C "$TC2_HOME" rev-parse HEAD 2>/dev/null || echo "?")"
-
-TC2_PUSH_RC=0
-git -C "$TC2_HOME" push origin "HEAD:staging" --quiet 2>/dev/null || TC2_PUSH_RC=$?
-
-if [[ "$TC2_PUSH_RC" -eq 0 ]]; then
-  pass "TC2-1: coordination push succeeded despite dirty main checkout (rc=0)"
-else
-  fail "TC2-1: coordination push failed (rc=$TC2_PUSH_RC) — dirty main checkout interfered"
-fi
-
-TC2_MAIN_BRANCH_AFTER="$(git -C "$TC2_DIR" branch --show-current 2>/dev/null || echo "")"
-if [[ "$TC2_MAIN_BRANCH_AFTER" == "feature/dirty-interference" ]]; then
-  pass "TC2-2: main checkout remains on 'feature/dirty-interference' (daemon did not touch it)"
-else
-  fail "TC2-2: main checkout moved to '$TC2_MAIN_BRANCH_AFTER' (daemon interfered)"
-fi
-
-# Local staging ref (refs/heads/staging) must be unchanged — push went to origin (bare),
-# not to the main checkout's local branch.
-TC2_LOCAL_STAGING_AFTER="$(git -C "$TC2_DIR" rev-parse "staging" 2>/dev/null || echo "?")"
-if [[ "$TC2_LOCAL_STAGING_AFTER" == "$TC2_LOCAL_STAGING_BEFORE" ]]; then
-  pass "TC2-3: main checkout's local staging ref unchanged (daemon coordination stayed in home)"
-else
-  fail "TC2-3: main checkout's local staging moved from $TC2_LOCAL_STAGING_BEFORE to $TC2_LOCAL_STAGING_AFTER (unexpected)"
-fi
-
-# Bare remote's staging must advance to home's commit
-TC2_BARE_TIP="$(git -C "$TC2_BARE" rev-parse "staging" 2>/dev/null || echo "!")"
-if [[ "$TC2_BARE_TIP" == "$TC2_HOME_HEAD" ]]; then
-  pass "TC2-4: bare remote's staging advanced to home's commit ($TC2_HOME_HEAD)"
-else
-  fail "TC2-4: bare remote staging ($TC2_BARE_TIP) != home commit ($TC2_HOME_HEAD)"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TC3: completeness backstop — zero coordination push sites lack HEAD: refspec (AC6c)
-# ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== TC3: completeness backstop — zero coordination pushes lack HEAD: refspec ==="
+echo "=== TC3: exact '=name' targeting resists a prefix collision ==="
+SESS="$(session_of)"
+tmux -f /dev/null -S "$SOCK" new-session -d -s "${SESS}-decoy" 'exec /bin/sh -c "sleep 60"' 2>/dev/null
+OUT="$(gaai_run "$ROOT" "$START" --status 2>&1)"
+if echo "$OUT" | grep -q 'verdict:     ambiguous'; then
+  pass "TC3-1: a foreign session on the private server is ambiguous evidence, not adopted"
+else
+  fail "TC3-1: a foreign session did not make the verdict ambiguous: $OUT"
+fi
+tmux -f /dev/null -S "$SOCK" kill-session -t "=${SESS}-decoy" 2>/dev/null
+OUT="$(gaai_run "$ROOT" "$START" --status 2>&1)"
+echo "$OUT" | grep -q 'verdict:     live' \
+  && pass "TC3-2: after the decoy is gone the exact session is live again" \
+  || fail "TC3-2: exact targeting did not recover: $OUT"
 
-TC3_PASS=1
+echo ""
+echo "=== TC4: --status is read-only ==="
+BEFORE_OWNER="$(cksum < "$OWNER")"
+BEFORE_HOME="$(git -C "$HOME_WT" rev-parse HEAD)"
+BEFORE_PANES="$(tmux -f /dev/null -S "$SOCK" list-panes -a 2>/dev/null | wc -l | tr -d ' ')"
+gaai_run "$ROOT" "$START" --status >/dev/null 2>&1
+[[ "$(cksum < "$OWNER")" == "$BEFORE_OWNER" ]] \
+  && pass "TC4-1: --status did not mutate the owner record" || fail "TC4-1: --status mutated the owner record"
+[[ "$(git -C "$HOME_WT" rev-parse HEAD)" == "$BEFORE_HOME" ]] \
+  && pass "TC4-2: --status did not touch the home" || fail "TC4-2: --status moved the home"
+[[ "$(tmux -f /dev/null -S "$SOCK" list-panes -a 2>/dev/null | wc -l | tr -d ' ')" == "$BEFORE_PANES" ]] \
+  && pass "TC4-3: --status created no pane or session" || fail "TC4-3: --status changed the pane set"
+[[ ! -d "$LIFECYCLE/lock.d" ]] \
+  && pass "TC4-4: --status left no lifecycle lock held" || fail "TC4-4: --status left the lock held"
 
-for _script in \
-    "$SCRIPTS_DIR/delivery-daemon.sh" \
-    "$SCRIPTS_DIR/lib/chore-commit.sh" \
-    "$SCRIPTS_DIR/daemon-dispatch.sh"; do
+echo ""
+echo "=== TC5: concurrent starts — exactly one daemon, no second spawn ==="
+fresh_home
+PANES_BEFORE=0
+for _i in 1 2 3; do
+  gaai_run "$ROOT" "$START" >"$ROOT/concurrent.$_i.out" 2>&1 &
+done
+wait
+SOCK="$(socket_of)"
+STARTED="$(grep -l 'Daemon started' "$ROOT"/concurrent.*.out 2>/dev/null | wc -l | tr -d ' ')"
+REFUSED="$(grep -lE 'reason=(already_running|home_lock_failed|process_authority_invalid)' "$ROOT"/concurrent.*.out 2>/dev/null | wc -l | tr -d ' ')"
+if [[ "$STARTED" == "1" ]]; then
+  pass "TC5-1: exactly one concurrent start succeeded"
+else
+  fail "TC5-1: $STARTED concurrent starts succeeded (expected 1)"
+fi
+if [[ "$REFUSED" == "2" ]]; then
+  pass "TC5-2: the other two returned a typed refusal"
+else
+  fail "TC5-2: $REFUSED concurrent starts returned a typed refusal (expected 2)"
+fi
+PANES="$(tmux -f /dev/null -S "$SOCK" list-panes -a 2>/dev/null | wc -l | tr -d ' ')"
+[[ "$PANES" == "1" ]] && pass "TC5-3: exactly one pane exists on the private server" \
+                      || fail "TC5-3: $PANES panes exist (expected 1)"
 
-  if [[ ! -f "$_script" ]]; then
-    fail "TC3: script not found at $_script"
-    TC3_PASS=0
-    continue
+echo ""
+echo "=== TC6: the lock is held across the whole start, and released after ==="
+[[ ! -d "$LIFECYCLE/lock.d" ]] \
+  && pass "TC6-1: the lifecycle lock is released once the start settles" \
+  || fail "TC6-1: the lifecycle lock is still held after a completed start"
+
+echo ""
+echo "=== TC7: an orphaned pending record is settled, not spawned over ==="
+fresh_home
+# Controller crash BEFORE the first tmux effect: a pending record with no server.
+mkdir -p "$LIFECYCLE"
+printf 'schema=gaai-daemon-lifecycle/v1\nstate=pending\nattempt=orphan\nsocket=%s\nsession=%s\n' \
+  "$(gaai_run "$ROOT" "$START" --status 2>/dev/null | sed -n 's/^  socket: *//p')" \
+  "$(gaai_run "$ROOT" "$START" --status 2>/dev/null | sed -n 's/^  session: *//p')" > "$OWNER"
+OUT="$(gaai_run "$ROOT" "$START" 2>&1)"
+if echo "$OUT" | grep -q 'Daemon started'; then
+  pass "TC7-1: a pending record with no server is settled evidence and a fresh start proceeds"
+else
+  fail "TC7-1: a pre-tmux crash blocked forever: $(echo "$OUT" | tail -1)"
+fi
+
+echo ""
+echo "=== TC8: a corrupt owner record blocks every path ==="
+gaai_run "$ROOT" "$START" --stop >/dev/null 2>&1
+mkdir -p "$LIFECYCLE"; printf 'garbage\n' > "$OWNER"
+OUT="$(gaai_run "$ROOT" "$START" 2>&1)"
+echo "$OUT" | grep -q 'reason=process_authority_invalid' \
+  && pass "TC8-1: a corrupt owner blocks startup" || fail "TC8-1: a corrupt owner did not block startup: $OUT"
+OUT="$(gaai_run "$ROOT" "$START" --stop 2>&1)"
+echo "$OUT" | grep -q 'evidence=owner_role=corrupt_record' \
+  && pass "TC8-2: a corrupt owner names no settlement target and blocks --stop" \
+  || fail "TC8-2: --stop acted on a corrupt owner: $OUT"
+OUT="$(gaai_run "$ROOT" "$START" --status 2>&1)"
+echo "$OUT" | grep -q 'state:       corrupt' \
+  && pass "TC8-3: --status reports the corrupt state read-only" || fail "TC8-3: --status hid the corrupt state"
+rm -f "$OWNER"
+
+echo ""
+echo "=== TC9: owner identity drift blocks settlement ==="
+fresh_home
+gaai_run "$ROOT" "$START" >/dev/null 2>&1
+SOCK="$(socket_of)"
+cp "$OWNER" "$ROOT/owner.bak"
+sed 's#^socket=.*#socket=/tmp/.gaai-d-0/deadbeefdeadbeef#' "$ROOT/owner.bak" > "$OWNER"
+OUT="$(gaai_run "$ROOT" "$START" --stop 2>&1)"
+echo "$OUT" | grep -qE 'owner_role=(ambiguous|identity_drift)' \
+  && pass "TC9-1: a swapped socket identity blocks settlement" \
+  || fail "TC9-1: a swapped socket identity was settled anyway: $OUT"
+cp "$ROOT/owner.bak" "$OWNER"
+sed 's#^session=.*#session=gaai-daemon-0000000000000000#' "$ROOT/owner.bak" > "$OWNER"
+OUT="$(gaai_run "$ROOT" "$START" --stop 2>&1)"
+echo "$OUT" | grep -qE 'owner_role=(ambiguous|identity_drift)' \
+  && pass "TC9-2: a swapped session identity blocks settlement" \
+  || fail "TC9-2: a swapped session identity was settled anyway: $OUT"
+cp "$ROOT/owner.bak" "$OWNER"
+gaai_run "$ROOT" "$START" --stop >/dev/null 2>&1
+
+echo ""
+echo "=== TC10: the release barrier — one record, exact match, no release otherwise ==="
+fresh_home
+gaai_run "$ROOT" "$START" >/dev/null 2>&1
+ATT="$(attempt_of)"
+if [[ -n "$ATT" ]]; then
+  RELEASE_DIGEST="$(sed -n 's/^release_digest=//p' "$ATT/manifest" | head -1)"
+  ATTEMPT_ID="$(sed -n 's/^attempt=//p' "$ATT/manifest" | head -1)"
+  RECORD="release attempt=$ATTEMPT_ID digest=$RELEASE_DIGEST"
+  [[ "${#RECORD}" -le 512 ]] \
+    && pass "TC10-1: the release record (${#RECORD} bytes) fits within the guaranteed PIPE_BUF" \
+    || fail "TC10-1: the release record exceeds the guaranteed PIPE_BUF"
+  [[ -p "$ATT/release.fifo" ]] \
+    && pass "TC10-2: the barrier is a FIFO in the private 0700 directory" \
+    || fail "TC10-2: no FIFO at the barrier path"
+  # A child that never receives its EXACT record must not run the daemon. The test
+  # holds the FIFO open read-write for the whole case: a writer that opened and closed
+  # before the child's own open would destroy the buffer and block that open, which
+  # would test the harness rather than the barrier.
+  LAUNCHER="$(sed -n 's/^launcher=//p' "$OWNER" | head -1)"
+  run_child_with_record() {
+    local _dir="$1" _payload="$2" _pid
+    # The test holds the FIFO open read-write so the child's own open never blocks,
+    # runs the child in the background, writes the payload, then CLOSES the write end.
+    # Closing matters: a payload with no terminator must reach the child as EOF, and
+    # a writer left open would make the child sit on its full read timeout instead.
+    exec 9<> "$_dir/release.fifo" || return 1
+    /usr/bin/env -i "PATH=$ROOT/fakebin:/usr/bin:/bin" "HOME=$ROOT/opshome" TERM=dumb \
+      "$LAUNCHER" --daemon-child "$_dir" > "$_dir/child.out" 2>&1 &
+    _pid=$!
+    sleep 1
+    printf '%s' "$_payload" >&9
+    exec 9>&-
+    wait "$_pid" 2>/dev/null
+    cat "$_dir/child.out" 2>/dev/null
+  }
+
+  BAD="$ROOT/badattempt"; mkdir -p "$BAD"; chmod 0700 "$BAD"
+  cp "$ATT/manifest" "$BAD/manifest"
+  mkfifo -m 0600 "$BAD/release.fifo"
+  OUT="$(run_child_with_record "$BAD" "release attempt=$ATTEMPT_ID digest=wrongdigest
+")"
+  if echo "$OUT" | grep -q 'release_role=record_mismatch'; then
+    pass "TC10-3: a non-matching release record does not release the child"
+  else
+    fail "TC10-3: a non-matching release record was accepted: $OUT"
   fi
 
-  # Grep for coordination push patterns without HEAD: prefix.
-  # Excludes: story-branch pushes (story/), already-correct HEAD: refspecs, comment lines.
-  _missing=$(grep -nE 'git push origin[[:space:]]+"?\$\{?(TARGET_BRANCH|target_branch)' "$_script" \
-    | grep -v 'HEAD:' \
-    | grep -v 'story/' \
-    | grep -v '^[[:space:]]*#' || true)
-
-  if [[ -z "$_missing" ]]; then
-    pass "TC3: $(basename "$_script") — no unconverted coordination push sites"
+  BAD2="$ROOT/badattempt2"; mkdir -p "$BAD2"; chmod 0700 "$BAD2"
+  cp "$ATT/manifest" "$BAD2/manifest"
+  mkfifo -m 0600 "$BAD2/release.fifo"
+  OUT="$(run_child_with_record "$BAD2" "release attempt=$ATTEMPT_ID digest=$RELEASE_DIGEST-truncated")"
+  if echo "$OUT" | grep -qE 'release_role=(read_failed_or_eof|record_mismatch)'; then
+    pass "TC10-4: a partial record with no terminator does not release the child"
   else
-    fail "TC3: $(basename "$_script") has push sites missing HEAD: refspec:"
-    echo "$_missing" | while IFS= read -r line; do echo "    $line"; done
-    TC3_PASS=0
+    fail "TC10-4: a partial record was treated as a release: $OUT"
+  fi
+
+  BAD3="$ROOT/badattempt3"; mkdir -p "$BAD3"; chmod 0700 "$BAD3"
+  cp "$ATT/manifest" "$BAD3/manifest"
+  mkfifo -m 0600 "$BAD3/release.fifo"
+  OUT="$(run_child_with_record "$BAD3" "release attempt=someone-elses digest=$RELEASE_DIGEST
+")"
+  if echo "$OUT" | grep -q 'release_role=record_mismatch'; then
+    pass "TC10-5: a record naming a different attempt does not release the child"
+  else
+    fail "TC10-5: a foreign attempt's record was accepted: $OUT"
+  fi
+else
+  fail "TC10-0: no attempt directory recorded"
+fi
+
+echo ""
+echo "=== TC11: manifest and asset swaps fail closed before the daemon runs ==="
+LAUNCHER="$(sed -n 's/^launcher=//p' "$OWNER" | head -1)"
+SWAP="$ROOT/swapattempt"; mkdir -p "$SWAP"; chmod 0700 "$SWAP"
+sed 's/^daemon_digest=.*/daemon_digest=0000000000000000000000000000000000000000000000000000000000000000/' \
+  "$ATT/manifest" > "$SWAP/manifest"
+mkfifo -m 0600 "$SWAP/release.fifo"
+OUT="$(/usr/bin/env -i "PATH=$ROOT/fakebin:/usr/bin:/bin" "HOME=$ROOT/opshome" TERM=dumb \
+        "$LAUNCHER" --daemon-child "$SWAP" 2>&1)"
+echo "$OUT" | grep -q 'daemon_role=fd_blob_mismatch' \
+  && pass "TC11-1: a swapped daemon digest is refused at the descriptor, before any release" \
+  || fail "TC11-1: a swapped daemon digest was accepted: $OUT"
+SWAP2="$ROOT/swapattempt2"; mkdir -p "$SWAP2"; chmod 0700 "$SWAP2"
+sed 's#^home=.*#home=/nonexistent/home#' "$ATT/manifest" > "$SWAP2/manifest"
+mkfifo -m 0600 "$SWAP2/release.fifo"
+OUT="$(/usr/bin/env -i "PATH=$ROOT/fakebin:/usr/bin:/bin" "HOME=$ROOT/opshome" TERM=dumb \
+        "$LAUNCHER" --daemon-child "$SWAP2" 2>&1)"
+echo "$OUT" | grep -qE 'asset_root_unresolved|daemon_role=absent' \
+  && pass "TC11-2: a swapped asset root is refused before any daemon effect" \
+  || fail "TC11-2: a swapped asset root was accepted: $OUT"
+SWAP3="$ROOT/swapattempt3"; mkdir -p "$SWAP3"; chmod 0700 "$SWAP3"
+sed 's/^credential_mode=.*/credential_mode=present/' "$ATT/manifest" > "$SWAP3/manifest"
+mkfifo -m 0600 "$SWAP3/release.fifo"
+OUT="$(/usr/bin/env -i "PATH=$ROOT/fakebin:/usr/bin:/bin" "HOME=$ROOT/opshome" TERM=dumb \
+        "$LAUNCHER" --daemon-child "$SWAP3" 2>&1)"
+echo "$OUT" | grep -q 'secret_path_absent\|secret_role=absent' \
+  && pass "TC11-3: absent-to-present credential fabrication fails closed" \
+  || fail "TC11-3: credential fabrication was accepted: $OUT"
+
+echo ""
+echo "=== TC12: the live daemon verifies the home and never repairs it ==="
+DD="$SCRIPTS_DIR/delivery-daemon.sh"
+if grep -q '_per_cycle_home_check()' "$DD"; then
+  pass "TC12-1: delivery-daemon.sh exposes the verify-only per-cycle check"
+else
+  fail "TC12-1: the verify-only per-cycle check is missing"
+fi
+if ! grep -n '_gaai_provision_daemon_home "' "$DD" >/dev/null; then
+  pass "TC12-2: delivery-daemon.sh invokes no runtime provisioner"
+else
+  fail "TC12-2: delivery-daemon.sh still invokes a runtime provisioner"
+fi
+if grep -q 'declare -F _gaai_provision_daemon_home' "$DD"; then
+  pass "TC12-3: delivery-daemon.sh refuses a stale library carrying the retired provisioner"
+else
+  fail "TC12-3: the stale-library guard is missing"
+fi
+if grep -q 'GAAI_DAEMON_LAUNCH_ATTEMPT' "$DD" && grep -q 'ack.ready' "$DD"; then
+  pass "TC12-4: delivery-daemon.sh validates its launch tuple and acknowledges readiness"
+else
+  fail "TC12-4: the launch-tuple validation or ready acknowledgement is missing"
+fi
+if grep -q 'credential_downgrade' "$DD" && grep -q 'credential_fabrication' "$DD"; then
+  pass "TC12-5: the daemon fails closed on credential downgrade and fabrication"
+else
+  fail "TC12-5: the daemon does not check credential-mode integrity"
+fi
+
+echo ""
+echo "=== TC13: wrapper-drain authority is unchanged (non-regression) ==="
+if grep -q '_list_live_wrappers()' "$SCRIPTS_DIR/daemon-start.sh" \
+   && grep -q '_drain_wrappers()' "$SCRIPTS_DIR/daemon-start.sh"; then
+  pass "TC13-1: the orthogonal wrapper-drain functions are retained"
+else
+  fail "TC13-1: the wrapper-drain authority was lost"
+fi
+if grep -q 'GAAI_STOP_DRAIN_TIMEOUT' "$SCRIPTS_DIR/daemon-start.sh"; then
+  pass "TC13-2: the drain timeout override is retained"
+else
+  fail "TC13-2: the drain timeout override was lost"
+fi
+# The drain SIGTERMs wrapper PIDs from lock files — never the daemon PID. Settlement
+# targets the persisted session, so no failure path signals daemon authority directly.
+if ! grep -nE 'kill (-[A-Z]+ )?"\$(_pid|_ack_pid|_pane_pid)"' "$SCRIPTS_DIR/daemon-start.sh" >/dev/null; then
+  pass "TC13-3: no failure path signals the daemon PID directly"
+else
+  fail "TC13-3: a path signals the daemon PID directly:"
+  grep -nE 'kill (-[A-Z]+ )?"\$(_pid|_ack_pid|_pane_pid)"' "$SCRIPTS_DIR/daemon-start.sh" | sed 's/^/        /'
+fi
+
+echo ""
+echo "=== TC14: operator-state paths still follow the real checkout ==="
+if grep -qE '^[[:space:]]*export GAAI_REPO_ROOT="\$PROJECT_ROOT"' "$SCRIPTS_DIR/daemon-start.sh"; then
+  pass "TC14-1: daemon-start.sh exports GAAI_REPO_ROOT=PROJECT_ROOT"
+else
+  fail "TC14-1: GAAI_REPO_ROOT export was lost"
+fi
+for _v in GAAI_REPO_ROOT GAAI_CI_TEST_GATE_TIMEOUT_SEC GAAI_CI_TEST_GATE_MATERIALIZE_SEC; do
+  if grep -qE "tmux_env_args\+=\(-e \"$_v=" "$SCRIPTS_DIR/daemon-start.sh"; then
+    pass "TC14-2[$_v]: still forwarded to the session environment"
+  else
+    fail "TC14-2[$_v]: no longer forwarded"
   fi
 done
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TC4: home is on gaai-daemon-home; main checkout's <target> ref unchanged (AC6d)
-# ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== TC4: home on gaai-daemon-home; main checkout's staging ref unchanged ==="
-
-TC4_DIR="$FIXTURE_DIR/tc4-project"
-TC4_HOME="$FIXTURE_DIR/tc4-home"
-setup_git_repo "$TC4_DIR"
-
-TC4_MAIN_STAGING_BEFORE="$(git -C "$TC4_DIR" rev-parse "staging" 2>/dev/null || echo "?")"
-
-_gaai_provision_daemon_home "$TC4_HOME" "staging" "$TC4_DIR" >/dev/null 2>&1
-
-TC4_HOME_BRANCH="$(git -C "$TC4_HOME" branch --show-current 2>/dev/null || echo "")"
-if [[ "$TC4_HOME_BRANCH" == "gaai-daemon-home" ]]; then
-  pass "TC4-1: home is on 'gaai-daemon-home' branch after provisioning"
+echo "=== TC15: exact restart settlement ==="
+fresh_home
+gaai_run "$ROOT" "$START" >/dev/null 2>&1
+SOCK1="$(socket_of)"; PID1="$(sed -n 's/^child_pid=//p' "$OWNER" | head -1)"
+OUT="$(gaai_run "$ROOT" "$START" --restart 2>&1)"
+PID2="$(sed -n 's/^child_pid=//p' "$OWNER" | head -1)"
+if echo "$OUT" | grep -q 'Daemon started' && [[ -n "$PID2" && "$PID1" != "$PID2" ]]; then
+  pass "TC15-1: --restart settled the old lifecycle and established a new one"
 else
-  fail "TC4-1: home is on '${TC4_HOME_BRANCH:-<detached>}' (expected gaai-daemon-home)"
+  fail "TC15-1: --restart did not produce a new lifecycle (pid1=$PID1 pid2=$PID2)"
 fi
-
-TC4_MAIN_STAGING_AFTER="$(git -C "$TC4_DIR" rev-parse "staging" 2>/dev/null || echo "?")"
-if [[ "$TC4_MAIN_STAGING_AFTER" == "$TC4_MAIN_STAGING_BEFORE" ]]; then
-  pass "TC4-2: main checkout's local 'staging' ref unchanged by provisioning ($TC4_MAIN_STAGING_AFTER)"
+if ! kill -0 "$PID1" 2>/dev/null; then
+  pass "TC15-2: the previous daemon process is gone"
 else
-  fail "TC4-2: main checkout's 'staging' moved from $TC4_MAIN_STAGING_BEFORE to $TC4_MAIN_STAGING_AFTER (daemon modified it)"
+  fail "TC15-2: the previous daemon process survived the restart"
 fi
+[[ "$(state_of)" == "running" ]] && pass "TC15-3: the new lifecycle reached durable running" \
+                                 || fail "TC15-3: the new lifecycle did not reach running"
 
-TC4_MAIN_BRANCH="$(git -C "$TC4_DIR" branch --show-current 2>/dev/null || echo "")"
-if [[ "$TC4_MAIN_BRANCH" == "staging" ]]; then
-  pass "TC4-3: main checkout remains on 'staging' (daemon never checked out its branch)"
-else
-  fail "TC4-3: main checkout is on '$TC4_MAIN_BRANCH' (expected staging)"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Shared harness for E1003S06 TC5-TC9 — run the real delivery-daemon.sh standalone
-# ═══════════════════════════════════════════════════════════════════════════════
-DAEMON_SCRIPT="$SCRIPTS_DIR/delivery-daemon.sh"
-
-# delivery-daemon.sh requires tmux (or osascript on Darwin) before arg parsing —
-# stub tmux hermetically so the corpus runner doesn't need it installed.
-TMUX_STUB_DIR="$FIXTURE_DIR/bin-stub"
-mkdir -p "$TMUX_STUB_DIR"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$TMUX_STUB_DIR/tmux"
-chmod +x "$TMUX_STUB_DIR/tmux"
-
-# Builds a sandbox repo (bare remote + main checkout on staging) plus a private
-# copy of .gaai/core/scripts, so delivery-daemon.sh can run as a standalone process.
-setup_daemon_sandbox() {
-  local project_dir="$1"
-  setup_git_repo "$project_dir"
-  mkdir -p "$project_dir/.gaai/core"
-  cp -R "$SCRIPTS_DIR" "$project_dir/.gaai/core/scripts"
-}
-
-# Runs the sandboxed delivery-daemon.sh hermetically: strips ambient daemon-home
-# env vars (proves nothing is inherited from the test's own process), stubs tmux,
-# fixes the target branch. Caller redirects stdout/stderr as needed.
-run_sandbox_daemon() {
-  local project_dir="$1" mode="$2"
-  env -u GAAI_DAEMON_HOME -u GAAI_REPO_ROOT -u _GAAI_DAEMON_HOME_SH_SOURCED \
-    PATH="$TMUX_STUB_DIR:$PATH" GAAI_TARGET_BRANCH=staging \
-    bash "$project_dir/.gaai/core/scripts/delivery-daemon.sh" "$mode"
-}
-
-# Extracts _per_cycle_home_branch_check's body from the real delivery-daemon.sh
-# (pattern-matched, not line-numbered — survives unrelated reflow).
-extract_home_branch_check() {
-  awk '/^_per_cycle_home_branch_check\(\) \{/,/^\}/' "$DAEMON_SCRIPT"
-}
-
-_CHECK_FN="$(extract_home_branch_check)"
-if [[ -n "$_CHECK_FN" ]] && grep -q '_gaai_provision_daemon_home' <<<"$_CHECK_FN"; then
-  pass "TC-harness: _per_cycle_home_branch_check extraction is non-empty and calls the provisioner"
-else
-  fail "TC-harness: _per_cycle_home_branch_check extraction is empty or missing the provisioner call — TC6/TC8 cannot proceed reliably"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TC5: _gaai_provision_daemon_home is defined in the daemon's OWN process (AC1)
-# ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== TC5: provisioner is loaded in the daemon's own process, not inherited ==="
+echo "=== TC16: a clean stop leaves no server, socket, owner or attempt residue ==="
+SOCK="$(socket_of)"; ATT="$(attempt_of)"
+gaai_run "$ROOT" "$START" --stop >/dev/null 2>&1
+[[ ! -e "$OWNER" ]] && pass "TC16-1: the owner record is removed" || fail "TC16-1: the owner record survives"
+[[ ! -e "$SOCK" ]] && pass "TC16-2: the exact persisted socket is removed" || fail "TC16-2: the socket survives"
+[[ ! -d "$ATT" ]] && pass "TC16-3: the exact persisted attempt directory is removed" \
+                  || fail "TC16-3: the attempt directory survives"
+OUT="$(gaai_run "$ROOT" "$START" --status 2>&1)"
+echo "$OUT" | grep -q 'state:       none' \
+  && pass "TC16-4: --status reports a settled lifecycle" || fail "TC16-4: --status does not report settled"
 
-TC5_DIR="$FIXTURE_DIR/tc5-project"
-setup_daemon_sandbox "$TC5_DIR"
-
-TC5_1_OUT=$(run_sandbox_daemon "$TC5_DIR" --help 2>&1)
-TC5_1_RC=$?
-if [[ "$TC5_1_RC" -eq 0 ]] && ! grep -q 'command not found' <<<"$TC5_1_OUT"; then
-  pass "TC5-1: sandbox with the real lib — --help succeeds, no 'command not found'"
-else
-  fail "TC5-1: rc=$TC5_1_RC, output: $TC5_1_OUT"
-fi
-
-# Decisive: replace the sandbox lib with a stub that both defines the function
-# AND touches a sentinel at SOURCE time (top-level, not inside the function).
-# The sentinel existing after --help proves the daemon PROCESS itself sourced it.
-TC5_SENTINEL="$FIXTURE_DIR/tc5-sentinel"
-rm -f "$TC5_SENTINEL"
-cat > "$TC5_DIR/.gaai/core/scripts/lib/daemon-home.sh" <<EOF
-#!/usr/bin/env bash
-touch "$TC5_SENTINEL"
-_gaai_provision_daemon_home() { return 0; }
-EOF
-run_sandbox_daemon "$TC5_DIR" --help >/dev/null 2>&1
-if [[ -f "$TC5_SENTINEL" ]]; then
-  pass "TC5-2: sentinel written by the sandboxed lib exists — the daemon process itself sourced lib/daemon-home.sh"
-else
-  fail "TC5-2: sentinel absent — the daemon process did not source lib/daemon-home.sh itself"
-fi
-
-# Root-cause control: a bare child bash that sources nothing does not inherit
-# the function — confirms functions do not cross the launcher→daemon process boundary.
-if env -u _GAAI_DAEMON_HOME_SH_SOURCED bash -c 'declare -F _gaai_provision_daemon_home' >/dev/null 2>&1; then
-  fail "TC5-3: _gaai_provision_daemon_home unexpectedly available in a bare child shell that sourced nothing"
-else
-  pass "TC5-3: a bare child bash without sourcing the helper does not have _gaai_provision_daemon_home (process boundary confirmed)"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TC6: wrong-branch home repaired at the current target tip via the check (AC2)
-# ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== TC6: wrong-branch home repair via _per_cycle_home_branch_check ==="
+echo "=== TC17: a target that advances mid-attempt is a race, not a refresh ==="
+fresh_home
+# Advance origin/staging after setup converged the home: the home is now stale and
+# the first observation already refuses. This is the same guard the second
+# observation applies inside a single attempt.
+gaai_advance_target "$PROJ"
+OUT="$(gaai_run "$ROOT" "$START" 2>&1)"
+echo "$OUT" | grep -qE 'reason=(home_identity_invalid|target_advanced)' \
+  && pass "TC17-1: an advanced target refuses rather than launching against a stale home" \
+  || fail "TC17-1: an advanced target was accepted: $OUT"
+[[ ! -e "$OWNER" ]] \
+  && pass "TC17-2: the refusal created no owner record, server or session" \
+  || fail "TC17-2: a refused attempt left lifecycle state behind"
 
-TC6_DIR="$FIXTURE_DIR/tc6-project"
-TC6_HOME="$FIXTURE_DIR/tc6-home"
-TC6_BARE="${TC6_DIR}_remote.git"
-setup_git_repo "$TC6_DIR"
-
-_gaai_provision_daemon_home "$TC6_HOME" "staging" "$TC6_DIR" >/dev/null 2>&1
-
-# Advance the bare remote's staging by one commit since provisioning — the repair
-# must land on this NEW tip, not the stale one captured at provisioning time.
-echo "advance" > "$TC6_DIR/advance.txt"
-git -C "$TC6_DIR" add advance.txt
-git -C "$TC6_DIR" commit -m "advance-staging" -q
-git -C "$TC6_DIR" push origin staging -q
-TC6_NEW_TIP="$(git -C "$TC6_BARE" rev-parse staging 2>/dev/null || echo "?")"
-TC6_MAIN_BRANCH_BEFORE="$(git -C "$TC6_DIR" branch --show-current 2>/dev/null || echo "")"
-TC6_MAIN_STAGING_BEFORE="$(git -C "$TC6_DIR" rev-parse staging 2>/dev/null || echo "?")"
-
-# Force the home onto a wrong branch (simulating the observed drift).
-git -C "$TC6_HOME" checkout -B drifted -q
-
-TC6_CHECK_SCRIPT="$FIXTURE_DIR/tc6-check.sh"
-{
-  echo '#!/usr/bin/env bash'
-  echo "source \"$DAEMON_HOME_LIB\""
-  echo 'log() { :; }'
-  echo "$_CHECK_FN"
-  echo '_per_cycle_home_branch_check'
-} > "$TC6_CHECK_SCRIPT"
-
-TC6_REPAIR_OUT=$(PROJECT_DIR="$TC6_HOME" REPO_ROOT="$TC6_DIR" TARGET_BRANCH=staging GAAI_DAEMON_HOME="$TC6_HOME" bash "$TC6_CHECK_SCRIPT" 2>&1)
-
-TC6_HOME_BRANCH_AFTER="$(git -C "$TC6_HOME" branch --show-current 2>/dev/null || echo "")"
-TC6_HOME_HEAD_AFTER="$(git -C "$TC6_HOME" rev-parse HEAD 2>/dev/null || echo "?")"
-TC6_MAIN_BRANCH_AFTER="$(git -C "$TC6_DIR" branch --show-current 2>/dev/null || echo "")"
-TC6_MAIN_STAGING_AFTER="$(git -C "$TC6_DIR" rev-parse staging 2>/dev/null || echo "?")"
-
-[[ "$TC6_HOME_BRANCH_AFTER" == "gaai-daemon-home" ]] \
-  && pass "TC6-1: drifted home is repaired back onto 'gaai-daemon-home'" \
-  || fail "TC6-1: home is on '${TC6_HOME_BRANCH_AFTER:-<detached>}' (expected gaai-daemon-home)"
-
-[[ "$TC6_HOME_HEAD_AFTER" == "$TC6_NEW_TIP" ]] \
-  && pass "TC6-2: repaired home HEAD == the NEW origin/staging tip ($TC6_NEW_TIP)" \
-  || fail "TC6-2: repaired home HEAD ($TC6_HOME_HEAD_AFTER) != new tip ($TC6_NEW_TIP)"
-
-[[ "$TC6_MAIN_BRANCH_AFTER" == "$TC6_MAIN_BRANCH_BEFORE" ]] \
-  && pass "TC6-3: main checkout's branch untouched by the repair ($TC6_MAIN_BRANCH_AFTER)" \
-  || fail "TC6-3: main checkout branch changed from $TC6_MAIN_BRANCH_BEFORE to $TC6_MAIN_BRANCH_AFTER"
-
-[[ "$TC6_MAIN_STAGING_AFTER" == "$TC6_MAIN_STAGING_BEFORE" ]] \
-  && pass "TC6-4: main checkout's local staging ref untouched by the repair" \
-  || fail "TC6-4: main checkout staging moved from $TC6_MAIN_STAGING_BEFORE to $TC6_MAIN_STAGING_AFTER"
-
-! grep -q 'command not found' <<<"$TC6_REPAIR_OUT" \
-  && pass "TC6-5: repair path produced no 'command not found'" \
-  || fail "TC6-5: repair output contains 'command not found': $TC6_REPAIR_OUT"
-
-# Sensitivity control (TC6-N): same check, WITHOUT sourcing the lib — reproduces
-# the historical drift incident exactly, and the home must stay un-repaired.
-git -C "$TC6_HOME" checkout -B drifted -q 2>/dev/null || true
-TC6N_CHECK_SCRIPT="$FIXTURE_DIR/tc6n-check.sh"
-{
-  echo '#!/usr/bin/env bash'
-  echo 'log() { :; }'
-  echo "$_CHECK_FN"
-  echo '_per_cycle_home_branch_check'
-} > "$TC6N_CHECK_SCRIPT"
-TC6N_OUT=$(PROJECT_DIR="$TC6_HOME" REPO_ROOT="$TC6_DIR" TARGET_BRANCH=staging GAAI_DAEMON_HOME="$TC6_HOME" bash "$TC6N_CHECK_SCRIPT" 2>&1)
-TC6N_HOME_BRANCH="$(git -C "$TC6_HOME" branch --show-current 2>/dev/null || echo "")"
-
-grep -q '_gaai_provision_daemon_home: command not found' <<<"$TC6N_OUT" \
-  && pass "TC6-N-1: without sourcing the lib, reproduces the incident ('command not found')" \
-  || fail "TC6-N-1: expected 'command not found' without the lib sourced, got: $TC6N_OUT"
-
-[[ "$TC6N_HOME_BRANCH" == "drifted" ]] \
-  && pass "TC6-N-2: home stays on 'drifted' when the provisioner isn't callable (no silent repair)" \
-  || fail "TC6-N-2: home moved to '$TC6N_HOME_BRANCH' without a callable provisioner"
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TC7: fail-closed startup when the capability is unavailable, without leaking (AC3)
-# ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== TC7: fail-closed on missing / non-defining / malformed helper ==="
+echo "=== TC18: an unreachable target fails closed, without a cached-ref fallback ==="
+fresh_home
+git -C "$PROJ" remote set-url origin /nonexistent/remote.git
+OUT="$(gaai_run "$ROOT" "$START" 2>&1)"
+echo "$OUT" | grep -q 'reason=target_fetch_failed action=none' \
+  && pass "TC18-1: a failed fetch returns target_fetch_failed + none" \
+  || fail "TC18-1: a failed fetch did not fail closed: $OUT"
+[[ ! -e "$OWNER" ]] \
+  && pass "TC18-2: no lifecycle was created against a cached ref" \
+  || fail "TC18-2: a lifecycle was created despite an unreachable target"
+git -C "$PROJ" remote set-url origin "$ROOT/remote.git"
 
-TC7_DIR="$FIXTURE_DIR/tc7-project"
-setup_daemon_sandbox "$TC7_DIR"
-TC7_LIB="$TC7_DIR/.gaai/core/scripts/lib/daemon-home.sh"
-
-# 7-1: lib absent entirely.
-rm -f "$TC7_LIB"
-TC7_1_OUT=$(run_sandbox_daemon "$TC7_DIR" --help 2>&1)
-TC7_1_RC=$?
-[[ "$TC7_1_RC" -ne 0 ]] \
-  && pass "TC7-1: --help fails closed (rc=$TC7_1_RC) when lib/daemon-home.sh is absent" \
-  || fail "TC7-1: --help returned rc=0 with the lib absent (G11 regression — the fix is not effective)"
-
-# 7-2: diagnostic names the capability, leaks nothing sensitive.
-if grep -q '_gaai_provision_daemon_home' <<<"$TC7_1_OUT" && grep -q 'daemon-home.sh' <<<"$TC7_1_OUT"; then
-  pass "TC7-2a: diagnostic names the missing capability (_gaai_provision_daemon_home / daemon-home.sh)"
-else
-  fail "TC7-2a: diagnostic does not name the missing capability: $TC7_1_OUT"
-fi
-if grep -qE '://|git@|[A-Z]+[0-9]{3,}S[0-9]{2}' <<<"$TC7_1_OUT" || grep -qiE 'token|secret' <<<"$TC7_1_OUT"; then
-  fail "TC7-2b: diagnostic leaks a URL/remote/story-id/credential-shaped token: $TC7_1_OUT"
-else
-  pass "TC7-2b: diagnostic leaks no URL, remote, story id, or credential-shaped content"
-fi
-
-# 7-3: helper present but sets the source guard without defining the function
-# (covers "cannot define" — e.g. guard var pre-exported into the daemon's env).
-cat > "$TC7_LIB" <<'EOF'
-#!/usr/bin/env bash
-_GAAI_DAEMON_HOME_SH_SOURCED=1
-return 0
-EOF
-TC7_3_OUT=$(run_sandbox_daemon "$TC7_DIR" --help 2>&1)
-TC7_3_RC=$?
-[[ "$TC7_3_RC" -ne 0 ]] && grep -q '_gaai_provision_daemon_home' <<<"$TC7_3_OUT" \
-  && pass "TC7-3: fails closed with the same diagnostic when the helper defines nothing (rc=$TC7_3_RC)" \
-  || fail "TC7-3: rc=$TC7_3_RC, output: $TC7_3_OUT"
-
-# 7-4: syntactically invalid helper — rc-only assertion (bash's own parse error
-# is an acceptable deterministic abort per the Story's AC3 edge-case analysis).
-printf '_gaai_provision_daemon_home() {\n  echo "unterminated\n' > "$TC7_LIB"
-run_sandbox_daemon "$TC7_DIR" --help >/dev/null 2>&1
-TC7_4_RC=$?
-[[ "$TC7_4_RC" -ne 0 ]] \
-  && pass "TC7-4: malformed helper aborts deterministically (rc=$TC7_4_RC)" \
-  || fail "TC7-4: malformed helper did not abort (rc=0)"
-
-# 7-5: mode-independence + no-loop — lib absent, both --help and --status hit the
-# same fail-closed diagnostic, and neither ever reaches the per-cycle check or
-# the started banner (i.e. abort happens before polling/coordination/spawn).
-rm -f "$TC7_LIB"
-TC7_5_HELP_OUT=$(run_sandbox_daemon "$TC7_DIR" --help 2>&1)
-TC7_5_STATUS_OUT=$(run_sandbox_daemon "$TC7_DIR" --status 2>&1)
-
-if grep -q '_gaai_provision_daemon_home' <<<"$TC7_5_HELP_OUT" && grep -q '_gaai_provision_daemon_home' <<<"$TC7_5_STATUS_OUT"; then
-  pass "TC7-5a: diagnostic appears identically for both --help and --status modes"
-else
-  fail "TC7-5a: diagnostic missing for --help and/or --status"
-fi
-if grep -qE '\[HOME-INTEGRITY\]|Daemon started' <<<"$TC7_5_HELP_OUT$TC7_5_STATUS_OUT"; then
-  fail "TC7-5b: daemon reached the per-cycle check or the started banner despite the missing capability"
-else
-  pass "TC7-5b: daemon aborts before [HOME-INTEGRITY] / 'Daemon started' in either mode — no repeated-loop is possible"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TC8: direct mode (GAAI_DAEMON_HOME unset) stays inert (AC4)
-# ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== TC8: direct mode is a no-op — no worktree/branch/ref side effects ==="
-
-TC8_DIR="$FIXTURE_DIR/tc8-project"
-setup_daemon_sandbox "$TC8_DIR"
-echo "operator-wip" > "$TC8_DIR/uncommitted.txt"
-
-TC8_WORKTREE_BEFORE="$(git -C "$TC8_DIR" worktree list --porcelain)"
-TC8_BRANCH_BEFORE="$(git -C "$TC8_DIR" branch --show-current 2>/dev/null || echo "")"
-TC8_STAGING_BEFORE="$(git -C "$TC8_DIR" rev-parse staging 2>/dev/null || echo "?")"
-TC8_HOME_BRANCH_BEFORE="$(git -C "$TC8_DIR" branch --list gaai-daemon-home)"
-
-TC8_HELP_RC=0
-run_sandbox_daemon "$TC8_DIR" --help >/dev/null 2>&1 || TC8_HELP_RC=$?
-[[ "$TC8_HELP_RC" -eq 0 ]] \
-  && pass "TC8-1: --help succeeds with GAAI_DAEMON_HOME unset (direct mode, real lib intact)" \
-  || fail "TC8-1: --help failed (rc=$TC8_HELP_RC) in direct mode with the real lib present"
-
-TC8_CHECK_SCRIPT="$FIXTURE_DIR/tc8-check.sh"
-{
-  echo '#!/usr/bin/env bash'
-  echo "source \"$DAEMON_HOME_LIB\""
-  echo 'log() { :; }'
-  echo "$_CHECK_FN"
-  echo '_per_cycle_home_branch_check; echo "RC=$?"'
-} > "$TC8_CHECK_SCRIPT"
-TC8_CHECK_OUT=$(env -u GAAI_DAEMON_HOME PROJECT_DIR="$TC8_DIR" REPO_ROOT="$TC8_DIR" TARGET_BRANCH=staging bash "$TC8_CHECK_SCRIPT" 2>&1)
-grep -q 'RC=0' <<<"$TC8_CHECK_OUT" \
-  && pass "TC8-2: _per_cycle_home_branch_check is a no-op (rc=0) with GAAI_DAEMON_HOME unset" \
-  || fail "TC8-2: unexpected output with GAAI_DAEMON_HOME unset: $TC8_CHECK_OUT"
-
-TC8_WORKTREE_AFTER="$(git -C "$TC8_DIR" worktree list --porcelain)"
-TC8_BRANCH_AFTER="$(git -C "$TC8_DIR" branch --show-current 2>/dev/null || echo "")"
-TC8_STAGING_AFTER="$(git -C "$TC8_DIR" rev-parse staging 2>/dev/null || echo "?")"
-TC8_HOME_BRANCH_AFTER="$(git -C "$TC8_DIR" branch --list gaai-daemon-home)"
-
-[[ "$TC8_WORKTREE_AFTER" == "$TC8_WORKTREE_BEFORE" ]] \
-  && pass "TC8-3: worktree list unchanged (no worktree created/removed)" \
-  || fail "TC8-3: worktree list changed"
-[[ "$TC8_BRANCH_AFTER" == "$TC8_BRANCH_BEFORE" && "$TC8_STAGING_AFTER" == "$TC8_STAGING_BEFORE" ]] \
-  && pass "TC8-4: main checkout branch + local staging ref unchanged" \
-  || fail "TC8-4: main checkout branch/ref changed (before: $TC8_BRANCH_BEFORE/$TC8_STAGING_BEFORE, after: $TC8_BRANCH_AFTER/$TC8_STAGING_AFTER)"
-[[ -z "$TC8_HOME_BRANCH_BEFORE" && -z "$TC8_HOME_BRANCH_AFTER" ]] \
-  && pass "TC8-5: no 'gaai-daemon-home' branch was ever created in direct mode" \
-  || fail "TC8-5: a 'gaai-daemon-home' branch exists in direct mode"
-[[ "$(cat "$TC8_DIR/uncommitted.txt" 2>/dev/null)" == "operator-wip" ]] \
-  && pass "TC8-6: the operator's uncommitted file survives untouched (nothing was cleaned)" \
-  || fail "TC8-6: the operator's uncommitted file was modified or removed"
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TC9: static neutrality/authority guard rails (AC5)
-# ═══════════════════════════════════════════════════════════════════════════════
-echo ""
-echo "=== TC9: AC5 static guard rails — single SCRIPT_DIR-relative source, no product token ==="
-
-TC9_SOURCE_LINES=$(grep -cE '^[[:space:]]*source "\$SCRIPT_DIR/lib/daemon-home\.sh"' "$DAEMON_SCRIPT" || true)
-[[ "$TC9_SOURCE_LINES" -eq 1 ]] \
-  && pass "TC9-1: exactly one \$SCRIPT_DIR-relative lib/daemon-home.sh source line in delivery-daemon.sh" \
-  || fail "TC9-1: expected exactly 1 source line, found $TC9_SOURCE_LINES"
-
-TC9_BLOCK=$(awk '/^# daemon-start\.sh sources lib\/daemon-home\.sh too/,/^NOTIFICATION_WEBHOOK=/' "$DAEMON_SCRIPT" | sed '$d')
-if [[ -z "$TC9_BLOCK" ]]; then
-  fail "TC9-2: could not locate the daemon-home prelude block for static inspection"
-elif grep -qiE 'gaai\.cloud|workers/|packages/|curl|http' <<<"$TC9_BLOCK"; then
-  fail "TC9-2: prelude block contains a network/product token: $TC9_BLOCK"
-else
-  pass "TC9-2: prelude block introduces no network/product token"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Summary
-# ═══════════════════════════════════════════════════════════════════════════════
-echo ""
-echo "══════════════════════════════════════════════════"
-echo "  Results: $PASS_COUNT passed, $FAIL_COUNT failed"
-echo "══════════════════════════════════════════════════"
-
-exit "$FAIL_COUNT"
+echo "════════════════════════════════════════"
+echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed"
+[[ "$FAIL_COUNT" -eq 0 ]] || exit 1
+exit 0
