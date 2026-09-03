@@ -74,12 +74,55 @@ else
   check "git" "not found — install git before proceeding"
 fi
 
-# 3. Python 3 (for backlog-scheduler.sh)
+# 3. Python 3 on PATH — the stdlib-only runtime dependency.
+# This is NOT the YAML runtime check below, and the two are never merged: the
+# YAML boundary selects and attests its own interpreter and never falls back to
+# an ambient one, so a green probe here implies nothing about the runtime tuple
+# and a green tuple check implies nothing about python3 being on PATH. What still
+# depends on this probe are the modes that were not migrated because they import
+# no YAML — concretely backlog-scheduler.sh's own python3 guard and its exit-3
+# contract.
 if command -v python3 &>/dev/null; then
   py_version=$(python3 --version 2>&1 | awk '{print $2}')
-  check "python3 ($py_version) — for backlog-scheduler.sh" "ok"
+  check "python3 ($py_version) — for backlog-scheduler.sh stdlib-only modes" "ok"
 else
-  check "python3 — for backlog-scheduler.sh" "not found (optional — backlog-scheduler.sh will not work)"
+  check "python3 — for backlog-scheduler.sh stdlib-only modes" "not found (--list/--next/--set-status and archive handling will not work)"
+fi
+
+# 3b. The repository-controlled YAML runtime: one allowed final CPython and the
+# complete distributed tuple (archive, manifest and licence), verified through
+# the invocation boundary. This is a hard check, not an optional one.
+YAML_RUNTIME_LIB="$(cd "$(dirname "$0")" && pwd)/lib/yaml-runtime.sh"
+if [[ ! -f "$YAML_RUNTIME_LIB" ]]; then
+  check "YAML runtime — vendored offline runtime" "boundary library not found in this distribution"
+else
+  # shellcheck source=lib/yaml-runtime.sh
+  if ! source "$YAML_RUNTIME_LIB" 2>/dev/null; then
+    check "YAML runtime — vendored offline runtime" "boundary library could not be loaded"
+  else
+    YAML_RUNTIME_ROLE=install_check
+    yr_out=""
+    yr_err=""
+    yr_rc=0
+    yr_err_file="$(mktemp "${TMPDIR:-/tmp}/gaai-install-check.XXXXXX")"
+    yr_out="$(yaml_runtime_verify_tuple 2>"$yr_err_file")" || yr_rc=$?
+    yr_err="$(cat "$yr_err_file" 2>/dev/null || true)"
+    rm -f "$yr_err_file"
+    if [[ "$yr_rc" -eq 0 ]]; then
+      yr_version="$(printf '%s\n' "$yr_out" | sed -n 's/^python=\([^ ]*\) .*/\1/p')"
+      yr_trust="$(printf '%s\n' "$yr_out" | sed -n 's/.* trust=\([^ ]*\).*/\1/p')"
+      check "YAML runtime (CPython ${yr_version}, trust ${yr_trust}) — archive, manifest and licence verified" "ok"
+    else
+      yr_code="$(printf '%s\n' "$yr_err" | sed -n 's/.*code=\([a-z_]*\).*/\1/p' | head -1)"
+      if [[ "$yr_code" == "yaml_runtime_asset_invalid" || "$yr_code" == "yaml_runtime_manifest_invalid" ]]; then
+        check "YAML runtime — vendored offline runtime" \
+          "${yr_code:-verification failed} — if the checkout was made under a restrictive umask, see the restrictive-umask checkout section of .gaai/core/README.md"
+      else
+        check "YAML runtime — vendored offline runtime" \
+          "${yr_code:-verification failed} — declare GAAI_YAML_PYTHON, or see the supported-interpreter section of .gaai/core/README.md"
+      fi
+    fi
+  fi
 fi
 
 # 4. Write access to target

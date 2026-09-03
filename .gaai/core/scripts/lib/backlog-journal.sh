@@ -12,6 +12,16 @@ BACKLOG_JOURNAL_RECORD_DIGEST=""
 BACKLOG_JOURNAL_SEQUENCE=""
 BACKLOG_JOURNAL_RUN_TOKEN=""
 
+# Parser availability is owned by the repository-controlled runtime boundary, so
+# this library no longer probes an ambient interpreter or an ambient parser.
+# shellcheck source=yaml-runtime.sh
+if [[ -z "${_YAML_RUNTIME_SH_SOURCED:-}" ]]; then
+  if ! source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/yaml-runtime.sh"; then
+    printf '%s\n' '[yaml-runtime] role=journal action=load_boundary code=yaml_runtime_missing' >&2
+    return 1 2>/dev/null || exit 30
+  fi
+fi
+
 _backlog_journal_safe_story() {
   [[ "${1:-}" =~ ^[A-Za-z][A-Za-z0-9._-]{0,63}$ ]] && printf '%s' "$1" || printf '-'
 }
@@ -53,13 +63,9 @@ backlog_journal_begin_run() {
   BACKLOG_JOURNAL_REASON=""
   BACKLOG_JOURNAL_RUN_TOKEN=""
 
-  if ! command -v python3 >/dev/null 2>&1; then
-    BACKLOG_JOURNAL_OUTCOME="rejected"
-    BACKLOG_JOURNAL_REASON="runtime_missing:python3"
-    _backlog_journal_shell_diagnostic "-" "-" "$writer_context" "$BACKLOG_JOURNAL_REASON"
-    return 1
-  fi
-
+  # Registration is a stdlib-only program: it composes no YAML and imports no
+  # parser, so it keeps its own invocation. An unavailable interpreter is already
+  # fail-closed here — the empty result and non-zero status below reject the run.
   if result=$(python3 - "$backlog_file" "$writer_context" <<'PY'
 import datetime
 import hashlib
@@ -201,14 +207,8 @@ backlog_journal_emit() {
   BACKLOG_JOURNAL_RECORD_DIGEST=""
   BACKLOG_JOURNAL_SEQUENCE=""
 
-  if ! command -v python3 >/dev/null 2>&1; then
-    BACKLOG_JOURNAL_OUTCOME="rejected"
-    BACKLOG_JOURNAL_REASON="runtime_missing:python3"
-    _backlog_journal_shell_diagnostic "$story_id" "$field" "$writer_context" "$BACKLOG_JOURNAL_REASON"
-    return 1
-  fi
-
-  if result=$(python3 - "$backlog_file" "$story_id" "$field" "$new_value" \
+  local YAML_RUNTIME_ROLE=journal
+  if result=$(yaml_runtime_run "$backlog_file" "$story_id" "$field" "$new_value" \
       "$writer_context" "$run_token" <<'PY'
 import datetime
 import decimal
@@ -348,10 +348,9 @@ def git_content(args):
 
 
 def load_yaml_source(source, target_story_id):
-    try:
-        import yaml
-    except ImportError:
-        raise JournalError("runtime_missing:pyyaml")
+    # The boundary has already attested and imported the runtime; this resolves
+    # from the retained-descriptor module and can never reach an ambient tree.
+    import yaml
 
     try:
         class BacklogSafeLoader(yaml.SafeLoader):
@@ -1056,7 +1055,8 @@ PY
 backlog_journal_prepare_projection() {
   local backlog_file="${1:-}" base_commit="${2:-}" backlog_rel="${3:-}"
   local projected_output="${4:-}" manifest_output="${5:-}"
-  python3 - "$backlog_file" "$base_commit" "$backlog_rel" \
+  local YAML_RUNTIME_ROLE=journal
+  yaml_runtime_run "$backlog_file" "$base_commit" "$backlog_rel" \
     "$projected_output" "$manifest_output" <<'PY'
 import datetime, decimal, fcntl, glob, hashlib, json, os, re, stat, subprocess, sys
 
@@ -1109,10 +1109,9 @@ def closed_exception(_kind, _value, _traceback):
     print("[BACKLOG-PROJECTION] outcome=rejected reason=projection_invalid applied=0 waiting=0 conflicted=0 invalid=1", file=sys.stderr)
 sys.excepthook = closed_exception
 
-try:
-    import yaml
-except ImportError:
-    reject("runtime_missing:pyyaml")
+# Attested and imported by the boundary before this program runs.
+import yaml
+
 try:
     raw = open(backlog_file, "rb").read()
     text = raw.decode("utf-8")

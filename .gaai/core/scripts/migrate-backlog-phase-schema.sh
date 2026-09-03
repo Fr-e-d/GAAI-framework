@@ -38,11 +38,16 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 BACKLOG="$PROJECT_DIR/.gaai/project/contexts/backlog/active.backlog.yaml"
 
-# ── Pre-check: pyyaml available ──────────────────────────────
-if ! python3 -c "import yaml" 2>/dev/null; then
-  echo "ERROR: pyyaml is required. Install with: pip3 install pyyaml" >&2
+# ── Runtime boundary ─────────────────────────────────────────
+# The parser is repository-controlled: there is no ambient availability probe and
+# nothing to install. An unavailable or untrusted runtime is a typed hard failure
+# from the boundary itself.
+# shellcheck source=lib/yaml-runtime.sh
+if ! source "$SCRIPT_DIR/lib/yaml-runtime.sh"; then
+  echo "ERROR: the repository-controlled YAML runtime boundary is unavailable" >&2
   exit 1
 fi
+YAML_RUNTIME_ROLE=migration
 
 # ── Pre-condition: backlog file must exist ───────────────────
 if [[ ! -f "$BACKLOG" ]]; then
@@ -71,7 +76,7 @@ echo "Backup created: ${BACKLOG}.bak"
 MIGRATION_MAP_FILE=$(mktemp)
 trap 'rm -f "$MIGRATION_MAP_FILE"' EXIT
 
-python3 - "$BACKLOG" "$MIGRATION_MAP_FILE" << 'PYEOF'
+yaml_runtime_run "$BACKLOG" "$MIGRATION_MAP_FILE" << 'PYEOF'
 import sys, yaml
 
 backlog_path = sys.argv[1]
@@ -210,7 +215,7 @@ PYEOF
 python3 -c "$WRITE_PASS_PY" "$BACKLOG" "$MIGRATION_MAP_FILE"
 
 # ── YAML validation post-write ───────────────────────────────
-if ! python3 -c "import yaml; yaml.safe_load(open('$BACKLOG'))" 2>/dev/null; then
+if ! yaml_runtime_validate_file "$BACKLOG"; then
   echo "ERROR: YAML parse failed after migration. Restoring backup." >&2
   cp "${BACKLOG}.bak" "$BACKLOG"
   echo "Backup restored." >&2
@@ -218,7 +223,7 @@ if ! python3 -c "import yaml; yaml.safe_load(open('$BACKLOG'))" 2>/dev/null; the
 fi
 
 # ── Summary: phase_status breakdown ─────────────────────────
-python3 - "$BACKLOG" << 'PYEOF'
+yaml_runtime_run "$BACKLOG" << 'PYEOF'
 import sys, yaml
 from collections import Counter
 

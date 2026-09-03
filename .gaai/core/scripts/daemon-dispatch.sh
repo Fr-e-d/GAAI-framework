@@ -23,6 +23,37 @@ source "${_GAAI_DISPATCH_LIB_DIR}/commit-retry-containment.sh"
 # The PLAN target guard is owned by this library and must remain available in
 # the fresh wrapper shell, which sources daemon-dispatch directly rather than
 # inheriting delivery-daemon functions.
+# Every authority-bearing YAML program in this file runs through the
+# repository-controlled runtime boundary. It is sourced ahead of the classifier
+# so both use the same already-loaded boundary.
+# shellcheck source=lib/yaml-runtime.sh
+if [[ -z "${_YAML_RUNTIME_SH_SOURCED:-}" ]]; then
+  if ! source "${_GAAI_DISPATCH_LIB_DIR}/yaml-runtime.sh"; then
+    printf '%s\n' '[yaml-runtime] role=dispatcher action=load_boundary code=yaml_runtime_missing' >&2
+    return 1 2>/dev/null || exit 30
+  fi
+fi
+
+# The restrictive-umask repair and its verification, in the exact order the
+# contract requires: normalize, then the worktree-local exact blob/mode
+# verification, before anything in that worktree executes. A tree whose HEAD
+# predates the vendored tuple declares none of it and needs neither step.
+_dispatch_repair_worktree_tuple() {
+  local story_id="$1" worktree_path="$2" rc=0
+  local YAML_RUNTIME_ROLE=dispatcher
+  if ! declare -F yaml_runtime_repair_and_verify_tree >/dev/null 2>&1; then
+    return 1
+  fi
+  yaml_runtime_repair_and_verify_tree "$worktree_path" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    return "$rc"
+  fi
+  if [[ "${YAML_RUNTIME_TUPLE_STATE:-}" == "absent" ]]; then
+    echo "[INFO] ${story_id}: worktree base predates the vendored runtime tuple — nothing to normalize or verify"
+  fi
+  return 0
+}
+
 # shellcheck source=lib/stuck-classifier.sh
 if [[ -z "${_STUCK_CLASSIFIER_SH_SOURCED:-}" ]]; then
   if ! source "${_GAAI_DISPATCH_LIB_DIR}/stuck-classifier.sh"; then
@@ -293,10 +324,20 @@ _lifecycle_assert_base_held_assets() {
   project_root=$(cd "${PROJECT_DIR:?}" 2>/dev/null && pwd -P) || return 1
   [[ "$asset_root" == "$project_root" ]] || return 1
 
+  # The parser the lifecycle writer depends on is base-held on the exact remote
+  # SHA before that write, exactly like the writer itself. Without this, a
+  # candidate could leave the three original assets pristine, swap the parser
+  # underneath them, and still author lifecycle state. The manifest is bound as
+  # well as the archive because a tamperer can keep the pair internally
+  # consistent; only the base-held blob comparison catches that.
   local assets=(
     .gaai/core/scripts/daemon-dispatch.sh
     .gaai/core/scripts/lib/backlog-journal.sh
     .gaai/core/scripts/lib/chore-commit.sh
+    .gaai/core/scripts/lib/yaml-runtime.sh
+    .gaai/core/vendor/pyyaml/6.0.3/pyyaml-runtime.pyz
+    .gaai/core/vendor/pyyaml/6.0.3/PROVENANCE.json
+    .gaai/core/vendor/pyyaml/6.0.3/LICENSE
   )
   if [[ -n "${GAAI_LIFECYCLE_CALLER_ASSET:-}" ]]; then
     case "$GAAI_LIFECYCLE_CALLER_ASSET" in
@@ -763,13 +804,12 @@ PY
 
 _lifecycle_snapshot_matches() {
   local snapshot="$1" story_id="$2"
+  local YAML_RUNTIME_ROLE=dispatcher
   shift 2
-  python3 - "$snapshot" "$story_id" "$@" <<'PY'
+  yaml_runtime_run "$snapshot" "$story_id" "$@" <<'PY'
 import decimal, sys
-try:
-    import yaml
-except ImportError:
-    raise SystemExit(1)
+
+import yaml
 
 path, story, *pairs = sys.argv[1:]
 if len(pairs) == 0 or len(pairs) % 2:
@@ -2537,17 +2577,15 @@ _dispatch_story_record_at_commit() {
     rm -f "$snapshot"
     return 1
   fi
-  result=$(python3 - "$snapshot" "$story_id" "$blob" "$story_blob" <<'PY'
+  local YAML_RUNTIME_ROLE=dispatcher
+  result=$(yaml_runtime_run "$snapshot" "$story_id" "$blob" "$story_blob" <<'PY'
 import hashlib
 import os
 import re
 import stat
 import sys
 
-try:
-    import yaml
-except ImportError:
-    raise SystemExit(1)
+import yaml
 
 path, story, expected_blob, story_blob = sys.argv[1:]
 if not re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", story):
@@ -2779,6 +2817,15 @@ handle_plan_phase() {
     mkdir -p "$(dirname "$worktree_path")"
     if ! git -C "$PROJECT_DIR" worktree add "$worktree_path" "story/${story_id}" 2>/dev/null; then
       echo "[ERROR] ${story_id} handle_plan_phase: git worktree add failed for $worktree_path"
+      _emit_plan_routing_record "$story_id" "$trace_id" "error" "WORKTREE_CREATE_FAILED" "0"
+      return 1
+    fi
+    # This checkout runs inside the generated wrapper, whose restrictive umask
+    # materializes the vendored runtime at 0600 by construction. Repair exactly
+    # the three vendor files and re-verify the tuple against this worktree's own
+    # HEAD tree before anything in it executes.
+    if ! _dispatch_repair_worktree_tuple "$story_id" "$worktree_path"; then
+      echo "[ERROR] ${story_id} handle_plan_phase: runtime tuple unusable in $worktree_path"
       _emit_plan_routing_record "$story_id" "$trace_id" "error" "WORKTREE_CREATE_FAILED" "0"
       return 1
     fi
@@ -4973,6 +5020,14 @@ handle_commit_phase() {
       _emit_commit_routing_record "$story_id" "$trace_id" "error" "COMMIT_FAILED" "0" "" "false"
       return 1
     fi
+    # Same restrictive-umask repair as the plan-phase checkout: normalize the
+    # three vendor files, then verify the tuple against this worktree's own HEAD
+    # tree, before anything in it executes.
+    if ! _dispatch_repair_worktree_tuple "$story_id" "$worktree_path"; then
+      echo "[ERROR] ${story_id} handle_commit_phase: runtime tuple unusable in recreated worktree [class=COMMIT_FAILED]"
+      _emit_commit_routing_record "$story_id" "$trace_id" "error" "COMMIT_FAILED" "0" "" "false"
+      return 1
+    fi
     # AC3/AC6: seed marker only when recreated worktree has BOTH populated node_modules AND
     # lockfile hash match — a hash-only seed would write a false-fresh marker (forbidden by AC6)
     local _wt_marker_dir; _wt_marker_dir="$(_wt_deps_marker_dir "$worktree_path")"
@@ -5147,6 +5202,20 @@ ${qa_snippet}"
         return 1
       fi
       echo "[INFO] ${story_id} handle_commit_phase: worktree recovery succeeded — continuing with push"
+      # A successful recovery removes and re-creates the worktree with its own
+      # checkout under this wrapper's restrictive umask, so the vendored runtime
+      # is back at 0600 even if the pre-recovery tree had already been
+      # normalized. Repair and verify here, before admission, the push loop, any
+      # retry, and before any consumer in that worktree reads anything.
+      if ! _dispatch_repair_worktree_tuple "$story_id" "$worktree_path"; then
+        echo "[ERROR] ${story_id} handle_commit_phase: recovered worktree runtime tuple unusable — aborting push [class=WORKTREE_CORRUPTION]"
+        if declare -F notify_escalation_inline >/dev/null 2>&1; then
+          notify_escalation_inline "$story_id" "worktree_corruption_runtime_tuple" \
+            "Inspect worktree at ${worktree_path}; the vendored runtime tuple could not be repaired and verified"
+        fi
+        _emit_commit_routing_record "$story_id" "$trace_id" "error" "WORKTREE_CORRUPTION" "0" "" "false"
+        return 1
+      fi
     fi
   fi
 

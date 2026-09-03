@@ -4,6 +4,17 @@
 [[ -n "${_STUCK_CLASSIFIER_SH_SOURCED:-}" ]] && return 0
 _STUCK_CLASSIFIER_SH_SOURCED=1
 
+# The authority-bearing YAML program below runs through the repository-controlled
+# runtime boundary, never through an ambient interpreter or an ambient parser.
+# The stdlib-only context programs further down keep their own invocation.
+# shellcheck source=yaml-runtime.sh
+if [[ -z "${_YAML_RUNTIME_SH_SOURCED:-}" ]]; then
+  if ! source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/yaml-runtime.sh"; then
+    printf '%s\n' '[yaml-runtime] role=classifier action=load_boundary code=yaml_runtime_missing' >&2
+    return 1 2>/dev/null || exit 30
+  fi
+fi
+
 # One semantic validator is injected into each descriptor-bound operation so
 # install, read and retire cannot drift onto different context schemas.
 _FORWARD_CONTEXT_VALIDATE_PY='def validate_context(obj):
@@ -90,7 +101,8 @@ _FORWARD_CONTEXT_VALIDATE_PY='def validate_context(obj):
 # before the strict YAML loader sees them.
 _forward_read_snapshot() {
   [[ "$#" -ge 4 && "$#" -le 9 ]] || return 1
-  python3 - "$@" <<'PY'
+  local YAML_RUNTIME_ROLE=classifier
+  yaml_runtime_run "$@" <<'PY'
 import datetime
 import hashlib
 import os
@@ -99,10 +111,7 @@ import stat
 import subprocess
 import sys
 
-try:
-    import yaml
-except ImportError:
-    raise SystemExit(1)
+import yaml
 
 path, source_sha, expected_blob, mode = sys.argv[1:5]
 if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", source_sha):
