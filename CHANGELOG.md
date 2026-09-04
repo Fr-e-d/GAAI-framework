@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- follow-up: remove the unproven Bash 3.2 expansion and pin the floor in a test
 -: make daemon-home startup exact-current and fail closed
 - chore: honor external worktree roots
 -: ship an offline attested YAML runtime for public Framework paths
