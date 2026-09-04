@@ -57,11 +57,15 @@ Full reference: see `GAAI.md` → "Branch Model & Automation".
 
 **Runtime requirement:** The daemon explicitly supports two local headless executors: Claude Code CLI (`claude` binary in PATH, the backwards-compatible default) or Codex CLI (`codex` binary in PATH, via `GAAI_DAEMON_EXECUTOR=codex`). An unknown or unavailable executor stops before governed work begins with an actionable error. Discovery and manual Delivery work with any AI coding tool; this requirement applies only to autonomous delivery.
 
-> **Tested on:** macOS (Apple Silicon). Linux (Ubuntu) is **expected** to work and
-> is exercised by the hosted continuous-integration matrix once that lane has run on
-> a published candidate; until then it is not claimed as validated. WSL is **not** claimed — no WSL run exists. Native
-> Windows (Git Bash / MSYS2 / Cygwin) is explicitly unsupported and the daemon
-> refuses to start there.
+> **Tested on:** macOS (Apple Silicon), enforced continuously — every candidate that
+> touches this framework runs the three daemon home suites on a hosted macOS runner
+> under `/bin/bash`, which on that platform IS the Bash 3.2 floor the daemon entry
+> point targets. That lane exists because Darwin's kernel interfaces differ from
+> Linux's in ways a `/proc`-based run cannot observe, so a green Linux corpus alone
+> never proved this platform. Linux (Ubuntu) is exercised by the hosted corpus on the
+> same candidates. WSL is **not** claimed — no WSL run exists. Native Windows
+> (Git Bash / MSYS2 / Cygwin) is explicitly unsupported and the daemon refuses to
+> start there.
 
 ---
 
