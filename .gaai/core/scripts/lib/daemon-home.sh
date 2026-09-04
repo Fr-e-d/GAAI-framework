@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # lib/daemon-home.sh — verify-only daemon-home identity + portable lifecycle lock
 #
-# E1003S07 (DEC-162, DEC-223). This library carries NO provisioning authority.
+# Exact-current startup contract (committed-on-target framework code, human-only
+# admission and merge trust surfaces). This library carries NO provisioning authority.
 # `daemon-setup.sh` is the sole explicit offline owner that may create or update the
 # dedicated `gaai-daemon-home` worktree. Every runtime path exported here — used by
 # `daemon-start.sh` and `delivery-daemon.sh` — is strictly verify-only: it never
@@ -9,7 +10,7 @@
 # dirty, foreign, wrong-branch or ambiguous evidence returns a typed refusal before
 # any tmux, credential or daemon effect.
 #
-# The pre-E1003S07 `_gaai_provision_daemon_home` is deliberately gone: a runtime
+# The former `_gaai_provision_daemon_home` is deliberately gone: a runtime
 # repair cannot portably bind the linked-worktree directory, its `.git` link and the
 # common-directory administrative records into one crash-atomic, no-overwrite
 # transaction with Git's public pathname-based worktree commands.
@@ -322,7 +323,7 @@ _gaai_home_lock_held() { [[ -n "$_GAAI_HOME_LOCK_DIR" && -d "$_GAAI_HOME_LOCK_DI
 # _gaai_home_fetch_target <repo_root> <target_branch>
 # Fetches and prints the resolved remote tip SHA. A failed fetch is a typed refusal,
 # never a silent fall back to a cached ref: swallowing it is exactly how missing
-# evidence became launch authority before E1003S07.
+# evidence became launch authority under the former model.
 _gaai_home_fetch_target() {
   local _repo_root="$1" _target="$2" _sha
   if ! git -C "$_repo_root" fetch --quiet origin "$_target" 2>/dev/null; then

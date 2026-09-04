@@ -39,7 +39,7 @@ GAAI_ENTRY_NAME="daemon-start"
 
 # BEGIN GAAI-ENTRY-AUTHORITY (byte-identical in daemon-start.sh and daemon-setup.sh)
 # ═══════════════════════════════════════════════════════════════════════════
-# Privileged entry authority (E1003S07 AC2) — FIRST INSTRUCTIONS
+# Privileged entry authority (exact-current startup contract) — FIRST INSTRUCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
 #
 # This block is deliberately inlined rather than sourced. A sourced helper runs
@@ -403,7 +403,7 @@ if ! declare -F _gaai_home_verify >/dev/null 2>&1 \
   printf 'daemon-start: reason=process_authority_invalid action=operator_disposition_required evidence=home_library_unavailable\n' >&2
   exit 1
 fi
-# The pre-E1003S07 runtime provisioner must not exist in this process. Its presence
+# The former runtime provisioner must not exist in this process. Its presence
 # would mean a stale library is loaded and startup could still repair the home.
 if declare -F _gaai_provision_daemon_home >/dev/null 2>&1; then
   printf 'daemon-start: reason=process_authority_invalid action=operator_disposition_required evidence=runtime_provisioner_present\n' >&2
@@ -572,6 +572,25 @@ _child_refuse() {
   exit 1
 }
 
+# Bound-descriptor identity, per platform. Through /proc/self/fd/N (Linux) the
+# magic link resolves to the open description's file, so inode AND device must
+# both match the proven pathname. Through /dev/fd/N (Darwin's fdesc filesystem)
+# stat(2) on the node reports the bound file's inode but fdesc's OWN device
+# number, so the device is not comparable there by construction; identity is
+# then the inode plus the digest read from the descriptor itself (daemon) or the
+# inode plus the encoder round-trip of the sourced bytes (secret) — both of which
+# the caller already requires. Measured on Darwin: /dev/fd/9 ino == file ino,
+# /dev/fd/9 dev == fdesc dev != file dev.
+_child_fd_identity_matches() {
+  local _fd_path="$1" _f_ino="$2" _f_dev="$3" _p_ino="$4" _p_dev="$5"
+  [[ "$_f_ino" == "$_p_ino" ]] || return 1
+  case "$_fd_path" in
+    /proc/*) [[ "$_f_dev" == "$_p_dev" ]] || return 1 ;;
+    *)       [[ "$(uname -s)" == "Darwin" ]] || { [[ "$_f_dev" == "$_p_dev" ]] || return 1; } ;;
+  esac
+  return 0
+}
+
 do_daemon_child() {
   local _attempt_dir="${1:-}"
   [[ -n "$_attempt_dir" && -d "$_attempt_dir" ]] || _child_refuse "${_attempt_dir:-/nonexistent}" "attempt_dir_absent"
@@ -614,7 +633,7 @@ do_daemon_child() {
   local _f_ino _f_dev _f_digest
   _f_ino="$(_gaai_home_stat_field '%i' "$_fd_path")" || _child_refuse "$_attempt_dir" "daemon_role=fd_stat_unavailable"
   _f_dev="$(_gaai_home_stat_field '%d' "$_fd_path")" || _child_refuse "$_attempt_dir" "daemon_role=fd_stat_unavailable"
-  [[ "$_f_ino" == "$_p_ino" && "$_f_dev" == "$_p_dev" ]] \
+  _child_fd_identity_matches "$_fd_path" "$_f_ino" "$_f_dev" "$_p_ino" "$_p_dev" \
     || _child_refuse "$_attempt_dir" "daemon_role=fd_identity_mismatch"
   _f_digest="$(_gaai_home_digest_file "$_fd_path")" || _child_refuse "$_attempt_dir" "daemon_role=fd_digest_unavailable"
   [[ "$_f_digest" == "$_daemon_digest" ]] || _child_refuse "$_attempt_dir" "daemon_role=fd_blob_mismatch"
@@ -660,7 +679,7 @@ do_daemon_child() {
     local _sf_ino _sf_dev
     _sf_ino="$(_gaai_home_stat_field '%i' "$_sfd_path")" || _child_refuse "$_attempt_dir" "secret_role=fd_stat_unavailable"
     _sf_dev="$(_gaai_home_stat_field '%d' "$_sfd_path")" || _child_refuse "$_attempt_dir" "secret_role=fd_stat_unavailable"
-    [[ "$_sf_ino" == "$_s_ino" && "$_sf_dev" == "$_s_dev" ]] \
+    _child_fd_identity_matches "$_sfd_path" "$_sf_ino" "$_sf_dev" "$_s_ino" "$_s_dev" \
       || _child_refuse "$_attempt_dir" "secret_role=fd_identity_mismatch"
     # Unlink the pathname and fsync the parent: from here the token exists only as
     # this descriptor. Unlinked bytes are not claimed to be forensically erased.
@@ -1268,6 +1287,14 @@ do_monitor() {
   # Resolve the home the pane should read from the same repository-scoped root, so
   # `--monitor` without a running daemon still finds the live backlog (#3176).
   local _monitor_home="${GAAI_DAEMON_HOME:-}"
+  # Prefer the proven home recorded by a live lifecycle over any derived path.
+  if [[ -z "$_monitor_home" && -n "${OWNER_FILE:-}" && -r "$OWNER_FILE" ]]; then
+    local _owner_home
+    _owner_home="$(_owner_field "$OWNER_FILE" home 2>/dev/null || echo "")"
+    # A recorded home is only preferred while it still exists; a leftover record
+    # naming a deleted path falls through to the guarded derivation below.
+    [[ -n "$_owner_home" && -d "$_owner_home/.gaai/project/contexts/backlog" ]] && _monitor_home="$_owner_home"
+  fi
   if [[ -z "$_monitor_home" && -d "${GAAI_WORKTREES_BASE}/__daemon-home/.gaai/project/contexts/backlog" ]]; then
     _monitor_home="${GAAI_WORKTREES_BASE}/__daemon-home"
   fi

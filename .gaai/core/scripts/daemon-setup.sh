@@ -8,7 +8,7 @@
 #   auto-configures idempotent settings, and — uniquely in this framework — may
 #   create or update the dedicated registered `gaai-daemon-home` worktree.
 #
-#   E1003S07 moved ALL provisioning authority here. `daemon-start.sh`,
+#   The exact-current startup contract moved ALL provisioning authority here. `daemon-start.sh`,
 #   `delivery-daemon.sh` and every runtime path in `lib/daemon-home.sh` are
 #   verify-only. The reason is empirical, not stylistic: Git's public linked-worktree
 #   operations are pathname-based across a physical directory plus common-directory
@@ -41,7 +41,7 @@ GAAI_ENTRY_NAME="daemon-setup"
 
 # BEGIN GAAI-ENTRY-AUTHORITY (byte-identical in daemon-start.sh and daemon-setup.sh)
 # ═══════════════════════════════════════════════════════════════════════════
-# Privileged entry authority (E1003S07 AC2) — FIRST INSTRUCTIONS
+# Privileged entry authority (exact-current startup contract) — FIRST INSTRUCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
 #
 # This block is deliberately inlined rather than sourced. A sourced helper runs

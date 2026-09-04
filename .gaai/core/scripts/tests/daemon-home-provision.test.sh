@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# daemon-home-provision.test.sh — E1003S07 AC6 setup/startup authority matrices
+# daemon-home-provision.test.sh — exact-current startup contract, regression-coverage criterion setup/startup authority matrices
 #
 # Proves the Option A authority split:
 #   * `daemon-setup.sh` is the ONLY path that can create or advance the dedicated
@@ -81,7 +81,7 @@ gaai_build_fixture() {
   chmod 0755 "$_proj/.gaai/core/scripts/backlog-scheduler.sh"
   cat > "$_proj/.gaai/core/scripts/delivery-daemon.sh" <<'STUB_EOF'
 #!/usr/bin/env bash
-# Stub daemon for the E1003S07 matrices. Mirrors the real ready-acknowledgement
+# Stub daemon for the daemon-home matrices. Mirrors the real ready-acknowledgement
 # contract of delivery-daemon.sh and records what actually crossed the boundary.
 set -uo pipefail
 A="${GAAI_DAEMON_LAUNCH_ATTEMPT:-}"
@@ -179,7 +179,7 @@ if [[ -n "${GAAI_HOME_FIXTURE_ONLY:-}" ]]; then return 0; fi
 
 for _tool in git tmux; do
   if ! command -v "$_tool" >/dev/null 2>&1; then
-    echo "ERROR: $_tool is required by the E1003S07 matrices and is absent."
+    echo "ERROR: $_tool is required by the daemon-home matrices and is absent."
     echo "The hosted OSS lane must execute the real capability probe and smoke lifecycle;"
     echo "installing it is outside this Story's inventory (see Out of Scope)."
     exit 1
