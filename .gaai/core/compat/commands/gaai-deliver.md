@@ -43,13 +43,15 @@ cd /path/to/project && .gaai/core/scripts/daemon-start.sh <args>
 
 Use the actual project root (the directory containing `.gaai/`). Pass all arguments as-is to the script.
 
-**`--status` flag:** run the script with `--status`. On macOS with tmux this opens a live monitoring dashboard in a new Terminal.app window. Display the output and stop.
+**`--status` flag:** run the script with `--status`. This is a completed read-only lifecycle subprotocol — it reports state (socket, session, credential mode, daemon pid, verdict) and mutates nothing. Display the output and stop.
+
+**`--monitor` flag:** run the script with `--monitor`. It completes the read-only status subprotocol first, then attaches a presentation UI in a **distinct** tmux socket and session, which is never daemon authority or evidence. Requires a terminal.
 
 **`--stop` flag:** run the script with `--stop`. Display the output and stop.
 
-**`--start` or no action flag (default):** the script starts the daemon in a background tmux session (`gaai-daemon`) and automatically opens a second Terminal.app window with the live monitoring dashboard. Inform the user:
-- Daemon runs in tmux session `gaai-daemon`
-- Monitor opens automatically in a new Terminal.app window
+**`--start` or no action flag (default):** the script verifies the pre-provisioned daemon home is clean, registered and exact-current, then launches the daemon inside a **private** tmux server whose socket is digest-bound to the physical git common directory. It does not open any window by itself. Inform the user:
+- Daemon runs in a session named `gaai-daemon-<label>` on that private server, not on the default tmux server
+- The monitor does NOT open automatically — attach it with `.gaai/core/scripts/daemon-start.sh --monitor`
 - Each delivery runs in its own tmux session `gaai-deliver-<STORY_ID>`
 - Logs: `.gaai/project/contexts/backlog/.delivery-logs/<STORY_ID>.log`
 - Stop: `/gaai-deliver --stop` or `.gaai/core/scripts/daemon-start.sh --stop`
