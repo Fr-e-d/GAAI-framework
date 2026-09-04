@@ -1,10 +1,10 @@
 ![Version](https://img.shields.io/badge/version-2.48.0-blue)
 ![License: ELv2](https://img.shields.io/badge/license-ELv2-green)
-![No SDK](https://img.shields.io/badge/stack-markdown%20%2B%20yaml%20%2B%20bash-orange)
+![Stack](https://img.shields.io/badge/stack-bash%20%2B%20md%20%2B%20yaml%20%2B%20python%20%2B%20node-orange)
 
 # GAAI — Governed Agentic AI Infrastructure
 
-A `.gaai/` folder you drop into any project. Markdown + YAML + bash. No SDK. No package. No external services.
+A `.gaai/` folder you drop into any git project. Markdown, YAML and bash, with a vendored Python runtime and a few Node helpers. No SDK. No package to install. No external services.
 
 **GAAI turns AI coding tools into reliable agentic software delivery systems.**
 
@@ -94,7 +94,7 @@ your-project/
             └── artefacts/     ← stories, epics, plans, reports
 ```
 
-No SDK. No npm package. No pip install. Markdown + YAML + bash. Readable by humans and any AI tool.
+No SDK. No npm package. No pip install — nothing is fetched when you install. Governance is markdown, YAML and bash: readable by humans and by any AI tool. Delivery also needs `python3` and `node` on PATH, plus the vendored PyYAML runtime shipped in `.gaai/core/vendor/` — the one binary in the tree.
 
 ---
 
@@ -189,7 +189,7 @@ a defect — start it from a clean environment, e.g.
 
 > `/gaai-deliver` = one Story, current session. `/gaai-daemon` = background daemon, parallel delivery.
 
-> Requires: git repo, `staging` branch, **Claude Code CLI (`claude` in PATH, default) or Codex CLI (`codex` in PATH, via `GAAI_DAEMON_EXECUTOR=codex`)**, python3, and **tmux — required, not optional** (3.2 is the nominal floor; a real capability probe is the admission authority). There is no Terminal.app or `nohup` fallback: a fallback launcher is how process ownership used to be inferred from ambient state instead of proven.
+> Requires: git repo, `staging` branch, **Claude Code CLI (`claude` in PATH, default) or Codex CLI (`codex` in PATH, via `GAAI_DAEMON_EXECUTOR=codex`)**, `python3`, `node`, and **tmux — required, not optional** (3.2 is the nominal floor; a real capability probe is the admission authority). There is no Terminal.app or `nohup` fallback: a fallback launcher is how process ownership used to be inferred from ambient state instead of proven.
 >
 > **Note:** The Delivery Daemon explicitly supports two local headless executors — Claude Code CLI (default) and Codex CLI. An unknown or unavailable executor stops before governed work begins with an actionable error. Discovery and governance work with any AI tool — this requirement applies only to autonomous delivery.
 >
@@ -227,6 +227,7 @@ One canonical source (`.gaai/`). Thin adapters per tool. No duplication. Discove
 
 - Discovery is conversational and intentionally lightweight. It helps you structure what you know — it does not replace deep product research or collaborative brainstorming across a team.
 - Trivial tasks still need a backlog item. You can make it a one-liner, but the gate is always there.
+- “No package to install” is literal, not a claim of zero dependencies. Nothing is fetched — PyYAML is vendored in-tree — but `git`, `python3`, `node` and `tmux` must already be on PATH for the Delivery Daemon, and the vendored runtime is a binary zipapp rather than readable source.
 - The framework relies on the agent following the files. There is no programmatic enforcement.
 - The repo was recently published under ELv2. Community is just getting started.
 
