@@ -1055,7 +1055,7 @@ if ! declare -F _gaai_home_verify >/dev/null 2>&1; then
   echo "Expected lib/daemon-home.sh to define _gaai_home_verify — check it exists and is readable" >&2
   exit 1
 fi
-# E1003S07: the live daemon holds NO provisioning authority. A library still
+# Exact-current startup contract: the live daemon holds NO provisioning authority. A library still
 # carrying the retired runtime provisioner means a stale asset is loaded and this
 # process could repair the home mid-cycle — refuse before any coordination.
 if declare -F _gaai_provision_daemon_home >/dev/null 2>&1; then
@@ -1417,7 +1417,7 @@ _clear_drift_marker_if_clean() {
   fi
 }
 
-# Per-cycle home verification (E1003S07). VERIFY-ONLY: the live daemon proves the
+# Per-cycle home verification (exact-current startup contract). VERIFY-ONLY: the live daemon proves the
 # pre-provisioned home is still the exact-current, clean, registered tree its launch
 # tuple named, and fails closed before any coordination git-state operation. It never
 # creates, moves, removes, prunes, resets, cleans or repairs the home — that authority
@@ -1510,7 +1510,7 @@ if ! _daemon_repair_tuple "daemon home" "$PROJECT_DIR"; then
   exit 1
 fi
 
-# ── Launch-tuple validation + ready acknowledgement (E1003S07 AC3) ────────
+# ── Launch-tuple validation + ready acknowledgement (startup contract) ─────
 #
 # When this daemon was released by `daemon-start.sh`, it validates the immutable
 # launch tuple it was handed and acknowledges readiness from its OWN pid and

@@ -65,7 +65,7 @@ fi
 # durable owner record and the private tmux server that `daemon-start.sh` maintains,
 # never inferred from a pgrep match. A false negative here costs a backup restore;
 # treating it as authority would reintroduce exactly the ambient-state inference
-# E1003S07 removed.
+# that the exact-current startup contract removed.
 if pgrep -f "delivery-daemon.sh" > /dev/null 2>&1; then
   echo "ERROR: delivery-daemon.sh is running. Stop it first, through the" >&2
   echo "       privileged executable entry (a plain \`bash <script>\` entry is refused):" >&2

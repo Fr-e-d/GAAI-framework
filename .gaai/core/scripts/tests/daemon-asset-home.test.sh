@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# daemon-asset-home.test.sh — E1003S07 AC6 census, privileged entry and exact-asset matrices
+# daemon-asset-home.test.sh — exact-current startup contract, regression-coverage criterion census, privileged entry and exact-asset matrices
 #
 # Covers:
 #   * the deterministic repository-wide CENSUS over every tracked reference to
@@ -218,7 +218,34 @@ while IFS= read -r _sh; do
     rm -f /tmp/gaai-pwn-marker
     _out="$(/usr/bin/env -i "PATH=$ROOT/fakebin:/usr/bin:/bin" "HOME=$ROOT/opshome" TERM=dumb \
              "$_assign" "$_sh" --noprofile --norc -p "$START" --help 2>&1)"
-    if ! printf '%s' "$_out" | grep -q "reason=entry_authority_invalid"; then
+    _neutralized=0
+    case "$_label" in
+      DYLD_*)
+        # Darwin: dyld strips DYLD_* from every process image before the first
+        # instruction (measured for /bin/bash and Homebrew bash, -p or not), or
+        # terminates the image when the inserted library cannot load. The entry
+        # can therefore never observe the variable; the protective property is
+        # that it is unobservable in the entry's own environment.
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+          _probe="$(/usr/bin/env -i "PATH=$ROOT/fakebin:/usr/bin:/bin" "HOME=$ROOT/opshome" TERM=dumb \
+                    "$_assign" "$_sh" --noprofile --norc -p -c 'env' 2>&1 || true)"
+          # Positive evidence, one of two loader outcomes: (1) the image ran with the
+          # variable stripped — its environment is visible (PATH=) and carries no DYLD_
+          # entry; (2) dyld refused to load the inserted library and terminated the
+          # image before its first instruction (Homebrew Bash, measured). An empty or
+          # unrelated result is NOT evidence and falls through to the refusal check.
+          if printf '%s\n' "$_probe" | grep -q '^PATH=' \
+              && ! printf '%s\n' "$_probe" | grep -q '^DYLD_'; then
+            _neutralized=1
+          elif printf '%s\n' "$_probe" | grep -qE '^dyld\[[0-9]+\]: terminating'; then
+            _neutralized=1
+          fi
+        fi
+        ;;
+    esac
+    if [[ "$_neutralized" -eq 1 ]]; then
+      pass "ENTRY-hostile[$_shname/$_label]: neutralized by the platform loader before the entry (unobservable)"
+    elif ! printf '%s' "$_out" | grep -q "reason=entry_authority_invalid"; then
       fail "ENTRY-hostile[$_shname/$_label]: observable input was not refused"
       _bad=1
     fi
@@ -444,6 +471,48 @@ if grep -qE 'worktree add -B "\$GAAI_HOME_BRANCH"' "$SETUP_SRC"; then
   pass "VERIFY-4: daemon-setup.sh is the only file that may create the worktree"
 else
   fail "VERIFY-4: daemon-setup.sh lost its provisioning authority"
+fi
+
+echo ""
+echo "=== Descriptor identity helper: every branch, negative and positive ==="
+# The helper is extracted verbatim from the launcher and exercised directly, so the
+# platform-specific device rule has direct coverage on every host.
+HELPER_SRC="$(sed -n '/^_child_fd_identity_matches()/,/^}/p' "$START")"
+if [[ -n "$HELPER_SRC" ]] && eval "$HELPER_SRC" && declare -F _child_fd_identity_matches >/dev/null; then
+  # inode mismatch is refused on every platform and every descriptor path
+  _child_fd_identity_matches /dev/fd/9 11 5 12 5 \
+    && fail "FDID-1: an inode mismatch was accepted through /dev/fd" \
+    || pass "FDID-1: an inode mismatch is refused through /dev/fd"
+  _child_fd_identity_matches /proc/self/fd/9 11 5 12 5 \
+    && fail "FDID-2: an inode mismatch was accepted through /proc" \
+    || pass "FDID-2: an inode mismatch is refused through /proc"
+  # through /proc the device must match too, on every platform
+  _child_fd_identity_matches /proc/self/fd/9 11 5 11 6 \
+    && fail "FDID-3: a device mismatch was accepted through /proc" \
+    || pass "FDID-3: a device mismatch is refused through /proc"
+  _child_fd_identity_matches /proc/self/fd/9 11 5 11 5 \
+    && pass "FDID-4: matching inode and device are admitted through /proc" \
+    || fail "FDID-4: matching inode and device were refused through /proc"
+  # through /dev/fd the device rule is platform-bound: Darwin cannot observe it
+  # (fdesc reports its own device), every other platform still requires it.
+  UNAME_SHIM="$ROOT/uname-shim"; mkdir -p "$UNAME_SHIM"
+  printf '#!/bin/sh\necho Linux\n' > "$UNAME_SHIM/uname"; chmod 0755 "$UNAME_SHIM/uname"
+  PATH="$UNAME_SHIM:$PATH" _child_fd_identity_matches /dev/fd/9 11 5 11 6 \
+    && fail "FDID-5: a device mismatch through /dev/fd was accepted off Darwin" \
+    || pass "FDID-5: a device mismatch through /dev/fd is refused off Darwin"
+  PATH="$UNAME_SHIM:$PATH" _child_fd_identity_matches /dev/fd/9 11 5 11 5 \
+    && pass "FDID-8: matching inode and device through /dev/fd are admitted off Darwin" \
+    || fail "FDID-8: matching inode and device through /dev/fd were refused off Darwin"
+  printf '#!/bin/sh\necho Darwin\n' > "$UNAME_SHIM/uname"
+  PATH="$UNAME_SHIM:$PATH" _child_fd_identity_matches /dev/fd/9 11 5 11 6 \
+    && pass "FDID-6: on Darwin a matching inode is admitted through /dev/fd although fdesc reports its own device" \
+    || fail "FDID-6: on Darwin the unobservable fdesc device was demanded"
+  PATH="$UNAME_SHIM:$PATH" _child_fd_identity_matches /dev/fd/9 11 5 12 6 \
+    && fail "FDID-7: on Darwin an inode mismatch through /dev/fd was accepted" \
+    || pass "FDID-7: on Darwin an inode mismatch through /dev/fd is still refused"
+  unset -f _child_fd_identity_matches
+else
+  fail "FDID-0: the descriptor identity helper could not be extracted from the launcher"
 fi
 
 echo ""

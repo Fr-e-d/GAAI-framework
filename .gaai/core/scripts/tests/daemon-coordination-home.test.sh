@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# daemon-coordination-home.test.sh — E1003S07 AC6 live-coordination matrices
+# daemon-coordination-home.test.sh — exact-current startup contract, regression-coverage criterion live-coordination matrices
 #
 # Covers the fail-closed live boundary: private-server lifecycle and races, the
 # durable pending -> bound -> running transitions and every crash point between
@@ -195,6 +195,44 @@ gaai_run "$ROOT" "$START" --stop >/dev/null 2>&1
 echo ""
 echo "=== TC10: the release barrier — one record, exact match, no release otherwise ==="
 fresh_home
+# Bounded child harness, defined unconditionally so every case that runs a
+# child directly (TC10 and TC11) shares the same FIFO discipline and timeout.
+run_child_with_record() {
+  local _dir="$1" _payload="$2" _pid
+  # The test holds the FIFO open read-write so the child's own open never blocks,
+  # runs the child in the background, writes the payload, then CLOSES the write end.
+  # Closing matters: a payload with no terminator must reach the child as EOF, and
+  # a writer left open would make the child sit on its full read timeout instead.
+  exec 9<> "$_dir/release.fifo" || return 1
+  /usr/bin/env -i "PATH=$ROOT/fakebin:/usr/bin:/bin" "HOME=$ROOT/opshome" TERM=dumb \
+    "$LAUNCHER" --daemon-child "$_dir" > "$_dir/child.out" 2>&1 &
+  _pid=$!
+  # No timing assumption: keep the writer open until the child has either opened
+  # its end (it writes ack.launcher right after) or refused earlier (child_failed).
+  # Only then deliver the payload and close, so EOF can never precede the open.
+  local _waited=0
+  while [[ ! -e "$_dir/ack.launcher" && ! -e "$_dir/ack.child_failed" ]] && kill -0 "$_pid" 2>/dev/null; do
+    sleep 0.2; _waited=$(( _waited + 1 )); [[ "$_waited" -ge 300 ]] && break
+  done
+  printf '%s' "$_payload" >&9
+  exec 9>&-
+  # Bounded: a child that never reaches its FIFO open, or blocks on it, must go
+  # red with a typed timeout rather than hang the whole suite.
+  ( sleep 60; kill "$_pid" 2>/dev/null ) >/dev/null 2>&1 & local _watchdog=$!
+  wait "$_pid" 2>/dev/null; local _rc=$?
+  # Reap the watchdog AND its sleep: killing only the subshell would leave the
+  # sleep running and a `wait` on it would cost the full bound on every call.
+  pkill -P "$_watchdog" 2>/dev/null; kill "$_watchdog" 2>/dev/null
+  cat "$_dir/child.out" 2>/dev/null
+  if [[ "$_rc" -eq 143 || "$_rc" -eq 137 ]]; then
+    # Reported on stderr and by return code: this function runs inside a command
+    # substitution, so a pass/fail emitted here would be captured, not counted.
+    printf '  child under test exceeded the 60s bound in %s (timeout, not a verdict)\n' "$(basename "$_dir")" >&2
+    return 124
+  fi
+  return 0
+}
+
 gaai_run "$ROOT" "$START" >/dev/null 2>&1
 ATT="$(attempt_of)"
 if [[ -n "$ATT" ]]; then
@@ -212,28 +250,12 @@ if [[ -n "$ATT" ]]; then
   # before the child's own open would destroy the buffer and block that open, which
   # would test the harness rather than the barrier.
   LAUNCHER="$(sed -n 's/^launcher=//p' "$OWNER" | head -1)"
-  run_child_with_record() {
-    local _dir="$1" _payload="$2" _pid
-    # The test holds the FIFO open read-write so the child's own open never blocks,
-    # runs the child in the background, writes the payload, then CLOSES the write end.
-    # Closing matters: a payload with no terminator must reach the child as EOF, and
-    # a writer left open would make the child sit on its full read timeout instead.
-    exec 9<> "$_dir/release.fifo" || return 1
-    /usr/bin/env -i "PATH=$ROOT/fakebin:/usr/bin:/bin" "HOME=$ROOT/opshome" TERM=dumb \
-      "$LAUNCHER" --daemon-child "$_dir" > "$_dir/child.out" 2>&1 &
-    _pid=$!
-    sleep 1
-    printf '%s' "$_payload" >&9
-    exec 9>&-
-    wait "$_pid" 2>/dev/null
-    cat "$_dir/child.out" 2>/dev/null
-  }
 
   BAD="$ROOT/badattempt"; mkdir -p "$BAD"; chmod 0700 "$BAD"
   cp "$ATT/manifest" "$BAD/manifest"
   mkfifo -m 0600 "$BAD/release.fifo"
   OUT="$(run_child_with_record "$BAD" "release attempt=$ATTEMPT_ID digest=wrongdigest
-")"
+")" || fail "harness: the child under test for BAD did not finish within the bound"
   if echo "$OUT" | grep -q 'release_role=record_mismatch'; then
     pass "TC10-3: a non-matching release record does not release the child"
   else
@@ -243,7 +265,7 @@ if [[ -n "$ATT" ]]; then
   BAD2="$ROOT/badattempt2"; mkdir -p "$BAD2"; chmod 0700 "$BAD2"
   cp "$ATT/manifest" "$BAD2/manifest"
   mkfifo -m 0600 "$BAD2/release.fifo"
-  OUT="$(run_child_with_record "$BAD2" "release attempt=$ATTEMPT_ID digest=$RELEASE_DIGEST-truncated")"
+  OUT="$(run_child_with_record "$BAD2" "release attempt=$ATTEMPT_ID digest=$RELEASE_DIGEST-truncated")" || fail "harness: the child under test for BAD2 did not finish within the bound"
   if echo "$OUT" | grep -qE 'release_role=(read_failed_or_eof|record_mismatch)'; then
     pass "TC10-4: a partial record with no terminator does not release the child"
   else
@@ -254,7 +276,7 @@ if [[ -n "$ATT" ]]; then
   cp "$ATT/manifest" "$BAD3/manifest"
   mkfifo -m 0600 "$BAD3/release.fifo"
   OUT="$(run_child_with_record "$BAD3" "release attempt=someone-elses digest=$RELEASE_DIGEST
-")"
+")" || fail "harness: the child under test for BAD3 did not finish within the bound"
   if echo "$OUT" | grep -q 'release_role=record_mismatch'; then
     pass "TC10-5: a record naming a different attempt does not release the child"
   else
@@ -271,24 +293,30 @@ SWAP="$ROOT/swapattempt"; mkdir -p "$SWAP"; chmod 0700 "$SWAP"
 sed 's/^daemon_digest=.*/daemon_digest=0000000000000000000000000000000000000000000000000000000000000000/' \
   "$ATT/manifest" > "$SWAP/manifest"
 mkfifo -m 0600 "$SWAP/release.fifo"
-OUT="$(/usr/bin/env -i "PATH=$ROOT/fakebin:/usr/bin:/bin" "HOME=$ROOT/opshome" TERM=dumb \
-        "$LAUNCHER" --daemon-child "$SWAP" 2>&1)"
+# Run through the bounded harness with an EMPTY release payload: a child that
+# wrongly passes its asset gates meets EOF at the barrier and refuses at once,
+# so a weakened proof goes red in seconds instead of waiting out the 300s read.
+OUT="$(run_child_with_record "$SWAP" "")" || fail "harness: the child under test for SWAP did not finish within the bound"
 echo "$OUT" | grep -q 'daemon_role=fd_blob_mismatch' \
   && pass "TC11-1: a swapped daemon digest is refused at the descriptor, before any release" \
   || fail "TC11-1: a swapped daemon digest was accepted: $OUT"
 SWAP2="$ROOT/swapattempt2"; mkdir -p "$SWAP2"; chmod 0700 "$SWAP2"
 sed 's#^home=.*#home=/nonexistent/home#' "$ATT/manifest" > "$SWAP2/manifest"
 mkfifo -m 0600 "$SWAP2/release.fifo"
-OUT="$(/usr/bin/env -i "PATH=$ROOT/fakebin:/usr/bin:/bin" "HOME=$ROOT/opshome" TERM=dumb \
-        "$LAUNCHER" --daemon-child "$SWAP2" 2>&1)"
+# Run through the bounded harness with an EMPTY release payload: a child that
+# wrongly passes its asset gates meets EOF at the barrier and refuses at once,
+# so a weakened proof goes red in seconds instead of waiting out the 300s read.
+OUT="$(run_child_with_record "$SWAP2" "")" || fail "harness: the child under test for SWAP2 did not finish within the bound"
 echo "$OUT" | grep -qE 'asset_root_unresolved|daemon_role=absent' \
   && pass "TC11-2: a swapped asset root is refused before any daemon effect" \
   || fail "TC11-2: a swapped asset root was accepted: $OUT"
 SWAP3="$ROOT/swapattempt3"; mkdir -p "$SWAP3"; chmod 0700 "$SWAP3"
 sed 's/^credential_mode=.*/credential_mode=present/' "$ATT/manifest" > "$SWAP3/manifest"
 mkfifo -m 0600 "$SWAP3/release.fifo"
-OUT="$(/usr/bin/env -i "PATH=$ROOT/fakebin:/usr/bin:/bin" "HOME=$ROOT/opshome" TERM=dumb \
-        "$LAUNCHER" --daemon-child "$SWAP3" 2>&1)"
+# Run through the bounded harness with an EMPTY release payload: a child that
+# wrongly passes its asset gates meets EOF at the barrier and refuses at once,
+# so a weakened proof goes red in seconds instead of waiting out the 300s read.
+OUT="$(run_child_with_record "$SWAP3" "")" || fail "harness: the child under test for SWAP3 did not finish within the bound"
 echo "$OUT" | grep -q 'secret_path_absent\|secret_role=absent' \
   && pass "TC11-3: absent-to-present credential fabrication fails closed" \
   || fail "TC11-3: credential fabrication was accepted: $OUT"
