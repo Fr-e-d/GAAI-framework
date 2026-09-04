@@ -151,28 +151,45 @@ git clone https://github.com/Fr-e-d/GAAI-framework.git /tmp/gaai && \
 - Launches parallel Claude Code or Codex sessions in tmux (default: 3 slots, configurable)
 - Coordinates across devices via git push
 - Monitors health, retries failures, archives completed work
-- Auto-opens a monitoring dashboard (tmux split: daemon config + active deliveries)
+- Runs inside a private tmux server whose socket is digest-bound to the repository, so a second checkout can never join or clobber the lifecycle
+- Offers an on-demand monitoring dashboard (tmux split: daemon config + active deliveries)
 
 <img src="assets/daemon-monitor.png" alt="Delivery Daemon monitoring 3 concurrent story deliveries" width="700">
 
 **Setup (one-time):**
 
 ```bash
-bash .gaai/core/scripts/daemon-setup.sh
+.gaai/core/scripts/daemon-setup.sh
 ```
+
+Invoke it **directly**. `daemon-setup.sh` and `daemon-start.sh` are executables carrying a
+`#!/bin/bash -p` shebang: prefixing either with a plain `bash` interpreter is refused with
+`entry_authority_invalid`, because a non-privileged interpreter has already applied `BASH_ENV`
+and imported exported functions before the script's first instruction. The only alternative is
+an absolute, verified Bash invoked `--noprofile --norc -p <script>`.
+
+`daemon-setup.sh` is also the **only** command that may create or update the dedicated daemon
+home worktree. Startup verifies that home and refuses if it is absent, stale, dirty, foreign or
+on the wrong branch — it never repairs it, and there is no fallback to your working checkout.
+
+Because the entry rebuilds a closed allowlist of configuration, a shell exporting `GIT_EDITOR`,
+`GIT_CONFIG_COUNT`, `PYTHONPATH` and similar cannot start the daemon. That is the contract, not
+a defect — start it from a clean environment, e.g.
+`env -i PATH=/usr/bin:/bin HOME="$HOME" TERM="$TERM" .gaai/core/scripts/daemon-start.sh`.
 
 **Usage:**
 
 ```
-/gaai-daemon                        # start daemon (3 slots, auto-opens monitor)
+/gaai-daemon                        # start daemon (3 slots)
 /gaai-daemon --max-concurrent 3     # 3 parallel deliveries
-/gaai-daemon --status               # live monitoring dashboard
+/gaai-daemon --status               # read-only lifecycle status (mutates nothing)
+/gaai-daemon --monitor              # attach the monitoring dashboard
 /gaai-daemon --stop                 # graceful shutdown
 ```
 
 > `/gaai-deliver` = one Story, current session. `/gaai-daemon` = background daemon, parallel delivery.
 
-> Requires: git repo, `staging` branch, **Claude Code CLI (`claude` in PATH, default) or Codex CLI (`codex` in PATH, via `GAAI_DAEMON_EXECUTOR=codex`)**, python3, tmux (recommended) or Terminal.app (macOS fallback).
+> Requires: git repo, `staging` branch, **Claude Code CLI (`claude` in PATH, default) or Codex CLI (`codex` in PATH, via `GAAI_DAEMON_EXECUTOR=codex`)**, python3, and **tmux — required, not optional** (3.2 is the nominal floor; a real capability probe is the admission authority). There is no Terminal.app or `nohup` fallback: a fallback launcher is how process ownership used to be inferred from ambient state instead of proven.
 >
 > **Note:** The Delivery Daemon explicitly supports two local headless executors — Claude Code CLI (default) and Codex CLI. An unknown or unavailable executor stops before governed work begins with an actionable error. Discovery and governance work with any AI tool — this requirement applies only to autonomous delivery.
 >
