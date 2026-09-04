@@ -15,11 +15,12 @@ Runs `.gaai/core/scripts/daemon-start.sh` — the unified daemon lifecycle wrapp
 ## Usage
 
 ```
-/gaai-deliver                        # start daemon (30s poll, 1 slot) + open monitor
+/gaai-deliver                        # start daemon (30s poll, 1 slot)
 /gaai-deliver --start                # explicit start (same as default)
-/gaai-deliver --start --max-concurrent 3  # 3 parallel deliveries + open monitor
+/gaai-deliver --start --max-concurrent 3  # 3 parallel deliveries
 /gaai-deliver --interval 15          # poll every 15s
-/gaai-deliver --status               # show live monitoring dashboard (tmux)
+/gaai-deliver --status               # read-only lifecycle status (mutates nothing)
+/gaai-deliver --monitor              # attach the monitoring dashboard (tmux)
 /gaai-deliver --stop                 # graceful shutdown
 /gaai-deliver --restart              # stop + start
 /gaai-deliver --dry-run              # preview without launching
