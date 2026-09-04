@@ -318,6 +318,82 @@ rm -f /tmp/gaai-evil-git
 # ═══════════════════════════════════════════════════════════════════════════
 
 echo ""
+echo "=== Bash 3.2 source compatibility (static falsifier) ==="
+#
+# `daemon-start.sh` carries `#!/bin/bash -p`, and on macOS `/bin/bash` IS Bash 3.2 —
+# the OSS floor and the real interpreter of the launcher on that platform. A Bash 4+
+# construct here is not a portability nicety, it is a parse failure at the entry gate.
+#
+# This falsifier is static on purpose: it holds on every host, including one with no
+# 3.2 interpreter available, so the property is enforced continuously instead of
+# depending on a lane that happens to provide 3.2. It does NOT replace executing the
+# suites under a real 3.2 — that behavioural half still requires such a lane — but it
+# makes the syntactic half impossible to regress silently.
+
+B32_FILES="$SCRIPTS_DIR/daemon-start.sh $SCRIPTS_DIR/daemon-setup.sh $SCRIPTS_DIR/lib/daemon-home.sh
+$SCRIPT_DIR/daemon-home-provision.test.sh $SCRIPT_DIR/daemon-asset-home.test.sh
+$SCRIPT_DIR/daemon-coordination-home.test.sh"
+
+# Comments are stripped before matching so prose about a construct never fails the
+# gate; only code is judged.
+b32_probe() {
+  local _label="$1" _pattern="$2" _hits _f
+  _hits=""
+  for _f in $B32_FILES; do
+    [[ -f "$_f" ]] || continue
+    local _found
+    _found="$(sed 's/[[:space:]]*#.*$//' "$_f" | grep -nE "$_pattern" || true)"
+    [[ -n "$_found" ]] && _hits="${_hits}$(basename "$_f"): ${_found}"$'\n'
+  done
+  if [[ -z "$_hits" ]]; then
+    pass "B32[$_label]: absent"
+  else
+    fail "B32[$_label]: a Bash 4+ construct is present"
+    printf '        %s\n' "$_hits"
+  fi
+}
+
+# Both the labels and the patterns below are written so the literal construct never
+# appears in this file. Otherwise the falsifier would flag its own probe definitions
+# and, worse, the only way to silence that would be to stop scanning this file — the
+# one that runs under 3.2 on macOS like every other. Adjacent shell quoting ('a''b')
+# concatenates at parse time, so the pattern is exact while the source text is not.
+b32_probe "assoc-array 4.0"       '(declare|local|typeset)[[:space:]]+-[A-Za-z]*A'
+b32_probe "bulk-read 4.0"         '\b(map''file|read''array)[[:space:]]'
+b32_probe "co-process 4.0"        '\bco''proc\b'
+b32_probe "case-conversion 4.0"   '\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?(\^\^|,,|\^|,)'
+b32_probe "globstar 4.0"          'shopt[[:space:]]+-s[[:space:]]+glob''star'
+b32_probe "append-both 4.0"       '&>''>'
+b32_probe "pipe-stderr 4.0"       '\|''&'
+b32_probe "case-fallthrough 4.0"  ';;?''&[[:space:]]*$'
+b32_probe "auto-fd 4.1"           '(exec|[0-9]?[<>]&?)[[:space:]]*\{[A-Za-z_][A-Za-z0-9_]*\}[<>]'
+b32_probe "test-isset 4.2"        '\[\[[[:space:]]+-''v[[:space:]]'
+b32_probe "declare-global 4.2"    '(declare|local)[[:space:]]+-[A-Za-z]*''g[[:space:]]'
+b32_probe "printf-time 4.2"       'print''f[^\n]*%\([^)]*\)''T'
+b32_probe "nameref 4.3"           '(declare|local)[[:space:]]+-[A-Za-z]*''n[[:space:]]'
+b32_probe "wait-any 4.3"          'wai''t[[:space:]]+-n\b'
+b32_probe "param-transform 4.4"   '\$\{[A-Za-z_][A-Za-z0-9_]*@[QEPAaKkLUu]\}'
+
+# The entry gate must not depend on indirect expansion carrying a modifier. Both
+# `${!name+set}` and `${!name:-}` are believed to work in 3.2, but the launcher's
+# entry authority is the wrong place to rely on a belief: presence is proven against
+# the exported set and the value read with a plain `${!name}`.
+if sed 's/[[:space:]]*#.*$//' "$SCRIPTS_DIR/daemon-start.sh" "$SCRIPTS_DIR/daemon-setup.sh" \
+     | grep -qE '\$\{![A-Za-z_][A-Za-z0-9_]*[-+:=?]'; then
+  fail "B32[indirect+modifier]: the entry gate relies on an unproven 3.2 expansion form"
+else
+  pass "B32[indirect+modifier]: absent — presence is proven against the exported set"
+fi
+
+# Every descriptor the launch protocol binds must be an explicit low fd, both because
+# auto-allocation is 4.1+ and because low fds are the ones that survive `exec`.
+if grep -qE 'exec[[:space:]]+[6-9][<>]' "$SCRIPTS_DIR/daemon-start.sh"; then
+  pass "B32[explicit-fds]: the launch protocol binds explicit low descriptors"
+else
+  fail "B32[explicit-fds]: the expected explicit descriptor bindings are missing"
+fi
+
+echo ""
 echo "=== Zero fallback: no main-checkout or nohup path survives ==="
 if ! grep -qE '(^|[^#])[[:space:]]*nohup ' "$START_SRC"; then
   pass "FALLBACK-1: daemon-start.sh contains no nohup launch path"

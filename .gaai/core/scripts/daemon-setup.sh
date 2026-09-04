@@ -289,8 +289,20 @@ GAAI_DAEMON_EXECUTOR GAAI_CODEX_MODEL GAAI_CODEX_SANDBOX GAAI_CODEX_EPHEMERAL
 GAAI_CODEX_IGNORE_USER_CONFIG GAAI_CI_TEST_GATE_TIMEOUT_SEC GAAI_CI_TEST_GATE_MATERIALIZE_SEC
 GAAI_WORKTREES_BASE
 GAAI_NOTIFICATION_WEBHOOK GAAI_DAEMON_WEBHOOK_SECRET GAAI_IMPL_AUTH_TOKEN'
+# Presence is tested against the exported set rather than with an indirect
+# expansion carrying a modifier (`${!name+set}`). Both forms are believed to work
+# in Bash 3.2, but "believed" is not a proof, and on macOS `/bin/bash` — the real
+# interpreter of this launcher's shebang — IS 3.2. Membership in `compgen -e` plus
+# a PLAIN `${!name}` uses only constructs whose 3.2 support is not in question, and
+# at the first instruction the exported set is exactly the inherited set, so the
+# two tests are equivalent here. Plain indirection is also safe under `set -u`
+# precisely because membership was proven first.
+_GAAI_EXPORTED_SET=" $(compgen -e 2>/dev/null | tr '\n' ' ') "
 for _gaai_key in $_GAAI_CONFIG_ALLOW; do
-  [[ -n "${!_gaai_key+set}" ]] || continue
+  case "$_GAAI_EXPORTED_SET" in
+    *" $_gaai_key "*) ;;
+    *) continue ;;
+  esac
   _gaai_val="${!_gaai_key}"
   # A validated scalar: no newline, no NUL, no control character, bounded length.
   case "$_gaai_val" in
@@ -300,7 +312,7 @@ for _gaai_key in $_GAAI_CONFIG_ALLOW; do
     _gaai_entry_refuse "entry_role=config_oversized:${_gaai_key}"
   fi
 done
-unset -v _gaai_key _gaai_val
+unset -v _gaai_key _gaai_val _GAAI_EXPORTED_SET
 for _gaai_name in $(compgen -e 2>/dev/null || true); do
   case " $_GAAI_CONFIG_ALLOW PATH HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME TMPDIR LC_ALL LANG SHELL TERM USER LOGNAME UID EUID PWD SHLVL " in
     *" $_gaai_name "*) ;;
