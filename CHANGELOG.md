@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- ci(test-gate): gate the daemon home suites on a macOS Bash 3.2 lane
 - follow-up: fix the usage cheat-sheets PR 3179 left self-contradicting
 - follow-up: make the operator command surfaces describe the launcher that exists
 - follow-up: fix the daemon launcher's Darwin descriptor identity and prove the loader outcome
